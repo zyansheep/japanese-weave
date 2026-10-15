@@ -1,4 +1,4 @@
-import { isZeroFrench, wordCount } from './levels.js';
+import { isZeroJapanese, wordCount } from './levels.js';
 import { flatten } from './text.js';
 
 export const TWEET = '[data-testid="tweetText"]';
@@ -14,5 +14,5 @@ export function readable(el, url) {
   if (lang && !/^(en(?:-|$)|und$|qme$|zxx$|art$)/i.test(lang)) return false;
   if (!isX(url) && el.querySelector(PROSE)) return false;
   const text = flatten(el).text;
-  return text.length <= 2000 && wordCount(text) >= 6 && !isZeroFrench(text);
+  return text.length <= 2000 && wordCount(text) >= 6 && !isZeroJapanese(text);
 }

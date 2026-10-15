@@ -1,14 +1,13 @@
 {
-  "name": "french-weave",
-  "version": "0.2.0",
-  "description": "Weaves a few French words into Claude's chat replies, at your level, and syncs your words with the French Weave Chrome extension.",
+  "name": "japanese-weave",
+  "version": "0.1.0",
+  "description": "Weaves a few Japanese words into Claude's chat replies, at your level, and syncs your words with the Japanese Weave browser extension (Firefox and Chrome).",
   "author": {
-    "name": "Jackie Oliver"
+    "name": "Jackie Oliver (French Weave); Japanese port"
   },
-  "repository": "https://github.com/jackieoliver/french-weave",
   "license": "MIT",
   "keywords": [
-    "french",
+    "japanese",
     "language-learning",
     "hooks"
   ]

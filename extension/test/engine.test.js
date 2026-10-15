@@ -20,12 +20,12 @@ describe('gemini', () => {
   });
   test('callGemini posts with the key in a header and parses ids', async () => {
     const calls = [];
-    const fetchImpl = async (url, init) => { calls.push({ url, init }); return geminiReply([{ id: 'a', swaps: [{ o: 'and', f: 'et', g: 'and', h: 'ay', ctx: 'x and y' }] }]); };
+    const fetchImpl = async (url, init) => { calls.push({ url, init }); return geminiReply([{ id: 'a', swaps: [{ o: 'but', f: 'でも', g: 'but', h: 'demo', ctx: 'x but y' }] }]); };
     const out = await callGemini({ fetchImpl, apiKey: 'K', model: 'gemini-3.8-flash', body: { x: 1 } });
     expect(calls[0].url).toBe(`${API_BASE}gemini-3.8-flash:generateContent`);
     expect(calls[0].init.headers['x-goog-api-key']).toBe('K');
     expect(calls[0].url).not.toContain('K');
-    expect(out.get('a')[0].f).toBe('et');
+    expect(out.get('a')[0].f).toBe('でも');
   });
   test('HTTP error and bad JSON throw', async () => {
     await expect(callGemini({ fetchImpl: async () => ({ ok: false, status: 503 }), apiKey: 'K', model: 'm', body: {} })).rejects.toThrow('HTTP 503');
@@ -40,12 +40,12 @@ describe('engine', () => {
     const fetchImpl = async (url) => {
       models.push(url.split('/').pop().split(':')[0]);
       if (models.length === 1) return { ok: false, status: 503 };
-      return geminiReply([{ id: 'a', swaps: [{ o: 'and', f: 'et', g: 'and', h: 'ay', ctx: 'x and y' }, { o: 'in', f: 'dans', g: 'in', h: 'dahn', ctx: 'in y' }] }]);
+      return geminiReply([{ id: 'a', swaps: [{ o: 'but', f: 'でも', g: 'but', h: 'demo', ctx: 'x but y' }, { o: 'voice', f: '声', g: 'voice', h: 'koe', ctx: 'voice y' }] }]);
     };
     const r = await requestSwaps({ apiKey: 'K', model: 'gemini-3.8-flash', level: 1, batch: [{ id: 'a', text: 'x and y in y' }], fetchImpl });
     expect(models).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
     expect(r.model).toBe('gemini-3.5-flash-lite');
-    expect(r.results.a.map((s) => s.f)).toEqual(['et']);
+    expect(r.results.a.map((s) => s.f)).toEqual(['でも']);
   });
   test('throws when both models fail; Lite has no fallback', async () => {
     let n = 0;
@@ -84,21 +84,21 @@ describe('engine', () => {
   });
   test('caps density per sentence, one use per word, learning words kept before known filler', async () => {
     const words = [
-      { fr: 'grand', en: 'big', hint: 'grahn', status: 'active' },
-      { fr: 'et', en: 'and', hint: 'ay', status: 'known' },
-      { fr: 'mais', en: 'but', hint: 'meh', status: 'known' },
-      { fr: 'très', en: 'very', hint: 'treh', status: 'known' },
+      { ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' },
+      { ja: 'でも', en: 'but', hint: 'demo', status: 'known' },
+      { ja: 'もう', en: 'already', hint: 'mō', status: 'known' },
+      { ja: 'とても', en: 'very', hint: 'totemo', status: 'known' },
     ];
     const swaps = [
-      { o: 'and', f: 'et', ctx: 'x and' }, { o: 'very', f: 'très', ctx: 'very' }, { o: 'and', f: 'et', ctx: 'y and' },
-      { o: 'but', f: 'mais', ctx: 'but' }, { o: 'big', f: 'grand', ctx: 'a big' },
+      { o: 'but', f: 'でも', ctx: 'x but' }, { o: 'very', f: 'とても', ctx: 'very' }, { o: 'but', f: 'でも', ctx: 'y but' },
+      { o: 'already', f: 'もう', ctx: 'already' }, { o: 'big', f: '大きい', ctx: 'a big' },
     ];
     const fetchImpl = async () => geminiReply([{ id: 'a', swaps }]);
     const text = 'It was a big day and a very long one, but fine.';
     const r = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 1, batch: [{ id: 'a', text }], words, fetchImpl });
-    expect(r.results.a.map((s) => s.f)).toEqual(['grand']);
+    expect(r.results.a.map((s) => s.f)).toEqual(['大きい']);
     const two = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 2, batch: [{ id: 'a', text }], words, fetchImpl });
-    expect(two.results.a.map((s) => s.f)).toEqual(['et', 'grand']);
+    expect(two.results.a.map((s) => s.f)).toEqual(['でも', '大きい']);
   });
 });
 

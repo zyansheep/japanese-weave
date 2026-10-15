@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Live model check: runs realistic prompts through `claude -p` with only this plugin loaded and measures the French.
+"""Live model check: runs realistic prompts through `claude -p` with only this plugin loaded and measures the Japanese.
 
 Isolation: empty temp working dir, --setting-sources project, CLAUDE_CODE_DISABLE_CLAUDE_MDS=1,
-CLAUDE_CODE_DISABLE_AUTO_MEMORY=1, no tools, no session persistence, and a temp French Weave state dir with an
-empty transcript root, so your own config, CLAUDE.md, memory and word state stay out of it. FRENCH_WEAVE_FORCE=1
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1, no tools, no session persistence, and a temp Japanese Weave state dir with an
+empty transcript root, so your own config, CLAUDE.md, memory and word state stay out of it. JAPANESE_WEAVE_FORCE=1
 makes the hook weave in these scripted runs, which it otherwise skips.
 
 Usage: python3 tests/model_eval.py --models opus,sonnet --stages 1,2 --out DIR
@@ -44,14 +44,14 @@ KNOWN = {1: 0, 2: 60, 3: 200, 4: 450}  # known words for a typical user at each 
 
 def make_state(home, stage, known=None):
     """Stage 1: a brand-new user. Later stages: KNOWN[stage] known words with varied chat exposure, 8 learning words."""
-    os.environ['FRENCH_WEAVE_HOME'] = str(home)
+    os.environ['JAPANESE_WEAVE_HOME'] = str(home)
     state = fwlib.new_state('2026-09-01')
     exposure = {'words': {}, 'offsets': {}, 'recent': {}}
     count = KNOWN[stage] if known is None else known
     for i, w in enumerate(state['words'][:count]):
-        fwlib.apply_event(state, w['fr'], 'known', '2026-09-01')
+        fwlib.apply_event(state, w['ja'], 'known', '2026-09-01')
         days, n = ((8, 40) if i < count / 3 else (4, 12) if i < 2 * count / 3 else (1, 2))
-        exposure['words'][w['fr']] = {'n': n, 'days': [f'2026-09-{d + 10:02d}' for d in range(days)]}
+        exposure['words'][w['ja']] = {'n': n, 'days': [f'2026-09-{d + 10:02d}' for d in range(days)]}
     for day in range(2, 6):
         fwlib.promote(state, f'2026-09-{day:02d}', {})
     if fwlib.stage_for(state) != stage:  # e.g. 1,000 known words at Stage 3: pin it
@@ -63,34 +63,33 @@ def make_state(home, stage, known=None):
 
 def sentences(text):
     prose = CODE_BLOCK.sub(' ', text)
-    return [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', prose) if len(s.split()) >= 4]
+    return [s.strip() for s in re.split(r'(?<=[.!?。！？])\s*|\n+', prose) if len(s.split()) >= 4]
 
 
-def french_sentence(sentence, words):
-    """A sentence that reads as French: several French grammar words, or most of its words French."""
+def japanese_sentence(sentence, words):
+    """A sentence that reads as Japanese: several off-list Japanese words, or most of its words Japanese."""
     _, total, _, grammar = weave.share(sentence, words)
-    french = weave.share(sentence, words)[0]
-    return grammar >= 2 or (total >= 4 and french / total > 0.5)
+    japanese = weave.share(sentence, words)[0]
+    return grammar >= 2 or (total >= 4 and japanese / total > 0.5)
 
 
 def measure(text, state):
     words = fwlib.introduced(state)
-    french, total, learning, grammar = weave.share(text, words)
+    japanese, total, learning, grammar = weave.share(text, words)
     code = ' '.join(CODE_BLOCK.findall(text))
-    code_french = sorted({w['fr'] for w in words if fwlib.norm(w['fr']) not in fwlib.UNMEASURABLE
-                          and len(w['fr']) > 2 and fwlib.pattern(w['fr']).search(fwlib.norm(code))})
+    code_japanese = sorted({w['ja'] for w in words if fwlib.pattern(w['ja']).search(fwlib.norm(code))})
     lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
-    in_sentences = 0  # words of fully French sentences that the list count missed (articles, verbs)
+    in_sentences = 0  # words of fully Japanese sentences that the list count missed (particles, verbs)
     for sentence in sentences(text):
-        if french_sentence(sentence, words):
+        if japanese_sentence(sentence, words):
             listed, count = weave.share(sentence, words)[:2]
             in_sentences += count - listed
     return {
-        'percent': round(100 * french / total, 1) if total else 0.0, 'french': french, 'words': total,
-        'percent_all': round(100 * (french + in_sentences) / total, 1) if total else 0.0,
+        'percent': round(100 * japanese / total, 1) if total else 0.0, 'japanese': japanese, 'words': total,
+        'percent_all': round(100 * (japanese + in_sentences) / total, 1) if total else 0.0,
         'learning_uses': learning, 'grammar_slips': grammar,
-        'french_sentences': [s for s in sentences(text) if french_sentence(s, words)],
-        'french_in_code': code_french,
+        'japanese_sentences': [s for s in sentences(text) if japanese_sentence(s, words)],
+        'japanese_in_code': code_japanese,
         'recall_open': bool(lines) and lines[0].lower().startswith('recall:'),
         'recall_answer': any(re.match(r'\**recall:.*=', l, re.I) for l in lines[1:]),
         'footer': any(re.search(r'\(\s*[^()]+ = [^()]+["\u201c][^"\u201d]+["\u201d]', l) for l in lines[-3:]),
@@ -107,15 +106,15 @@ def run(model, stage, name, prompt, out, known=None, paste=None):
         state = make_state(tmp / 'fw', stage, known)
         if paste and paste.startswith('level-'):
             level = int(paste.split('-')[1])
-            state = make_blocks.level_state(level, fwlib.load_lexicon())
-            text = make_blocks.block(level, 99, fwlib.load_lexicon())[0]
+            state = make_blocks.level_state(level, fwlib.load_lexicon(fwlib.LEXICON))
+            text = make_blocks.block(level, 99, fwlib.load_lexicon(fwlib.LEXICON))[0]
             pasted = text.split('```text\n', 1)[1].split('\n```', 1)[0]
         elif paste == 'export':
             pasted = export.claude_ai(state)
         if paste:
             (tmp / 'prefs.txt').write_text(pasted)
-        env = dict(os.environ, FRENCH_WEAVE_HOME=str(tmp / 'fw'), FRENCH_WEAVE_TRANSCRIPTS=str(tmp / 'transcripts'),
-                   FRENCH_WEAVE_FORCE='1',  # claude -p is a scripted run: the hook stays silent without this
+        env = dict(os.environ, JAPANESE_WEAVE_HOME=str(tmp / 'fw'), JAPANESE_WEAVE_TRANSCRIPTS=str(tmp / 'transcripts'),
+                   JAPANESE_WEAVE_FORCE='1',  # claude -p is a scripted run: the hook stays silent without this
                    CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1')
         plugin = ['--append-system-prompt-file', str(tmp / 'prefs.txt')] if paste else ['--plugin-dir', str(ROOT)]
         result = subprocess.run(

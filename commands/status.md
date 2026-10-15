@@ -1,7 +1,7 @@
 ---
-description: Show your French Weave stage and learning words
-allowed-tools: Bash(python3:*)
+description: Show your Japanese Weave stage and learning words
+allowed-tools: Bash(sh:*)
 ---
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" status`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/run" "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" status`
 
-Show the output above to the user as-is, in a code block, with no French. Add nothing else unless something failed.
+Show the output above to the user as-is, in a code block, with no Japanese. Add nothing else unless something failed.

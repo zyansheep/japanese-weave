@@ -1,14 +1,14 @@
 {
-  "name": "french-weave",
-  "description": "Passive French for people who read a lot of LLM output.",
+  "name": "japanese-weave",
+  "description": "Passive Japanese for people who read a lot of LLM output.",
   "owner": {
-    "name": "Jackie Oliver"
+    "name": "Jackie Oliver (French Weave); Japanese port"
   },
   "plugins": [
     {
-      "name": "french-weave",
+      "name": "japanese-weave",
       "source": "./",
-      "description": "Weaves a few French words into Claude's chat replies, at your level, and syncs your words with the French Weave Chrome extension."
+      "description": "Weaves a few Japanese words into Claude's chat replies, at your level, and syncs your words with the Japanese Weave browser extension (Firefox and Chrome)."
     }
   ]
 }

@@ -1,7 +1,7 @@
 ---
-description: Pause French Weave in chat and on X
-allowed-tools: Bash(python3:*)
+description: Pause Japanese Weave in chat and on websites
+allowed-tools: Bash(sh:*)
 ---
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" pause`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/run" "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" pause`
 
-Confirm in one plain-English line. Starting with your next reply, write no French until the user resumes.
+Confirm in one plain-English line. Starting with your next reply, write no Japanese until the user resumes.

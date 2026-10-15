@@ -2,9 +2,9 @@
 // --load-extension, so this uses Playwright's Chromium). Run setup first, registering the profile dir used here:
 //   python3 scripts/fw.py setup --user-data-dir /tmp/fw-profile [--gemini-key-file KEY]
 //   PROFILE=/tmp/fw-profile node tests/extension_e2e.mjs
-// To leave your own setup alone, give both commands a scratch FRENCH_WEAVE_HOME (and setup a scratch HOME, so
+// To leave your own setup alone, give both commands a scratch JAPANESE_WEAVE_HOME (and setup a scratch HOME, so
 // it writes no host manifest into your real browsers).
-// Loads a temporary copy of ~/.french-weave/extension (or $FRENCH_WEAVE_HOME/extension) with website access
+// Loads a temporary copy of ~/.japanese-weave/extension (or $JAPANESE_WEAVE_HOME/extension) with website access
 // granted up front, since Chrome's grant dialog can't be clicked from a script. Serves a fake x.com timeline and a
 // fake article on another site (synthetic text), and prints what happened: native host sync, real Gemini swaps
 // (a few requests), delayed hover tip, click flip, health text untouched, links and forms intact, seen/flip events
@@ -15,7 +15,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 
-const INSTALLED = join(process.env.FRENCH_WEAVE_HOME || join(homedir(), '.french-weave'), 'extension');
+const INSTALLED = join(process.env.JAPANESE_WEAVE_HOME || join(homedir(), '.japanese-weave'), 'extension');
 const EXT = mkdtempSync(join(tmpdir(), 'fw-ext-'));
 cpSync(INSTALLED, EXT, { recursive: true });
 const manifest = JSON.parse(readFileSync(join(EXT, 'manifest.json'), 'utf8'));
@@ -62,16 +62,16 @@ try {
     state = await sw.evaluate(() => chrome.storage.local.get(['wordState', 'hostKey']));
     if (!state.wordState) await new Promise((r) => setTimeout(r, 500));
   }
-  out.synced = state.wordState ? { stage: state.wordState.stage, words: state.wordState.words.map((w) => w.fr), version: state.wordState.version } : null;
+  out.synced = state.wordState ? { stage: state.wordState.stage, words: state.wordState.words.map((w) => w.ja), version: state.wordState.version } : null;
   out.hostKeyFromSetup = !!state.hostKey;
 
   await ctx.route('https://x.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
   const page = await ctx.newPage();
-  page.on('console', (m) => { if (/french-weave/.test(m.text())) (out.console ||= []).push(m.text()); });
+  page.on('console', (m) => { if (/japanese-weave/.test(m.text())) (out.console ||= []).push(m.text()); });
   await page.goto('https://x.com/home');
   await page.waitForSelector('.fw-word', { timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(3000);
-  out.swaps = await page.$$eval('.fw-word', (els) => els.map((e) => ({ tweet: e.closest('article').id, fr: e.dataset.fr, en: e.dataset.en, tip: e.dataset.tip })));
+  out.swaps = await page.$$eval('.fw-word', (els) => els.map((e) => ({ tweet: e.closest('article').id, ja: e.dataset.ja, en: e.dataset.en, tip: e.dataset.tip })));
   out.healthTouched = await page.$$eval('#t4 .fw-word', (els) => els.length);
   out.linksIntact = await page.$eval('#t5', (el) => [...el.querySelectorAll('a')].map((a) => a.textContent));
   out.texts = await page.$$eval('[data-testid=tweetText]', (els) => els.map((e) => e.textContent));
@@ -114,11 +114,11 @@ try {
   }
   await ctx.route('https://reading.example/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: article }));
   const reading = await ctx.newPage();
-  reading.on('console', (m) => { if (/french-weave/.test(m.text())) (out.console ||= []).push(m.text()); });
+  reading.on('console', (m) => { if (/japanese-weave/.test(m.text())) (out.console ||= []).push(m.text()); });
   await reading.goto(ARTICLE_URL);
   await reading.waitForSelector('.fw-word', { timeout: 60000 }).catch(() => {});
   await reading.waitForTimeout(3000);
-  out.articleSwaps = await reading.$$eval('.fw-word', (els) => els.map((e) => ({ p: e.closest('[id]')?.id || e.parentElement.tagName, fr: e.dataset.fr, en: e.dataset.en })));
+  out.articleSwaps = await reading.$$eval('.fw-word', (els) => els.map((e) => ({ p: e.closest('[id]')?.id || e.parentElement.tagName, ja: e.dataset.ja, en: e.dataset.en })));
   out.articleHealthTouched = await reading.$$eval('#a3 .fw-word', (els) => els.length);
   out.articleFormTouched = await reading.$$eval('form .fw-word', (els) => els.length);
   out.articleNavIntact = await reading.$eval('nav', (n) => n.textContent);

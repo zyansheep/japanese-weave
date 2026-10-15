@@ -1,9 +1,9 @@
 {
-  "name": "french-weave",
-  "version": "0.2.0",
+  "name": "japanese-weave",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "French Weave Chrome extension: swaps a few English words for French on any website.",
+  "description": "Japanese Weave browser extension (Chrome and Firefox): swaps a few English words for Japanese on any website.",
   "scripts": {
     "test": "bun test"
   },

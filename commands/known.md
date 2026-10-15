@@ -1,8 +1,8 @@
 ---
-description: Mark French words as known (they stop being glossed)
+description: Mark Japanese words as known (they stop being glossed); kanji, kana or romaji
 argument-hint: <word>[, <word>...]
-allowed-tools: Bash(python3:*)
+allowed-tools: Bash(sh:*)
 ---
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" known "$ARGUMENTS"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/run" "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" known "$ARGUMENTS"`
 
-Tell the user in one plain-English line what changed, using the output above. No French.
+Tell the user in one plain-English line what changed, using the output above. No Japanese.

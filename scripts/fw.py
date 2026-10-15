@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
-"""French Weave command line: setup, status, word and stage changes. Python 3.9+, standard library only.
+"""Japanese Weave command line: setup, status, word and stage changes. Python 3.9+, standard library only.
 
-  fw.py setup [--gemini-key-file FILE] [--user-data-dir DIR]... [--known-top N] [--sites all|ask] [--dry-run]
-                                                     install the state dir, extension copy and native host;
-                                                     --user-data-dir also registers the host for a browser run
-                                                     with that --user-data-dir (Chromium looks there);
+  fw.py setup [--gemini-key-file FILE] [--user-data-dir DIR]... [--known-top N] [--sites all|ask]
+              [--browsers firefox,chrome] [--anki COLLECTION] [--remote SSH_HOST] [--dry-run]
+                                                     install the state dir, extension copies (Firefox and
+                                                     Chrome) and native host; --user-data-dir also registers
+                                                     the host for a Chromium run with that --user-data-dir;
                                                      --known-top marks the top N lexicon words known unless
-                                                     already introduced (40: some basics, 150: simple French);
+                                                     already introduced (40: some basics, 150: simple Japanese);
                                                      --sites: extension on every site (all) or only ones you
-                                                     turn on (ask)
+                                                     turn on (ask); --anki: run `anki` too; --remote: this
+                                                     machine only runs the browser, the word state lives on
+                                                     SSH_HOST (the native host talks to it over ssh)
+  fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--dry-run]
+                                                     put the words on your Anki cards under review (learning
+                                                     or review, not new or suspended) at the front of the
+                                                     list; mature cards (interval >= N days, default 21)
+                                                     become known unless --no-known
   fw.py status                                       stage, word counts, learning words
   fw.py known WORD...                                mark words as known
   fw.py learn WORD...                                put words back in the learning set (shaky)
   fw.py stage N|auto                                 pin the stage (1-4) or let it follow known words
-  fw.py pause | resume                               stop or restart French in chat and on X
+  fw.py pause | resume                               stop or restart Japanese in chat and on websites
+  fw.py glosses abbr|footer                          T3 Code chats: gloss each Japanese word in an <abbr> shown
+                                                     on hover or click (needs a T3 build that renders them), or
+                                                     in a footer line (default)
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
   fw.py setup --codex [--dry-run]                    also add the chat hook to Codex CLI (~/.codex or $CODEX_HOME)
   fw.py export [--claude-ai | --chatgpt] [--log-day] paste-ready block for claude.ai preferences or ChatGPT
@@ -27,50 +38,94 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import export  # noqa: E402
+import anki  # noqa: E402
 
-HOST_NAME = 'com.frenchweave.host'
-EXTENSION_ID = 'ckihjnkijacemibkblmjfjgpffflbced'  # fixed by the "key" in extension/manifest.json
+HOST_NAME = 'com.japaneseweave.host'
+EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
+GECKO_ID = 'japanese-weave@weave.local'  # Firefox: browser_specific_settings.gecko.id in extension-firefox/
+FIREFOX_MIN = '128.0'  # optional_host_permissions in MV3
 
 
 def host_dirs(extra=()):
-    """User-level NativeMessagingHosts folders for Google Chrome and Chromium on this OS, plus any extra
-    browser user-data dirs (a browser started with --user-data-dir looks only inside that dir)."""
+    """(folder, browser) for user-level native messaging hosts on this OS: Firefox, Google Chrome and Chromium, plus
+    any extra Chromium user-data dirs (a browser started with --user-data-dir looks only inside that dir)."""
     home = Path.home()
-    extra = [Path(d).expanduser().resolve() / 'NativeMessagingHosts' for d in extra]
+    extra = [(Path(d).expanduser().resolve() / 'NativeMessagingHosts', 'chrome') for d in extra]
     if sys.platform == 'darwin':
         base = home / 'Library' / 'Application Support'
-        return [base / 'Google' / 'Chrome' / 'NativeMessagingHosts', base / 'Chromium' / 'NativeMessagingHosts'] + extra
+        return [(base / 'Mozilla' / 'NativeMessagingHosts', 'firefox'),
+                (base / 'Google' / 'Chrome' / 'NativeMessagingHosts', 'chrome'),
+                (base / 'Chromium' / 'NativeMessagingHosts', 'chrome')] + extra
     config = Path(os.environ.get('XDG_CONFIG_HOME') or home / '.config')
-    return [config / 'google-chrome' / 'NativeMessagingHosts', config / 'chromium' / 'NativeMessagingHosts'] + extra
+    return [(home / '.mozilla' / 'native-messaging-hosts', 'firefox'),
+            (config / 'google-chrome' / 'NativeMessagingHosts', 'chrome'),
+            (config / 'chromium' / 'NativeMessagingHosts', 'chrome')] + extra
+
+
+def host_manifest(browser, launcher):
+    manifest = {'name': HOST_NAME, 'description': 'Japanese Weave word state', 'path': str(launcher), 'type': 'stdio'}
+    if browser == 'firefox':
+        manifest['allowed_extensions'] = [GECKO_ID]
+    else:
+        manifest['allowed_origins'] = [f'chrome-extension://{EXTENSION_ID}/']
+    return manifest
+
+
+def python_path():
+    """A Python 3.9+ path that survives upgrades, for launchers: python3 or python on PATH (some systems have only
+    one of them), else this interpreter."""
+    here = Path(sys.executable).resolve()
+    for name in ('python3', 'python'):
+        found = shutil.which(name)
+        if found and (Path(found).resolve() == here or subprocess.run(
+                [found, '-c', 'import sys; sys.exit(sys.version_info < (3, 9))'], capture_output=True).returncode == 0):
+            return found
+    return sys.executable
+
+
+def firefox_manifest(manifest):
+    """The Chrome manifest adapted for Firefox: event-page background scripts instead of a service worker, a gecko
+    id (native messaging needs it), and no Chrome key."""
+    manifest = dict(manifest)
+    manifest.pop('key', None)
+    manifest['background'] = {'scripts': [manifest['background']['service_worker']], 'type': 'module'}
+    manifest['browser_specific_settings'] = {'gecko': {
+        'id': GECKO_ID, 'strict_min_version': FIREFOX_MIN,
+        'data_collection_permissions': {'required': ['websiteContent']}}}  # page text goes to Gemini
+    return manifest
 
 
 def plan(extra=()):
     root, home = fwlib.PLUGIN_ROOT, fwlib.home()
     return {
-        'python': sys.executable,
+        'python': python_path(),
         'python_version': platform.python_version(),
         'platform': sys.platform,
         'source': str(root),
         'state_dir': str(home),
-        'extension_dir': str(home / 'extension'),
+        'extension_dir_firefox': str(home / 'extension-firefox'),
+        'extension_dir_chrome': str(home / 'extension'),
         'host_launcher': str(home / 'app' / 'fw-host'),
-        'host_manifests': [str(d / f'{HOST_NAME}.json') for d in host_dirs(extra)],
+        'host_manifests': [str(d / f'{HOST_NAME}.json') for d, _ in host_dirs(extra)],
         'extension_id': EXTENSION_ID,
+        'gecko_id': GECKO_ID,
         'codex_cli': shutil.which('codex'),
     }
 
 
-CODEX_MARK = 'french-weave'  # our Codex hook command always contains this (the state dir path)
+CODEX_MARK = 'japanese-weave'  # our Codex hook command always contains this (the state dir path)
 
 
 def codex_command():
-    return f'"{sys.executable}" "{fwlib.home() / "app" / "scripts" / "weave.py"}" --hook'
+    return f'"{python_path()}" "{fwlib.home() / "app" / "scripts" / "weave.py"}" --hook'
 
 
 def is_ours(handler):
@@ -120,14 +175,14 @@ def setup_codex(dry_run):
         sys.exit(f'{hooks_path} is not valid JSON; fix it, then rerun setup --codex.')
     codex.mkdir(parents=True, exist_ok=True)
     for path in (hooks_path, config_path):
-        backup = path.with_name(path.name + '.before-french-weave')
+        backup = path.with_name(path.name + '.before-japanese-weave')
         if path.exists() and not backup.exists():
             shutil.copy2(path, backup)
     fwlib.write_json(hooks_path, data)
     config_path.write_text(config)
     print(f'Codex: chat hook in {hooks_path}, hooks enabled in {config_path}.')
     print('  Human step: start `codex` once; at "Hooks need review" pick "Trust all and continue" (or review first).')
-    print('  Codex never runs a new hook before that. `codex exec` runs stay French-free either way.')
+    print('  Codex never runs a new hook before that. `codex exec` runs stay Japanese-free either way.')
 
 
 KEY_SHAPE = re.compile(r'^[A-Za-z0-9_-]{30,64}$')
@@ -147,23 +202,23 @@ def read_key_file(arg):
     return key
 
 
-def setup(args):
-    info = plan(args.user_data_dir)
-    if sys.version_info < (3, 9):
-        sys.exit(f'French Weave needs Python 3.9 or newer; this is {info["python_version"]}.')
-    root, home = fwlib.PLUGIN_ROOT, fwlib.home()
-    if not (root / 'extension' / 'manifest.json').exists():
-        sys.exit(f'No extension/ folder next to {root / "scripts"}; run setup from a full copy of the repo.')
-    key = read_key_file(args.gemini_key_file) if args.gemini_key_file else None
-    if args.dry_run:
-        print(json.dumps(dict(info, dry_run=True, gemini_key='would be stored' if key else 'not given',
-                              known_top=args.known_top, sites=args.sites), indent=1))
-        if args.codex:
-            setup_codex(True)
-        return
-    home.mkdir(parents=True, exist_ok=True)
-    os.chmod(home, 0o700)
-    # Stable copies: the plugin cache path changes on every update, Chrome needs fixed paths.
+def write_launcher(home, remote=None, remote_home=None):
+    """The native host launcher the browser starts. Remote: the word state lives on another machine, so the
+    browser's messages go to that machine's own launcher over ssh (keys only, never a password prompt)."""
+    launcher = home / 'app' / 'fw-host'
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    if remote:
+        target = shlex.quote(f'{remote_home or ".japanese-weave"}/app/fw-host')
+        launcher.write_text(f'#!/bin/sh\n# Japanese Weave: the word state lives on {remote}.\n'
+                            f'exec ssh -T -o BatchMode=yes -o ConnectTimeout=10 {shlex.quote(remote)} {target}\n')
+    else:
+        launcher.write_text(f'#!/bin/sh\nexec "{python_path()}" "{home / "app" / "scripts" / "fw_host.py"}" "$@"\n')
+    launcher.chmod(0o755)
+    return launcher
+
+
+def install_extensions(root, home):
+    """Stable copies: the plugin cache path changes on every update, browsers need fixed paths."""
     for name, ignore in (('extension', shutil.ignore_patterns('test', 'node_modules', 'package.json', 'bun.lock')),
                          ('app/scripts', shutil.ignore_patterns('__pycache__')), ('app/data', None)):
         source = root / ('extension' if name == 'extension' else name.split('/')[1])
@@ -171,18 +226,55 @@ def setup(args):
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(source, target, ignore=ignore)
-    launcher = home / 'app' / 'fw-host'
-    launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{home / "app" / "scripts" / "fw_host.py"}" "$@"\n')
-    launcher.chmod(0o755)
-    manifest = {'name': HOST_NAME, 'description': 'French Weave word state', 'path': str(launcher), 'type': 'stdio',
-                'allowed_origins': [f'chrome-extension://{EXTENSION_ID}/']}
-    for directory in host_dirs(args.user_data_dir):
+    firefox = home / 'extension-firefox'
+    if firefox.exists():
+        shutil.rmtree(firefox)
+    shutil.copytree(home / 'extension', firefox)
+    manifest = fwlib.read_json(firefox / 'manifest.json')
+    fwlib.write_json(firefox / 'manifest.json', firefox_manifest(manifest))
+
+
+def setup(args):
+    info = plan(args.user_data_dir)
+    if sys.version_info < (3, 9):
+        sys.exit(f'Japanese Weave needs Python 3.9 or newer; this is {info["python_version"]}.')
+    root, home = fwlib.PLUGIN_ROOT, fwlib.home()
+    browsers = [b.strip() for b in args.browsers.split(',') if b.strip()]
+    if not (root / 'extension' / 'manifest.json').exists():
+        sys.exit(f'No extension/ folder next to {root / "scripts"}; run setup from a full copy of the repo.')
+    key = read_key_file(args.gemini_key_file) if args.gemini_key_file else None
+    if args.dry_run:
+        print(json.dumps(dict(info, dry_run=True, gemini_key='would be stored' if key else 'not given',
+                              known_top=args.known_top, sites=args.sites, browsers=browsers, remote=args.remote,
+                              anki=args.anki), indent=1))
+        if args.codex:
+            setup_codex(True)
+        return
+    home.mkdir(parents=True, exist_ok=True)
+    os.chmod(home, 0o700)
+    install_extensions(root, home)
+    launcher = write_launcher(home, args.remote, args.remote_home)
+    for directory, browser in host_dirs(args.user_data_dir):
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f'{HOST_NAME}.json').write_text(json.dumps(manifest, indent=1) + '\n')
+        (directory / f'{HOST_NAME}.json').write_text(json.dumps(host_manifest(browser, launcher), indent=1) + '\n')
+    remote_file = home / 'remote'
+    if args.remote:
+        remote_file.write_text(args.remote + '\n')
+    elif remote_file.exists():
+        remote_file.unlink()
     if key:
         path = home / 'gemini_key'
         path.write_text(key + '\n')
         path.chmod(0o600)
+    if args.remote:
+        print(f'Japanese Weave browser side is set up; the word state stays on {args.remote}.')
+        print(f'  native host: {launcher} (ssh {args.remote}; needs key login without a password prompt)')
+        print(f'  Gemini key:  {"stored here" if key else "from " + args.remote + " if setup stored one there, else paste it in the popup"}')
+        human_steps(home, browsers, args.sites or 'all', True)  # the key may come from the remote side
+        return
+    if args.anki:  # first, so your Anki words are the first learning words
+        anki_sync(argparse.Namespace(collection=args.anki, deck=None, mature_days=anki.MATURE_DAYS, no_known=False,
+                                     dry_run=False))
     with fwlib.locked():
         if not (home / 'state.json').exists():  # first run: seed known words before the first learning words
             fwlib.save_state(fwlib.new_state(known_top=args.known_top))
@@ -192,7 +284,7 @@ def setup(args):
             state.setdefault('prefs', {})['extension_sites'] = args.sites
     if args.codex:
         setup_codex(False)
-    print('French Weave is set up.')
+    print('Japanese Weave is set up.')
     print(f'  word state:  {home / "state.json"} (Stage {fwlib.stage_for(state)}, '
           f'{sum(w["status"] == "known" for w in state["words"])} known, '
           f'{sum(w["status"] == "active" for w in state["words"])} learning words)')
@@ -200,23 +292,65 @@ def setup(args):
     print(f'  extension:   {"every site; turn any off from the toolbar" if sites == "all" else "only sites you turn on"}')
     print(f'  native host: {", ".join(info["host_manifests"])}')
     print(f'  Gemini key:  {"stored for the extension" if key or (home / "gemini_key").exists() else "not stored; paste it in the extension popup"}')
-    print('Human steps left (Chrome blocks scripts from doing these):')
-    print('  1. Open chrome://extensions and switch on Developer mode (top right).')
-    print(f'  2. Click "Load unpacked" and pick: {home / "extension"}')
-    print('  3. Pin the French Weave toolbar icon (puzzle piece menu) and click it:')
-    if sites == 'all':
-        print('     click "Allow all websites" (Chrome asks once; until then it runs only on X).')
-    else:
-        print('     on each site you want, tick "This site" (Chrome asks for that site).')
-    if not key and not (home / 'gemini_key').exists():
-        print('     Paste a Gemini API key (https://aistudio.google.com/apikey).')
+    human_steps(home, browsers, sites, key or (home / 'gemini_key').exists())
     print('Chat weaving runs wherever the plugin is enabled; sessions opened from now on pick it up.')
+
+
+def human_steps(home, browsers, sites, has_key):
+    print('Human steps left (browsers block scripts from doing these):')
+    n = 0
+    if 'firefox' in browsers:
+        n += 1
+        print(f'  {n}. Firefox: open about:debugging#/runtime/this-firefox, click "Load Temporary Add-on..." and pick')
+        print(f'     {home / "extension-firefox" / "manifest.json"}')
+        print('     (temporary: gone when Firefox quits. To keep it, sign it once with tools/sign-firefox.sh and install')
+        print('     the .xpi from about:addons > gear > "Install Add-on From File".)')
+    if 'chrome' in browsers:
+        n += 1
+        print(f'  {n}. Chrome/Chromium: chrome://extensions, switch on Developer mode, "Load unpacked", pick:')
+        print(f'     {home / "extension"}')
+    n += 1
+    print(f'  {n}. Pin the Japanese Weave toolbar icon and click it:')
+    if sites == 'all':
+        print('     click "Allow all websites" (the browser asks once; until then it runs only on X).')
+    else:
+        print('     on each site you want, tick "This site" (the browser asks for that site).')
+    if not has_key:
+        print('     Paste a Gemini API key (https://aistudio.google.com/apikey).')
+
+
+def anki_sync(args):
+    words, report = anki.review_words(args.collection, deck=args.deck, mature_days=args.mature_days,
+                                      base=fwlib.read_lexicon(fwlib.LEXICON))
+    mature = [w for w in words if w['mature']]
+    print(f'Anki: {report["cards"]} cards under review on {report["notes"]} notes; {len(words)} usable words '
+          f'({len(mature)} mature, interval >= {args.mature_days} days).')
+    for reason, count in sorted(report['skipped'].items()):
+        print(f'  skipped {count}: {reason}')
+    if args.dry_run:
+        for w in words[:40]:
+            print(f'  {w["ja"]} = {w["en"]}, "{w["hint"]}"{"  (mature)" if w["mature"] else ""}')
+        return
+    home = fwlib.home()
+    home.mkdir(parents=True, exist_ok=True)
+    anki.write_csv(home / fwlib.ANKI_LEXICON, words)
+    known = [] if args.no_known else [w['ja'] for w in mature]
+    with fwlib.locked():
+        if not (home / 'state.json').exists():  # first run: mature cards known before the first learning words
+            fwlib.save_state(fwlib.new_state(known=known))
+    with fwlib.editing() as state:  # merge_lexicon puts them at the front of the queue
+        entries = [e for e in map(lambda name: fwlib.find(state, name), known) if e]
+        for entry in entries:  # learning words keep learning; only words not introduced yet jump to known
+            if entry['status'] == 'queue':
+                fwlib.set_status(entry, 'known', fwlib.today())
+        seeded = sum(e['status'] == 'known' for e in entries)
+    print(f'Front of the list: {len(words)} Anki words; {seeded} mature ones known. '
+          f'Rerun `fw.py anki` whenever you like; it never resets progress.')
 
 
 def check(_args):
     """Prints one line per check; exits 1 if any failed."""
     import struct
-    import subprocess
     home, ok = fwlib.home(), True
 
     def report(passed, what):
@@ -224,19 +358,24 @@ def check(_args):
         ok = ok and passed
         print(f'{"ok  " if passed else "FAIL"} {what}')
 
-    state = fwlib.load_state(create=False)
-    report(state is not None, f'word state at {home / "state.json"}' + (f' (Stage {fwlib.stage_for(state)})' if state else ''))
-    report((home / 'extension' / 'manifest.json').exists(), f'extension folder for Load unpacked: {home / "extension"}')
-    for directory in host_dirs():
+    remote = (home / 'remote').read_text().strip() if (home / 'remote').exists() else None
+    if remote:
+        print(f'note word state lives on {remote} (this machine runs only the browser side)')
+    else:
+        state = fwlib.load_state(create=False)
+        report(state is not None, f'word state at {home / "state.json"}' + (f' (Stage {fwlib.stage_for(state)})' if state else ''))
+    report((home / 'extension-firefox' / 'manifest.json').exists(),
+           f'Firefox extension for "Load Temporary Add-on": {home / "extension-firefox" / "manifest.json"}')
+    report((home / 'extension' / 'manifest.json').exists(), f'Chrome extension folder for Load unpacked: {home / "extension"}')
+    launcher = home / 'app' / 'fw-host'
+    for directory, browser in host_dirs():
         path = directory / f'{HOST_NAME}.json'
         manifest = fwlib.read_json(path)
-        report(bool(manifest) and manifest.get('allowed_origins') == [f'chrome-extension://{EXTENSION_ID}/'],
-               f'native host manifest {path}')
-    launcher = home / 'app' / 'fw-host'
+        report(bool(manifest) and manifest == host_manifest(browser, launcher), f'native host manifest {path}')
     try:
         message = json.dumps({'type': 'ping'}).encode()
         out = subprocess.run([str(launcher)], input=struct.pack('=I', len(message)) + message, capture_output=True,
-                             timeout=20).stdout
+                             timeout=30).stdout
         report(json.loads(out[4:]).get('ok') is True, f'native host answers: {launcher}')
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         report(False, f'native host answers: {launcher} ({error.__class__.__name__})')
@@ -247,6 +386,10 @@ def check(_args):
         enabled = config.exists() and enable_codex_hooks(config.read_text()) == config.read_text().rstrip('\n') + '\n'
         report(enabled, f'Codex hook in {fwlib.codex_home() / "hooks.json"} with [features] hooks = true '
                         '(Codex asks you to trust it on first start)')
+    anki_csv = home / fwlib.ANKI_LEXICON
+    if not remote:
+        print(f'{"ok  " if anki_csv.exists() else "note"} Anki words '
+              f'{"at the front of the list (" + str(len(fwlib.read_lexicon(anki_csv))) + ")" if anki_csv.exists() else "not synced; run fw.py anki <collection.anki2>"}')
     has_key = (home / 'gemini_key').exists()
     print(f'{"ok  " if has_key else "note"} Gemini key {"stored by setup" if has_key else "not stored; paste it in the extension popup"}')
     if not ok:
@@ -260,11 +403,11 @@ def uninstall(args):
         groups = (data.get('hooks') or {}).get('UserPromptSubmit') or []
         kept = [g for g in ({**g, 'hooks': [h for h in g.get('hooks', []) if not is_ours(h)]} for g in groups) if g['hooks']]
         if len(kept) != len(groups) or sum(len(g['hooks']) for g in kept) != sum(len(g.get('hooks', [])) for g in groups):
-            print(('would remove' if args.dry_run else 'removed') + f' the French Weave hook from {path}')
+            print(('would remove' if args.dry_run else 'removed') + f' the Japanese Weave hook from {path}')
             if not args.dry_run:
                 data['hooks']['UserPromptSubmit'] = kept
                 fwlib.write_json(path, data)
-    for directory in host_dirs():
+    for directory, _ in host_dirs():
         path = directory / f'{HOST_NAME}.json'
         if path.exists():
             print(('would remove ' if args.dry_run else 'removed ') + str(path))
@@ -280,7 +423,7 @@ def status(_args):
     for w in state['words']:
         by.setdefault(w['status'], []).append(w)
     stage = fwlib.stage_for(state)
-    print(f'French Weave: Stage {stage}{" (pinned)" if state.get("stage_pinned") else ""}'
+    print(f'Japanese Weave: Stage {stage}{" (pinned)" if state.get("stage_pinned") else ""}'
           f'{", PAUSED" if state.get("paused") else ""}')
     print(f'  known {len(by.get("known", []))}, learning {len(by.get("active", []))}, '
           f'shaky {len(by.get("shaky", []))}, not yet introduced {len(by.get("queue", []))}')
@@ -288,7 +431,7 @@ def status(_args):
     for name in ('shaky', 'active'):
         for w in by.get(name, []):
             days = len(fwlib.exposure_days(w, chat))
-            print(f'  {name:6} {w["fr"]} = {w["en"]}, "{w["hint"]}"  (seen on {days} day{"s" if days != 1 else ""})')
+            print(f'  {name:6} {w["ja"]} = {w["en"]}, "{w["hint"]}"  (seen on {days} day{"s" if days != 1 else ""})')
     nxt = next((n for n, s in sorted(fwlib.STAGES) if fwlib.stage_for(state) < s), None)
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
@@ -300,7 +443,7 @@ def mark(kind):
         with fwlib.editing() as state:
             for chunk in (c for arg in args.words for c in arg.split(',')):
                 chunk = chunk.strip()
-                # "parce que" is one word; "et mais" is two.
+                # "jitsu wa" (romaji for 実は) is one word; "ima demo" is two.
                 for word in [chunk] if fwlib.find(state, chunk) or ' ' not in chunk else chunk.split():
                     (done if fwlib.apply_event(state, word, kind) else missing).append(word)
         if done:
@@ -319,11 +462,18 @@ def stage(args):
     print(f'Stage {fwlib.stage_for(state)}{" (pinned)" if state["stage_pinned"] else " (automatic)"}')
 
 
+def glosses(args):
+    with fwlib.editing() as state:
+        state.setdefault('prefs', {})['chat_glosses'] = args.style
+    print('T3 Code chats: each Japanese word shows its romaji and meaning on hover or click.' if args.style == 'abbr' else
+          'T3 Code chats: learning words are glossed in a footer line.')
+
+
 def pause(value):
     def run(_args):
         with fwlib.editing() as state:
             state['paused'] = value
-        print('French Weave paused: no French in chat or on X until you resume.' if value else 'French Weave resumed.')
+        print('Japanese Weave paused: no Japanese in chat or on websites until you resume.' if value else 'Japanese Weave resumed.')
     return run
 
 
@@ -339,7 +489,7 @@ def export_cmd(args):
         print(f'--- "How would you like ChatGPT to respond?" ({len(respond)} characters) ---\n{respond}')
     else:
         block = export.claude_ai(state)
-        print(f'claude.ai > Settings > Profile > personal preferences. Replace the old French Weave block '
+        print(f'claude.ai > Settings > Profile > personal preferences. Replace the old Japanese Weave block '
               f'({len(block)} characters):\n\n{block}')
     if logged:
         print(f'\n(Counted today as chat exposure for {logged} learning words.)')
@@ -356,7 +506,7 @@ def refresh(_args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='French Weave', formatter_class=argparse.RawDescriptionHelpFormatter,
+    parser = argparse.ArgumentParser(description='Japanese Weave', formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('setup')
@@ -365,8 +515,19 @@ def main(argv=None):
     p.add_argument('--codex', action='store_true')
     p.add_argument('--known-top', type=int, default=0, metavar='N')
     p.add_argument('--sites', choices=['all', 'ask'])
+    p.add_argument('--browsers', default='firefox,chrome', help='human steps to print: firefox, chrome or both')
+    p.add_argument('--anki', metavar='COLLECTION', help='also run `anki COLLECTION`')
+    p.add_argument('--remote', metavar='SSH_HOST', help='browser-only machine; the word state lives on SSH_HOST')
+    p.add_argument('--remote-home', metavar='DIR', help='state dir on SSH_HOST (default ~/.japanese-weave)')
     p.add_argument('--dry-run', action='store_true')
     p.set_defaults(run=setup)
+    p = sub.add_parser('anki')
+    p.add_argument('collection', help='collection.anki2 (or a .colpkg / .apkg export)')
+    p.add_argument('--deck', help='only decks whose name contains this')
+    p.add_argument('--mature-days', type=int, default=anki.MATURE_DAYS)
+    p.add_argument('--no-known', action='store_true', help="don't mark mature cards known")
+    p.add_argument('--dry-run', action='store_true')
+    p.set_defaults(run=anki_sync)
     p = sub.add_parser('uninstall')
     p.add_argument('--codex', action='store_true')
     p.add_argument('--dry-run', action='store_true')
@@ -380,6 +541,9 @@ def main(argv=None):
     p = sub.add_parser('stage')
     p.add_argument('value', choices=['1', '2', '3', '4', 'auto'])
     p.set_defaults(run=stage)
+    p = sub.add_parser('glosses')
+    p.add_argument('style', choices=['abbr', 'footer'])
+    p.set_defaults(run=glosses)
     sub.add_parser('pause').set_defaults(run=pause(True))
     sub.add_parser('resume').set_defaults(run=pause(False))
     sub.add_parser('refresh').set_defaults(run=refresh)

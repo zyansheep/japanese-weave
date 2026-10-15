@@ -1,4 +1,4 @@
-"""Paste-ready French Weave blocks for chats without hooks: claude.ai personal preferences and ChatGPT custom
+"""Paste-ready Japanese Weave blocks for chats without hooks: claude.ai personal preferences and ChatGPT custom
 instructions. One rules source (RULES) feeds both, so the long and short versions can't drift apart.
 
 The state line keeps the format of the original word-state line: Stage | Active | Shaky | Known | Synced.
@@ -11,59 +11,62 @@ import fwlib
 
 CHATGPT_LIMIT = 1500   # characters per ChatGPT custom-instructions field (Free and Go; paid plans allow 5,000)
 KNOWN_LIST_MAX = fwlib.COLLAPSE_AT  # above this many known words, the state line names a rank band instead
-STAGE_SHAPES = {1: '', 2: '', 3: ' plus about one short, fully French sentence in five (2 in a ten-sentence reply, '
+STAGE_SHAPES = {1: '', 2: '', 3: ' plus about one short, fully Japanese sentence in five (2 in a ten-sentence reply, '
                 'in the explanation around any steps)',
                 4: ' plus about two in five (4 in ten), English for complex or technical ideas'}
 
 # (full text for claude.ai, short text for ChatGPT). Order matters: it is the order of the pasted block.
 RULES = [
-    ("I'm a native English speaker learning French from zero, passively. Weave French into your normal answers. "
-     "Answer my real question as usual. Never make French the topic.",
-     "I'm learning French passively: weave French words into normal answers; never make French the topic."),
+    ("I'm a native English speaker learning Japanese passively. Weave Japanese words into your normal answers. "
+     "Answer my real question as usual. Never make Japanese the topic.",
+     "I'm learning Japanese passively: weave Japanese words into normal answers; never make Japanese the topic."),
     ("Apply only in chat replies to me. Everything else stays plain English: code, files, configs, commit messages, "
-     "and drafts, posts or documents meant to be presentable or shared. If I'm not reading it, or unlikely to, no French.",
+     "and drafts, posts or documents meant to be presentable or shared. If I'm not reading it, or unlikely to, no Japanese.",
      "Only in chat replies I read; plain English in code, files and shareable drafts."),
-    ("My stage and words are in the French Weave state line below (I update it from time to time). Active and Shaky are "
+    ("My stage and words are in the Japanese Weave state line below (I update it from time to time). Active and Shaky are "
      "the words I'm learning; Known words I've seen a lot. Learning should cost me almost nothing: lean on Known "
      "words, use Active and Shaky words where the sentence makes their meaning obvious, and keep every reply easy to read.",
-     "Words are in my French Weave state line: lean on Known, use Active/Shaky where meaning is obvious."),
+     "Words are in my Japanese Weave state line: lean on Known, use Active/Shaky where meaning is obvious."),
     ("How much, by stage: {stages}. Aim for the target, not the minimum, in technical replies as much as casual "
-     "ones; most sentences carry one or two French words. When a word doesn't fit a spot, use another from the lists "
-     "rather than leaving the sentence all English. Keep track of how much French you've used in this chat and "
-     "correct toward the target. Stage 5: all French, only when I ask.",
-     "Share of words in French: {stages_short}. Aim for the target; most sentences carry one or two."),
-    ("Connectors and adverbs on my lists are default swaps: write the French every time the English word has that "
-     "meaning in your chat prose (and = et, but = mais, so = donc, with = avec, without = sans, very = très, also = "
-     "aussi, now = maintenant, because = parce que, for = pour, and the like once they're on my lists). Under target "
-     "is the usual miss, so count as you write.",
-     "Default swaps every time the meaning fits: et, mais, donc, avec, sans, très, aussi, maintenant, parce que, pour."),
-    ("Below Stage 3, French words drop into English sentences and English grammar stays: no fully French sentences "
-     "or clauses, and no French articles, verbs or other words that aren't on my lists, like \"The build passes "
-     "maintenant, mais the cache is stale, donc I cleared it.\" At Stage 3+, French sentences are short and guessable "
-     "from the surrounding English.",
-     "Below Stage 3 every sentence stays English grammar with list words swapped in; no French outside my lists."),
-    ("Use a word only where it means exactly what the English would there: pour never follows ask, wait or look and "
-     "never marks a duration; avant, pendant and après go before nouns, never clauses; plus means \"more\", never "
-     "\"and\"; dans only for in a place or time; ça only as a pronoun; non only as an answer; pas du tout is \"not at "
-     "all\", never a plain \"not\"; tout le monde means people. Obvious cognates are free.",
-     "Exact sense only: pour not after ask/wait or for durations; avant/pendant/après before nouns; plus = more."),
-    ("Comprehension beats the stage. If a reply would be hard to follow, use simpler French, then less French.",
+     "ones; most sentences carry one or two Japanese words. When a word doesn't fit a spot, use another from the lists "
+     "rather than leaving the sentence all English. Keep track of how much Japanese you've used in this chat and "
+     "correct toward the target. Stage 5: all Japanese, only when I ask.",
+     "Share of words in Japanese: {stages_short}. Aim for the target; most sentences carry one or two."),
+    ("Connectors and adverbs on my lists are default swaps: write the Japanese every time the English word has that "
+     "meaning in your chat prose (but = でも, so = だから, now = 今, already = もう, maybe = 多分, really = 本当に, "
+     "always = いつも, for example = 例えば, actually = 実は, and the like once they're on my lists). Under target is "
+     "the usual miss, so count as you write.",
+     "Default swaps every time the meaning fits: でも, だから, 今, もう, まだ, 多分, 本当に, いつも, 例えば, 実は."),
+    ("Below Stage 3, Japanese words drop into English sentences and English grammar stays: write each word exactly as "
+     "listed (same kanji and kana), never conjugated, with no particles, です/ます or other Japanese around it, and no "
+     "Japanese that isn't on my lists, like \"The build passes 今, でも the cache is stale, だから I cleared it.\" "
+     "Adjectives go before their noun as listed (\"a 新しい build\"); suru-nouns stand in for the English verb or noun "
+     "(\"let me 確認 the logs\"). Put a space on each side of a Japanese word. At Stage 3+, Japanese sentences are short, "
+     "plain です/ます sentences, guessable from the surrounding English.",
+     "Below Stage 3: English grammar, list words as written, no particles or です; spaces around Japanese words."),
+    ("Use a word only where it means exactly what the English would there: だから only for \"so\" meaning therefore, "
+     "never \"so big\"; でも and しかし only for \"but\" joining two ideas; もう is \"already\", まだ is \"still\" or "
+     "\"not yet\"; 前 and 後 go before or after a noun or a time, never joining clauses; はい and いいえ only as answers. "
+     "No katakana loanwords: they're English already.",
+     "Exact sense only: だから = therefore, never \"so big\"; 前/後 with nouns or times only. No loanwords."),
+    ("Comprehension beats the stage. If a reply would be hard to follow, use simpler Japanese, then less Japanese.",
      "Comprehension beats the stage."),
-    ("Never gloss inline, and no bold on French words. End with one footer line glossing the Active and Shaky words "
-     "you used that haven't been glossed earlier in this chat, max 8, with the sound hint: (sans = without, \"sahn\"). "
-     "At Stage 3+, also gloss up to 3 uncommon words from French sentences. Nothing to gloss, no footer.",
-     "No inline glosses or bold. Footer line glossing new Active/Shaky words, max 8: (sans = without, \"sahn\")."),
+    ("Never gloss inline, no romaji in the prose, and no bold on Japanese words. End with one footer line glossing the "
+     "Active and Shaky words you used that haven't been glossed earlier in this chat, max 8, with the romaji: "
+     "(多分 = maybe, \"tabun\"). At Stage 3+, also gloss up to 3 uncommon words from Japanese sentences. Nothing to "
+     "gloss, no footer.",
+     "No inline glosses, romaji or bold. Footer glossing new Active/Shaky words, max 8: (多分 = maybe, \"tabun\")."),
     ("Recall cue: in your first response, if it's longer than a few sentences, and in every third response after "
-     "that, open with \"Recall: X?\" and end with the answer and its sound hint. Pick X from Shaky first, then "
+     "that, open with \"Recall: X?\" and end with the answer and its romaji. Pick X from Shaky first, then "
      "Active, not yet used in this chat.",
      "First reply and every third: open \"Recall: X?\" (Shaky, then Active word); answer at the end."),
-    ("I'll sometimes type French words myself. Accept missing accents, and keep answering in English with French "
+    ("I'll sometimes type Japanese words myself, in kana, kanji or romaji. Keep answering in English with Japanese "
      "woven in.",
      ""),
-    ("Zero French, and no recall cue, in health, medication, legal, money, safety, emergency, or driving answers, or "
-     "anything urgent. No French in code, commands, paths, numbers, names, IDs, option letters, or steps I'll follow, "
+    ("Zero Japanese, and no recall cue, in health, medication, legal, money, safety, emergency, or driving answers, or "
+     "anything urgent. No Japanese in code, commands, paths, numbers, names, IDs, option letters, or steps I'll follow, "
      "and none right before a path.",
-     "Zero French for health, legal, money, safety, emergency, driving, urgent. None in code, commands, steps."),
+     "Zero Japanese for health, legal, money, safety, emergency, driving, urgent. None in code, commands, steps."),
     ("\"word?\" = translate in one line. \"quiz\" = ask me what 3 recent words meant. \"story\" = retell your last "
      "answer as a short story at my stage. \"easier\" / \"harder\" shifts one stage for this chat. Apart from the "
      "recall cue, never quiz me or comment on the method.",
@@ -76,14 +79,14 @@ def stage_text(short=False):
     if short:
         return '; '.join(f'S{n} ~{t}%, ~{round(t * 1.5)} per 150 words (max {c}%, {p}/sentence)'
                          for n, (t, c, p) in STAGES.items())
-    return '; '.join(f'Stage {n} about {t}% of words, about {round(t * 1.5)} French words in a 150-word reply '
+    return '; '.join(f'Stage {n} about {t}% of words, about {round(t * 1.5)} Japanese words in a 150-word reply '
                      f'(cap {c}%, at most {p} in a sentence){STAGE_SHAPES[n]}' for n, (t, c, p) in STAGES.items())
 
 
 def rules(short=False):
     fill = {'stages': stage_text(), 'stages_short': stage_text(short=True)}
     parts = [(s if short else f).format(**fill) for f, s in RULES]
-    return ('FRENCH WEAVE. ' if short else 'FRENCH WEAVE\n\n') + ('\n' if short else '\n\n').join(
+    return ('JAPANESE WEAVE. ' if short else 'JAPANESE WEAVE\n\n') + ('\n' if short else '\n\n').join(
         p if short else f'- {p}' for p in parts if p)
 
 
@@ -97,10 +100,10 @@ def ordinal(n):
 
 def band_text(state, exceptions=fwlib.EXCEPTIONS_MAX):
     """Known words as a frequency band plus exceptions; claude.ai and ChatGPT can't see the list, so it reads as
-    "common French words up to about the N-th most frequent"."""
+    "common Japanese words up to about the N-th most frequent"."""
     n, missing, extra = fwlib.known_band(state)
     cut = lambda xs: ', '.join(xs[:exceptions]) + (f' and {len(xs) - exceptions} more' if len(xs) > exceptions else '')
-    return (f'common French words up to about the {ordinal(n)} most frequent'
+    return (f'common Japanese words up to about the {ordinal(n)} most frequent'
             + (f', except (not learned yet): {cut(missing)}' if missing else '')
             + (f'; also: {cut(extra)}' if extra else ''))
 
@@ -112,16 +115,16 @@ def state_line(state, now=None, known_max=KNOWN_LIST_MAX, dates=True, exceptions
     active = by_added([w for w in words if w['status'] == 'active'])
     shaky = by_added([w for w in words if w['status'] == 'shaky'])
     known = [w for w in words if w['status'] == 'known']
-    entry = lambda w, d: f'{w["fr"]} = {w["en"]}, "{w["hint"]}"' + (f' ({md(d)})' if dates else '')
+    entry = lambda w, d: f'{w["ja"]} = {w["en"]}, "{w["hint"]}"' + (f' ({md(d)})' if dates else '')
     listing = lambda xs: '; '.join(xs) or 'none'
     known_text = (band_text(state, exceptions) if len(known) > known_max
-                  else ', '.join(w['fr'] for w in known[:known_max]) or 'none')
+                  else ', '.join(w['ja'] for w in known[:known_max]) or 'none')
     if 0 <= known_max < len(known) <= KNOWN_LIST_MAX:  # trimmed listing (ChatGPT)
-        shown = ', '.join(w['fr'] for w in known[:known_max])
-        known_text = (f'{shown} and {len(known) - known_max} more of the most common French words' if shown
-                      else f'the {len(known)} most common French words')
+        shown = ', '.join(w['ja'] for w in known[:known_max])
+        known_text = (f'{shown} and {len(known) - known_max} more of the most common Japanese words' if shown
+                      else f'the {len(known)} most common Japanese words')
     stamp = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime(time.time() if now is None else now))
-    return (f'French weave state{" (re-export about weekly)" if tail is None else ""} — Stage: {fwlib.stage_for(state)}'
+    return (f'Japanese weave state{" (re-export about weekly)" if tail is None else ""} — Stage: {fwlib.stage_for(state)}'
             f' | Active (use most; gloss in footer): {listing([entry(w, w["added"]) for w in active])}'
             f' | Shaky (use often; gloss in footer): {listing([entry(w, w["changed"]) for w in shaky])}'
             f' | Known (use freely; never gloss): {known_text}'
@@ -139,7 +142,7 @@ def parse_state_line(line):
         if name in ('active', 'shaky'):
             out[name] = [] if body == 'none' else [entry.match(e).groups()[:3] for e in body.split('; ')]
         elif name == 'known':
-            out['known'] = [] if body == 'none' else body if body.startswith('common French words') else body.split(', ')
+            out['known'] = [] if body == 'none' else body if body.startswith('common Japanese words') else body.split(', ')
         elif name == 'synced':
             out['synced'] = body
     return out
@@ -172,4 +175,4 @@ def mark_exported(state, target):
 def log_chat_day(state, day=None):
     """Opt-in: count today as an "assumed" exposure day for every learning word (chats that can't be scanned)."""
     day = day or dt.date.today().isoformat()
-    return sum(fwlib.apply_event(state, w['fr'], 'assumed', day) for w in state['words'] if w['status'] in ('active', 'shaky'))
+    return sum(fwlib.apply_event(state, w['ja'], 'assumed', day) for w in state['words'] if w['status'] in ('active', 'shaky'))

@@ -11,9 +11,9 @@ const REPLY = {
   stage: 1,
   paused: false,
   words: [
-    { fr: 'alors', en: 'so / then', hint: 'ah-lor', status: 'active' },
-    { fr: 'très', en: 'very', hint: 'treh', status: 'shaky' },
-    { fr: 'et', en: 'and', hint: 'ay', status: 'known' },
+    { ja: 'だから', en: 'so / therefore', hint: 'dakara', kana: 'だから', status: 'active' },
+    { ja: '多分', en: 'maybe', hint: 'tabun', kana: 'たぶん', status: 'shaky' },
+    { ja: 'でも', en: 'but', hint: 'demo', kana: 'でも', status: 'known' },
   ],
   geminiKey: 'KEY',
 };
@@ -30,8 +30,8 @@ describe('parseState', () => {
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'bogus' } }).sites).toBe('all');
   });
   it('drops unusable rows and duplicates; bad stage falls back to 1', () => {
-    const s = parseState({ stage: 9, words: [{ fr: 'et', en: 'and' }, { fr: 'et', en: 'x' }, { fr: ' ', en: 'y' }, null, { fr: 'mais' }] });
-    expect(s.words).toEqual([{ fr: 'et', en: 'and', hint: '', status: 'active' }]);
+    const s = parseState({ stage: 9, words: [{ ja: 'でも', en: 'but' }, { ja: 'でも', en: 'x' }, { ja: ' ', en: 'y' }, null, { ja: 'もう' }] });
+    expect(s.words).toEqual([{ ja: 'でも', en: 'but', hint: '', kana: '', status: 'active' }]);
     expect(s.stage).toBe(1);
   });
   it('throws when nothing usable is left', () => {
@@ -62,33 +62,34 @@ describe('refresh', () => {
   });
   it('a synced list drives validation and the prompt', () => {
     const s = parseState(REPLY);
-    expect(validateSwaps(1, [{ o: 'so', f: 'alors', ctx: 'so then' }], s.words)[0].f).toBe('alors');
-    expect(validateSwaps(1, [{ o: 'but', f: 'mais', ctx: 'x' }], s.words)).toEqual([]);
+    expect(validateSwaps(1, [{ o: 'so', f: 'だから', ctx: 'so then' }], s.words)[0].f).toBe('だから');
+    expect(validateSwaps(1, [{ o: 'maybe', f: 'たぶん', ctx: 'maybe' }], s.words)[0].f).toBe('多分');
+    expect(validateSwaps(1, [{ o: 'already', f: 'もう', ctx: 'x' }], s.words)).toEqual([]);
     const prompt = buildSystemPrompt(1, s.words);
-    expect(prompt).toContain('alors = so / then; très = very');
-    expect(prompt).toContain('KNOWN words (filler only):\net');
+    expect(prompt).toContain('だから = so / therefore; 多分 = maybe');
+    expect(prompt).toContain('KNOWN words (filler only):\nでも');
   });
 });
 
 describe('events', () => {
   it('counts a word as seen or peeked once per day, keeps every flip', async () => {
     const storage = memoryStorage();
-    await queueEvents(storage, [{ word: 'Très', kind: 'seen' }, { word: 'très', kind: 'seen' }, { word: 'et', kind: 'flip' },
-      { word: 'très', kind: 'peek' }, { word: 'très', kind: 'peek' }], '2026-10-01');
-    await queueEvents(storage, [{ word: 'très', kind: 'seen' }, { word: 'et', kind: 'flip' }, { word: 'x', kind: 'bogus' }], '2026-10-01');
-    await queueEvents(storage, [{ word: 'très', kind: 'seen' }], '2026-10-02');
+    await queueEvents(storage, [{ word: '多分', kind: 'seen' }, { word: '多分', kind: 'seen' }, { word: 'でも', kind: 'flip' },
+      { word: '多分', kind: 'peek' }, { word: '多分', kind: 'peek' }], '2026-10-01');
+    await queueEvents(storage, [{ word: '多分', kind: 'seen' }, { word: 'でも', kind: 'flip' }, { word: 'x', kind: 'bogus' }], '2026-10-01');
+    await queueEvents(storage, [{ word: '多分', kind: 'seen' }], '2026-10-02');
     const { [PENDING_KEY]: pending } = await storage.get([PENDING_KEY]);
     expect(pending).toEqual([
-      { word: 'très', kind: 'seen', day: '2026-10-01' },
-      { word: 'et', kind: 'flip', day: '2026-10-01' },
-      { word: 'très', kind: 'peek', day: '2026-10-01' },
-      { word: 'et', kind: 'flip', day: '2026-10-01' },
-      { word: 'très', kind: 'seen', day: '2026-10-02' },
+      { word: '多分', kind: 'seen', day: '2026-10-01' },
+      { word: 'でも', kind: 'flip', day: '2026-10-01' },
+      { word: '多分', kind: 'peek', day: '2026-10-01' },
+      { word: 'でも', kind: 'flip', day: '2026-10-01' },
+      { word: '多分', kind: 'seen', day: '2026-10-02' },
     ]);
   });
   it('flush sends and clears; a failed flush keeps the queue', async () => {
     const storage = memoryStorage();
-    await queueEvents(storage, [{ word: 'et', kind: 'flip' }], '2026-10-01');
+    await queueEvents(storage, [{ word: 'でも', kind: 'flip' }], '2026-10-01');
     const failed = await flushEvents({ storage, send: async () => { throw new Error('no host'); } });
     expect(failed.error).toBe('no host');
     expect((await storage.get([PENDING_KEY]))[PENDING_KEY]).toHaveLength(1);
@@ -100,8 +101,8 @@ describe('events', () => {
   });
   it('words seen today come back for the prompt; peeks and other days do not', async () => {
     const storage = memoryStorage();
-    await queueEvents(storage, [{ word: 'très', kind: 'seen' }, { word: 'et', kind: 'peek' }], '2026-10-01');
-    expect(await shownToday(storage, '2026-10-01')).toEqual(['très']);
+    await queueEvents(storage, [{ word: '多分', kind: 'seen' }, { word: 'でも', kind: 'peek' }], '2026-10-01');
+    expect(await shownToday(storage, '2026-10-01')).toEqual(['多分']);
     expect(await shownToday(storage, '2026-10-02')).toEqual([]);
   });
   it('readCached ignores empty state', async () => {

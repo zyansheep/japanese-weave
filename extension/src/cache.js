@@ -1,4 +1,6 @@
 // Decision cache: key -> swaps. Storage adapter is injected (chrome.storage.local in the extension).
+// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
+const chrome = globalThis.browser ?? globalThis.chrome;
 const PREFIX = 'c:';
 
 export function createCache(storage, { max = 5000, pruneBy = 1000, pruneEvery = 100 } = {}) {

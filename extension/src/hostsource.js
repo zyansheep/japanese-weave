@@ -1,8 +1,8 @@
-// Word state from the French Weave Claude Code plugin, through the Chrome native messaging host that its
+// Word state from the Japanese Weave Claude Code plugin, through the browser native messaging host that its
 // setup step installs. No chrome APIs here: the native-message function and storage are injected so this
-// tests without Chrome. Without the host, the bundled lists in levels.js keep working.
+// tests without a browser. Without the host, the bundled lists in levels.js keep working.
 
-export const HOST = 'com.frenchweave.host';
+export const HOST = 'com.japaneseweave.host';
 export const STATE_KEY = 'wordState';
 export const PENDING_KEY = 'pendingEvents';
 export const SENT_KEY = 'seenSent';
@@ -12,12 +12,13 @@ export function parseState(data) {
   const words = [];
   const seen = new Set();
   for (const w of data?.words || []) {
-    if (!w || typeof w.fr !== 'string' || typeof w.en !== 'string') continue;
-    const fr = w.fr.trim();
+    if (!w || typeof w.ja !== 'string' || typeof w.en !== 'string') continue;
+    const ja = w.ja.trim();
     const en = w.en.trim();
-    if (!fr || !en || seen.has(fr)) continue;
-    seen.add(fr);
-    words.push({ fr, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', status: typeof w.status === 'string' ? w.status : 'active' });
+    if (!ja || !en || seen.has(ja)) continue;
+    seen.add(ja);
+    words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
+      status: typeof w.status === 'string' ? w.status : 'active' });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -43,7 +44,7 @@ export async function refresh({ storage, send, now = () => Date.now() }) {
   const cached = await readCached(storage);
   try {
     const reply = await send({ type: 'state' });
-    if (!reply?.ok) throw new Error(reply?.error || 'no reply from the French Weave host');
+    if (!reply?.ok) throw new Error(reply?.error || 'no reply from the Japanese Weave host');
     const state = parseState(reply);
     const changed = !cached || cached.version !== state.version;
     const stored = { ...state, fetchedAt: now() };
@@ -65,7 +66,7 @@ export async function queueEvents(storage, events, day = localDay()) {
   const sent = obj[SENT_KEY]?.day === day ? obj[SENT_KEY] : { day, words: [] };
   for (const e of events || []) {
     if (!e || typeof e.word !== 'string' || !['seen', 'flip', 'peek'].includes(e.kind)) continue;
-    const word = e.word.toLowerCase();
+    const word = e.word.normalize('NFKC').toLowerCase();
     if (e.kind !== 'flip') {
       const tag = e.kind === 'seen' ? word : `${e.kind}:${word}`;
       if (sent.words.includes(tag)) continue;

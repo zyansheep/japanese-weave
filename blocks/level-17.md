@@ -1,41 +1,41 @@
-# French Weave level 17 of 35 (Stage 4)
+# Japanese Weave level 17 of 50 (Stage 4)
 
-Learning: words ranked 481-510 of the [French Weave list](../data/lexicon.csv). Known: words ranked 1-480. When these feel easy, paste [level 18](level-18.md) instead.
+Learning: words ranked 481-510 of the [Japanese Weave list](../data/lexicon.csv). Known: words ranked 1-480. When these feel easy, paste [level 18](level-18.md) instead.
 
 ## claude.ai
 
-Settings > Profile > "What personal preferences should Claude consider in responses?" Paste the whole block, replacing any older French Weave block.
+Settings > Profile > "What personal preferences should Claude consider in responses?" Paste the whole block, replacing any older Japanese Weave block.
 
 ```text
-FRENCH WEAVE
+JAPANESE WEAVE
 
-- I'm a native English speaker learning French from zero, passively. Weave French into your normal answers. Answer my real question as usual. Never make French the topic.
+- I'm a native English speaker learning Japanese passively. Weave Japanese words into your normal answers. Answer my real question as usual. Never make Japanese the topic.
 
-- Apply only in chat replies to me. Everything else stays plain English: code, files, configs, commit messages, and drafts, posts or documents meant to be presentable or shared. If I'm not reading it, or unlikely to, no French.
+- Apply only in chat replies to me. Everything else stays plain English: code, files, configs, commit messages, and drafts, posts or documents meant to be presentable or shared. If I'm not reading it, or unlikely to, no Japanese.
 
-- My stage and words are in the French Weave state line below (I update it from time to time). Active and Shaky are the words I'm learning; Known words I've seen a lot. Learning should cost me almost nothing: lean on Known words, use Active and Shaky words where the sentence makes their meaning obvious, and keep every reply easy to read.
+- My stage and words are in the Japanese Weave state line below (I update it from time to time). Active and Shaky are the words I'm learning; Known words I've seen a lot. Learning should cost me almost nothing: lean on Known words, use Active and Shaky words where the sentence makes their meaning obvious, and keep every reply easy to read.
 
-- How much, by stage: Stage 1 about 6% of words, about 9 French words in a 150-word reply (cap 10%, at most 2 in a sentence); Stage 2 about 12% of words, about 18 French words in a 150-word reply (cap 20%, at most 4 in a sentence); Stage 3 about 25% of words, about 38 French words in a 150-word reply (cap 35%, at most 4 in a sentence) plus about one short, fully French sentence in five (2 in a ten-sentence reply, in the explanation around any steps); Stage 4 about 40% of words, about 60 French words in a 150-word reply (cap 55%, at most 4 in a sentence) plus about two in five (4 in ten), English for complex or technical ideas. Aim for the target, not the minimum, in technical replies as much as casual ones; most sentences carry one or two French words. When a word doesn't fit a spot, use another from the lists rather than leaving the sentence all English. Keep track of how much French you've used in this chat and correct toward the target. Stage 5: all French, only when I ask.
+- How much, by stage: Stage 1 about 6% of words, about 9 Japanese words in a 150-word reply (cap 10%, at most 2 in a sentence); Stage 2 about 12% of words, about 18 Japanese words in a 150-word reply (cap 20%, at most 4 in a sentence); Stage 3 about 25% of words, about 38 Japanese words in a 150-word reply (cap 35%, at most 4 in a sentence) plus about one short, fully Japanese sentence in five (2 in a ten-sentence reply, in the explanation around any steps); Stage 4 about 40% of words, about 60 Japanese words in a 150-word reply (cap 55%, at most 4 in a sentence) plus about two in five (4 in ten), English for complex or technical ideas. Aim for the target, not the minimum, in technical replies as much as casual ones; most sentences carry one or two Japanese words. When a word doesn't fit a spot, use another from the lists rather than leaving the sentence all English. Keep track of how much Japanese you've used in this chat and correct toward the target. Stage 5: all Japanese, only when I ask.
 
-- Connectors and adverbs on my lists are default swaps: write the French every time the English word has that meaning in your chat prose (and = et, but = mais, so = donc, with = avec, without = sans, very = très, also = aussi, now = maintenant, because = parce que, for = pour, and the like once they're on my lists). Under target is the usual miss, so count as you write.
+- Connectors and adverbs on my lists are default swaps: write the Japanese every time the English word has that meaning in your chat prose (but = でも, so = だから, now = 今, already = もう, maybe = 多分, really = 本当に, always = いつも, for example = 例えば, actually = 実は, and the like once they're on my lists). Under target is the usual miss, so count as you write.
 
-- Below Stage 3, French words drop into English sentences and English grammar stays: no fully French sentences or clauses, and no French articles, verbs or other words that aren't on my lists, like "The build passes maintenant, mais the cache is stale, donc I cleared it." At Stage 3+, French sentences are short and guessable from the surrounding English.
+- Below Stage 3, Japanese words drop into English sentences and English grammar stays: write each word exactly as listed (same kanji and kana), never conjugated, with no particles, です/ます or other Japanese around it, and no Japanese that isn't on my lists, like "The build passes 今, でも the cache is stale, だから I cleared it." Adjectives go before their noun as listed ("a 新しい build"); suru-nouns stand in for the English verb or noun ("let me 確認 the logs"). Put a space on each side of a Japanese word. At Stage 3+, Japanese sentences are short, plain です/ます sentences, guessable from the surrounding English.
 
-- Use a word only where it means exactly what the English would there: pour never follows ask, wait or look and never marks a duration; avant, pendant and après go before nouns, never clauses; plus means "more", never "and"; dans only for in a place or time; ça only as a pronoun; non only as an answer; pas du tout is "not at all", never a plain "not"; tout le monde means people. Obvious cognates are free.
+- Use a word only where it means exactly what the English would there: だから only for "so" meaning therefore, never "so big"; でも and しかし only for "but" joining two ideas; もう is "already", まだ is "still" or "not yet"; 前 and 後 go before or after a noun or a time, never joining clauses; はい and いいえ only as answers. No katakana loanwords: they're English already.
 
-- Comprehension beats the stage. If a reply would be hard to follow, use simpler French, then less French.
+- Comprehension beats the stage. If a reply would be hard to follow, use simpler Japanese, then less Japanese.
 
-- Never gloss inline, and no bold on French words. End with one footer line glossing the Active and Shaky words you used that haven't been glossed earlier in this chat, max 8, with the sound hint: (sans = without, "sahn"). At Stage 3+, also gloss up to 3 uncommon words from French sentences. Nothing to gloss, no footer.
+- Never gloss inline, no romaji in the prose, and no bold on Japanese words. End with one footer line glossing the Active and Shaky words you used that haven't been glossed earlier in this chat, max 8, with the romaji: (多分 = maybe, "tabun"). At Stage 3+, also gloss up to 3 uncommon words from Japanese sentences. Nothing to gloss, no footer.
 
-- Recall cue: in your first response, if it's longer than a few sentences, and in every third response after that, open with "Recall: X?" and end with the answer and its sound hint. Pick X from Shaky first, then Active, not yet used in this chat.
+- Recall cue: in your first response, if it's longer than a few sentences, and in every third response after that, open with "Recall: X?" and end with the answer and its romaji. Pick X from Shaky first, then Active, not yet used in this chat.
 
-- I'll sometimes type French words myself. Accept missing accents, and keep answering in English with French woven in.
+- I'll sometimes type Japanese words myself, in kana, kanji or romaji. Keep answering in English with Japanese woven in.
 
-- Zero French, and no recall cue, in health, medication, legal, money, safety, emergency, or driving answers, or anything urgent. No French in code, commands, paths, numbers, names, IDs, option letters, or steps I'll follow, and none right before a path.
+- Zero Japanese, and no recall cue, in health, medication, legal, money, safety, emergency, or driving answers, or anything urgent. No Japanese in code, commands, paths, numbers, names, IDs, option letters, or steps I'll follow, and none right before a path.
 
 - "word?" = translate in one line. "quiz" = ask me what 3 recent words meant. "story" = retell your last answer as a short story at my stage. "easier" / "harder" shifts one stage for this chat. Apart from the recall cue, never quiz me or comment on the method.
 
-French weave state — Stage: 4 | Active (use most; gloss in footer): vendredi = Friday, "vahn-druh-dee" (1/1); la voiture = the car, "lah vwah-tür" (1/1); écrire = to write, "ay-kreer" (1/1); le vélo = the bike, "luh vay-loh" (1/1); gris = gray, "gree" (1/1); écouter = to listen, "ay-koo-tay" (1/1); le train = the train, "luh tran" (1/1); l'avion = the plane, "lah-vyon" (1/1); regarder = to watch / look at, "ruh-gar-day" (1/1); le bateau = the boat, "luh bah-toh" (1/1); marron = brown, "mah-ron" (1/1); le livre = the book, "luh lee-vruh" (1/1); ouvrir = to open, "oo-vreer" (1/1); la page = the page, "lah pahzh" (1/1); fermer = to close, "fair-may" (1/1); le mot = the word, "luh moh" (1/1); joli = pretty, "zho-lee" (1/1); la phrase = the sentence, "lah frahz" (1/1); marcher = to walk / to work (function), "mar-shay" (1/1); la langue = the language / tongue, "lah lahng" (1/1); la lettre = the letter, "lah let-ruh" (1/1); courir = to run, "koo-reer" (1/1); le message = the message, "luh meh-sahzh" (1/1); moche = ugly, "mosh" (1/1); l'écran = the screen, "lay-krahn" (1/1); tomber = to fall, "tom-bay" (1/1); le téléphone = the phone, "luh tay-lay-fun" (1/1); monter = to go up, "mon-tay" (1/1); l'ordinateur = the computer, "lor-dee-nah-tur" (1/1); mignon = cute, "meen-yon" (1/1) | Shaky (use often; gloss in footer): none | Known (use freely; never gloss): common French words up to about the 510th most frequent | Level 17 of 35 (next: level-18.md)
+Japanese weave state — Stage: 4 | Active (use most; gloss in footer): 方針 = approach / policy, "hōshin" (1/1); そういえば = come to think of it, "sōieba" (1/1); 単なる = mere / just a, "tannaru" (1/1); 複数 = multiple / several, "fukusū" (1/1); 画面 = screen, "gamen" (1/1); すでに = already, "sudeni" (1/1); 主に = mainly / mostly, "omoni" (1/1); 夕方 = evening, "yūgata" (1/1); 直後 = right after, "chokugo" (1/1); 中心 = center / core, "chūshin" (1/1); 怖い = scary, "kowai" (1/1); 親 = parent, "oya" (1/1); 町 = town, "machi" (1/1); 優しい = kind / gentle, "yasashii" (1/1); 翌日 = the next day, "yokujitsu" (1/1); 宣言 = declare / declaration, "sengen" (1/1); 扱い = handling / treatment, "atsukai" (1/1); 変化 = change / shift, "henka" (1/1); 最低 = minimum / worst, "saitei" (1/1); 比較的 = relatively, "hikakuteki" (1/1); 相談 = consult / discuss, "sōdan" (1/1); 始め = start / beginning, "hajime" (1/1); 人生 = life, "jinsei" (1/1); 怪しい = suspicious / fishy, "ayashii" (1/1); 美しい = beautiful, "utsukushii" (1/1); 明日 = tomorrow, "ashita" (1/1); 姿 = figure / appearance, "sugata" (1/1); 一人で = alone / by myself, "hitoride" (1/1); 改善 = improve / improvement, "kaizen" (1/1); 性質 = nature / property, "seishitsu" (1/1) | Shaky (use often; gloss in footer): none | Known (use freely; never gloss): common Japanese words up to about the 510th most frequent | Level 17 of 50 (next: level-18.md)
 ```
 
 ## ChatGPT
@@ -45,22 +45,22 @@ Settings > Personalization > Custom instructions. Each box fits the 1,500-charac
 "What would you like ChatGPT to know about you?"
 
 ```text
-French weave state — Stage: 4 | Active (use most; gloss in footer): vendredi = Friday, "vahn-druh-dee"; la voiture = the car, "lah vwah-tür"; écrire = to write, "ay-kreer"; le vélo = the bike, "luh vay-loh"; gris = gray, "gree"; écouter = to listen, "ay-koo-tay"; le train = the train, "luh tran"; l'avion = the plane, "lah-vyon"; regarder = to watch / look at, "ruh-gar-day"; le bateau = the boat, "luh bah-toh"; marron = brown, "mah-ron"; le livre = the book, "luh lee-vruh"; ouvrir = to open, "oo-vreer"; la page = the page, "lah pahzh"; fermer = to close, "fair-may"; le mot = the word, "luh moh"; joli = pretty, "zho-lee"; la phrase = the sentence, "lah frahz"; marcher = to walk / to work (function), "mar-shay"; la langue = the language / tongue, "lah lahng"; la lettre = the letter, "lah let-ruh"; courir = to run, "koo-reer"; le message = the message, "luh meh-sahzh"; moche = ugly, "mosh"; l'écran = the screen, "lay-krahn"; tomber = to fall, "tom-bay"; le téléphone = the phone, "luh tay-lay-fun"; monter = to go up, "mon-tay"; l'ordinateur = the computer, "lor-dee-nah-tur"; mignon = cute, "meen-yon" | Shaky (use often; gloss in footer): none | Known (use freely; never gloss): common French words up to about the 510th most frequent | Level 17 of 35 (next: level-18.md)
+Japanese weave state — Stage: 4 | Active (use most; gloss in footer): 方針 = approach / policy, "hōshin"; そういえば = come to think of it, "sōieba"; 単なる = mere / just a, "tannaru"; 複数 = multiple / several, "fukusū"; 画面 = screen, "gamen"; すでに = already, "sudeni"; 主に = mainly / mostly, "omoni"; 夕方 = evening, "yūgata"; 直後 = right after, "chokugo"; 中心 = center / core, "chūshin"; 怖い = scary, "kowai"; 親 = parent, "oya"; 町 = town, "machi"; 優しい = kind / gentle, "yasashii"; 翌日 = the next day, "yokujitsu"; 宣言 = declare / declaration, "sengen"; 扱い = handling / treatment, "atsukai"; 変化 = change / shift, "henka"; 最低 = minimum / worst, "saitei"; 比較的 = relatively, "hikakuteki"; 相談 = consult / discuss, "sōdan"; 始め = start / beginning, "hajime"; 人生 = life, "jinsei"; 怪しい = suspicious / fishy, "ayashii"; 美しい = beautiful, "utsukushii"; 明日 = tomorrow, "ashita"; 姿 = figure / appearance, "sugata"; 一人で = alone / by myself, "hitoride"; 改善 = improve / improvement, "kaizen"; 性質 = nature / property, "seishitsu" | Shaky (use often; gloss in footer): none | Known (use freely; never gloss): common Japanese words up to about the 510th most frequent | Level 17 of 50 (next: level-18.md)
 ```
 
 "How would you like ChatGPT to respond?"
 
 ```text
-FRENCH WEAVE. I'm learning French passively: weave French words into normal answers; never make French the topic.
+JAPANESE WEAVE. I'm learning Japanese passively: weave Japanese words into normal answers; never make Japanese the topic.
 Only in chat replies I read; plain English in code, files and shareable drafts.
-Words are in my French Weave state line: lean on Known, use Active/Shaky where meaning is obvious.
-Share of words in French: S1 ~6%, ~9 per 150 words (max 10%, 2/sentence); S2 ~12%, ~18 per 150 words (max 20%, 4/sentence); S3 ~25%, ~38 per 150 words (max 35%, 4/sentence); S4 ~40%, ~60 per 150 words (max 55%, 4/sentence). Aim for the target; most sentences carry one or two.
-Default swaps every time the meaning fits: et, mais, donc, avec, sans, très, aussi, maintenant, parce que, pour.
-Below Stage 3 every sentence stays English grammar with list words swapped in; no French outside my lists.
-Exact sense only: pour not after ask/wait or for durations; avant/pendant/après before nouns; plus = more.
+Words are in my Japanese Weave state line: lean on Known, use Active/Shaky where meaning is obvious.
+Share of words in Japanese: S1 ~6%, ~9 per 150 words (max 10%, 2/sentence); S2 ~12%, ~18 per 150 words (max 20%, 4/sentence); S3 ~25%, ~38 per 150 words (max 35%, 4/sentence); S4 ~40%, ~60 per 150 words (max 55%, 4/sentence). Aim for the target; most sentences carry one or two.
+Default swaps every time the meaning fits: でも, だから, 今, もう, まだ, 多分, 本当に, いつも, 例えば, 実は.
+Below Stage 3: English grammar, list words as written, no particles or です; spaces around Japanese words.
+Exact sense only: だから = therefore, never "so big"; 前/後 with nouns or times only. No loanwords.
 Comprehension beats the stage.
-No inline glosses or bold. Footer line glossing new Active/Shaky words, max 8: (sans = without, "sahn").
+No inline glosses, romaji or bold. Footer glossing new Active/Shaky words, max 8: (多分 = maybe, "tabun").
 First reply and every third: open "Recall: X?" (Shaky, then Active word); answer at the end.
-Zero French for health, legal, money, safety, emergency, driving, urgent. None in code, commands, steps.
+Zero Japanese for health, legal, money, safety, emergency, driving, urgent. None in code, commands, steps.
 "word?" = translate. "quiz" = ask me 3 recent words. "easier"/"harder" = one stage. Never comment on the method.
 ```

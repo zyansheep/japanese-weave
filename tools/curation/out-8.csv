@@ -1,0 +1,339 @@
+rank,ja,kana,hint,en,tier,score
+51,仕事,しごと,shigoto,work / job,B,187
+54,意味,いみ,imi,meaning / mean,T,198
+66,関係,かんけい,kankei,relationship / relation,T,225
+90,生活,せいかつ,seikatsu,life / living,B,283
+97,結果,けっか,kekka,result / outcome,T,302
+100,存在,そんざい,sonzai,exist / existence,T,306
+114,説明,せつめい,setsumei,explain / explanation,T,341
+140,理解,りかい,rikai,understand / understanding,T,407
+143,心配,しんぱい,shinpai,worry,B,417
+164,原因,げんいん,gen'in,cause,T,465
+171,利用,りよう,riyō,use / make use of,T,487
+192,確認,かくにん,kakunin,check / confirm,T,530
+203,期待,きたい,kitai,expect / expectation,T,567
+204,質問,しつもん,shitsumon,question / ask,T,567
+206,意識,いしき,ishiki,awareness / conscious,B,579
+209,研究,けんきゅう,kenkyū,research / study,B,580
+211,活動,かつどう,katsudō,activity,B,583
+223,計画,けいかく,keikaku,plan,T,602
+225,行動,こうどう,kōdō,action / behavior,B,613
+230,準備,じゅんび,junbi,prepare / preparation,B,625
+234,参加,さんか,sanka,join / participate,B,629
+236,結婚,けっこん,kekkon,marry / marriage,B,631
+243,電話,でんわ,denwa,phone call / call,B,640
+263,影響,えいきょう,eikyō,affect / impact,T,668
+264,変化,へんか,henka,change / shift,B,668
+270,相談,そうだん,sōdan,consult / discuss,B,672
+277,報告,ほうこく,hōkoku,report,T,690
+294,安心,あんしん,anshin,relief / peace of mind,B,724
+295,用意,ようい,yōi,prepare / get ready,B,725
+300,判断,はんだん,handan,judge / judgment,T,729
+301,調査,ちょうさ,chōsa,investigate / survey,T,735
+310,料理,りょうり,ryōri,cooking / cook,B,749
+314,協力,きょうりょく,kyōryoku,cooperate / cooperation,B,755
+316,食事,しょくじ,shokuji,meal,B,759
+318,経験,けいけん,keiken,experience,B,761
+331,対応,たいおう,taiō,handle / support,T,784
+334,予定,よてい,yotei,plans / schedule,B,785
+346,連絡,れんらく,renraku,contact / let know,B,794
+348,使用,しよう,shiyō,use / usage,T,796
+351,記憶,きおく,kioku,memory / remember,B,800
+363,教育,きょういく,kyōiku,education,B,829
+371,紹介,しょうかい,shōkai,introduce / introduction,B,841
+383,反応,はんのう,hannō,reaction / react,B,865
+386,決定,けってい,kettei,decide / decision,T,869
+389,注意,ちゅうい,chūi,caution / attention,T,877
+392,作業,さぎょう,sagyō,work / task,T,889
+394,位置,いち,ichi,position / location,T,893
+412,管理,かんり,kanri,manage / management,T,924
+417,施設,しせつ,shisetsu,facility,B,928
+426,想像,そうぞう,sōzō,imagine / imagination,B,948
+432,開発,かいはつ,kaihatsu,development / develop,T,961
+436,評価,ひょうか,hyōka,evaluate / evaluation,T,964
+437,移動,いどう,idō,move / movement,T,965
+438,勉強,べんきょう,benkyō,study,B,966
+447,成長,せいちょう,seichō,growth / grow,B,991
+459,約束,やくそく,yakusoku,promise,B,1016
+462,機能,きのう,kinō,feature / function,T,1021
+464,発生,はっせい,hassei,occur / occurrence,T,1023
+465,努力,どりょく,doryoku,effort,B,1024
+471,発見,はっけん,hakken,discover / discovery,B,1030
+476,返事,へんじ,henji,reply / answer,B,1043
+478,会話,かいわ,kaiwa,conversation,T,1045
+483,成功,せいこう,seikō,succeed / success,T,1051
+485,戦争,せんそう,sensō,war,B,1053
+490,希望,きぼう,kibō,hope / wish,B,1070
+492,解決,かいけつ,kaiketsu,solve / resolve,T,1073
+496,組織,そしき,soshiki,organization,B,1078
+503,反対,はんたい,hantai,opposite / oppose,B,1082
+506,感覚,かんかく,kankaku,sense / feeling,B,1088
+508,展開,てんかい,tenkai,unfold / expand,C,1100
+516,運動,うんどう,undō,exercise,B,1116
+522,失敗,しっぱい,shippai,fail / failure,T,1135
+536,選択,せんたく,sentaku,choose / selection,T,1163
+550,処理,しょり,shori,process / handling,T,1202
+555,満足,まんぞく,manzoku,satisfied / satisfaction,B,1214
+558,予想,よそう,yosō,expect / guess,B,1216
+559,設定,せってい,settei,setting / configure,T,1217
+560,練習,れんしゅう,renshū,practice,B,1218
+562,表現,ひょうげん,hyōgen,expression / express,T,1219
+566,契約,けいやく,keiyaku,contract,B,1225
+571,納得,なっとく,nattoku,be convinced / accept,B,1231
+572,開始,かいし,kaishi,start / begin,T,1232
+576,指導,しどう,shidō,guidance / coaching,B,1240
+579,緊張,きんちょう,kinchō,nervous / tension,B,1252
+580,感謝,かんしゃ,kansha,thanks / gratitude,B,1262
+581,代表,だいひょう,daihyō,representative,B,1263
+592,経営,けいえい,keiei,run a business,B,1279
+598,保護,ほご,hogo,protect / protection,T,1295
+601,集中,しゅうちゅう,shūchū,focus / concentrate,T,1300
+605,否定,ひてい,hitei,deny / negate,B,1306
+607,攻撃,こうげき,kōgeki,attack,B,1314
+614,担当,たんとう,tantō,in charge / responsible,B,1330
+625,認識,にんしき,ninshiki,recognize / awareness,T,1349
+629,記録,きろく,kiroku,record / log,T,1357
+633,会議,かいぎ,kaigi,meeting,B,1368
+634,完成,かんせい,kansei,complete / finish,T,1372
+638,案内,あんない,annai,guide / show around,B,1388
+644,治療,ちりょう,chiryō,treatment / treat,B,1393
+647,相当,そうとう,sōtō,considerably / equivalent,C,1400
+660,指摘,してき,shiteki,point out,T,1424
+661,失礼,しつれい,shitsurei,rude / impolite,B,1425
+665,指定,してい,shitei,specify / designate,T,1427
+667,一言,ひとこと,hitokoto,a word / a few words,B,1429
+672,我慢,がまん,gaman,patience / put up with,B,1438
+674,信頼,しんらい,shinrai,trust / rely on,B,1440
+681,確保,かくほ,kakuho,secure / allocate,T,1447
+683,表示,ひょうじ,hyōji,display / show,T,1448
+684,整備,せいび,seibi,maintenance / service,C,1451
+685,無視,むし,mushi,ignore,T,1451
+688,検討,けんとう,kentō,consider / look into,T,1454
+689,発表,はっぴょう,happyō,announce / presentation,B,1457
+705,変更,へんこう,henkō,change / modify,T,1482
+706,計算,けいさん,keisan,calculate / compute,T,1483
+722,提供,ていきょう,teikyō,provide / offer,T,1511
+723,邪魔,じゃま,jama,in the way / nuisance,B,1512
+731,設置,せっち,setchi,set up / install,B,1528
+735,命令,めいれい,meirei,command / order,T,1535
+737,支配,しはい,shihai,rule / control,C,1538
+743,安定,あんてい,antei,stable / stability,T,1548
+747,信用,しんよう,shin'yō,trust / credit,B,1555
+755,回復,かいふく,kaifuku,recover / recovery,T,1563
+762,消費,しょうひ,shōhi,consume / consumption,T,1578
+763,労働,ろうどう,rōdō,labor / work,C,1578
+766,主張,しゅちょう,shuchō,claim / insist,B,1581
+768,挨拶,あいさつ,aisatsu,greeting / greet,B,1584
+769,関連,かんれん,kanren,related / relation,T,1585
+775,苦労,くろう,kurō,trouble / hardship,B,1596
+780,体験,たいけん,taiken,experience / try out,B,1602
+785,要求,ようきゅう,yōkyū,demand / requirement,T,1613
+790,旅行,りょこう,ryokō,travel / trip,B,1629
+793,調整,ちょうせい,chōsei,adjust / tweak,T,1631
+795,発展,はってん,hatten,growth / develop,B,1632
+797,登場,とうじょう,tōjō,appear / entrance,B,1637
+802,規定,きてい,kitei,rule / regulation,C,1657
+805,障害,しょうがい,shōgai,outage / obstacle,T,1662
+807,終了,しゅうりょう,shūryō,end / exit,T,1663
+808,到着,とうちゃく,tōchaku,arrive / arrival,B,1664
+813,証明,しょうめい,shōmei,prove / proof,T,1675
+816,提案,ていあん,teian,suggest / proposal,T,1677
+818,指示,しじ,shiji,instruct / instructions,T,1682
+821,許可,きょか,kyoka,permission / allow,T,1685
+827,訓練,くんれん,kunren,training / train,B,1692
+828,覚悟,かくご,kakugo,be prepared / resolve,C,1695
+833,拡大,かくだい,kakudai,expand / enlarge,T,1702
+835,生産,せいさん,seisan,production / produce,B,1705
+840,議論,ぎろん,giron,discussion / debate,B,1715
+846,実現,じつげん,jitsugen,achieve / make happen,T,1720
+847,維持,いじ,iji,maintain / keep,T,1722
+851,恐怖,きょうふ,kyōfu,fear / terror,B,1727
+859,観察,かんさつ,kansatsu,observe / observation,B,1733
+861,授業,じゅぎょう,jugyō,class / lesson,B,1737
+873,実施,じっし,jisshi,carry out / conduct,C,1750
+875,支援,しえん,shien,support / assistance,B,1755
+880,強化,きょうか,kyōka,strengthen / reinforce,B,1770
+886,交換,こうかん,kōkan,swap / exchange,T,1776
+888,取引,とりひき,torihiki,deal / transaction,B,1779
+891,通信,つうしん,tsūshin,communication,T,1787
+904,構成,こうせい,kōsei,structure / config,T,1804
+906,抵抗,ていこう,teikō,resist / resistance,B,1805
+912,試験,しけん,shiken,exam / test,B,1820
+913,混乱,こんらん,konran,confusion / chaos,B,1824
+918,購入,こうにゅう,kōnyū,purchase / buy,B,1832
+923,卒業,そつぎょう,sotsugyō,graduate / graduation,B,1834
+928,発言,はつげん,hatsugen,remark / statement,B,1844
+934,実験,じっけん,jikken,experiment,T,1858
+947,破壊,はかい,hakai,destroy / destruction,B,1882
+948,携帯,けいたい,keitai,cell phone / mobile,B,1883
+951,一定,いってい,ittei,constant / fixed,C,1889
+954,分析,ぶんせき,bunseki,analyze / analysis,T,1893
+956,注目,ちゅうもく,chūmoku,attention / focus on,B,1899
+957,成立,せいりつ,seiritsu,form / hold true,C,1905
+965,撮影,さつえい,satsuei,filming / photography,B,1919
+971,提出,ていしゅつ,teishutsu,submit / submission,T,1929
+974,実行,じっこう,jikkō,run / execute,T,1934
+976,検査,けんさ,kensa,inspect / inspection,B,1940
+978,結論,けつろん,ketsuron,conclusion,T,1944
+980,呼吸,こきゅう,kokyū,breathing / breath,B,1945
+986,整理,せいり,seiri,organize / tidy up,T,1956
+991,刺激,しげき,shigeki,stimulus / stimulate,B,1960
+1000,把握,はあく,haaku,grasp / understand,T,1978
+1002,交渉,こうしょう,kōshō,negotiate / negotiation,B,1980
+1003,登録,とうろく,tōroku,register / registration,T,1993
+1005,販売,はんばい,hanbai,sale / sell,B,1995
+1013,びっくり,びっくり,bikkuri,surprised / surprise,B,2013
+1015,依頼,いらい,irai,request / ask,T,2016
+1016,処分,しょぶん,shobun,get rid of / dispose of,B,2019
+1018,作成,さくせい,sakusei,create / make,T,2021
+1029,試合,しあい,shiai,match / game,B,2030
+1030,比較,ひかく,hikaku,compare / comparison,T,2033
+1034,放送,ほうそう,hōsō,broadcast,B,2040
+1035,監督,かんとく,kantoku,director / coach,B,2042
+1037,制限,せいげん,seigen,limit / restriction,T,2044
+1038,不足,ふそく,fusoku,lack / shortage,T,2045
+1039,出発,しゅっぱつ,shuppatsu,leave / departure,B,2047
+1040,禁止,きんし,kinshi,forbid / ban,B,2053
+1041,増加,ぞうか,zōka,increase / rise,T,2054
+1042,運転,うんてん,unten,drive / driving,B,2059
+1047,解放,かいほう,kaihō,release / free,T,2062
+1054,遠慮,えんりょ,enryo,hesitate / hold back,B,2068
+1064,連続,れんぞく,renzoku,in a row / consecutive,B,2087
+1066,掃除,そうじ,sōji,clean / cleaning,B,2092
+1075,操作,そうさ,sōsa,operate / operation,T,2111
+1082,応援,おうえん,ōen,cheer on / support,B,2127
+1083,興奮,こうふん,kōfun,excited / excitement,B,2128
+1086,保証,ほしょう,hoshō,guarantee / warranty,T,2130
+1093,承知,しょうち,shōchi,understood / aware,C,2146
+1118,開催,かいさい,kaisai,hold / host,C,2183
+1119,後悔,こうかい,kōkai,regret,B,2183
+1125,裁判,さいばん,saiban,trial / court case,B,2196
+1141,宣言,せんげん,sengen,declare / declaration,T,2218
+1143,思考,しこう,shikō,thinking / thought,B,2221
+1144,勝利,しょうり,shōri,victory / win,B,2221
+1150,怪我,けが,kega,injury / get hurt,B,2233
+1151,活躍,かつやく,katsuyaku,shine / active role,C,2233
+1155,建設,けんせつ,kensetsu,construction / build,B,2242
+1160,買い物,かいもの,kaimono,shopping,B,2262
+1166,経過,けいか,keika,elapse / progress,B,2279
+1168,改善,かいぜん,kaizen,improve / improvement,T,2280
+1184,上昇,じょうしょう,jōshō,rise / go up,B,2305
+1190,爆発,ばくはつ,bakuhatsu,explode / explosion,B,2325
+1196,解釈,かいしゃく,kaishaku,interpret / interpretation,T,2340
+1199,達成,たっせい,tassei,achieve / accomplish,B,2342
+1200,感動,かんどう,kandō,be moved / touched,B,2344
+1201,回答,かいとう,kaitō,answer / reply,T,2345
+1215,追加,ついか,tsuika,add / addition,T,2372
+1218,優先,ゆうせん,yūsen,priority / prioritize,T,2382
+1220,警戒,けいかい,keikai,caution / be wary,C,2391
+1224,注文,ちゅうもん,chūmon,order,B,2395
+1225,再生,さいせい,saisei,play / playback,B,2397
+1231,監視,かんし,kanshi,monitor / watch,T,2407
+1232,投資,とうし,tōshi,invest / investment,B,2407
+1235,茶,ちゃ,cha,tea,X,2416
+1239,礼,れい,rei,thanks / bow,X,2429
+1240,自覚,じかく,jikaku,awareness / be aware,B,2437
+1241,発揮,はっき,hakki,show / bring out,C,2438
+1254,確信,かくしん,kakushin,be sure / conviction,B,2476
+1258,恋愛,れんあい,ren'ai,romance / love,B,2477
+1262,沈黙,ちんもく,chinmoku,silence,B,2483
+1267,世話,せわ,sewa,care / look after,B,2490
+1281,対処,たいしょ,taisho,deal with / cope,T,2517
+1284,営業,えいぎょう,eigyō,sales / business,B,2521
+1292,誕生,たんじょう,tanjō,birth / be born,B,2549
+1293,派遣,はけん,haken,dispatch / send,C,2552
+1295,停止,ていし,teishi,stop / halt,T,2558
+1296,総合,そうごう,sōgō,overall / comprehensive,C,2559
+1298,固定,こてい,kotei,fixed / pin,T,2565
+1307,形成,けいせい,keisei,form / formation,C,2580
+1322,保存,ほぞん,hozon,save / store,T,2611
+1326,交流,こうりゅう,kōryū,interact / exchange,B,2614
+1331,平均,へいきん,heikin,average,T,2626
+1332,回転,かいてん,kaiten,rotate / spin,B,2627
+1338,措置,そち,sochi,measure / step,C,2643
+1342,意図,いと,ito,intent / intention,T,2652
+1343,一致,いっち,itchi,match / agree,T,2653
+1344,散歩,さんぽ,sanpo,walk / stroll,B,2653
+1346,誤解,ごかい,gokai,misunderstand,T,2655
+1347,独立,どくりつ,dokuritsu,independent / independence,B,2656
+1349,同意,どうい,dōi,agree / agreement,T,2659
+1351,告白,こくはく,kokuhaku,confess / confession,B,2660
+1359,決意,けつい,ketsui,resolve / determination,C,2672
+1368,装置,そうち,sōchi,device / equipment,B,2687
+1372,真似,まね,mane,copy / imitate,B,2697
+1377,採用,さいよう,saiyō,adopt / hire,T,2713
+1380,捜査,そうさ,sōsa,investigation,C,2720
+1384,運営,うんえい,un'ei,run / operate,B,2729
+1392,強調,きょうちょう,kyōchō,emphasize / emphasis,T,2745
+1395,学習,がくしゅう,gakushū,learning / learn,T,2747
+1404,設備,せつび,setsubi,equipment / facilities,B,2765
+1406,反省,はんせい,hansei,reflect on / regret,B,2767
+1407,活用,かつよう,katsuyō,make use of / leverage,T,2769
+1409,拒否,きょひ,kyohi,reject / refuse,T,2774
+1412,充実,じゅうじつ,jūjitsu,fulfilling / full,B,2776
+1420,減少,げんしょう,genshō,decrease / decline,T,2805
+1421,改革,かいかく,kaikaku,reform,C,2807
+1424,記念,きねん,kinen,memorial / commemorate,B,2813
+1428,挑戦,ちょうせん,chōsen,challenge / attempt,B,2832
+1429,作用,さよう,sayō,action / effect,C,2833
+1431,復活,ふっかつ,fukkatsu,revive / comeback,B,2834
+1435,所有,しょゆう,shoyū,own / ownership,B,2847
+1436,出席,しゅっせき,shusseki,attend / attendance,B,2849
+1446,自慢,じまん,jiman,brag / pride,B,2868
+1449,向上,こうじょう,kōjō,improve / boost,T,2871
+1451,製造,せいぞう,seizō,manufacture / produce,B,2873
+1453,接触,せっしょく,sesshoku,contact / touch,B,2875
+1455,勘違い,かんちがい,kanchigai,mistake / mix-up,T,2876
+1456,配置,はいち,haichi,placement / layout,T,2881
+1460,申請,しんせい,shinsei,apply for / application,B,2884
+1462,説得,せっとく,settoku,persuade / persuasion,B,2887
+1470,戦闘,せんとう,sentō,battle / combat,C,2905
+1472,侵入,しんにゅう,shinnyū,intrusion / break in,C,2908
+1475,共有,きょうゆう,kyōyū,share / sharing,T,2912
+1476,批判,ひはん,hihan,criticize / criticism,B,2913
+1477,工事,こうじ,kōji,construction work,B,2914
+1479,死亡,しぼう,shibō,death / die,C,2919
+1480,企画,きかく,kikaku,plan / project,B,2920
+1482,手術,しゅじゅつ,shujutsu,surgery / operation,B,2933
+1484,想定,そうてい,sōtei,assume / assumption,T,2935
+1485,観光,かんこう,kankō,sightseeing / tourism,B,2937
+1486,低下,ていか,teika,drop / decline,T,2937
+1487,公開,こうかい,kōkai,publish / make public,T,2943
+1488,所属,しょぞく,shozoku,belong to / affiliation,B,2946
+1497,推進,すいしん,suishin,promote / drive,C,2963
+1498,入院,にゅういん,nyūin,be hospitalized,B,2966
+1501,限定,げんてい,gentei,limited / limit to,B,2981
+1503,喧嘩,けんか,kenka,fight / quarrel,B,2982
+1509,感心,かんしん,kanshin,impressed / admire,B,2994
+1513,自殺,じさつ,jisatsu,suicide,C,2998
+1514,訪問,ほうもん,hōmon,visit,B,3002
+1516,輸入,ゆにゅう,yunyū,import / importation,C,3003
+1517,予約,よやく,yoyaku,reserve / booking,B,3003
+1521,違反,いはん,ihan,violation / violate,T,3014
+1541,回収,かいしゅう,kaishū,collect / recall,B,3054
+1549,導入,どうにゅう,dōnyū,introduce / adopt,T,3064
+1551,確定,かくてい,kakutei,finalize / confirm,T,3072
+1552,出現,しゅつげん,shutsugen,appear / emerge,C,3074
+1562,放置,ほうち,hōchi,leave alone / neglect,B,3087
+1563,了解,りょうかい,ryōkai,got it / understood,A,3088
+1568,進行,しんこう,shinkō,progress / proceed,B,3101
+1570,建築,けんちく,kenchiku,architecture / building,B,3103
+1571,正解,せいかい,seikai,correct answer / right,B,3104
+1572,適用,てきよう,tekiyō,apply / application,T,3104
+1580,崩壊,ほうかい,hōkai,collapse / breakdown,B,3125
+1581,防衛,ぼうえい,bōei,defense / defend,C,3129
+1583,規制,きせい,kisei,regulation / restrict,C,3134
+1584,請求,せいきゅう,seikyū,bill / charge,B,3135
+1587,配慮,はいりょ,hairyo,consideration / care,B,3143
+1588,対抗,たいこう,taikō,rival / counter,C,3152
+1592,選挙,せんきょ,senkyo,election,B,3162
+1599,発想,はっそう,hassō,idea / way of thinking,B,3177
+1603,予測,よそく,yosoku,predict / forecast,B,3184
+1605,休憩,きゅうけい,kyūkei,break / rest,B,3194
+1609,中止,ちゅうし,chūshi,cancel / call off,B,3199
+1612,募集,ぼしゅう,boshū,recruit / call for,B,3207
+1621,逮捕,たいほ,taiho,arrest,C,3231
+1625,記載,きさい,kisai,state / mention,C,3239
+1626,要請,ようせい,yōsei,request / call for,C,3239
+1627,競争,きょうそう,kyōsō,competition / compete,B,3240
+1628,賛成,さんせい,sansei,agree / in favor,B,3240

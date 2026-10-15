@@ -1,7 +1,7 @@
 ---
-description: Resume French Weave
-allowed-tools: Bash(python3:*)
+description: Resume Japanese Weave
+allowed-tools: Bash(sh:*)
 ---
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" resume`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/run" "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" resume`
 
 Confirm in one plain-English line.

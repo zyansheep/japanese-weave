@@ -1,0 +1,401 @@
+rank,ja,kana,hint,en,tier,score
+2401,犯行,はんこう,hankō,crime / offense,C,6088
+2402,無邪気,むじゃき,mujaki,innocent / naive,B,6088
+2403,経営者,けいえいしゃ,keieisha,business owner / manager,B,6089
+2404,出来,でき,deki,quality / result,C,6093
+2405,一目,ひとめ,hitome,glance / one look,B,6100
+2406,つらい,つらい,tsurai,hard / painful,B,6102
+2407,甲斐,かい,kai,worth / point,C,6104
+2408,不当,ふとう,futō,unfair / unjust,B,6104
+2409,国土,こくど,kokudo,national land,C,6110
+2410,独身,どくしん,dokushin,single / unmarried,B,6111
+2411,しょうがない,しょうがない,shōganai,oh well / can't be helped,A,6114
+2412,表紙,ひょうし,hyōshi,cover,B,6125
+2413,幼稚,ようち,yōchi,childish / immature,B,6130
+2414,火災,かさい,kasai,fire / blaze,C,6133
+2415,容器,ようき,yōki,container,B,6136
+2416,顔面,がんめん,ganmen,face,C,6137
+2417,たまたま,たまたま,tamatama,by chance / happened to,A,6138
+2418,歩み,あゆみ,ayumi,progress / steps,C,6139
+2419,絵本,えほん,ehon,picture book,B,6140
+2420,だいぶ,だいぶ,daibu,quite / a lot,A,6141
+2421,毛布,もうふ,mōfu,blanket,B,6144
+2422,愚痴,ぐち,guchi,complaining / grumble,B,6146
+2423,食糧,しょくりょう,shokuryō,food / provisions,B,6149
+2424,幕府,ばくふ,bakufu,shogunate,C,6149
+2425,昨夜,ゆうべ,yūbe,last night,A,6151
+2426,誠実,せいじつ,seijitsu,sincere / honest,B,6157
+2427,悪夢,あくむ,akumu,nightmare,B,6167
+2428,水道,すいどう,suidō,water supply / tap,B,6170
+2429,険しい,けわしい,kewashii,steep / stern,C,6173
+2430,現時点,げんじてん,genjiten,at this point / currently,A,6174
+2431,最期,さいご,saigo,last moments / death,C,6175
+2432,当分,とうぶん,tōbun,for a while / for now,A,6176
+2433,真っ黒,まっくろ,makkuro,pitch-black,B,6176
+2434,潮,しお,shio,tide,B,6178
+2435,今に,いまに,imani,before long / soon,A,6180
+2436,青空,あおぞら,aozora,blue sky,B,6182
+2437,行列,ぎょうれつ,gyōretsu,queue / matrix,T,6184
+2438,役人,やくにん,yakunin,official / bureaucrat,B,6192
+2439,一年生,いちねんせい,ichinensei,first-year / freshman,B,6195
+2440,茶色,ちゃいろ,chairo,brown,B,6198
+2441,直接的,ちょくせつてき,chokusetsuteki,direct,T,6203
+2442,苦情,くじょう,kujō,complaint,B,6204
+2443,いかが,いかが,ikaga,how / how about,C,6204
+2444,海軍,かいぐん,kaigun,navy,B,6205
+2445,見覚え,みおぼえ,mioboe,recognition,C,6214
+2446,内臓,ないぞう,naizō,internal organs,C,6215
+2447,高齢者,こうれいしゃ,kōreisha,elderly / senior,B,6217
+2448,早く,はやく,hayaku,quickly / early,A,6220
+2449,紅,くれない,kurenai,crimson / deep red,C,6220
+2450,進路,しんろ,shinro,course / path,B,6221
+2451,遅れ,おくれ,okure,delay / lag,T,6228
+2452,女優,じょゆう,joyū,actress,B,6236
+2453,結末,けつまつ,ketsumatsu,ending / outcome,B,6238
+2454,襟,えり,eri,collar,B,6243
+2455,遺産,いさん,isan,inheritance / legacy,B,6246
+2456,責任者,せきにんしゃ,sekininsha,person responsible,B,6246
+2457,もし,もし,moshi,if,A,6248
+2458,神話,しんわ,shinwa,myth / mythology,B,6248
+2459,偽物,にせもの,nisemono,fake / counterfeit,B,6248
+2460,先祖,せんぞ,senzo,ancestor,B,6249
+2461,車内,しゃない,shanai,in the car,C,6252
+2462,道理,どうり,dōri,reason / logic,B,6256
+2463,２３日,にじゅうさんにち,nijūsannichi,23rd day of the month,X,6256
+2464,目当て,めあて,meate,aim / goal,B,6257
+2465,やり方,やりかた,yarikata,way / method,T,6258
+2466,子孫,しそん,shison,descendant,B,6262
+2467,足跡,あしあと,ashiato,footprint / track,B,6262
+2468,合間,あいま,aima,gap / break,B,6263
+2469,各々,おのおの,onoono,each / each one,C,6268
+2470,火事,かじ,kaji,fire,B,6271
+2471,顧客,こきゃく,kokyaku,customer / client,B,6271
+2472,本書,ほんしょ,honsho,main text,X,6273
+2473,持ち物,もちもの,mochimono,belongings,B,6275
+2474,街道,かいどう,kaidō,highway / main road,B,6276
+2475,漠然,ばくぜん,bakuzen,vague / vaguely,B,6279
+2476,階層,かいそう,kaisō,hierarchy / layer,T,6280
+2477,殺し,ころし,koroshi,murder / killing,C,6282
+2478,高等,こうとう,kōtō,advanced / higher,C,6283
+2479,柔軟,じゅうなん,jūnan,flexible,T,6285
+2480,概要,がいよう,gaiyō,overview / summary,T,6286
+2481,果実,かじつ,kajitsu,fruit,B,6287
+2482,所得,しょとく,shotoku,income,B,6288
+2483,郊外,こうがい,kōgai,suburbs,B,6293
+2484,平凡,へいぼん,heibon,ordinary / mediocre,B,6294
+2485,一帯,いったい,ittai,whole area / region,C,6296
+2486,仰向け,あおむけ,aomuke,face-up / on one's back,C,6297
+2487,瞬時,しゅんじ,shunji,instant / instantly,B,6300
+2488,だいたい,だいたい,daitai,roughly / mostly,A,6300
+2489,裁判所,さいばんしょ,saibansho,court / courthouse,B,6303
+2490,善,ぜん,zen,good / goodness,C,6303
+2491,協定,きょうてい,kyōtei,agreement / pact,B,6306
+2492,思惑,おもわく,omowaku,intention / expectation,C,6306
+2493,全面的,ぜんめんてき,zenmenteki,full / complete,T,6306
+2494,海上,かいじょう,kaijō,at sea / maritime,C,6314
+2495,無縁,むえん,muen,unrelated / unconnected,B,6315
+2496,半身,はんしん,hanshin,half the body,C,6317
+2497,たびに,たびに,tabini,each time / every time,X,6318
+2498,不機嫌,ふきげん,fukigen,grumpy / bad mood,B,6322
+2499,早急,そうきゅう,sōkyū,urgent / immediate,T,6328
+2500,無茶,むちゃ,mucha,reckless / absurd,B,6329
+2501,親族,しんぞく,shinzoku,relatives,B,6331
+2502,国王,こくおう,kokuō,king,B,6332
+2503,素朴,そぼく,soboku,simple / unpretentious,B,6338
+2504,指導者,しどうしゃ,shidōsha,leader,B,6342
+2505,夕日,ゆうひ,yūhi,sunset / setting sun,B,6343
+2506,別人,べつじん,betsujin,different person,B,6343
+2507,心境,しんきょう,shinkyō,state of mind,B,6346
+2508,内閣,ないかく,naikaku,cabinet,B,6349
+2509,無難,ぶなん,bunan,safe / safe bet,T,6351
+2510,大戦,たいせん,taisen,great war / world war,C,6356
+2511,そしたら,そしたら,soshitara,then / and then,A,6357
+2512,手袋,てぶくろ,tebukuro,gloves,B,6363
+2513,半端,はんぱ,hanpa,half-done / incomplete,B,6363
+2514,前年,ぜんねん,zennen,previous year,B,6364
+2515,甲,こう,kō,shell / carapace,C,6364
+2516,美女,びじょ,bijo,beautiful woman,C,6365
+2517,校長,こうちょう,kōchō,principal,B,6366
+2518,砂漠,さばく,sabaku,desert,B,6371
+2519,その上,そのうえ,sonoue,besides / on top of that,A,6372
+2520,直面,ちょくめん,chokumen,face / confront,B,6372
+2521,渦,うず,uzu,whirlpool / swirl,C,6377
+2522,問題点,もんだいてん,mondaiten,issue / problem,T,6377
+2523,うんざり,うんざり,unzari,fed up / sick of,B,6378
+2524,かも,かも,kamo,duck,X,6380
+2525,下半身,かはんしん,kahanshin,lower body,C,6382
+2526,集まり,あつまり,atsumari,gathering / meeting,B,6386
+2527,仮に,かりに,karini,suppose / temporarily,A,6387
+2528,担当者,たんとうしゃ,tantōsha,person in charge,B,6391
+2529,粒子,りゅうし,ryūshi,particle,C,6393
+2530,礼儀,れいぎ,reigi,manners / courtesy,B,6393
+2531,拍子,ひょうし,hyōshi,beat / rhythm,C,6393
+2532,異性,いせい,isei,opposite sex,B,6394
+2533,総合的,そうごうてき,sōgōteki,overall / comprehensive,T,6397
+2534,塀,へい,hei,wall / fence,B,6399
+2535,課長,かちょう,kachō,section chief,B,6400
+2536,効力,こうりょく,kōryoku,effect / validity,B,6402
+2537,重力,じゅうりょく,jūryoku,gravity,B,6403
+2538,悪口,わるぐち,waruguchi,insults / badmouthing,B,6406
+2539,打撃,だげき,dageki,blow / hit,B,6407
+2540,並びに,ならびに,narabini,as well as / and,C,6408
+2541,志,こころざし,kokorozashi,ambition / aspiration,B,6410
+2542,おおい,おおい,ōi,hey,C,6410
+2543,神聖,しんせい,shinsei,sacred / holy,C,6412
+2544,思い切り,おもいきり,omoikiri,all out / to the fullest,B,6414
+2545,陸,りく,riku,land,B,6415
+2546,抜群,ばつぐん,batsugun,outstanding / excellent,B,6421
+2547,振る舞い,ふるまい,furumai,behavior,T,6424
+2548,容姿,ようし,yōshi,looks / appearance,C,6429
+2549,路線,ろせん,rosen,route / line,B,6431
+2550,乳房,ちぶさ,chibusa,breast,C,6432
+2551,体勢,たいせい,taisei,posture / stance,C,6434
+2552,重量,じゅうりょう,jūryō,weight,B,6437
+2553,当面,とうめん,tōmen,for now / for the moment,A,6437
+2554,塾,じゅく,juku,cram school,B,6440
+2555,青白い,あおじろい,aojiroi,pale,C,6446
+2556,憲法,けんぽう,kenpō,constitution,B,6450
+2557,功績,こうせき,kōseki,achievement,B,6453
+2558,同等,どうとう,dōtō,equivalent / equal,T,6455
+2559,心から,こころから,kokorokara,sincerely / truly,B,6459
+2560,鮮明,せんめい,senmei,vivid / clear,B,6463
+2561,公務,こうむ,kōmu,official duties,C,6466
+2562,教科,きょうか,kyōka,school subject,B,6470
+2563,唾,つば,tsuba,spit / saliva,C,6474
+2564,年頃,としごろ,toshigoro,age / of an age,C,6474
+2565,個体,こたい,kotai,individual / specimen,C,6480
+2566,悲惨,ひさん,hisan,tragic / miserable,B,6481
+2567,いかにも,いかにも,ikanimo,indeed / truly,A,6483
+2568,事実上,じじつじょう,jijitsujō,effectively / de facto,A,6488
+2569,順序,じゅんじょ,junjo,order / sequence,T,6490
+2570,品質,ひんしつ,hinshitsu,quality,T,6493
+2571,存分,ぞんぶん,zonbun,fully / freely,C,6494
+2572,毎週,まいしゅう,maishū,every week / weekly,A,6494
+2573,幹,みき,miki,trunk,B,6495
+2574,不便,ふべん,fuben,inconvenient,T,6497
+2575,旅館,りょかん,ryokan,Japanese inn,B,6500
+2576,ひっそり,ひっそり,hissori,quietly / hushed,C,6502
+2577,盛大,せいだい,seidai,grand / lavish,B,6506
+2578,憎しみ,にくしみ,nikushimi,hatred,C,6507
+2579,軍人,ぐんじん,gunjin,soldier,B,6513
+2580,恐る恐る,おそるおそる,osoruosoru,timidly / nervously,C,6517
+2581,無力,むりょく,muryoku,powerless / helpless,B,6522
+2582,探偵,たんてい,tantei,detective,B,6540
+2583,違法,いほう,ihō,illegal,B,6542
+2584,本名,ほんみょう,honmyō,real name,B,6550
+2585,名目,めいもく,meimoku,pretext / nominal,C,6551
+2586,態勢,たいせい,taisei,readiness / setup,C,6555
+2587,説得力,せっとくりょく,settokuryoku,persuasiveness,B,6559
+2588,快い,こころよい,kokoroyoi,pleasant,C,6561
+2589,泣き声,なきごえ,nakigoe,crying / cry,B,6561
+2590,柵,さく,saku,fence,B,6562
+2591,病人,びょうにん,byōnin,sick person / patient,B,6570
+2592,用件,ようけん,yōken,business / matter,B,6572
+2593,系統,けいとう,keitō,system / lineage,B,6574
+2594,おいおい,おいおい,oioi,come on / hey now,A,6580
+2595,豆腐,とうふ,tōfu,tofu,B,6585
+2596,境界,きょうかい,kyōkai,boundary / border,T,6586
+2597,仕業,しわざ,shiwaza,doing / work,C,6591
+2598,人権,じんけん,jinken,human rights,B,6592
+2599,都,みやこ,miyako,capital,C,6596
+2600,反射的,はんしゃてき,hanshateki,reflexive / reflexively,C,6600
+2601,清潔,せいけつ,seiketsu,clean / hygienic,B,6608
+2602,髪型,かみがた,kamigata,hairstyle,B,6608
+2603,犯罪者,はんざいしゃ,hanzaisha,criminal,B,6610
+2604,すかさず,すかさず,sukasazu,right away / instantly,B,6610
+2605,色彩,しきさい,shikisai,color / coloring,C,6614
+2606,安易,あんい,an'i,careless / too easy,T,6617
+2607,右足,みぎあし,migiashi,right foot,C,6617
+2608,交互,こうご,kōgo,alternating / in turns,B,6619
+2609,細長い,ほそながい,hosonagai,long and narrow,C,6619
+2610,著者,ちょしゃ,chosha,author,B,6620
+2611,同志,どうし,dōshi,comrade,C,6622
+2612,あえて,あえて,aete,deliberately / dare to,A,6624
+2613,厳重,げんじゅう,genjū,strict / tight,B,6629
+2614,痕跡,こんせき,konseki,trace / vestige,C,6633
+2615,能,のう,nō,Noh / ability,C,6637
+2616,こんにちは,こんにちは,konnichiwa,hello,A,6642
+2617,敬意,けいい,keii,respect,B,6645
+2618,鈴,すず,suzu,bell,B,6646
+2619,横目,よこめ,yokome,sidelong glance,C,6647
+2620,受話器,じゅわき,juwaki,phone receiver,C,6647
+2621,一夜,いちや,ichiya,one night / overnight,C,6648
+2622,知性,ちせい,chisei,intelligence,B,6649
+2623,ひたすら,ひたすら,hitasura,nonstop / intently,A,6651
+2624,小僧,こぞう,kozō,kid / brat,C,6652
+2625,魔力,まりょく,maryoku,magic power,C,6660
+2626,からって,からって,karatte,just because / even if,X,6660
+2627,農民,のうみん,nōmin,farmer / peasant,B,6661
+2628,さよなら,さよなら,sayonara,goodbye / bye,A,6663
+2629,おかしな,おかしな,okashina,strange / weird,T,6666
+2630,上級,じょうきゅう,jōkyū,advanced / senior,B,6669
+2631,まず,まず,mazu,first / first of all,A,6671
+2632,文献,ぶんけん,bunken,literature / references,B,6673
+2633,衛星,えいせい,eisei,satellite,B,6679
+2634,講座,こうざ,kōza,course / lecture,B,6679
+2635,羊,ひつじ,hitsuji,sheep,B,6680
+2636,乗客,じょうきゃく,jōkyaku,passenger,B,6682
+2637,上半身,じょうはんしん,jōhanshin,upper body,C,6684
+2638,理想的,りそうてき,risōteki,ideal,T,6688
+2639,静寂,せいじゃく,seijaku,silence / stillness,C,6689
+2640,犠牲者,ぎせいしゃ,giseisha,victim / casualty,B,6691
+2641,縄,なわ,nawa,rope,B,6697
+2642,偽,にせ,nise,fake / false,C,6701
+2643,対等,たいとう,taitō,equal / on par,B,6705
+2644,徐々に,じょじょに,jojoni,gradually,A,6705
+2645,民,たみ,tami,the people,C,6707
+2646,直径,ちょっけい,chokkei,diameter,B,6707
+2647,個室,こしつ,koshitsu,private room,B,6709
+2648,技能,ぎのう,ginō,skill,B,6713
+2649,助手,じょしゅ,joshu,assistant,B,6714
+2650,自力,じりき,jiriki,on one's own,B,6717
+2651,定番,ていばん,teiban,standard / go-to,T,6719
+2652,損失,そんしつ,sonshitsu,loss,T,6723
+2653,特権,とっけん,tokken,privilege,T,6727
+2654,蝶,ちょう,chō,butterfly,B,6733
+2655,頂上,ちょうじょう,chōjō,summit / top,B,6742
+2656,化け物,ばけもの,bakemono,monster,C,6744
+2657,印象的,いんしょうてき,inshōteki,impressive / memorable,B,6745
+2658,大将,たいしょう,taishō,general / boss,C,6747
+2659,証人,しょうにん,shōnin,witness,B,6750
+2660,意気,いき,iki,spirit / morale,C,6755
+2661,９日,ここのか,kokonoka,9th day of the month,X,6755
+2662,いいや,いいや,iiya,no / nope,A,6756
+2663,数年前,すうねんまえ,sūnenmae,a few years ago,A,6759
+2664,言い分,いいぶん,iibun,one's side / claim,B,6761
+2665,棟,むね,mune,ridge / building,C,6764
+2666,適正,てきせい,tekisei,appropriate / proper,T,6767
+2667,要件,ようけん,yōken,requirement,T,6769
+2668,案の定,あんのじょう,annojō,sure enough / as expected,A,6776
+2669,沼,ぬま,numa,swamp / marsh,B,6778
+2670,救急車,きゅうきゅうしゃ,kyūkyūsha,ambulance,B,6779
+2671,最低限,さいていげん,saiteigen,minimum / at least,T,6780
+2672,厳密,げんみつ,genmitsu,strict / precise,T,6787
+2673,年月,としつき,toshitsuki,years / time,C,6791
+2674,短期間,たんきかん,tankikan,short time / short-term,B,6803
+2675,適度,てきど,tekido,moderate,B,6807
+2676,２５日,にじゅうごにち,nijūgonichi,25th day of the month,X,6807
+2677,読み,よみ,yomi,reading / guess,B,6812
+2678,３０日,さんじゅうにち,sanjūnichi,30th day of the month,X,6820
+2679,定員,ていいん,teiin,capacity / quota,B,6822
+2680,治安,ちあん,chian,public safety,B,6824
+2681,濃厚,のうこう,nōkō,rich / strong,B,6826
+2682,必須,ひっす,hissu,required / essential,T,6829
+2683,重要性,じゅうようせい,jūyōsei,importance,T,6830
+2684,嫌がらせ,いやがらせ,iyagarase,harassment,B,6835
+2685,体格,たいかく,taikaku,build / physique,C,6843
+2686,くるくる,くるくる,kurukuru,round and round,C,6845
+2687,三角,さんかく,sankaku,triangle,B,6847
+2688,商,しょう,shō,quotient,C,6849
+2689,てっきり,てっきり,tekkiri,assumed / was sure,A,6851
+2690,とっくに,とっくに,tokkuni,long ago / already,A,6852
+2691,井戸,いど,ido,well,B,6853
+2692,石油,せきゆ,sekiyu,oil / petroleum,B,6857
+2693,市街,しがい,shigai,downtown / city streets,C,6866
+2694,溝,みぞ,mizo,ditch / gap,B,6866
+2695,引き出し,ひきだし,hikidashi,drawer / withdrawal,B,6867
+2696,同期,どうき,dōki,sync / peer,T,6871
+2697,帰り道,かえりみち,kaerimichi,way home,B,6876
+2698,延々,えんえん,en'en,endlessly / on and on,B,6877
+2699,露骨,ろこつ,rokotsu,blatant / obvious,B,6879
+2700,莫大,ばくだい,bakudai,huge / enormous,B,6886
+2701,一通り,ひととおり,hitotōri,roughly / once over,A,6887
+2702,試練,しれん,shiren,ordeal / trial,C,6887
+2703,管,かん,kan,tube / pipe,B,6889
+2704,ふわふわ,ふわふわ,fuwafuwa,fluffy / floaty,B,6892
+2705,知事,ちじ,chiji,governor,B,6892
+2706,鹿,しか,shika,deer,B,6895
+2707,位,くらい,kurai,rank / position,C,6897
+2708,輪郭,りんかく,rinkaku,outline / contour,C,6906
+2709,侍,さむらい,samurai,samurai,C,6907
+2710,丈,たけ,take,length / height,C,6908
+2711,有,ゆう,yū,existence,X,6909
+2712,すっと,すっと,sutto,smoothly / swiftly,C,6911
+2713,やる気,やるき,yaruki,motivation,B,6915
+2714,固有,こゆう,koyū,specific / inherent,T,6916
+2715,反動,はんどう,handō,backlash / recoil,B,6920
+2716,ものすごい,ものすごい,monosugoi,tremendous / incredible,B,6927
+2717,拳銃,けんじゅう,kenjū,pistol / handgun,C,6931
+2718,重たい,おもたい,omotai,heavy,B,6936
+2719,子宮,しきゅう,shikyū,womb / uterus,C,6937
+2720,心情,しんじょう,shinjō,feelings / sentiment,B,6937
+2721,大根,だいこん,daikon,daikon / radish,B,6937
+2722,用途,ようと,yōto,use / purpose,T,6940
+2723,惨め,みじめ,mijime,miserable,B,6942
+2724,領土,りょうど,ryōdo,territory,B,6943
+2725,取り組み,とりくみ,torikumi,effort / initiative,B,6944
+2726,乾杯,かんぱい,kanpai,cheers,A,6948
+2727,そうすれば,そうすれば,sōsureba,that way / then,A,6948
+2728,必然的,ひつぜんてき,hitsuzenteki,inevitable,B,6949
+2729,わくわく,わくわく,wakuwaku,excited / thrilled,B,6950
+2730,大衆,たいしゅう,taishū,the public / masses,B,6950
+2731,最善,さいぜん,saizen,best,T,6956
+2732,ぶつぶつ,ぶつぶつ,butsubutsu,mutter / grumble,C,6959
+2733,亀,かめ,kame,turtle,B,6960
+2734,毎朝,まいあさ,maiasa,every morning,A,6963
+2735,緩い,ゆるい,yurui,loose / lenient,T,6965
+2736,破片,はへん,hahen,fragment / shard,C,6970
+2737,焦り,あせり,aseri,impatience / haste,B,6976
+2738,庭園,ていえん,teien,garden,B,6976
+2739,地形,ちけい,chikei,terrain,B,6984
+2740,直線,ちょくせん,chokusen,straight line,B,6985
+2741,強制的,きょうせいてき,kyōseiteki,forced / forcibly,T,6992
+2742,画家,がか,gaka,painter,B,6993
+2743,よほど,よほど,yohodo,really / greatly,A,6993
+2744,１３日,じゅうさんにち,jūsannichi,13th day of the month,X,6993
+2745,歌詞,かし,kashi,lyrics,B,7001
+2746,樹木,じゅもく,jumoku,trees,C,7002
+2747,心当たり,こころあたり,kokoroatari,idea / clue,B,7003
+2748,一位,いちい,ichii,first place / first rank,X,7006
+2749,翌年,よくねん,yokunen,following year,B,7006
+2750,この間,このあいだ,konoaida,the other day / recently,A,7011
+2751,近頃,ちかごろ,chikagoro,lately / these days,A,7014
+2752,異変,いへん,ihen,anomaly / upheaval,B,7016
+2753,大小,だいしょう,daishō,size / large and small,C,7020
+2754,頭脳,ずのう,zunō,brains / intellect,B,7020
+2755,利用者,りようしゃ,riyōsha,user,T,7020
+2756,風情,ふぜい,fuzei,charm / elegance,C,7026
+2757,大嫌い,だいきらい,daikirai,hate / really dislike,B,7027
+2758,視覚,しかく,shikaku,sight / vision,B,7028
+2759,野生,やせい,yasei,wild,B,7033
+2760,ふらふら,ふらふら,furafura,dizzy / wobbly,B,7034
+2761,面影,おもかげ,omokage,vestige / likeness,C,7037
+2762,恩恵,おんけい,onkei,benefit,T,7040
+2763,偏見,へんけん,henken,prejudice / bias,B,7041
+2764,寮,りょう,ryō,dorm,B,7047
+2765,口座,こうざ,kōza,bank account,B,7048
+2766,膜,まく,maku,membrane / film,C,7049
+2767,濃度,のうど,nōdo,concentration / density,B,7052
+2768,極力,きょくりょく,kyokuryoku,as much as possible,A,7059
+2769,夜間,やかん,yakan,night / nighttime,B,7065
+2770,病室,びょうしつ,byōshitsu,hospital room,B,7068
+2771,芋,いも,imo,potato,B,7070
+2772,回路,かいろ,kairo,circuit,T,7078
+2773,赤字,あかじ,akaji,deficit / loss,B,7086
+2774,当て,あて,ate,aim / reliance,C,7093
+2775,葬儀,そうぎ,sōgi,funeral,B,7096
+2776,北部,ほくぶ,hokubu,the north,B,7097
+2777,云々,うんぬん,unnun,and so on / etc,A,7104
+2778,住まい,すまい,sumai,home / residence,B,7107
+2779,目前,もくぜん,mokuzen,imminent / right ahead,B,7109
+2780,人柄,ひとがら,hitogara,personality / character,B,7116
+2781,万全,ばんぜん,banzen,perfect / all set,B,7118
+2782,異議,いぎ,igi,objection,B,7119
+2783,教養,きょうよう,kyōyō,culture / education,B,7121
+2784,先月,せんげつ,sengetsu,last month,A,7124
+2785,頼もしい,たのもしい,tanomoshii,reliable / dependable,B,7124
+2786,俳優,はいゆう,haiyū,actor,B,7130
+2787,守り,まもり,mamori,defense / protection,B,7133
+2788,未熟,みじゅく,mijuku,immature / inexperienced,B,7133
+2789,互いに,たがいに,tagaini,each other / mutually,A,7137
+2790,分子,ぶんし,bunshi,molecule / numerator,B,7137
+2791,詩人,しじん,shijin,poet,B,7139
+2792,訴え,うったえ,uttae,complaint / appeal,B,7142
+2793,数時間,すうじかん,sūjikan,a few hours,A,7142
+2794,咳,せき,seki,cough,B,7143
+2795,一筋,ひとすじ,hitosuji,devoted / one line,C,7145
+2796,仮説,かせつ,kasetsu,hypothesis,T,7145
+2797,紫色,むらさきいろ,murasakiiro,purple,B,7146
+2798,だんだん,だんだん,dandan,gradually / bit by bit,A,7149
+2799,一息,ひといき,hitoiki,a breather / one breath,B,7151
+2800,害,がい,gai,harm / damage,B,7154

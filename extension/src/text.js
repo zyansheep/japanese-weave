@@ -124,7 +124,7 @@ export function toNode(flat, m, o) {
 }
 
 export function tipFor(swap) {
-  return swap.h ? `${swap.g} · "${swap.h}"` : swap.g;
+  return [swap.g, swap.h, swap.k].filter(Boolean).join(' · ');
 }
 
 function wrap(place, swap) {
@@ -135,7 +135,7 @@ function wrap(place, swap) {
   const span = doc.createElement('span');
   span.className = SWAP_CLASS;
   span.setAttribute('data-en', mid.data);
-  span.setAttribute('data-fr', swap.f);
+  span.setAttribute('data-ja', swap.f);
   span.setAttribute('data-tip', tipFor(swap));
   span.setAttribute('data-fw-split', '1');
   if (swap.status) span.dataset.fwStatus = swap.status;
@@ -203,11 +203,11 @@ export function revert(root) {
   return spans.length;
 }
 
-// Click: flip one swap between French and English.
+// Click: flip one swap between Japanese and English.
 export function toggle(span) {
   const showEn = !span.classList.contains('fw-en');
   span.classList.toggle('fw-en', showEn);
-  span.textContent = showEn ? span.getAttribute('data-en') : span.getAttribute('data-fr');
-  span.setAttribute('aria-label', `${span.textContent}. Show ${showEn ? 'French' : 'English'}`);
+  span.textContent = showEn ? span.getAttribute('data-en') : span.getAttribute('data-ja');
+  span.setAttribute('aria-label', `${span.textContent}. Show ${showEn ? 'Japanese' : 'English'}`);
   return showEn;
 }

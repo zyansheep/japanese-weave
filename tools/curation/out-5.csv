@@ -1,0 +1,401 @@
+rank,ja,kana,hint,en,tier,score
+1601,見解,けんかい,kenkai,view / opinion,B,4082
+1602,仕方ない,しかたない,shikatanai,unavoidable / no choice,B,4083
+1603,やがて,やがて,yagate,eventually / soon,A,4086
+1604,一族,いちぞく,ichizoku,clan / family,B,4088
+1605,各国,かっこく,kakkoku,each country,B,4091
+1606,荒い,あらい,arai,rough / harsh,B,4097
+1607,盛ん,さかん,sakan,thriving / popular,B,4098
+1608,生地,きじ,kiji,fabric / dough,B,4102
+1609,一口,ひとくち,hitokuchi,bite / mouthful,B,4104
+1610,王国,おうこく,ōkoku,kingdom,C,4115
+1611,刑事,けいじ,keiji,detective,B,4115
+1612,愚か,おろか,oroka,foolish / stupid,C,4116
+1613,海岸,かいがん,kaigan,coast / beach,B,4118
+1614,面積,めんせき,menseki,area,B,4118
+1615,輝き,かがやき,kagayaki,brightness / shine,C,4120
+1616,有無,うむ,umu,presence / existence,C,4120
+1617,頻繁,ひんぱん,hinpan,frequent / frequently,T,4122
+1618,そっか,そっか,sokka,I see / oh right,A,4122
+1619,黄色い,きいろい,kiiroi,yellow,B,4124
+1620,三時,さんじ,sanji,3 o'clock,X,4129
+1621,真っ白,まっしろ,masshiro,pure white / blank,B,4133
+1622,盾,たて,tate,shield,C,4135
+1623,各種,かくしゅ,kakushu,various / all kinds,B,4137
+1624,寝室,しんしつ,shinshitsu,bedroom,B,4140
+1625,体内,たいない,tainai,inside the body,C,4146
+1626,市内,しない,shinai,in the city / downtown,B,4147
+1627,槍,やり,yari,spear,C,4149
+1628,奴隷,どれい,dorei,slave,C,4149
+1629,手間,てま,tema,effort / hassle,T,4153
+1630,手首,てくび,tekubi,wrist,C,4154
+1631,不自然,ふしぜん,fushizen,unnatural / awkward,B,4154
+1632,会計,かいけい,kaikei,accounting / the bill,B,4159
+1633,年上,としうえ,toshiue,older / senior,B,4163
+1634,外国人,がいこくじん,gaikokujin,foreigner,B,4166
+1635,順番,じゅんばん,junban,order / turn,T,4169
+1636,資源,しげん,shigen,resources,T,4170
+1637,公共,こうきょう,kōkyō,public,B,4174
+1638,飲み物,のみもの,nomimono,drink / beverage,B,4181
+1639,病,やまい,yamai,illness / disease,C,4183
+1640,近年,きんねん,kinnen,recent years / lately,A,4186
+1641,熊,くま,kuma,bear,B,4186
+1642,一階,いっかい,ikkai,first floor / ground floor,X,4187
+1643,湖,みずうみ,mizuumi,lake,B,4188
+1644,先頭,せんとう,sentō,front / head,T,4188
+1645,親切,しんせつ,shinsetsu,kind / helpful,B,4190
+1646,人格,じんかく,jinkaku,personality / character,B,4191
+1647,そうですね,そうですね,sōdesune,right / well,A,4191
+1648,部門,ぶもん,bumon,department / division,B,4201
+1649,大規模,だいきぼ,daikibo,large-scale,T,4204
+1650,数多く,かずおおく,kazuōku,many / numerous,B,4208
+1651,悪,あく,aku,evil,C,4209
+1652,実質,じっしつ,jisshitsu,effectively / substance,T,4209
+1653,数十,すうじゅう,sūjū,dozens / scores of,X,4209
+1654,折,おり,ori,occasion / when,C,4211
+1655,異様,いよう,iyō,strange / bizarre,C,4215
+1656,不良,ふりょう,furyō,defective / delinquent,B,4219
+1657,綺麗,きれい,kirei,clean / pretty,T,4221
+1658,児童,じどう,jidō,children / child,B,4223
+1659,皮肉,ひにく,hiniku,irony / sarcasm,B,4233
+1660,でかい,でかい,dekai,huge / big,B,4234
+1661,灰色,はいいろ,haiiro,gray,B,4239
+1662,売り上げ,うりあげ,uriage,sales / revenue,B,4239
+1663,食材,しょくざい,shokuzai,ingredient / food,B,4239
+1664,天才,てんさい,tensai,genius,B,4246
+1665,前日,ぜんじつ,zenjitsu,the day before,A,4248
+1666,孤独,こどく,kodoku,loneliness / solitude,B,4250
+1667,外側,そとがわ,sotogawa,outside / exterior,B,4250
+1668,居場所,いばしょ,ibasho,whereabouts / place,B,4250
+1669,決定的,けっていてき,ketteiteki,decisive / definitive,T,4251
+1670,霊,れい,rei,spirit / ghost,C,4251
+1671,憧れ,あこがれ,akogare,longing / admiration,B,4252
+1672,かわいい,かわいい,kawaii,cute,B,4257
+1673,騎士,きし,kishi,knight,C,4271
+1674,巨人,きょじん,kyojin,giant,C,4274
+1675,林,はやし,hayashi,woods / grove,B,4275
+1676,暗闇,くらやみ,kurayami,darkness,C,4279
+1677,名称,めいしょう,meishō,name / title,T,4287
+1678,財布,さいふ,saifu,wallet,B,4290
+1679,敏感,びんかん,binkan,sensitive,B,4298
+1680,特性,とくせい,tokusei,property / trait,T,4300
+1681,小型,こがた,kogata,small / compact,B,4300
+1682,おそらく,おそらく,osoraku,probably / likely,A,4302
+1683,頭上,ずじょう,zujō,overhead,C,4309
+1684,不安定,ふあんてい,fuantei,unstable / flaky,T,4313
+1685,坂,さか,saka,slope / hill,B,4315
+1686,上位,じょうい,jōi,top / higher-level,T,4316
+1687,密か,ひそか,hisoka,secret / private,C,4319
+1688,１日,ついたち,tsuitachi,first day of the month / the first of the month,X,4325
+1689,今頃,いまごろ,imagoro,about now / by now,A,4327
+1690,資本,しほん,shihon,capital / funds,B,4332
+1691,おいしい,おいしい,oishii,delicious / tasty,B,4332
+1692,手当,てあて,teate,allowance / treatment,B,4335
+1693,本当に,ほんとうに,hontōni,really / truly,A,4338
+1694,理性,りせい,risei,rationality / reason,B,4339
+1695,地点,ちてん,chiten,spot / location,B,4341
+1696,牛乳,ぎゅうにゅう,gyūnyū,milk,B,4343
+1697,必要性,ひつようせい,hitsuyōsei,need / necessity,T,4349
+1698,空中,くうちゅう,kūchū,midair / the air,B,4355
+1699,日時,にちじ,nichiji,date and time,T,4360
+1700,汚れ,よごれ,yogore,dirt / stain,B,4361
+1701,圧力,あつりょく,atsuryoku,pressure,B,4363
+1702,敷地,しきち,shikichi,grounds / premises,B,4363
+1703,軍隊,ぐんたい,guntai,army / military,B,4367
+1704,三度,さんど,sando,three times / thrice,X,4370
+1705,久々,ひさびさ,hisabisa,first in a while,B,4375
+1706,それじゃ,それじゃ,soreja,well then / then,A,4377
+1707,双方,そうほう,sōhō,both sides / both,B,4382
+1708,印,しるし,shirushi,mark / sign,B,4384
+1709,観客,かんきゃく,kankyaku,audience / spectators,B,4387
+1710,一家,いっか,ikka,family / household,B,4387
+1711,危うい,あやうい,ayaui,risky / precarious,B,4388
+1712,もはや,もはや,mohaya,no longer / already,A,4389
+1713,尻尾,しっぽ,shippo,tail,B,4389
+1714,松,まつ,matsu,pine tree,B,4391
+1715,個性,こせい,kosei,individuality,B,4396
+1716,懐,ふところ,futokoro,bosom / pocket,C,4397
+1717,人影,ひとかげ,hitokage,figure / silhouette,C,4399
+1718,もしかしたら,もしかしたら,moshikashitara,maybe / perhaps,A,4401
+1719,縦,たて,tate,vertical / length,T,4401
+1720,さっと,さっと,satto,quickly / swiftly,A,4408
+1721,機構,きこう,kikō,mechanism / system,T,4408
+1722,空港,くうこう,kūkō,airport,B,4410
+1723,背筋,せすじ,sesuji,spine / posture,C,4412
+1724,紅茶,こうちゃ,kōcha,black tea / tea,B,4413
+1725,成分,せいぶん,seibun,ingredient / component,B,4414
+1726,天然,てんねん,tennen,natural,B,4414
+1727,年金,ねんきん,nenkin,pension,B,4417
+1728,凄まじい,すさまじい,susamajii,tremendous / terrible,C,4417
+1729,倉庫,そうこ,sōko,warehouse / storage,B,4418
+1730,他者,たしゃ,tasha,others / other people,B,4421
+1731,だめ,だめ,dame,no good / not allowed,T,4422
+1732,同一,どういつ,dōitsu,identical / same,T,4423
+1733,人員,じんいん,jin'in,personnel / staff,B,4424
+1734,木々,きぎ,kigi,trees,B,4426
+1735,価値観,かちかん,kachikan,values,B,4430
+1736,柔らか,やわらか,yawaraka,soft / gentle,B,4430
+1737,無限,むげん,mugen,infinite / infinity,T,4432
+1738,頼り,たより,tayori,reliance / support,B,4433
+1739,一件,いっけん,ikken,matter / item,X,4436
+1740,まずい,まずい,mazui,bad / tastes bad,B,4437
+1741,指輪,ゆびわ,yubiwa,ring,B,4441
+1742,地味,じみ,jimi,plain / low-key,B,4441
+1743,福祉,ふくし,fukushi,welfare,B,4442
+1744,業者,ぎょうしゃ,gyōsha,vendor / contractor,B,4443
+1745,長さ,ながさ,nagasa,length,T,4443
+1746,正常,せいじょう,seijō,normal / working,T,4446
+1747,行,ぎょう,gyō,line / row,T,4450
+1748,すっきり,すっきり,sukkiri,refreshed / neat,B,4452
+1749,実績,じっせき,jisseki,track record / results,B,4458
+1750,傘,かさ,kasa,umbrella,B,4463
+1751,方がいい,ほうがいい,hōgaii,had better ...,X,4464
+1752,ちなみに,ちなみに,chinamini,by the way,A,4467
+1753,平等,びょうどう,byōdō,equality / equal,B,4472
+1754,あるいは,あるいは,arui wa,or / perhaps,A,4476
+1755,赤ん坊,あかんぼう,akanbō,baby,B,4479
+1756,次元,じげん,jigen,dimension / level,T,4484
+1757,罠,わな,wana,trap,B,4485
+1758,大げさ,おおげさ,ōgesa,exaggerated / overblown,B,4487
+1759,黄色,きいろ,kiiro,yellow / amber,X,4488
+1760,きっちり,きっちり,kitchiri,exactly / precisely,A,4491
+1761,快感,かいかん,kaikan,pleasure / thrill,C,4494
+1762,将軍,しょうぐん,shōgun,general / shogun,C,4501
+1763,本能,ほんのう,honnō,instinct,B,4503
+1764,階級,かいきゅう,kaikyū,class / rank,B,4509
+1765,原理,げんり,genri,principle,T,4511
+1766,膨大,ぼうだい,bōdai,huge / enormous,T,4515
+1767,教え,おしえ,oshie,teaching / lesson,B,4519
+1768,不快,ふかい,fukai,unpleasant / discomfort,B,4521
+1769,涼しい,すずしい,suzushii,cool / refreshing,B,4522
+1770,贅沢,ぜいたく,zeitaku,luxury / extravagant,B,4522
+1771,宙,ちゅう,chū,midair / space,C,4522
+1772,期限,きげん,kigen,deadline / expiration,T,4524
+1773,過剰,かじょう,kajō,excessive / excess,T,4525
+1774,秩序,ちつじょ,chitsujo,order / discipline,B,4525
+1775,可愛らしい,かわいらしい,kawairashii,lovely / adorable,C,4527
+1776,大部分,だいぶぶん,daibubun,most / majority,T,4527
+1777,鈍い,にぶい,nibui,dull / slow,B,4530
+1778,漢字,かんじ,kanji,kanji,B,4531
+1779,望ましい,のぞましい,nozomashii,desirable / preferable,T,4532
+1780,そば,そば,soba,soba / buckwheat,B,4536
+1781,薄暗い,うすぐらい,usugurai,dim / gloomy,C,4536
+1782,なんでも,なんでも,nandemo,anything / whatever,A,4539
+1783,情熱,じょうねつ,jōnetsu,passion,B,4543
+1784,首都,しゅと,shuto,capital,B,4545
+1785,手順,てじゅん,tejun,steps / procedure,T,4546
+1786,鉄道,てつどう,tetsudō,railway,B,4547
+1787,なぜか,なぜか,nazeka,somehow / for some reason,A,4548
+1788,芝居,しばい,shibai,play / acting,B,4553
+1789,個別,こべつ,kobetsu,individual / separate,T,4555
+1790,午前中,ごぜんちゅう,gozenchū,in the morning,A,4557
+1791,違いない,ちがいない,chigainai,sure / no mistaking it,X,4557
+1792,王子,おうじ,ōji,prince,C,4563
+1793,中間,ちゅうかん,chūkan,middle / intermediate,T,4566
+1794,港,みなと,minato,harbor / port,B,4569
+1795,気軽,きがる,kigaru,casual / easygoing,B,4571
+1796,本体,ほんたい,hontai,main body / core,T,4573
+1797,獣,けもの,kemono,beast,C,4575
+1798,杖,つえ,tsue,cane / staff,C,4575
+1799,物体,ぶったい,buttai,object,B,4578
+1800,次回,じかい,jikai,next time,A,4581
+1801,出口,でぐち,deguchi,exit,B,4589
+1802,眠り,ねむり,nemuri,sleep,B,4589
+1803,幸運,こううん,kōun,good luck / fortune,B,4590
+1804,好意,こうい,kōi,goodwill / affection,B,4594
+1805,車両,しゃりょう,sharyō,vehicle / car,B,4594
+1806,帝国,ていこく,teikoku,empire,C,4595
+1807,内心,ないしん,naishin,inwardly / deep down,B,4597
+1808,意義,いぎ,igi,significance / meaning,B,4600
+1809,考え方,かんがえかた,kangaekata,mindset / approach,T,4602
+1810,数学,すうがく,sūgaku,math,B,4602
+1811,遺体,いたい,itai,corpse / body,C,4603
+1812,運転手,うんてんしゅ,untenshu,driver,B,4604
+1813,表,ひょう,hyō,table / chart,T,4604
+1814,毎回,まいかい,maikai,every time,A,4608
+1815,華やか,はなやか,hanayaka,glamorous / showy,B,4608
+1816,外見,がいけん,gaiken,appearance / looks,B,4609
+1817,人間関係,にんげんかんけい,ningenkankei,relationships,B,4612
+1818,法則,ほうそく,hōsoku,law / rule,B,4612
+1819,爽やか,さわやか,sawayaka,refreshing / fresh,B,4616
+1820,液体,えきたい,ekitai,liquid,B,4617
+1821,農家,のうか,nōka,farmer / farm,B,4620
+1822,社会的,しゃかいてき,shakaiteki,social,B,4621
+1823,うっかり,うっかり,ukkari,accidentally / carelessly,A,4624
+1824,財政,ざいせい,zaisei,finances,B,4626
+1825,手がかり,てがかり,tegakari,clue / lead,T,4634
+1826,大して,たいして,taishite,that much / very,A,4635
+1827,わずか,わずか,wazuka,slight / only a few,T,4644
+1828,広大,こうだい,kōdai,vast / extensive,B,4644
+1829,根本,こんぽん,konpon,root / foundation,T,4646
+1830,相性,あいしょう,aishō,compatibility / chemistry,T,4650
+1831,宝石,ほうせき,hōseki,jewel / gem,B,4651
+1832,反対側,はんたいがわ,hantaigawa,other side / opposite,B,4655
+1833,最新,さいしん,saishin,latest / newest,T,4656
+1834,長男,ちょうなん,chōnan,eldest son,B,4657
+1835,一行,いっこう,ikkō,party / group,C,4660
+1836,賢い,かしこい,kashikoi,smart / clever,B,4665
+1837,顔つき,かおつき,kaotsuki,expression / looks,C,4666
+1838,絆,きずな,kizuna,bond / ties,B,4666
+1839,数値,すうち,sūchi,value / numeric value,T,4669
+1840,雷,かみなり,kaminari,thunder / lightning,B,4673
+1841,馬車,ばしゃ,basha,carriage,C,4674
+1842,水分,すいぶん,suibun,moisture / water,B,4675
+1843,豪華,ごうか,gōka,luxurious / gorgeous,B,4679
+1844,獲物,えもの,emono,prey / catch,C,4682
+1845,問い合わせ,といあわせ,toiawase,inquiry / query,T,4683
+1846,救い,すくい,sukui,relief / salvation,B,4685
+1847,一環,いっかん,ikkan,part / link,C,4686
+1848,列車,れっしゃ,ressha,train,B,4696
+1849,それに,それに,soreni,besides / plus,A,4698
+1850,今月,こんげつ,kongetsu,this month,A,4698
+1851,小声,こごえ,kogoe,whisper / low voice,C,4699
+1852,委員会,いいんかい,iinkai,committee,B,4701
+1853,回数,かいすう,kaisū,count / number of times,T,4701
+1854,英雄,えいゆう,eiyū,hero,C,4703
+1855,食品,しょくひん,shokuhin,food / food products,B,4703
+1856,威力,いりょく,iryoku,power / might,C,4707
+1857,方式,ほうしき,hōshiki,method / scheme,T,4709
+1858,気温,きおん,kion,temperature,B,4710
+1859,斜め,ななめ,naname,diagonal / slanted,B,4712
+1860,貧しい,まずしい,mazushii,poor,B,4712
+1861,戦,いくさ,ikusa,war / battle,C,4721
+1862,原稿,げんこう,genkō,manuscript / draft,B,4723
+1863,幻,まぼろし,maboroshi,illusion / phantom,C,4725
+1864,委員長,いいんちょう,iinchō,chairperson / class rep,B,4731
+1865,哲学,てつがく,tetsugaku,philosophy,B,4731
+1866,意地,いじ,iji,pride / stubbornness,B,4732
+1867,体育,たいいく,taiiku,gym class / phys ed,B,4733
+1868,そのよう,そのよう,sonoyō,that kind of / of the sort,X,4734
+1869,家事,かじ,kaji,housework / chores,B,4736
+1870,軍事,ぐんじ,gunji,military,B,4740
+1871,前向き,まえむき,maemuki,positive / proactive,B,4743
+1872,主役,しゅやく,shuyaku,lead role / star,B,4745
+1873,親指,おやゆび,oyayubi,thumb,C,4745
+1874,駐車場,ちゅうしゃじょう,chūshajō,parking lot,B,4755
+1875,前半,ぜんはん,zenhan,first half,T,4755
+1876,報告書,ほうこくしょ,hōkokusho,report,T,4756
+1877,勘,かん,kan,intuition / hunch,B,4757
+1878,研究者,けんきゅうしゃ,kenkyūsha,researcher,B,4760
+1879,それで,それで,sorede,so / and then,A,4761
+1880,悲劇,ひげき,higeki,tragedy,B,4761
+1881,まとも,まとも,matomo,decent / proper,B,4764
+1882,爆弾,ばくだん,bakudan,bomb,C,4764
+1883,日頃,ひごろ,higoro,usually / everyday,A,4766
+1884,幽霊,ゆうれい,yūrei,ghost,C,4766
+1885,所詮,しょせん,shosen,after all / in the end,A,4770
+1886,仮面,かめん,kamen,mask,C,4771
+1887,豚,ぶた,buta,pig,B,4772
+1888,ずいぶん,ずいぶん,zuibun,quite / very,A,4776
+1889,狼,おおかみ,ōkami,wolf,B,4780
+1890,学年,がくねん,gakunen,school year / grade,B,4784
+1891,散々,さんざん,sanzan,terribly / thoroughly,A,4787
+1892,箸,はし,hashi,chopsticks,B,4791
+1893,えっと,えっと,etto,um / let me see,A,4793
+1894,京,きょう,kyō,imperial capital,X,4795
+1895,好奇心,こうきしん,kōkishin,curiosity,B,4796
+1896,成人,せいじん,seijin,adult,B,4798
+1897,図書,としょ,tosho,books,C,4800
+1898,店舗,てんぽ,tenpo,store / shop,B,4803
+1899,当事者,とうじしゃ,tōjisha,person involved / party,B,4806
+1900,二枚,にまい,nimai,two sheets,X,4807
+1901,不可欠,ふかけつ,fukaketsu,essential / indispensable,T,4809
+1902,予備,よび,yobi,spare / backup,T,4811
+1903,叫び,さけび,sakebi,shout / cry,C,4813
+1904,行事,ぎょうじ,gyōji,event,B,4813
+1905,いつの間にか,いつのまにか,itsunomanika,before I knew it,A,4815
+1906,食欲,しょくよく,shokuyoku,appetite,B,4815
+1907,定期的,ていきてき,teikiteki,regular / periodic,T,4816
+1908,一員,いちいん,ichiin,member,B,4817
+1909,労働者,ろうどうしゃ,rōdōsha,worker,B,4817
+1910,ぎりぎり,ぎりぎり,girigiri,barely / just in time,A,4825
+1911,経済的,けいざいてき,keizaiteki,economic / economical,B,4826
+1912,どうでもいい,どうでもいい,dōdemoii,irrelevant / whatever,B,4827
+1913,兄貴,あにき,aniki,big brother / bro,B,4831
+1914,参加者,さんかしゃ,sankasha,participant,B,4833
+1915,作者,さくしゃ,sakusha,author / creator,B,4841
+1916,精一杯,せいいっぱい,seiippai,my best / all I can,B,4844
+1917,一人一人,ひとりひとり,hitorihitori,each person / one by one,B,4845
+1918,黄金,おうごん,ōgon,gold / golden,C,4847
+1919,自動的,じどうてき,jidōteki,automatic,T,4850
+1920,叔母,おば,oba,aunt,B,4850
+1921,基地,きち,kichi,base,B,4852
+1922,果て,はて,hate,end / far end,C,4853
+1923,近代,きんだい,kindai,modern era / modern,B,4856
+1924,花火,はなび,hanabi,fireworks,B,4859
+1925,快適,かいてき,kaiteki,comfortable / pleasant,B,4861
+1926,大手,おおて,ōte,major company / big,B,4863
+1927,手法,しゅほう,shuhō,technique / method,T,4866
+1928,正当,せいとう,seitō,legitimate / valid,T,4870
+1929,金融,きんゆう,kin'yū,finance,B,4872
+1930,ともかく,ともかく,tomokaku,anyway / at any rate,A,4872
+1931,日常生活,にちじょうせいかつ,nichijōseikatsu,daily life,B,4873
+1932,劇,げき,geki,drama / play,B,4874
+1933,愉快,ゆかい,yukai,fun / pleasant,B,4874
+1934,屋上,おくじょう,okujō,rooftop / roof,B,4876
+1935,住人,じゅうにん,jūnin,resident,B,4876
+1936,使命,しめい,shimei,mission,B,4883
+1937,恨み,うらみ,urami,grudge / resentment,B,4885
+1938,天下,てんか,tenka,the world / the realm,C,4885
+1939,めでたい,めでたい,medetai,happy / joyous,B,4888
+1940,幅広い,はばひろい,habahiroi,wide / broad,T,4894
+1941,動画,どうが,dōga,video,B,4895
+1942,学者,がくしゃ,gakusha,scholar,B,4898
+1943,おはよう,おはよう,ohayō,good morning,A,4899
+1944,金色,きんいろ,kin'iro,gold / golden,B,4900
+1945,封筒,ふうとう,fūtō,envelope,B,4901
+1946,得,とく,toku,benefit / advantage,B,4902
+1947,並,なみ,nami,ordinary / average,B,4903
+1948,体温,たいおん,taion,body temperature,B,4909
+1949,上空,じょうくう,jōkū,sky / overhead,C,4910
+1950,健全,けんぜん,kenzen,healthy / sound,T,4911
+1951,緑色,みどりいろ,midoriiro,green,B,4914
+1952,水面,すいめん,suimen,water surface,C,4916
+1953,女神,めがみ,megami,goddess,C,4921
+1954,後輩,こうはい,kōhai,junior,B,4929
+1955,言動,げんどう,gendō,behavior / conduct,B,4930
+1956,血管,けっかん,kekkan,blood vessel,C,4931
+1957,燃料,ねんりょう,nenryō,fuel,B,4931
+1958,節,せつ,setsu,section / occasion,C,4933
+1959,上着,うわぎ,uwagi,jacket / coat,B,4933
+1960,最強,さいきょう,saikyō,strongest,B,4934
+1961,限度,げんど,gendo,limit,T,4937
+1962,前者,ぜんしゃ,zensha,the former,T,4937
+1963,不利,ふり,furi,disadvantage / drawback,B,4938
+1964,無関係,むかんけい,mukankei,unrelated / irrelevant,T,4938
+1965,なりに,なりに,narini,in one's own way or style,X,4938
+1966,活発,かっぱつ,kappatsu,active / lively,B,4939
+1967,相互,そうご,sōgo,mutual / two-way,B,4940
+1968,根本的,こんぽんてき,konponteki,fundamental,T,4941
+1969,大気,たいき,taiki,atmosphere / air,B,4942
+1970,居間,いま,ima,living room,B,4943
+1971,申し出,もうしで,mōshide,offer / proposal,B,4943
+1972,特有,とくゆう,tokuyū,specific / peculiar,T,4947
+1973,人差し指,ひとさしゆび,hitosashiyubi,index finger,C,4950
+1974,迷い,まよい,mayoi,hesitation / doubt,B,4956
+1975,間近,まぢか,majika,close / near,B,4960
+1976,現実的,げんじつてき,genjitsuteki,realistic / practical,T,4960
+1977,航空,こうくう,kōkū,aviation,B,4960
+1978,国境,こっきょう,kokkyō,border,B,4960
+1979,現金,げんきん,genkin,cash,B,4961
+1980,小柄,こがら,kogara,petite / small build,C,4961
+1981,政権,せいけん,seiken,administration / regime,B,4968
+1982,戦力,せんりょく,senryoku,fighting strength / asset,C,4969
+1983,事柄,ことがら,kotogara,matter / thing,B,4970
+1984,右側,みぎがわ,migigawa,right side,B,4980
+1985,正午,しょうご,shōgo,noon / midday,A,4983
+1986,水準,すいじゅん,suijun,level / standard,T,4996
+1987,徒歩,とほ,toho,on foot / walking,B,4996
+1988,不正,ふせい,fusei,invalid / fraud,T,4999
+1989,脳裏,のうり,nōri,mind,C,5001
+1990,紫,むらさき,murasaki,purple,B,5006
+1991,新人,しんじん,shinjin,newcomer / rookie,B,5006
+1992,臨時,りんじ,rinji,temporary / special,T,5007
+1993,泥,どろ,doro,mud,B,5018
+1994,情勢,じょうせい,jōsei,situation / circumstances,B,5021
+1995,身内,みうち,miuchi,family / relatives,B,5021
+1996,何日,なんにち,nannichi,what day,X,5022
+1997,客観的,きゃっかんてき,kyakkanteki,objective,T,5022
+1998,賑やか,にぎやか,nigiyaka,lively / busy,B,5023
+1999,不審,ふしん,fushin,suspicious,B,5024
+2000,ゆったり,ゆったり,yuttari,relaxed / roomy,B,5029

@@ -1,13 +1,15 @@
-// Service worker: word state and the Gemini key from the Claude Code plugin (native host), site access,
+// Background (service worker in Chrome, event page in Firefox): word state and the Gemini key from the Claude Code plugin (native host), site access,
 // one model call at a time, results back to pages, seen/flip/peek events back to the plugin.
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
-import { resolveLevel, exactFr, isZeroFrench, wordCount } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
+// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
+const chrome = globalThis.browser ?? globalThis.chrome;
 
 const store = chrome.storage.local;
 const cache = createCache(chromeStorage);
@@ -60,14 +62,14 @@ async function swaps(msg, sender) {
   if (msg.revision !== ctx.revision || !activeOn(ctx, sender.url)) return { results: {}, stale: true };
   if (!Array.isArray(msg.items) || msg.items.length > 8) throw new Error('Invalid text batch');
   const items = msg.items.filter((i) => i && typeof i.text === 'string' && i.text.length <= 2000 &&
-    wordCount(i.text) >= 6 && !isZeroFrench(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
+    wordCount(i.text) >= 6 && !isZeroJapanese(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
   const results = await cache.getMany(items.map((i) => i.key));
   const misses = items.filter((i) => !(i.key in results));
   if (!misses.length) return { results };
   try {
     const fresh = await modelCall(async () => {
       if ((await context()).revision !== ctx.revision) return null;
-      if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; French resumes tomorrow`);
+      if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
       const { wordState, apiKey, hostKey } = await store.get(['wordState', 'apiKey', 'hostKey']);
       const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
       return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, words: wordState?.words, fetchImpl,
@@ -97,9 +99,9 @@ function scheduleFlush() {
 async function record(msg, sender) {
   const ctx = await context();
   if (!activeOn(ctx, sender.url) || !['seen', 'flip', 'peek'].includes(msg.event) || typeof msg.word !== 'string') return { ok: false };
-  const word = (await readCached(chromeStorage))?.words.find((w) => exactFr(w.fr) === exactFr(msg.word));
+  const word = (await readCached(chromeStorage))?.words.find((w) => exactJa(w.ja) === exactJa(msg.word));
   if (!word) return { ok: false };
-  await locked(() => queueEvents(chromeStorage, [{ word: word.fr, kind: msg.event }]));
+  await locked(() => queueEvents(chromeStorage, [{ word: word.ja, kind: msg.event }]));
   scheduleFlush();
   return { ok: true };
 }

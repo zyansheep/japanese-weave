@@ -4,6 +4,8 @@ import { flatten, applySwaps, revert, toggle, isSwap, swapWord, SWAP_CLASS } fro
 import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
 import { selector, readable } from './page.js';
+// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
+const chrome = globalThis.browser ?? globalThis.chrome;
 
 let config = null;
 let observer = null;

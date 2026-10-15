@@ -1,23 +1,55 @@
 {
   "manifest_version": 3,
-  "name": "French Weave",
-  "version": "0.2.0",
-  "description": "Swaps a few English words for French on any website in Chrome, at your French Weave level.",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0V8r5wBOrv17b7QXfvtdZjQgrBTK9rLvN33V9OJWpXLKNZZjsW0oDCcbIho+MFMs/i1F5Ovn0IgWT4dmX2Kck7687p/Deet0R3gytQYVMvsMq7oq/9Q2H5o4pxpNC2EEG1cE/4V0s4JOuvItoWZTVo1uukDlpQMA2kN443XeC37gGY2+13wh933/73MyGHgiQTkIltkVj9OwScxcxabRW8nbt0QAZHYK8+pplwvG6HF/gMgY3XC4EPU+lbOSN4GZ+TFeKgsRqtuxGU/rDSw1OgaJsl23f02yU7gqtD54vk2bXxfrX/XsJUPbdCmS0BTubywJijTN7WX6GPi2Iyv7LQIDAQAB",
-  "permissions": ["storage", "alarms", "nativeMessaging", "scripting", "activeTab"],
-  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
-  "background": { "service_worker": "src/background.js", "type": "module" },
+  "name": "Japanese Weave",
+  "version": "0.1.0",
+  "description": "Swaps a few English words for Japanese on any website, at your Japanese Weave level.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArvmqhsPqLEYrxjxSjopBU/JLY9q+PDa4yjZU3lvKMre+SznJh1pYMhGymAi5YRTOnY59v8t/uze2sx8W8TWy+BfXHh3v0oKefF4GzJ4pNh0N2ucsoFoN2+io+wd+FGqKI/WekpO/V7+yrfynPajM57G1aVztdHUyipdhs8ifWxMXEWklKsT0YaJbD3pgvyBEL2i2fG+OCOVLOlDeGgiZaUvdeGyaVgB8nX0bBKMf/fYzXo9wn5P8XJfR9D76sixxC/NxEjvfEgYB/bZf/+lbmLsyLJ5C0U4WJjlxwKa5T4azbGAECe65hAFHncXZm3Z5HkztjT5UQkyqMYuA10nnTQIDAQAB",
+  "permissions": [
+    "storage",
+    "alarms",
+    "nativeMessaging",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["src/content-loader.js"],
-      "css": ["src/content.css"],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "src/content-loader.js"
+      ],
+      "css": [
+        "src/content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
-    { "resources": ["src/*.js"], "matches": ["http://*/*", "https://*/*"] }
+    {
+      "resources": [
+        "src/*.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
   ],
-  "action": { "default_popup": "src/popup.html", "default_title": "French Weave" }
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Japanese Weave"
+  }
 }

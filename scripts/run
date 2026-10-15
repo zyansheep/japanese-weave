@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs a Japanese Weave script with Python 3.9+: python3, else python (some systems, like NixOS setups, have only one).
+if command -v python3 >/dev/null 2>&1; then exec python3 "$@"; fi
+if command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+  exec python "$@"
+fi
+echo 'Japanese Weave needs Python 3.9+ as python3 or python on PATH.' >&2
+exit 1

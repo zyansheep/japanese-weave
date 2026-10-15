@@ -20,8 +20,8 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
   let release;
   const hostEvents = [];
   let hostState = { version: 'test.1', stage: 1, paused: false, prefs: { extension_sites: 'ask' }, words: [
-    { fr: 'et', en: 'and', hint: 'ay', status: 'active' },
-    { fr: 'très', en: 'very', hint: 'treh', status: 'shaky' },
+    { ja: 'et', en: 'and', hint: 'ay', status: 'active' },
+    { ja: 'très', en: 'very', hint: 'treh', status: 'shaky' },
   ] };
   const listener = (arr) => ({ addListener: (fn) => arr.push(fn) });
   const storageArea = (data) => ({
@@ -101,7 +101,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
 
     // Route worker broadcasts to the content module without pretending they came from a page.
     const beforeContent = messageListeners.length;
-    win.document.body.innerHTML = '<main><p id="reading">I enjoy cats and dogs every single day.</p><form><p>Private typing and secrets should stay exactly here.</p></form><p contenteditable="true">Private words and typing must never leave this editor.</p><p id="nested">Keep these and other words <span contenteditable="true">private typed text</span> here.</p><p>My doctor says medication and rest are important.</p><p lang="fr">Bonjour et merci pour cette belle journee ici.</p></main>';
+    win.document.body.innerHTML = '<main><p id="reading">I enjoy cats and dogs every single day.</p><form><p>Private typing and secrets should stay exactly here.</p></form><p contenteditable="true">Private words and typing must never leave this editor.</p><p id="nested">Keep these and other words <span contenteditable="true">private typed text</span> here.</p><p>My doctor says medication and rest are important.</p><p lang="ja">Bonjour et merci pour cette belle journee ici.</p></main>';
     await import('../src/content.js');
     contentListeners.push(...messageListeners.splice(beforeContent));
     await wait();

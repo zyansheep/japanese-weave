@@ -1,6 +1,8 @@
 import { resolveLevel, MAX_BUILT_LEVEL } from './levels.js';
 import { MODELS } from './gemini.js';
 import { siteEnabled, siteOn, hasSiteAccess } from './settings.js';
+// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
+const chrome = globalThis.browser ?? globalThis.chrome;
 
 const $ = (id) => document.getElementById(id);
 const ALL_SITES = ['http://*/*', 'https://*/*'];
@@ -35,7 +37,7 @@ async function refresh() {
   $('siteName').textContent = host || 'This page (not a website)';
   $('grantSites').hidden = all || !s.newSitesEnabled;
   $('accessNote').textContent = s.newSitesEnabled
-    ? (all ? 'On for every site except the ones you turn off. Webmail, AI chat and local addresses start off.' : 'Chrome needs your OK before it can run on other sites.')
+    ? (all ? 'On for every site except the ones you turn off. Webmail, AI chat and local addresses start off.' : 'Your browser needs your OK before this can run on other sites.')
     : 'Off on sites until you turn them on here.';
   const { stage, chosen } = resolveLevel(s, c.stage);
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (Claude Code stage ${stage})` : ''}${chosen > MAX_BUILT_LEVEL ? ` · L${MAX_BUILT_LEVEL} rules for now` : ''}`;
@@ -84,7 +86,7 @@ async function inject() {
   try {
     await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['src/content.css'] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content-loader.js'] });
-  } catch { $('notice').textContent = 'Reload this page to start. Chrome blocks extensions on some pages.'; }
+  } catch { $('notice').textContent = 'Reload this page to start. Browsers block extensions on some pages.'; }
 }
 
 for (const [id, label] of Object.entries(MODELS)) {
@@ -102,7 +104,7 @@ $('apiKey').addEventListener('change', (e) => run(() => save({ apiKey: e.target.
 $('siteEnabled').addEventListener('change', (e) => run(async () => {
   const enabled = e.target.checked;
   if (enabled && !hasSiteAccess(tab.url, status.config.origins)) {
-    // Chrome asks for this one site only; requests need the click that opened this, so it happens first.
+    // The browser asks for this one site only; requests need the click that opened this, so it happens first.
     const accepted = await chrome.permissions.request({ origins: [`${new URL(tab.url).protocol}//${host}/*`] });
     if (!accepted) { await refresh(); return; }
   }

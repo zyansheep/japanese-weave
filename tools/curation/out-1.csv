@@ -1,0 +1,401 @@
+rank,ja,kana,hint,en,tier,score
+1,ない,ない,nai,nonexistent / not being,X,23
+2,という,という,toiu,called / named,X,36
+3,ある,ある,aru,a certain ... / some ...,X,42
+4,そう,そう,sō,in that way / thus,X,42
+5,人,ひと,hito,person / people,B,55
+6,でも,でも,demo,but / however,A,60
+7,この,この,kono,this,X,63
+8,もう,もう,mō,already / anymore,A,68
+9,中,なか,naka,inside / during,T,68
+10,どう,どう,dō,how / in what way,X,77
+11,時,とき,toki,time / when,B,80
+12,として,として,toshite,as / for,X,81
+13,今,いま,ima,now,A,81
+14,そんな,そんな,sonna,such / that sort of,X,83
+15,のです,のです,nodesu,the expectation is that ... / the reason is that ...,X,83
+16,前,まえ,mae,before / front,A,90
+17,そして,そして,soshite,and then / and,A,93
+18,方,ほう,hō,direction / side,B,93
+19,年,ねん,nen,year,X,97
+20,だった,だった,datta,was / were,X,105
+21,顔,かお,kao,face,B,110
+22,だから,だから,dakara,so / that's why,A,111
+23,話,はなし,hanashi,talk / story,B,116
+24,ほど,ほど,hodo,extent / degree,X,121
+25,について,について,nitsuite,about / on,X,124
+26,こう,こう,kō,in this way / like this,X,134
+27,上,うえ,ue,above / on top,T,137
+28,同じ,おなじ,onaji,same,T,139
+29,言葉,ことば,kotoba,word / language,B,140
+30,声,こえ,koe,voice,B,140
+31,なんて,なんて,nante,how ...! / what ...!,X,143
+32,時間,じかん,jikan,time / hours,T,143
+33,物,もの,mono,thing,B,143
+34,少し,すこし,sukoshi,a little / a bit,A,149
+35,だろう,だろう,darō,seems / I think,X,150
+36,本当,ほんとう,hontō,true / real,T,155
+37,こんな,こんな,konna,this sort of / this kind of,X,157
+38,場合,ばあい,baai,case / situation,T,157
+39,家,いえ,ie,house / home,B,158
+40,人間,にんげん,ningen,human / person,B,158
+41,必要,ひつよう,hitsuyō,necessary / needed,T,158
+42,後,あと,ato,after / later,A,160
+43,今日,きょう,kyō,today,A,160
+44,良い,よい,yoi,good / fine,T,164
+45,次,つぎ,tsugi,next,T,165
+46,多い,おおい,ōi,many / a lot,T,173
+47,問題,もんだい,mondai,problem / issue,T,176
+48,悪い,わるい,warui,bad / wrong,T,182
+49,だが,だが,daga,but,A,183
+50,間,あいだ,aida,between / while,T,187
+51,世界,せかい,sekai,world,B,189
+52,強い,つよい,tsuyoi,strong,B,194
+53,相手,あいて,aite,partner / other party,B,203
+54,早い,はやい,hayai,early / quick,T,203
+55,頭,あたま,atama,head,B,206
+56,大きい,おおきい,ōkii,big / large,T,206
+57,かもしれない,かもしれない,kamoshirenai,may / might,X,210
+58,心,こころ,kokoro,heart / mind,B,210
+59,高い,たかい,takai,high / expensive,T,211
+60,好き,すき,suki,like / favorite,B,213
+61,大きな,おおきな,ōkina,big / large,X,216
+62,場所,ばしょ,basho,place / location,T,222
+63,部屋,へや,heya,room,B,222
+64,気持ち,きもち,kimochi,feeling,B,227
+65,にも,にも,nimo,also / too,X,228
+66,姿,すがた,sugata,figure / appearance,C,228
+67,ように,ように,yōni,like / as,X,231
+68,にとって,にとって,nitotte,to / for,X,236
+69,どんな,どんな,donna,what kind of / what sort of,X,237
+70,力,ちから,chikara,power / strength,B,240
+71,また,また,mata,again / also,A,243
+72,ために,ために,tameni,for / for the sake of,X,247
+73,もっと,もっと,motto,more,A,251
+74,音,おと,oto,sound / noise,B,255
+75,体,からだ,karada,body / health,B,263
+76,他,ほか,hoka,other / else,T,268
+77,女性,じょせい,josei,woman,B,268
+78,口,くち,kuchi,mouth,C,270
+79,まだ,まだ,mada,still / not yet,A,270
+80,子供,こども,kodomo,child / kid,B,272
+81,ちょっと,ちょっと,chotto,a bit / a little,A,276
+82,理由,りゆう,riyū,reason,T,276
+83,初めて,はじめて,hajimete,for the first time,A,278
+84,最後,さいご,saigo,last / end,T,280
+85,最初,さいしょ,saisho,first / beginning,T,280
+86,感じ,かんじ,kanji,feeling / vibe,B,281
+87,長い,ながい,nagai,long,T,284
+88,特に,とくに,tokuni,especially,A,288
+89,ずっと,ずっと,zutto,all along / by far,A,292
+90,に対して,にたいして,nitaishite,towards / against,X,293
+91,者,もの,mono,person,X,294
+92,名前,なまえ,namae,name,T,294
+93,新しい,あたらしい,atarashii,new,T,305
+94,国,くに,kuni,country,B,305
+95,別,べつ,betsu,separate / another,T,306
+96,先,さき,saki,ahead / tip,B,307
+97,形,かたち,katachi,shape / form,T,309
+98,状況,じょうきょう,jōkyō,situation,T,313
+99,二人,ふたり,futari,two persons / two people,X,313
+100,下,した,shita,below / under,T,314
+101,一度,いちど,ichido,once,A,316
+102,水,みず,mizu,water,B,320
+103,方法,ほうほう,hōhō,method / way,T,322
+104,外,そと,soto,outside,T,323
+105,どうして,どうして,dōshite,why / how come,A,328
+106,一人,ひとり,hitori,one person,X,333
+107,夜,よる,yoru,night / evening,B,337
+108,少ない,すくない,sukunai,few / little,T,346
+109,状態,じょうたい,jōtai,state / status,T,347
+110,様子,ようす,yōsu,look / state of things,B,349
+111,足,あし,ashi,foot / leg,C,354
+112,用,よう,yō,errand / business,C,354
+113,一番,いちばん,ichiban,most / best,A,356
+114,円,えん,en,yen,X,361
+115,普通,ふつう,futsū,normal / usually,T,363
+116,情報,じょうほう,jōhō,information / info,T,364
+117,楽しい,たのしい,tanoshii,fun / enjoyable,B,366
+118,において,において,nioite,at / in,X,369
+119,道,みち,michi,road / way,B,373
+120,学校,がっこう,gakkō,school,B,374
+121,本,ほん,hon,book,B,381
+122,ただ,ただ,tada,just / only,A,384
+123,小さい,ちいさい,chiisai,small / little,T,385
+124,簡単,かんたん,kantan,simple / easy,T,386
+125,しかし,しかし,shikashi,however / but,A,387
+126,目的,もくてき,mokuteki,purpose / goal,T,390
+127,今度,こんど,kondo,next time / this time,A,391
+128,最近,さいきん,saikin,recently / lately,A,391
+129,先生,せんせい,sensei,teacher / doctor,B,394
+130,点,てん,ten,point / aspect,T,397
+131,だって,だって,datte,because / but,A,401
+132,訳,わけ,wake,reason / meaning,C,402
+133,夢,ゆめ,yume,dream,B,413
+134,若い,わかい,wakai,young,B,414
+135,家族,かぞく,kazoku,family,B,420
+136,昔,むかし,mukashi,long ago / the old days,A,422
+137,よく,よく,yoku,often / well,A,429
+138,通り,とおり,tōri,street / avenue,B,430
+139,思い,おもい,omoi,thought / feeling,C,431
+140,に対する,にたいする,nitaisuru,regarding / in,X,433
+141,深い,ふかい,fukai,deep,B,434
+142,近い,ちかい,chikai,near / close,B,435
+143,まあ,まあ,mā,well / oh well,A,440
+144,大切,たいせつ,taisetsu,important / precious,T,443
+145,元,もと,moto,original / source,T,448
+146,時代,じだい,jidai,era / period,B,448
+147,絶対,ぜったい,zettai,absolutely / definitely,A,448
+148,十分,じゅうぶん,jūbun,enough / sufficient,T,449
+149,自由,じゆう,jiyū,freedom / free,B,451
+150,大変,たいへん,taihen,tough / very,B,452
+151,必ず,かならず,kanarazu,always / without fail,A,453
+152,全く,まったく,mattaku,at all / completely,A,456
+153,朝,あさ,asa,morning,B,460
+154,分,ふん,fun,minute,X,463
+155,欲しい,ほしい,hoshii,want,B,468
+156,まま,まま,mama,as / remaining,X,474
+157,小さな,ちいさな,chiisana,small / little,X,480
+158,一緒,いっしょ,issho,together,X,481
+159,内容,ないよう,naiyō,content / contents,T,485
+160,現在,げんざい,genzai,currently / now,A,487
+161,ああ,ああ,ā,like that / so,X,487
+162,多く,おおく,ōku,many / much,X,489
+163,内,うち,uchi,inside / within,X,491
+164,近く,ちかく,chikaku,nearby / nearly,B,495
+165,今回,こんかい,konkai,this time,A,499
+166,性,せい,sei,nature,X,506
+167,部分,ぶぶん,bubun,part / portion,T,506
+168,無理,むり,muri,impossible / no way,T,506
+169,広い,ひろい,hiroi,wide / spacious,B,507
+170,風,ふう,fū,style / manner,C,508
+171,可能性,かのうせい,kanōsei,possibility / chance,T,509
+172,人々,ひとびと,hitobito,people,B,510
+173,いつも,いつも,itsumo,always / usually,A,513
+174,確か,たしか,tashika,surely / if I recall,A,519
+175,可能,かのう,kanō,possible,T,520
+176,完全,かんぜん,kanzen,complete / perfect,T,521
+177,車,くるま,kuruma,car,B,521
+178,一緒に,いっしょに,isshoni,together,A,522
+179,大事,だいじ,daiji,important / precious,T,526
+180,娘,むすめ,musume,daughter,B,526
+181,実は,じつは,jitsu wa,actually,A,531
+182,色,いろ,iro,color,B,533
+183,大丈夫,だいじょうぶ,daijōbu,fine / okay,T,533
+184,事件,じけん,jiken,incident / case,B,540
+185,写真,しゃしん,shashin,photo,B,546
+186,花,はな,hana,flower,B,548
+187,嫌,いや,iya,unpleasant / hate,B,554
+188,胸,むね,mune,chest,C,555
+189,光,ひかり,hikari,light,B,559
+190,難しい,むずかしい,muzukashii,difficult / hard,T,562
+191,考え,かんがえ,kangae,idea / thought,T,573
+192,会社,かいしゃ,kaisha,company,B,579
+193,何度,なんど,nando,how many times,X,580
+194,としても,としても,toshitemo,even if ... / even supposing that ...,X,583
+195,事実,じじつ,jijitsu,fact,T,589
+196,毎日,まいにち,mainichi,every day / daily,A,590
+197,つもり,つもり,tsumori,intention / plan,C,591
+198,動き,うごき,ugoki,movement / motion,B,591
+199,重要,じゅうよう,jūyō,important / key,T,593
+200,不安,ふあん,fuan,anxiety / uneasy,B,593
+201,面白い,おもしろい,omoshiroi,interesting / funny,T,596
+202,最も,もっとも,mottomo,most,A,598
+203,店,みせ,mise,shop / store,B,599
+204,神,かみ,kami,god,C,601
+205,金,かね,kane,money,B,602
+206,その,その,sono,that / the,X,606
+207,社会,しゃかい,shakai,society,B,617
+208,ゆっくり,ゆっくり,yukkuri,slowly / take your time,A,622
+209,非常,ひじょう,hijō,emergency,C,622
+210,急,きゅう,kyū,sudden / urgent,B,625
+211,友達,ともだち,tomodachi,friend,B,627
+212,実際,じっさい,jissai,in practice / actually,A,628
+213,ちゃんと,ちゃんと,chanto,properly / correctly,A,629
+214,きっと,きっと,kitto,surely / I bet,A,630
+215,自然,しぜん,shizen,nature / natural,B,633
+216,表情,ひょうじょう,hyōjō,facial expression,C,634
+217,首,くび,kubi,neck,C,634
+218,いや,いや,iya,no / nah,A,636
+219,あの,あの,ano,that / those,X,638
+220,午後,ごご,gogo,afternoon / p.m.,B,639
+221,途中,とちゅう,tochū,midway / partway,T,640
+222,海,うみ,umi,sea / ocean,B,641
+223,すぐに,すぐに,suguni,immediately / right away,X,642
+224,例えば,たとえば,tatoeba,for example,A,643
+225,白い,しろい,shiroi,white,B,645
+226,例,れい,rei,example,T,650
+227,軽い,かるい,karui,light / lightweight,T,652
+228,低い,ひくい,hikui,low,T,653
+229,我が,わが,waga,my / our,X,653
+230,人たち,ひとたち,hitotachi,people,X,656
+231,中心,ちゅうしん,chūshin,center / core,B,658
+232,怖い,こわい,kowai,scary,B,659
+233,再び,ふたたび,futatabi,again / once more,A,660
+234,親,おや,oya,parent,B,660
+235,町,まち,machi,town,B,661
+236,優しい,やさしい,yasashii,kind / gentle,B,662
+237,何も,なにも,nanimo,anything / at all,X,663
+238,昨日,きのう,kinō,yesterday,A,663
+239,明らか,あきらか,akiraka,clear / obvious,T,664
+240,あっ,あっ,a,oh / ah,A,668
+241,対象,たいしょう,taishō,target / subject,T,669
+242,腕,うで,ude,arm / skill,C,669
+243,耳,みみ,mimi,ear,C,671
+244,逆,ぎゃく,gyaku,reverse / opposite,T,672
+245,重い,おもい,omoi,heavy / serious,T,675
+246,当然,とうぜん,tōzen,naturally / of course,A,675
+247,人生,じんせい,jinsei,life,B,677
+248,美しい,うつくしい,utsukushii,beautiful,B,680
+249,における,における,niokeru,in / at,X,686
+250,奥,おく,oku,back / depths,C,688
+251,元気,げんき,genki,energetic / well,B,695
+252,結局,けっきょく,kekkyoku,in the end / after all,A,696
+253,特別,とくべつ,tokubetsu,special,T,698
+254,よりも,よりも,yorimo,than / in comparison to,X,702
+255,勝手,かって,katte,selfish / on its own,B,705
+256,うん,うん,un,yeah / yes,A,708
+257,ええ,ええ,ē,yes / right,A,710
+258,空,そら,sora,sky,B,711
+259,結構,けっこう,kekkō,quite / fine,A,711
+260,全部,ぜんぶ,zenbu,all / everything,A,713
+261,一体,いったい,ittai,on earth / the heck,A,716
+262,一部,いちぶ,ichibu,part / some,T,716
+263,肩,かた,kata,shoulder,C,719
+264,技術,ぎじゅつ,gijutsu,technology / technique,T,720
+265,後ろ,うしろ,ushiro,behind / back,B,720
+266,効果,こうか,kōka,effect,T,723
+267,額,がく,gaku,amount / frame,C,726
+268,決して,けっして,kesshite,never / by no means,A,727
+269,数,かず,kazu,number / count,T,727
+270,周り,まわり,mawari,surroundings / around,B,727
+271,限り,かぎり,kagiri,limit / as long as,C,737
+272,男性,だんせい,dansei,man / male,B,737
+273,それでも,それでも,soredemo,even so / still,A,744
+274,突然,とつぜん,totsuzen,suddenly,A,745
+275,壁,かべ,kabe,wall,B,745
+276,これから,これから,korekara,from now on / next,A,747
+277,現実,げんじつ,genjitsu,reality,B,748
+278,別に,べつに,betsuni,not really / particularly,A,749
+279,気分,きぶん,kibun,mood / feeling,B,750
+280,笑い,わらい,warai,laugh / laughter,C,750
+281,当時,とうじ,tōji,back then / at the time,A,751
+282,新た,あらた,arata,new / fresh,C,757
+283,そういう,そういう,sōiu,such / like that,X,759
+284,痛い,いたい,itai,painful / ouch,B,761
+285,全体,ぜんたい,zentai,whole / overall,T,762
+286,大学,だいがく,daigaku,university / college,B,764
+287,不思議,ふしぎ,fushigi,strange / mysterious,B,766
+288,命,いのち,inochi,life,C,766
+289,女の子,おんなのこ,onnanoko,girl,B,768
+290,地域,ちいき,chiiki,region / area,B,770
+291,立場,たちば,tachiba,position / standpoint,B,771
+292,詳しい,くわしい,kuwashii,detailed,T,774
+293,環境,かんきょう,kankyō,environment,T,775
+294,際,さい,sai,occasion / time,X,777
+295,腰,こし,koshi,lower back / waist,C,782
+296,瞬間,しゅんかん,shunkan,moment / instant,B,785
+297,赤い,あかい,akai,red,B,785
+298,敵,てき,teki,enemy,C,785
+299,全然,ぜんぜん,zenzen,at all / not at all,A,787
+300,指,ゆび,yubi,finger,C,788
+301,正しい,ただしい,tadashii,correct / right,T,789
+302,危険,きけん,kiken,dangerous / danger,T,790
+303,激しい,はげしい,hageshii,intense / violent,C,790
+304,母親,ははおや,hahaoya,mother,B,791
+305,違い,ちがい,chigai,difference,T,793
+306,過去,かこ,kako,the past / past,A,793
+307,意見,いけん,iken,opinion,B,794
+308,横,よこ,yoko,side / beside,B,794
+309,妻,つま,tsuma,wife,B,795
+310,時期,じき,jiki,period / season,B,796
+311,もちろん,もちろん,mochiron,of course,A,798
+312,客,きゃく,kyaku,customer / guest,B,800
+313,安全,あんぜん,anzen,safe / safety,T,802
+314,窓,まど,mado,window,B,802
+315,静か,しずか,shizuka,quiet,B,807
+316,能力,のうりょく,nōryoku,ability / skill,B,811
+317,変,へん,hen,weird / strange,T,814
+318,そのまま,そのまま,sonomama,as is / unchanged,A,816
+319,厳しい,きびしい,kibishii,strict / harsh,B,819
+320,髪,かみ,kami,hair,C,820
+321,面,めん,men,aspect / side,C,822
+322,どうしても,どうしても,dōshitemo,no matter what,A,828
+323,はっきり,はっきり,hakkiri,clearly,A,830
+324,今後,こんご,kongo,from now on / in future,A,830
+325,嬉しい,うれしい,ureshii,happy / glad,B,831
+326,じゃあ,じゃあ,jā,well then / so,A,836
+327,一日,いちにち,ichinichi,one day,X,836
+328,様々,さまざま,samazama,various,T,836
+329,責任,せきにん,sekinin,responsibility,B,837
+330,川,かわ,kawa,river,B,841
+331,どういう,どういう,dōiu,what kind of / what sort of,X,846
+332,雨,あめ,ame,rain,B,848
+333,直接,ちょくせつ,chokusetsu,directly / direct,T,849
+334,とても,とても,totemo,very,A,852
+335,行為,こうい,kōi,act / deed,C,852
+336,条件,じょうけん,jōken,condition / requirement,T,852
+337,長,ちょう,chō,head / chief,X,856
+338,どこか,どこか,dokoka,somewhere / somehow,A,858
+339,一方,いっぽう,ippō,on the other hand,A,863
+340,第一,だいいち,daiichi,first / foremost,X,863
+341,向こう,むこう,mukō,over there / other side,B,866
+342,周囲,しゅうい,shūi,surroundings,C,866
+343,自ら,みずから,mizukara,oneself / personally,C,875
+344,遅い,おそい,osoi,slow / late,T,875
+345,さあ,さあ,sā,come on / well,A,878
+346,涙,なみだ,namida,tears,C,884
+347,空気,くうき,kūki,air / atmosphere,B,892
+348,及び,および,oyobi,and / as well as,A,897
+349,役,やく,yaku,role / part,B,897
+350,答え,こたえ,kotae,answer,T,899
+351,約,やく,yaku,about / roughly,A,901
+352,興味,きょうみ,kyōmi,interest,B,902
+353,味,あじ,aji,taste / flavor,B,906
+354,笑顔,えがお,egao,smile,B,907
+355,仲間,なかま,nakama,buddy / companion,B,908
+356,態度,たいど,taido,attitude,B,912
+357,本人,ほんにん,honnin,the person themself,C,914
+358,友人,ゆうじん,yūjin,friend,C,914
+359,感情,かんじょう,kanjō,emotion,B,916
+360,機会,きかい,kikai,chance / opportunity,B,916
+361,人物,じんぶつ,jinbutsu,person / character,B,916
+362,大人,おとな,otona,adult,B,916
+363,病気,びょうき,byōki,illness / sick,B,917
+364,他人,たにん,tanin,others / stranger,B,920
+365,夏,なつ,natsu,summer,B,925
+366,父親,ちちおや,chichioya,father,B,925
+367,まさか,まさか,masaka,no way / surely not,A,926
+368,方向,ほうこう,hōkō,direction,T,926
+369,雰囲気,ふんいき,fun'iki,atmosphere / vibe,B,928
+370,一般,いっぱん,ippan,general / common,T,936
+371,息,いき,iki,breath,C,936
+372,黒い,くろい,kuroi,black,B,938
+373,明るい,あかるい,akarui,bright / cheerful,B,941
+374,右,みぎ,migi,right,B,942
+375,基本,きほん,kihon,basics / basic,T,943
+376,最高,さいこう,saikō,best / maximum,T,946
+377,息子,むすこ,musuko,son,B,948
+378,さっき,さっき,sakki,just now / earlier,A,949
+379,にしても,にしても,nishitemo,even if / even though,X,952
+380,あまり,あまり,amari,not very / too much,A,954
+381,背中,せなか,senaka,back,C,958
+382,事情,じじょう,jijō,circumstances,B,962
+383,残念,ざんねん,zannen,too bad / unfortunate,B,963
+384,すぐ,すぐ,sugu,right away / soon,A,963
+385,古い,ふるい,furui,old / outdated,T,973
+386,病院,びょういん,byōin,hospital,B,973
+387,建物,たてもの,tatemono,building,B,974
+388,幸せ,しあわせ,shiawase,happy / happiness,B,981
+389,どうぞ,どうぞ,dōzo,please / go ahead,A,982
+390,流れ,ながれ,nagare,flow,T,983
+391,種類,しゅるい,shurui,type / kind,T,988
+392,短い,みじかい,mijikai,short,T,988
+393,珍しい,めずらしい,mezurashii,rare / unusual,B,992
+394,先に,さきに,sakini,first / ahead,A,993
+395,意外,いがい,igai,unexpected / surprising,B,997
+396,誰も,だれも,daremo,everyone / anyone,X,999
+397,三人,さんにん,sannin,three people,X,1001
+398,席,せき,seki,seat,B,1007
+399,こういう,こういう,kōiu,such / this sort of,X,1008
+400,距離,きょり,kyori,distance,B,1008

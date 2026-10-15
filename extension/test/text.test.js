@@ -60,7 +60,7 @@ describe('applySwaps', () => {
     const el = tweet('<span>cats and dogs and birds</span>');
     const n = applySwaps(el, [S({ o: 'and', f: 'et', ctx: 'dogs and birds' })]);
     expect(n).toBe(1);
-    expect(el.innerHTML).toBe('<span>cats and dogs <span class="fw-word" data-en="and" data-fr="et" data-tip="and · &quot;ay&quot;" data-fw-split="1" tabindex="0" role="button" aria-label="et: and. Show English">et</span> birds</span>');
+    expect(el.innerHTML).toBe('<span>cats and dogs <span class="fw-word" data-en="and" data-ja="et" data-tip="and · ay" data-fw-split="1" tabindex="0" role="button" aria-label="et: and. Show English">et</span> birds</span>');
     expect(el.textContent).toBe('cats and dogs et birds');
   });
   test('two swaps in one text node, applied in any order', () => {
@@ -128,7 +128,8 @@ describe('applySwaps', () => {
   });
   test('tip without hint is just the gloss', () => {
     expect(tipFor({ g: 'and', h: '' })).toBe('and');
-    expect(tipFor({ g: 'and', h: 'ay' })).toBe('and · "ay"');
+    expect(tipFor({ g: 'and', h: 'ay' })).toBe('and · ay');
+    expect(tipFor({ g: 'now', h: 'ima', k: 'いま' })).toBe('now · ima · いま');
   });
 });
 
@@ -175,7 +176,7 @@ describe('revert and toggle', () => {
     applySwaps(el, swaps);
     expect(el.innerHTML).toBe(first);
   });
-  test('toggle flips between French and English, underline span stays', () => {
+  test('toggle flips between Japanese and English, underline span stays', () => {
     const el = tweet('<span>cats and dogs</span>');
     applySwaps(el, [S({ o: 'And', f: 'Et', ctx: 'cats And' }), S({ o: 'and', f: 'et', ctx: 'cats and dogs' })]);
     const span = el.querySelector('.fw-word');

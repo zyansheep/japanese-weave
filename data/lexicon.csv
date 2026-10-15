@@ -1,1023 +1,1501 @@
-fr,en,hint
-et,and,ay
-mais,but,meh
-donc,so,donk
-avec,with,ah-vek
-sans,without,sahn
-très,very,treh
-aussi,also,oh-see
-maintenant,now,man-tuh-nahn
-pour,for,poor
-parce que,because,pars kuh
-toujours,always,too-zhoor
-peut-être,maybe,puh-tet-ruh
-beaucoup,a lot,boh-koo
-oui,yes,wee
-non,no,noh
-merci,thank you,mair-see
-voilà,there it is,vwah-lah
-important,important,an-por-tahn
-possible,possible,po-see-bluh
-difficile,difficult,dee-fee-seel
-le problème,the problem,luh prob-lem
-la question,the question,lah kess-tyon
-l'idée,the idea,lee-day
-la réponse,the answer,lah ray-ponss
-ou,or,oo
-bien,well,byan
-un peu,a little,uhn puh
-ici,here,ee-see
-c'est,it's,seh
-il y a,there is,eel ee ah
-alors,so / then,ah-lor
-plus,more,plüs
-moins,less,mwan
-déjà,already,day-zha
-encore,again / still,ahn-kor
-jamais,never,zha-meh
-souvent,often,soo-vahn
-vraiment,really,vray-mahn
-seulement,only,suhl-mahn
-presque,almost,presk
-trop,too much,troh
-assez,enough,ah-say
-comme,like / as,kom
-si,if,see
-quand,when,kahn
-pendant,during,pahn-dahn
-avant,before,ah-vahn
-après,after,ah-preh
-entre,between,ahn-tr
-contre,against,kohn-truh
-depuis,since,duh-pwee
-je pense que,I think that,zhuh pahns kuh
-il faut,you have to,eel foh
-par exemple,for example,par eg-zahm-pl
-en fait,actually,ahn fet
-bien sûr,of course,byan sür
-d'accord,okay / agreed,da-kor
-tout,all / everything,too
-rien,nothing,ryan
-quelque chose,something,kel-kuh shohz
-tout le monde,everyone,too luh mond
-le temps,time,luh tahn
-le jour,the day,luh zhoor
-la chose,the thing,lah shohz
-le monde,the world,luh mond
-la vie,life,lah vee
-le travail,work,luh tra-vye
-la raison,the reason,lah ray-zon
-la façon,the way,lah fah-sohn
-la partie,the part,lah par-tee
-le côté,the side,luh koh-tay
-la fin,the end,lah fan
-le début,the beginning,luh day-boo
-grand,big,grahn
-petit,small,puh-tee
-bon,good,bon
-mauvais,bad,mo-veh
-nouveau,new,noo-voh
-vieux,old,vyuh
-même,same / even,mem
-autre,other,oh-tr
-seul,alone / only,suhl
-vrai,true,vray
-faux,false,foh
-facile,easy,fa-seel
-cher,expensive,shair
-mieux,better,myuh
-pire,worse,peer
-pourtant,yet / however,poor-tahn
-surtout,especially,sur-too
-ensuite,next / then,ahn-sweet
-enfin,finally,ahn-fan
-d'abord,first,dah-bor
-puis,then,pwee
-sauf,except,sohf
-selon,according to,suh-lohn
-malgré,despite,mal-gray
-où,where,oo
-pourquoi,why,poor-kwah
-comment,how,ko-mahn
-qui,who,kee
-quoi,what,kwah
-parfois,sometimes,par-fwah
-ensemble,together,ahn-sahm-bl
-bientôt,soon,byan-toh
-aujourd'hui,today,oh-zhoor-dwee
-demain,tomorrow,duh-man
-hier,yesterday,yair
-ce soir,tonight,suh swar
-là,there,lah
-pas du tout,not at all,pah dü too
-quelqu'un,someone,kel-kuhn
-ça,that / this,sa
-dans,in,dahn
-sur,on,sür
-la maison,the house / home,lah may-zon
-la semaine,the week,lah suh-men
-l'année,the year,lah-nay
-l'ami,the friend,lah-mee
-la famille,the family,lah fa-mee
-la ville,the city,lah veel
-le moment,the moment,luh mo-mahn
-la chance,luck,lah shahns
-l'histoire,the story / history,lees-twar
-la musique,music,lah mü-zeek
-le chat,the cat,luh sha
-le chien,the dog,luh shyan
-l'école,school,lay-kol
-jeune,young,zhuhn
-beau,beautiful,boh
-fort,strong,for
-long,long,lon
-chaud,hot,shoh
-froid,cold,frwah
-heureux,happy,uh-ruh
-triste,sad,treest
-libre,free,lee-br
-sûr,sure,sür
-simple,simple,san-pl
-intéressant,interesting,an-tay-reh-sahn
-incroyable,incredible,an-krwa-ya-bl
-parfait,perfect,par-feh
-terrible,terrible,teh-ree-bl
-excellent,excellent,ek-seh-lahn
-différent,different,dee-fay-rahn
-normal,normal,nor-mal
-rapide,fast,ra-peed
-dernier,last,dair-nyay
-premier,first,pruh-myay
-prochain,next,pro-shan
-gratuit,free (no cost),gra-twee
-sérieux,serious,say-ryuh
-drôle,funny,drohl
-fou,crazy,foo
-génial,great / brilliant,zhay-nyal
-impossible,impossible,an-po-see-bl
-j'aime,I love / I like,zhem
-je sais,I know,zhuh seh
-je ne sais pas,I don't know,zhuh nuh seh pah
-s'il vous plaît,please,seel voo pleh
-bonjour,hello,bon-zhoor
-désolé,sorry,day-zo-lay
-ça va,it's fine / how's it going,sa va
-sous,under,soo
-derrière,behind,dair-yair
-devant,in front of,duh-vahn
-près de,near,preh duh
-loin de,far from,lwan duh
-vers,toward,vair
-chez,at (someone's place),shay
-plutôt,rather,plü-toh
-tellement,so much,tel-mahn
-à cause de,because of,ah kohz duh
-grâce à,thanks to,grahs ah
-au lieu de,instead of,oh lyuh duh
-à côté de,next to,ah koh-tay duh
-autour de,around,oh-toor duh
-au moins,at least,oh mwan
-à peu près,roughly,ah puh preh
-sans doute,probably,sahn doot
-pendant que,while,pahn-dahn kuh
-tandis que,whereas,tahn-dee kuh
-lorsque,when,lors-kuh
-dès que,as soon as,deh kuh
-jusqu'à,until,zhüs-kah
-jusqu'ici,so far,zhüs-kee-see
-afin de,in order to,ah-fan duh
-sinon,otherwise,see-non
-cependant,however,suh-pahn-dahn
-quand même,anyway / still,kahn mem
-tout de suite,right away,tood sweet
-tout à fait,absolutely,too tah feh
-peu à peu,little by little,puh ah puh
-vite,quickly,veet
-lentement,slowly,lahnt-mahn
-doucement,gently,doos-mahn
-ailleurs,elsewhere,ah-yur
-partout,everywhere,par-too
-nulle part,nowhere,nül par
-quelque part,somewhere,kel-kuh par
-dedans,inside,duh-dahn
-dehors,outside,duh-or
-en haut,at the top / upstairs,ahn oh
-en bas,at the bottom / downstairs,ahn bah
-tôt,early,toh
-tard,late,tar
-en retard,late (behind time),ahn ruh-tar
-à l'heure,on time,ah lur
-longtemps,a long time,lon-tahn
-tout à l'heure,in a little while,too tah lur
-autrefois,in the past,oh-truh-fwah
-désormais,from now on,day-zor-meh
-environ,about / roughly,ahn-vee-ron
-exactement,exactly,eg-zak-tuh-mahn
-probablement,probably,pro-bah-bluh-mahn
-heureusement,fortunately,uh-ruhz-mahn
-malheureusement,unfortunately,mal-uh-ruhz-mahn
-évidemment,obviously,ay-vee-dah-mahn
-sûrement,surely,sür-mahn
-certainement,certainly,sair-ten-mahn
-complètement,completely,kom-plet-mahn
-simplement,simply,san-pluh-mahn
-facilement,easily,fa-seel-mahn
-rarement,rarely,rar-mahn
-d'habitude,usually,da-bee-tüd
-en général,in general,ahn zhay-nay-ral
-au fait,by the way,oh fet
-à la fois,at the same time,ah lah fwah
-en même temps,at the same time,ahn mem tahn
-de toute façon,anyway,duh toot fah-son
-en tout cas,in any case,ahn too kah
-par contre,on the other hand,par kon-truh
-d'ailleurs,besides,dah-yur
-en plus,on top of that,ahn plüs
-ni,nor,nee
-aucun,none / not any,oh-kuhn
-chaque,each,shak
-plusieurs,several,plü-zyur
-quelques,a few,kel-kuh
-voici,here is,vwah-see
-encore une fois,once again,ahn-kor ün fwah
-pas encore,not yet,pah zahn-kor
-pas mal,not bad,pah mal
-bof,meh,bof
-allez,come on,ah-lay
-bon courage,good luck,bon koo-razh
-bravo,well done,brah-voh
-à bientôt,see you soon,ah byan-toh
-salut,hi / bye,sah-lü
-bonsoir,good evening,bon-swar
-bonne nuit,good night,bun nwee
-au revoir,goodbye,oh ruh-vwar
-excusez-moi,excuse me,ex-kü-zay mwah
-pardon,sorry / excuse me,par-don
-de rien,you're welcome,duh ryan
-pas de problème,no problem,pah duh prob-lem
-c'est ça,that's it,seh sah
-c'est vrai,that's true,seh vray
-c'est pas grave,it's no big deal,seh pah grahv
-tant pis,too bad,tahn pee
-tant mieux,so much the better,tahn myuh
-ça dépend,it depends,sah day-pahn
-ça marche,that works,sah marsh
-ça suffit,that's enough,sah sü-fee
-n'importe quoi,nonsense / anything,nan-port kwah
-n'importe où,anywhere,nan-port oo
-n'importe quand,anytime,nan-port kahn
-il paraît que,apparently,eel pah-reh kuh
-on dirait,it looks like,on dee-reh
-je crois que,I believe that,zhuh krwah kuh
-je veux,I want,zhuh vuh
-je peux,I can,zhuh puh
-je dois,I have to,zhuh dwah
-je vais,I'm going to,zhuh vay
-on peut,we can,on puh
-on va,we're going to,on vah
-il y avait,there was / there were,eel ee ah-veh
-c'était,it was,say-teh
-ce n'est pas,it isn't,suh neh pah
-je suis,I am,zhuh swee
-j'ai,I have,zhay
-voilà pourquoi,that's why,vwah-lah poor-kwah
-en ce moment,right now,ahn suh mo-mahn
-à mon avis,in my opinion,ah mon nah-vee
-en fin de compte,in the end,ahn fan duh kont
-au début,at first,oh day-bü
-à la fin,at the end,ah lah fan
-petit à petit,little by little,puh-tee tah puh-tee
-de temps en temps,from time to time,duh tahn zahn tahn
-tous les jours,every day,too lay zhoor
-chaque fois,each time,shak fwah
-la plupart,most,lah plü-par
-le reste,the rest,luh rest
-beaucoup trop,way too much,boh-koo troh
-ça me plaît,I like it,sah muh pleh
-ça m'énerve,it annoys me,sah may-nairv
-je m'en fiche,I don't care,zhuh mahn feesh
-on verra,we'll see,on veh-rah
-ça y est,that's it / done,sah ee eh
-c'est parti,here we go,seh par-tee
-c'est dommage,it's a pity,seh do-mahzh
-quelle chance,what luck,kel shahns
-pas question,no way,pah kess-tyon
-bien joué,well played,byan zhoo-ay
-à vrai dire,to tell the truth,ah vray deer
-en effet,indeed,ahn eh-feh
-du coup,so / as a result,dü koo
-bref,in short,bref
-carrément,totally,kah-ray-mahn
-franchement,frankly,frahnsh-mahn
-justement,exactly / precisely,zhüst-mahn
-forcément,necessarily,for-say-mahn
-apparemment,apparently,ah-pah-rah-mahn
-absolument,absolutely,ab-so-lü-mahn
-vachement,really (slang),vash-mahn
-d'un côté,on one hand,duhn koh-tay
-de l'autre côté,on the other side,duh loh-truh koh-tay
-la personne,the person,lah pair-sun
-être,to be,eh-truh
-les gens,people,lay zhahn
-gentil,kind / nice,zhahn-tee
-l'homme,the man,lum
-avoir,to have,ah-vwar
-la femme,the woman / wife,lah fam
-faire,to do / make,fair
-l'enfant,the child,lahn-fahn
-méchant,mean,may-shahn
-le garçon,the boy,luh gar-son
-aller,to go,ah-lay
-la fille,the girl / daughter,lah fee
-lundi,Monday,luhn-dee
-le père,the father,luh pair
-venir,to come,vuh-neer
-la mère,the mother,lah mair
-poli,polite,po-lee
-le frère,the brother,luh frair
-voir,to see,vwar
-la sœur,the sister,lah sur
-savoir,to know,sah-vwar
-le fils,the son,luh fees
-fatigué,tired,fah-tee-gay
-les parents,the parents,lay pah-rahn
-pouvoir,to be able to,poo-vwar
-le mari,the husband,luh mah-ree
-le bébé,the baby,luh bay-bay
-vouloir,to want,voo-lwar
-malade,sick,mah-lahd
-le voisin,the neighbor,luh vwah-zan
-devoir,to have to,duh-vwar
-le copain,the buddy / boyfriend,luh ko-pan
-la copine,the friend / girlfriend,lah ko-peen
-dire,to say,deer
-le chef,the boss / chef,luh shef
-prêt,ready,preh
-le client,the customer,luh klee-ahn
-prendre,to take,prahn-druh
-le prof,the teacher,luh prof
-donner,to give,do-nay
-l'élève,the pupil,lay-lev
-occupé,busy,o-kü-pay
-l'étudiant,the student,lay-tü-dyahn
-mettre,to put,meh-truh
-le médecin,the doctor,luh mayd-san
-l'heure,the hour / time of day,lur
-parler,to talk,par-lay
-plein,full,plan
-la minute,the minute,lah mee-nüt
-le matin,the morning,luh mah-tan
-trouver,to find,troo-vay
-l'après-midi,the afternoon,lah-preh mee-dee
-mardi,Tuesday,mar-dee
-le soir,the evening,luh swar
-penser,to think,pahn-say
-vide,empty,veed
-la nuit,the night,lah nwee
-croire,to believe,krwar
-le week-end,the weekend,luh wee-kend
-le mois,the month,luh mwah
-aimer,to love / like,eh-may
-le siècle,the century,luh syeh-kluh
-propre,clean / own,pro-pruh
-l'été,summer,lay-tay
-passer,to pass / spend (time),pah-say
-l'hiver,winter,lee-vair
-rester,to stay,ress-tay
-le printemps,spring,luh pran-tahn
-lourd,heavy,loor
-l'automne,autumn,loh-tun
-partir,to leave,par-teer
-le passé,the past,luh pah-say
-l'avenir,the future,lahv-neer
-sortir,to go out,sor-teer
-léger,light (weight),lay-zhay
-la journée,the day (all day),lah zhoor-nay
-la soirée,the evening / party,lah swah-ray
-entrer,to come in,ahn-tray
-le lendemain,the next day,luh lahnd-man
-doux,soft / mild,doo
-arriver,to arrive / happen,ah-ree-vay
-le pays,the country,luh pay-ee
-la rue,the street,lah rü
-attendre,to wait,ah-tahn-druh
-la route,the road,lah root
-mercredi,Wednesday,mair-kruh-dee
-le quartier,the neighborhood,luh kar-tyay
-chercher,to look for,shair-shay
-dur,hard,dür
-le bureau,the office / desk,luh bü-roh
-la chambre,the bedroom,lah shahm-bruh
-demander,to ask,duh-mahn-day
-la cuisine,the kitchen / cooking,lah kwee-zeen
-répondre,to answer,ray-pon-druh
-la salle de bain,the bathroom,lah sal duh ban
-haut,high / tall,oh
-le jardin,the garden,luh zhar-dan
-comprendre,to understand,kom-prahn-druh
-la porte,the door,lah port
-bas,low,bah
-la fenêtre,the window,lah fuh-neh-truh
-apprendre,to learn,ah-prahn-druh
-le mur,the wall,luh mür
-oublier,to forget,oo-blee-ay
-le toit,the roof,luh twah
-l'étage,the floor (storey),lay-tazh
-étroit,narrow,ay-trwah
-se souvenir,to remember,suh soov-neer
-l'escalier,the stairs,less-kah-lyay
-le magasin,the shop,luh mah-gah-zan
-commencer,to start,ko-mahn-say
-le marché,the market,luh mar-shay
-profond,deep,pro-fon
-la boulangerie,the bakery,lah boo-lahnzh-ree
-finir,to finish,fee-neer
-le restaurant,the restaurant,luh ress-toh-rahn
-continuer,to keep going,kon-tee-nü-ay
-le café,the coffee / café,luh kah-fay
-proche,close / near,prosh
-la gare,the train station,lah gar
-essayer,to try,eh-say-yay
-l'aéroport,the airport,lah-ay-roh-por
-la plage,the beach,lah plahzh
-réussir,to succeed,ray-ü-seer
-la mer,the sea,lah mair
-noir,black,nwar
-perdre,to lose,pair-druh
-la montagne,the mountain,lah mon-tahn-yuh
-jeudi,Thursday,zhuh-dee
-la forêt,the forest,lah fo-reh
-gagner,to win / earn,gahn-yay
-la campagne,the countryside,lah kahm-pahn-yuh
-le lac,the lake,luh lak
-blanc,white,blahn
-acheter,to buy,ahsh-tay
-la rivière,the river,lah ree-vyair
-le ciel,the sky,luh syel
-vendre,to sell,vahn-druh
-le soleil,the sun,luh so-lay
-rouge,red,roozh
-la lune,the moon,lah lün
-payer,to pay,pay-yay
-l'étoile,the star,lay-twahl
-manger,to eat,mahn-zhay
-la pluie,the rain,lah plwee
-bleu,blue,bluh
-la neige,the snow,lah nezh
-boire,to drink,bwar
-le vent,the wind,luh vahn
-dormir,to sleep,dor-meer
-le nuage,the cloud,luh nü-ahzh
-vert,green,vair
-la terre,the earth / ground,lah tair
-travailler,to work,trah-vah-yay
-l'eau,water,loh
-le feu,the fire,luh fuh
-jouer,to play,zhoo-ay
-l'arbre,the tree,lar-bruh
-jaune,yellow,zhohn
-la fleur,the flower,lah flur
-lire,to read,leer
-la pierre,the stone,lah pyair
-vendredi,Friday,vahn-druh-dee
-la voiture,the car,lah vwah-tür
-écrire,to write,ay-kreer
-le vélo,the bike,luh vay-loh
-gris,gray,gree
-écouter,to listen,ay-koo-tay
-le train,the train,luh tran
-l'avion,the plane,lah-vyon
-regarder,to watch / look at,ruh-gar-day
-le bateau,the boat,luh bah-toh
-marron,brown,mah-ron
-le livre,the book,luh lee-vruh
-ouvrir,to open,oo-vreer
-la page,the page,lah pahzh
-fermer,to close,fair-may
-le mot,the word,luh moh
-joli,pretty,zho-lee
-la phrase,the sentence,lah frahz
-marcher,to walk / to work (function),mar-shay
-la langue,the language / tongue,lah lahng
-la lettre,the letter,lah let-ruh
-courir,to run,koo-reer
-le message,the message,luh meh-sahzh
-moche,ugly,mosh
-l'écran,the screen,lay-krahn
-tomber,to fall,tom-bay
-le téléphone,the phone,luh tay-lay-fun
-monter,to go up,mon-tay
-l'ordinateur,the computer,lor-dee-nah-tur
-mignon,cute,meen-yon
-le clavier,the keyboard,luh klah-vyay
-descendre,to go down,day-sahn-druh
-la souris,the mouse,lah soo-ree
-samedi,Saturday,sam-dee
-le fichier,the file,luh fee-shyay
-tourner,to turn,toor-nay
-le dossier,the folder,luh doh-syay
-riche,rich,reesh
-le lien,the link,luh lyan
-changer,to change,shahn-zhay
-le site,the website,luh seet
-choisir,to choose,shwah-zeer
-le logiciel,the software,luh lo-zhee-syel
-pauvre,poor,poh-vruh
-l'appli,the app,lah-plee
-décider,to decide,day-see-day
-le réseau,the network,luh ray-zoh
-la mise à jour,the update,lah meez ah zhoor
-aider,to help,ay-day
-étrange,strange,ay-trahnzh
-le mot de passe,the password,luh moh duh pahss
-utiliser,to use,ü-tee-lee-zay
-le serveur,the server,luh sair-vur
-la base de données,the database,lah bahz duh do-nay
-créer,to create,kray-ay
-l'erreur,the error,lair-ur
-connu,well-known,ko-nü
-la panne,the outage / breakdown,lah pan
-construire,to build,kon-strweer
-la sauvegarde,the backup,lah sohv-gard
-casser,to break,kah-say
-la clé,the key,lah klay
-célèbre,famous,say-leh-bruh
-la boîte,the box,lah bwaht
-réparer,to fix,ray-pah-ray
-le sac,the bag,luh sak
-la table,the table,lah tah-bluh
-vérifier,to check,vay-ree-fyay
-inconnu,unknown,an-ko-nü
-la chaise,the chair,lah shez
-le lit,the bed,luh lee
-envoyer,to send,ahn-vwah-yay
-le verre,the glass,luh vair
-dimanche,Sunday,dee-mahnsh
-recevoir,to receive,ruh-suh-vwar
-la tasse,the cup,lah tahss
-utile,useful,ü-teel
-l'assiette,the plate,lah-syet
-appeler,to call,ahp-lay
-la bouteille,the bottle,lah boo-tay
-le couteau,the knife,luh koo-toh
-montrer,to show,mon-tray
-la fourchette,the fork,lah foor-shet
-inutile,useless,ee-nü-teel
-la cuillère,the spoon,lah kwee-yair
-expliquer,to explain,ex-plee-kay
-l'argent,money / silver,lar-zhahn
-raconter,to tell (a story),rah-kon-tay
-le prix,the price / prize,luh pree
-nécessaire,necessary,nay-say-sair
-la carte,the card / map,lah kart
-garder,to keep,gar-day
-le billet,the ticket / banknote,luh bee-yeh
-le cadeau,the gift,luh kah-doh
-laisser,to leave / let,leh-say
-pratique,handy / practical,prah-teek
-le jeu,the game,luh zhuh
-le jouet,the toy,luh zhoo-eh
-porter,to carry / wear,por-tay
-la photo,the photo,lah fo-toh
-compliqué,complicated,kom-plee-kay
-tenir,to hold,tuh-neer
-le film,the movie,luh feelm
-la chanson,the song,lah shahn-son
-suivre,to follow,swee-vruh
-le dessin,the drawing,luh deh-san
-précis,precise,pray-see
-le tableau,the painting / board,luh tah-bloh
-sembler,to seem,sahm-blay
-la couleur,the color,lah koo-lur
-devenir,to become,duhv-neer
-la forme,the shape,lah form
-janvier,January,zhahn-vyay
-la taille,the size,lah tye
-revenir,to come back,ruhv-neer
-le bruit,the noise,luh brwee
-juste,fair / right,zhüst
-la voix,the voice,lah vwah
-rentrer,to go home,rahn-tray
-la lumière,the light,lah lü-myair
-ancien,old / former,ahn-syan
-l'ombre,the shadow / shade,lom-bruh
-voyager,to travel,vwah-yah-zhay
-le vêtement,the piece of clothing,luh vet-mahn
-conduire,to drive,kon-dweer
-la chemise,the shirt,lah shuh-meez
-le pantalon,the pants / trousers,luh pahn-tah-lon
-moderne,modern,mo-dairn
-nager,to swim,nah-zhay
-la robe,the dress,lah rob
-les chaussures,the shoes,lay shoh-sür
-danser,to dance,dahn-say
-le manteau,the coat,luh mahn-toh
-actuel,current,ak-tü-el
-le chapeau,the hat,luh shah-poh
-chanter,to sing,shahn-tay
-le pain,the bread,luh pan
-cuisiner,to cook,kwee-zee-nay
-le fromage,the cheese,luh fro-mahzh
-suivant,next / following,swee-vahn
-le vin,the wine,luh van
-ranger,to tidy up,rahn-zhay
-la bière,the beer,lah byair
-le lait,the milk,luh leh
-nettoyer,to clean,neh-twah-yay
-le beurre,the butter,luh bur
-précédent,previous,pray-say-dahn
-laver,to wash,lah-vay
-l'œuf,the egg,luhf
-la viande,the meat,lah vyahnd
-février,February,fay-vree-ay
-habiter,to live (somewhere),ah-bee-tay
-le poulet,the chicken,luh poo-leh
-le poisson,the fish,luh pwah-son
-entier,whole,ahn-tyay
-vivre,to live,vee-vruh
-les légumes,vegetables,lay lay-güm
-le fruit,the fruit,luh frwee
-sentir,to feel / smell,sahn-teer
-la pomme,the apple,lah pum
-pareil,the same / alike,pah-ray
-toucher,to touch,too-shay
-la fraise,the strawberry,lah frez
-le sucre,the sugar,luh sü-kruh
-entendre,to hear,ahn-tahn-druh
-le sel,the salt,luh sel
-semblable,similar,sahm-blah-bluh
-le chocolat,the chocolate,luh sho-ko-lah
-connaître,to know (be familiar with),ko-neh-truh
-le gâteau,the cake,luh gah-toh
-reconnaître,to recognize,ruh-ko-neh-truh
-la soupe,the soup,lah soop
-meilleur,better / best,may-yur
-le riz,the rice,luh ree
-préférer,to prefer,pray-fay-ray
-les pâtes,pasta,lay paht
-le petit-déjeuner,breakfast,luh puh-tee day-zhuh-nay
-détester,to hate,day-tess-tay
-le déjeuner,lunch,luh day-zhuh-nay
-énorme,huge,ay-norm
-le dîner,dinner,luh dee-nay
-espérer,to hope,ess-pay-ray
-le repas,the meal,luh ruh-pah
-mars,March,mars
-le goût,the taste,luh goo
-rêver,to dream,reh-vay
-la faim,hunger,lah fan
-âgé,elderly,ah-zhay
-rire,to laugh,reer
-la soif,thirst,lah swahf
-le projet,the project,luh pro-zheh
-pleurer,to cry,pluh-ray
-le but,the goal,luh büt
-vivant,alive,vee-vahn
-le choix,the choice,luh shwah
-sourire,to smile,soo-reer
-la décision,the decision,lah day-see-zyon
-crier,to shout,kree-ay
-le changement,the change,luh shahnzh-mahn
-fier,proud,fyair
-le besoin,the need,luh buh-zwan
-se reposer,to rest,suh ruh-poh-zay
-l'envie,the urge / desire,lahn-vee
-le plaisir,pleasure,luh pleh-zeer
-se lever,to get up,suh luh-vay
-la peur,fear,lah pur
-timide,shy,tee-meed
-l'amour,love,lah-moor
-se coucher,to go to bed,suh koo-shay
-la joie,joy,lah zhwah
-s'asseoir,to sit down,sah-swar
-la colère,anger,lah ko-lair
-curieux,curious,kü-ryuh
-le souvenir,the memory,luh soov-neer
-se dépêcher,to hurry,suh day-peh-shay
-le rêve,the dream,luh rev
-l'avis,the opinion,lah-vee
-arrêter,to stop,ah-reh-tay
-sympa,nice / friendly,san-pah
-le conseil,the advice,luh kon-say
-bouger,to move,boo-zhay
-l'aide,help,led
-avril,April,ah-vreel
-le droit,the right / law,luh drwah
-pousser,to push / grow,poo-say
-la loi,the law,lah lwah
-nul,rubbish / no good,nül
-la règle,the rule,lah reh-gluh
-tirer,to pull,tee-ray
-le résultat,the result,luh ray-zül-tah
-la solution,the solution,lah so-lü-syon
-lancer,to launch / throw,lahn-say
-magnifique,magnificent,mahn-yee-feek
-le moyen,the means / way,luh mwah-yan
-installer,to install,an-stah-lay
-la manière,the manner / way,lah mah-nyair
-le sens,the meaning / direction,luh sahns
-télécharger,to download,tay-lay-shar-zhay
-le genre,the kind / type,luh zhahn-ruh
-chouette,cool / neat,shoo-et
-l'exemple,the example,leg-zahm-pluh
-charger,to load,shar-zhay
-le cas,the case,luh kah
-enregistrer,to save / record,ahn-ruh-zhees-tray
-le fait,the fact,luh feh
-dangereux,dangerous,dahnzh-ruh
-la vérité,the truth,lah vay-ree-tay
-supprimer,to delete,sü-pree-may
-le mensonge,the lie,luh mahn-sonzh
-la preuve,the proof,lah pruhv
-copier,to copy,ko-pyay
-tranquille,quiet / calm,trahn-keel
-le risque,the risk,luh reesk
-l'effort,the effort,leh-for
-coller,to paste / stick,ko-lay
-le succès,success,luh sük-seh
-bruyant,noisy,brwee-yahn
-partager,to share,par-tah-zhay
-l'échec,the failure,lay-shek
-le progrès,progress,luh pro-greh
-compter,to count,kon-tay
-la suite,what comes next / the rest,lah sweet
-mai,May,meh
-le point,the point,luh pwan
-comparer,to compare,kom-pah-ray
-silencieux,silent,see-lahn-syuh
-le sujet,the subject / topic,luh sü-zheh
-le niveau,the level,luh nee-voh
-ajouter,to add,ah-zhoo-tay
-le nombre,the number,luh nom-bruh
-enlever,to remove,ahn-luh-vay
-la moitié,half,lah mwah-tyay
-frais,fresh / cool,freh
-la place,the space / seat / square,lah plahss
-remplacer,to replace,rahm-plah-say
-l'endroit,the place / spot,lahn-drwah
-le chemin,the path / way,luh shuh-man
-déplacer,to move (something),day-plah-say
-tiède,lukewarm,tyed
-le voyage,the trip,luh vwah-yahzh
-régler,to sort out / adjust,ray-glay
-les vacances,the vacation,lay vah-kahns
-la fête,the party,lah fet
-sec,dry,sek
-gérer,to manage,zhay-ray
-l'anniversaire,the birthday,lah-nee-vair-sair
-le rendez-vous,the appointment / date,luh rahn-day-voo
-planter,to crash / plant,plahn-tay
-la réunion,the meeting,lah ray-ü-nyon
-mouillé,wet,moo-yay
-l'équipe,the team,lay-keep
-redémarrer,to restart,ruh-day-mah-ray
-l'entreprise,the company,lahn-truh-preez
-mettre à jour,to update,meh-truh ah zhoor
-le patron,the boss,luh pah-tron
-juin,June,zhwan
-le collègue,the colleague,luh ko-leg
-oser,to dare,oh-zay
-le métier,the job / trade,luh may-tyay
-malin,clever / sly,mah-lan
-le boulot,the job (casual),luh boo-loh
-permettre,to allow,pair-meh-truh
-le salaire,the salary,luh sah-lair
-bête,silly / stupid,bet
-la santé,health,lah sahn-tay
-refuser,to refuse,ruh-fü-zay
-le corps,the body,luh kor
-accepter,to accept,ak-sep-tay
-la tête,the head,lah tet
-le cœur,the heart,luh kur
-faible,weak,feh-bluh
-proposer,to suggest,pro-poh-zay
-la main,the hand,lah man
-le bras,the arm,luh brah
-promettre,to promise,pro-meh-truh
-la jambe,the leg,lah zhahmb
-gros,big / fat,groh
-le pied,the foot,luh pyay
-prévoir,to plan / forecast,pray-vwar
-les yeux,the eyes,lay zyuh
-préparer,to prepare,pray-pah-ray
-la bouche,the mouth,lah boosh
-mince,thin,mans
-le nez,the nose,luh nay
-rencontrer,to meet,rahn-kon-tray
-l'oreille,the ear,lo-ray
-les cheveux,hair,lay shuh-vuh
-visiter,to visit (a place),vee-zee-tay
-le dos,the back,luh doh
-nombreux,numerous,nom-bruh
-remercier,to thank,ruh-mair-syay
-la peau,the skin,lah poh
-le visage,the face,luh vee-zahzh
-s'excuser,to apologize,sex-kü-zay
-le sourire,the smile,luh soo-reer
-juillet,July,zhwee-yeh
-fréquent,frequent,fray-kahn
-la larme,the tear,lah larm
-se tromper,to be wrong,suh trom-pay
-l'oiseau,the bird,lwah-zoh
-le cheval,the horse,luh shuh-val
-avoir raison,to be right,ah-vwar ray-zon
-la vache,the cow,lah vash
-habituel,usual,ah-bee-tü-el
-avoir tort,to be wrong,ah-vwar tor
-le lapin,the rabbit,luh lah-pan
-l'ours,the bear,loors
-avoir besoin de,to need,ah-vwar buh-zwan duh
-le loup,the wolf,luh loo
-quotidien,daily,ko-tee-dyan
-le renard,the fox,luh ruh-nar
-avoir envie de,to feel like,ah-vwar ahn-vee duh
-la vue,the view / sight,lah vü
-avoir peur,to be afraid,ah-vwar pur
-le bout,the end / bit,luh boo
-évident,obvious,ay-vee-dahn
-le morceau,the piece,luh mor-soh
-avoir faim,to be hungry,ah-vwar fan
-la ligne,the line,lah leen-yuh
-le fil,the thread / wire,luh feel
-avoir soif,to be thirsty,ah-vwar swahf
-le trou,the hole,luh troo
-cassé,broken,kah-say
-le coin,the corner,luh kwan
-faire attention,to be careful,fair ah-tahn-syon
-le bord,the edge,luh bor
-faire la fête,to party,fair lah fet
-le milieu,the middle,luh mee-lyuh
-fini,finished / done,fee-nee
-le fond,the bottom / background,luh fon
-faire les courses,to go grocery shopping,fair lay koors
-le pont,the bridge,luh pon
-août,August,oot
-l'église,the church,lay-gleez
-prendre le temps,to take the time,prahn-druh luh tahn
-le musée,the museum,luh mü-zay
-disponible,available,dees-po-nee-bluh
-la bibliothèque,the library,lah bee-blee-oh-tek
-se rendre compte,to realize,suh rahn-druh kont
-l'hôpital,the hospital,lo-pee-tal
-dépenser,to spend (money),day-pahn-say
-la banque,the bank,lah bahnk
-ouvert,open,oo-vair
-la poste,the post office,lah post
-emprunter,to borrow,ahm-pruhn-tay
-le parc,the park,luh park
-le village,the village,luh vee-lahzh
-prêter,to lend,preh-tay
-l'île,the island,leel
-fermé,closed,fair-may
-le champ,the field,luh shahn
-rendre,to give back,rahn-druh
-le sol,the floor / ground,luh sol
-servir,to serve / be useful,sair-veer
-le plafond,the ceiling,luh plah-fon
-payant,paid (not free),pay-yahn
-le coup,the blow / hit,luh koo
-valoir,to be worth,vah-lwar
-le geste,the gesture,luh zhest
-pleuvoir,to rain,pluh-vwar
-le pas,the step,luh pah
-amusant,fun,ah-mü-zahn
-la course,the race / errand,lah koors
-briller,to shine,bree-yay
-le sport,sport,luh spor
-le match,the match / game,luh match
-brûler,to burn,brü-lay
-ennuyeux,boring,ahn-nwee-yuh
-le ballon,the ball,luh bah-lon
-le joueur,the player,luh zhoo-ur
-couper,to cut,koo-pay
-le tour,the turn / tour,luh toor
-septembre,September,sep-tahm-bruh
-la fois,the time (occasion),lah fwah
-mélanger,to mix,may-lahn-zhay
-passionnant,exciting,pah-syo-nahn
-l'occasion,the opportunity,lo-kah-zyon
-goûter,to taste,goo-tay
-la nouvelle,the news,lah noo-vel
-le journal,the newspaper,luh zhoor-nal
-remplir,to fill,rahm-pleer
-la télé,the TV,lah tay-lay
-inquiet,worried,an-kyeh
-l'émission,the show (TV),lay-mee-syon
-vider,to empty,vee-day
-la série,the series,lah say-ree
-cacher,to hide,kah-shay
-le doute,the doubt,luh doot
-énervé,annoyed,ay-nair-vay
-la peine,trouble / sorrow,lah pen
-deviner,to guess,duh-vee-nay
-le souci,the worry,luh soo-see
-la confiance,trust,lah kon-fyahns
-enseigner,to teach,ahn-sen-yay
-surpris,surprised,sür-pree
-la paix,peace,lah peh
-la guerre,war,lah gair
-étudier,to study,ay-tü-dyay
-le pouvoir,power,luh poo-vwar
-déçu,disappointed,day-sü
-répéter,to repeat,ray-pay-tay
-la force,strength,lah fors
-la chaleur,heat,lah shah-lur
-traduire,to translate,trah-dweer
-la vitesse,speed,lah vee-tess
-octobre,October,ok-to-bruh
-le poids,weight,luh pwah
-corriger,to correct,ko-ree-zhay
-ravi,delighted,rah-vee
-la longueur,length,lah lon-gur
-la hauteur,height,lah oh-tur
-signer,to sign,seen-yay
-la pensée,the thought,lah pahn-say
-lever,to raise,luh-vay
-la mémoire,memory,lah may-mwar
-perdu,lost,pair-dü
-l'esprit,the mind / spirit,less-pree
-baisser,to lower,beh-say
-l'âme,the soul,lahm
-épais,thick,ay-peh
-le caractère,personality,luh kah-rak-tair
-allumer,to turn on / light,ah-lü-may
-l'humeur,the mood,lü-mur
-éteindre,to turn off,ay-tan-druh
-la blague,the joke,lah blahg
-la promenade,the walk,lah prom-nahd
-mûr,ripe,mür
-brancher,to plug in,brahn-shay
-la balade,the stroll / ride,lah bah-lahd
-le parapluie,the umbrella,luh pah-rah-plwee
-sauver,to save / rescue,soh-vay
-la valise,the suitcase,lah vah-leez
-sucré,sweet,sü-kray
-le navigateur,the browser,luh nah-vee-gah-tur
-protéger,to protect,pro-tay-zhay
-l'onglet,the tab,lon-gleh
-défendre,to defend,day-fahn-druh
-le bouton,the button,luh boo-ton
-salé,salty,sah-lay
-le clic,the click,luh kleek
-battre,to beat,bah-truh
-le disque,the disk,luh deesk
-novembre,November,no-vahm-bruh
-l'outil,the tool,loo-tee
-offrir,to give (a gift),o-freer
-la tâche,the task,lah tahsh
-amer,bitter,ah-mair
-la liste,the list,lah leest
-emmener,to take (someone) along,ahm-nay
-la colonne,the column,lah ko-lun
-apporter,to bring,ah-por-tay
-le titre,the title,luh tee-truh
-le nom,the name,luh non
-délicieux,delicious,day-lee-syuh
-quitter,to leave (a place),kee-tay
-le prénom,the first name,luh pray-non
-l'adresse,the address,lah-dress
-manquer,to miss / lack,mahn-kay
-le courriel,the email,luh koo-ree-el
-dégoûtant,disgusting,day-goo-tahn
-le compte,the account,luh kont
-rater,to miss / fail,rah-tay
-l'utilisateur,the user,lü-tee-lee-zah-tur
-éviter,to avoid,ay-vee-tay
-le paramètre,the setting,luh pah-rah-meh-truh
-bon marché,cheap,bon mar-shay
-l'essai,the attempt / test,leh-seh
-empêcher,to prevent,ahm-peh-shay
-la branche,the branch,lah brahnsh
-le dépôt,the repository / deposit,luh day-poh
-s'occuper de,to take care of,so-kü-pay duh
-la demande,the request,lah duh-mahnd
-rempli,filled,rahm-plee
-s'inquiéter,to worry,san-kyay-tay
-la boucle,the loop,lah boo-kluh
-le paquet,the package,luh pah-keh
-s'habituer,to get used to,sah-bee-tü-ay
-la commande,the command / order,lah ko-mahnd
-étranger,foreign,ay-trahn-zhay
-le déchet,the waste / trash,luh day-sheh
-s'amuser,to have fun,sah-mü-zay
-la poubelle,the trash can,lah poo-bel
-décembre,December,day-sahm-bruh
-le cahier,the notebook,luh kah-yay
-s'ennuyer,to be bored,sahn-nwee-yay
-le stylo,the pen,luh stee-loh
-français,French,frahn-seh
-se sentir,to feel,suh sahn-teer
-le crayon,the pencil,luh kray-yon
-le papier,the paper,luh pah-pyay
-se passer,to happen,suh pah-say
-la feuille,the leaf / sheet,lah fuh-yuh
-anglais,English,ahn-gleh
-le cours,the class / course,luh koor
-se demander,to wonder,suh duh-mahn-day
-la leçon,the lesson,lah luh-son
-se perdre,to get lost,suh pair-druh
-l'examen,the exam,leg-zah-man
-américain,American,ah-may-ree-kan
-la note,the grade / note,lah nut
-s'appeler,to be called,sahp-lay
-la classe,the class,lah klahss
+ja,en,hint,kana
+でも,but / however,demo,でも
+もう,already / anymore,mō,もう
+中,inside / during,naka,なか
+今,now,ima,いま
+前,before / front,mae,まえ
+そして,and then / and,soshite,そして
+だから,so / that's why,dakara,だから
+上,above / on top,ue,うえ
+同じ,same,onaji,おなじ
+時間,time / hours,jikan,じかん
+少し,a little / a bit,sukoshi,すこし
+本当,true / real,hontō,ほんとう
+場合,case / situation,baai,ばあい
+必要,necessary / needed,hitsuyō,ひつよう
+後,after / later,ato,あと
+今日,today,kyō,きょう
+良い,good / fine,yoi,よい
+次,next,tsugi,つぎ
+多い,many / a lot,ōi,おおい
+問題,problem / issue,mondai,もんだい
+悪い,bad / wrong,warui,わるい
+だが,but,daga,だが
+人,person / people,hito,ひと
+間,between / while,aida,あいだ
+意味,meaning / mean,imi,いみ
+早い,early / quick,hayai,はやい
+大きい,big / large,ōkii,おおきい
+高い,high / expensive,takai,たかい
+場所,place / location,basho,ばしょ
+関係,relationship / relation,kankei,かんけい
+また,again / also,mata,また
+もっと,more,motto,もっと
+時,time / when,toki,とき
+他,other / else,hoka,ほか
+まだ,still / not yet,mada,まだ
+ちょっと,a bit / a little,chotto,ちょっと
+理由,reason,riyū,りゆう
+初めて,for the first time,hajimete,はじめて
+最後,last / end,saigo,さいご
+最初,first / beginning,saisho,さいしょ
+長い,long,nagai,ながい
+特に,especially,tokuni,とくに
+ずっと,all along / by far,zutto,ずっと
+名前,name,namae,なまえ
+結果,result / outcome,kekka,けっか
+新しい,new,atarashii,あたらしい
+別,separate / another,betsu,べつ
+存在,exist / existence,sonzai,そんざい
+形,shape / form,katachi,かたち
+方,direction / side,hō,ほう
+状況,situation,jōkyō,じょうきょう
+下,below / under,shita,した
+一度,once,ichido,いちど
+方法,method / way,hōhō,ほうほう
+外,outside,soto,そと
+どうして,why / how come,dōshite,どうして
+説明,explain / explanation,setsumei,せつめい
+少ない,few / little,sukunai,すくない
+状態,state / status,jōtai,じょうたい
+一番,most / best,ichiban,いちばん
+普通,normal / usually,futsū,ふつう
+情報,information / info,jōhō,じょうほう
+顔,face,kao,かお
+ただ,just / only,tada,ただ
+小さい,small / little,chiisai,ちいさい
+簡単,simple / easy,kantan,かんたん
+話,talk / story,hanashi,はなし
+しかし,however / but,shikashi,しかし
+目的,purpose / goal,mokuteki,もくてき
+今度,next time / this time,kondo,こんど
+最近,recently / lately,saikin,さいきん
+点,point / aspect,ten,てん
+だって,because / but,datte,だって
+理解,understand / understanding,rikai,りかい
+昔,long ago / the old days,mukashi,むかし
+よく,often / well,yoku,よく
+まあ,well / oh well,mā,まあ
+大切,important / precious,taisetsu,たいせつ
+元,original / source,moto,もと
+絶対,absolutely / definitely,zettai,ぜったい
+十分,enough / sufficient,jūbun,じゅうぶん
+必ず,always / without fail,kanarazu,かならず
+全く,at all / completely,mattaku,まったく
+原因,cause,gen'in,げんいん
+言葉,word / language,kotoba,ことば
+声,voice,koe,こえ
+物,thing,mono,もの
+内容,content / contents,naiyō,ないよう
+現在,currently / now,genzai,げんざい
+利用,use / make use of,riyō,りよう
+今回,this time,konkai,こんかい
+部分,part / portion,bubun,ぶぶん
+無理,impossible / no way,muri,むり
+可能性,possibility / chance,kanōsei,かのうせい
+いつも,always / usually,itsumo,いつも
+確か,surely / if I recall,tashika,たしか
+可能,possible,kanō,かのう
+完全,complete / perfect,kanzen,かんぜん
+一緒に,together,isshoni,いっしょに
+大事,important / precious,daiji,だいじ
+家,house / home,ie,いえ
+人間,human / person,ningen,にんげん
+確認,check / confirm,kakunin,かくにん
+実は,actually,jitsu wa,じつは
+大丈夫,fine / okay,daijōbu,だいじょうぶ
+難しい,difficult / hard,muzukashii,むずかしい
+期待,expect / expectation,kitai,きたい
+質問,question / ask,shitsumon,しつもん
+考え,idea / thought,kangae,かんがえ
+事実,fact,jijitsu,じじつ
+毎日,every day / daily,mainichi,まいにち
+重要,important / key,jūyō,じゅうよう
+面白い,interesting / funny,omoshiroi,おもしろい
+最も,most,mottomo,もっとも
+計画,plan,keikaku,けいかく
+ゆっくり,slowly / take your time,yukkuri,ゆっくり
+仕事,work / job,shigoto,しごと
+実際,in practice / actually,jissai,じっさい
+ちゃんと,properly / correctly,chanto,ちゃんと
+世界,world,sekai,せかい
+きっと,surely / I bet,kitto,きっと
+いや,no / nah,iya,いや
+途中,midway / partway,tochū,とちゅう
+例えば,for example,tatoeba,たとえば
+強い,strong,tsuyoi,つよい
+例,example,rei,れい
+軽い,light / lightweight,karui,かるい
+低い,low,hikui,ひくい
+再び,again / once more,futatabi,ふたたび
+昨日,yesterday,kinō,きのう
+明らか,clear / obvious,akiraka,あきらか
+あっ,oh / ah,a,あっ
+影響,affect / impact,eikyō,えいきょう
+対象,target / subject,taishō,たいしょう
+逆,reverse / opposite,gyaku,ぎゃく
+重い,heavy / serious,omoi,おもい
+当然,naturally / of course,tōzen,とうぜん
+相手,partner / other party,aite,あいて
+頭,head,atama,あたま
+報告,report,hōkoku,ほうこく
+結局,in the end / after all,kekkyoku,けっきょく
+特別,special,tokubetsu,とくべつ
+心,heart / mind,kokoro,こころ
+うん,yeah / yes,un,うん
+好き,like / favorite,suki,すき
+ええ,yes / right,ē,ええ
+結構,quite / fine,kekkō,けっこう
+全部,all / everything,zenbu,ぜんぶ
+一体,on earth / the heck,ittai,いったい
+一部,part / some,ichibu,いちぶ
+技術,technology / technique,gijutsu,ぎじゅつ
+効果,effect,kōka,こうか
+決して,never / by no means,kesshite,けっして
+数,number / count,kazu,かず
+判断,judge / judgment,handan,はんだん
+調査,investigate / survey,chōsa,ちょうさ
+部屋,room,heya,へや
+それでも,even so / still,soredemo,それでも
+突然,suddenly,totsuzen,とつぜん
+これから,from now on / next,korekara,これから
+別に,not really / particularly,betsuni,べつに
+当時,back then / at the time,tōji,とうじ
+気持ち,feeling,kimochi,きもち
+全体,whole / overall,zentai,ぜんたい
+詳しい,detailed,kuwashii,くわしい
+環境,environment,kankyō,かんきょう
+対応,handle / support,taiō,たいおう
+全然,at all / not at all,zenzen,ぜんぜん
+正しい,correct / right,tadashii,ただしい
+危険,dangerous / danger,kiken,きけん
+違い,difference,chigai,ちがい
+過去,the past / past,kako,かこ
+使用,use / usage,shiyō,しよう
+もちろん,of course,mochiron,もちろん
+力,power / strength,chikara,ちから
+安全,safe / safety,anzen,あんぜん
+変,weird / strange,hen,へん
+そのまま,as is / unchanged,sonomama,そのまま
+どうしても,no matter what,dōshitemo,どうしても
+はっきり,clearly,hakkiri,はっきり
+今後,from now on / in future,kongo,こんご
+じゃあ,well then / so,jā,じゃあ
+様々,various,samazama,さまざま
+直接,directly / direct,chokusetsu,ちょくせつ
+音,sound / noise,oto,おと
+とても,very,totemo,とても
+条件,condition / requirement,jōken,じょうけん
+どこか,somewhere / somehow,dokoka,どこか
+一方,on the other hand,ippō,いっぽう
+決定,decide / decision,kettei,けってい
+遅い,slow / late,osoi,おそい
+体,body / health,karada,からだ
+注意,caution / attention,chūi,ちゅうい
+さあ,come on / well,sā,さあ
+作業,work / task,sagyō,さぎょう
+位置,position / location,ichi,いち
+女性,woman,josei,じょせい
+及び,and / as well as,oyobi,および
+答え,answer,kotae,こたえ
+約,about / roughly,yaku,やく
+子供,child / kid,kodomo,こども
+管理,manage / management,kanri,かんり
+まさか,no way / surely not,masaka,まさか
+方向,direction,hōkō,ほうこう
+一般,general / common,ippan,いっぱん
+感じ,feeling / vibe,kanji,かんじ
+基本,basics / basic,kihon,きほん
+生活,life / living,seikatsu,せいかつ
+最高,best / maximum,saikō,さいこう
+さっき,just now / earlier,sakki,さっき
+あまり,not very / too much,amari,あまり
+開発,development / develop,kaihatsu,かいはつ
+すぐ,right away / soon,sugu,すぐ
+評価,evaluate / evaluation,hyōka,ひょうか
+移動,move / movement,idō,いどう
+古い,old / outdated,furui,ふるい
+どうぞ,please / go ahead,dōzo,どうぞ
+流れ,flow,nagare,ながれ
+種類,type / kind,shurui,しゅるい
+短い,short,mijikai,みじかい
+先に,first / ahead,sakini,さきに
+文字,character / letter,moji,もじ
+国,country,kuni,くに
+機能,feature / function,kinō,きのう
+多分,probably / maybe,tabun,たぶん
+発生,occur / occurrence,hassei,はっせい
+先,ahead / tip,saki,さき
+なぜ,why,naze,なぜ
+会話,conversation,kaiwa,かいわ
+成功,succeed / success,seikō,せいこう
+すっかり,completely / totally,sukkari,すっかり
+水,water,mizu,みず
+終わり,end,owari,おわり
+解決,solve / resolve,kaiketsu,かいけつ
+どんどん,more and more / rapidly,dondon,どんどん
+そろそろ,soon / about time,sorosoro,そろそろ
+しっかり,firmly / properly,shikkari,しっかり
+つい,inadvertently / just,tsui,つい
+対策,countermeasure / fix,taisaku,たいさく
+夜,night / evening,yoru,よる
+自分で,by yourself / myself,jibunde,じぶんで
+ううん,no / nope,uun,ううん
+失敗,fail / failure,shippai,しっぱい
+ほら,look / see,hora,ほら
+半分,half,hanbun,はんぶん
+改めて,again / anew,aratamete,あらためて
+一応,just in case / for now,ichiō,いちおう
+将来,future,shōrai,しょうらい
+今年,this year,kotoshi,ことし
+疑問,question / doubt,gimon,ぎもん
+選択,choose / selection,sentaku,せんたく
+様子,look / state of things,yōsu,ようす
+ほとんど,almost / mostly,hotondo,ほとんど
+最大,maximum / largest,saidai,さいだい
+具体的,concrete / specific,gutaiteki,ぐたいてき
+余裕,room / margin,yoyū,よゆう
+処理,process / handling,shori,しょり
+確実,certain / reliable,kakujitsu,かくじつ
+間違い,mistake / error,machigai,まちがい
+なかなか,quite / not easily,nakanaka,なかなか
+設定,setting / configure,settei,せってい
+表現,expression / express,hyōgen,ひょうげん
+楽しい,fun / enjoyable,tanoshii,たのしい
+基本的,basic / fundamental,kihonteki,きほんてき
+期間,period / duration,kikan,きかん
+事態,situation,jitai,じたい
+開始,start / begin,kaishi,かいし
+資料,documents / materials,shiryō,しりょう
+道,road / way,michi,みち
+学校,school,gakkō,がっこう
+本,book,hon,ほん
+本来,originally / by rights,honrai,ほんらい
+知識,knowledge,chishiki,ちしき
+保護,protect / protection,hogo,ほご
+先ほど,earlier / a moment ago,sakihodo,さきほど
+集中,focus / concentrate,shūchū,しゅうちゅう
+先生,teacher / doctor,sensei,せんせい
+何より,above all,naniyori,なにより
+証拠,evidence / proof,shōko,しょうこ
+妙,strange / odd,myō,みょう
+楽,easy / comfortable,raku,らく
+認識,recognize / awareness,ninshiki,にんしき
+役割,role,yakuwari,やくわり
+記録,record / log,kiroku,きろく
+完成,complete / finish,kansei,かんせい
+正確,accurate / precise,seikaku,せいかく
+夢,dream,yume,ゆめ
+若い,young,wakai,わかい
+心配,worry,shinpai,しんぱい
+あらゆる,every / all kinds of,arayuru,あらゆる
+家族,family,kazoku,かぞく
+正直,honestly / honest,shōjiki,しょうじき
+目標,goal / target,mokuhyō,もくひょう
+複雑,complex / complicated,fukuzatsu,ふくざつ
+同時,same time / simultaneous,dōji,どうじ
+だけど,but / though,dakedo,だけど
+残り,rest / remainder,nokori,のこり
+指摘,point out,shiteki,してき
+基準,standard / baseline,kijun,きじゅん
+指定,specify / designate,shitei,してい
+やっぱり,as expected / after all,yappari,やっぱり
+通り,street / avenue,tōri,とおり
+空間,space,kūkan,くうかん
+特徴,trait / feature,tokuchō,とくちょう
+きちんと,properly / neatly,kichinto,きちんと
+面倒,hassle / tedious,mendō,めんどう
+段階,stage / step,dankai,だんかい
+深い,deep,fukai,ふかい
+確保,secure / allocate,kakuho,かくほ
+表示,display / show,hyōji,ひょうじ
+近い,near / close,chikai,ちかい
+無視,ignore,mushi,むし
+なんで,why,nande,なんで
+検討,consider / look into,kentō,けんとう
+極めて,extremely,kiwamete,きわめて
+範囲,range / scope,han'i,はんい
+まるで,as if / just like,marude,まるで
+変更,change / modify,henkō,へんこう
+計算,calculate / compute,keisan,けいさん
+仕方,way / how to,shikata,しかた
+時代,era / period,jidai,じだい
+自由,freedom / free,jiyū,じゆう
+以降,and later / onward,ikō,いこう
+たった,only / just,tatta,たった
+大変,tough / very,taihen,たいへん
+規模,scale / size,kibo,きぼ
+提供,provide / offer,teikyō,ていきょう
+ありがとう,thanks / thank you,arigatō,ありがとう
+負担,burden / load,futan,ふたん
+そうか,I see / is that so,sōka,そうか
+朝,morning,asa,あさ
+命令,command / order,meirei,めいれい
+特定,specific / identify,tokutei,とくてい
+安定,stable / stability,antei,あんてい
+つまり,in other words / so,tsumari,つまり
+ふと,suddenly / by chance,futo,ふと
+無事,safely / without issue,buji,ぶじ
+欲しい,want,hoshii,ほしい
+普段,usually / normally,fudan,ふだん
+回復,recover / recovery,kaifuku,かいふく
+時点,point / moment,jiten,じてん
+消費,consume / consumption,shōhi,しょうひ
+関連,related / relation,kanren,かんれん
+どうせ,anyway / after all,dōse,どうせ
+鍵,key / lock,kagi,かぎ
+おかしい,strange / funny,okashii,おかしい
+なるほど,I see,naruhodo,なるほど
+要求,demand / requirement,yōkyū,ようきゅう
+今まで,so far / until now,imamade,いままで
+余計,extra / unnecessary,yokei,よけい
+調整,adjust / tweak,chōsei,ちょうせい
+手段,means / way,shudan,しゅだん
+だったら,in that case / then,dattara,だったら
+現状,current state / as-is,genjō,げんじょう
+近く,nearby / nearly,chikaku,ちかく
+よし,alright / okay,yoshi,よし
+一般的,common / general,ippanteki,いっぱんてき
+障害,outage / obstacle,shōgai,しょうがい
+終了,end / exit,shūryō,しゅうりょう
+大量,large amount / massive,tairyō,たいりょう
+証明,prove / proof,shōmei,しょうめい
+提案,suggest / proposal,teian,ていあん
+指示,instruct / instructions,shiji,しじ
+しかも,moreover / on top of that,shikamo,しかも
+中身,contents / inside,nakami,なかみ
+許可,permission / allow,kyoka,きょか
+危ない,dangerous / risky,abunai,あぶない
+広い,wide / spacious,hiroi,ひろい
+人々,people,hitobito,ひとびと
+単純,simple,tanjun,たんじゅん
+拡大,expand / enlarge,kakudai,かくだい
+構造,structure,kōzō,こうぞう
+しばらく,for a while,shibaraku,しばらく
+唯一,only / sole,yuiitsu,ゆいいつ
+異常,abnormal / anomaly,ijō,いじょう
+実現,achieve / make happen,jitsugen,じつげん
+維持,maintain / keep,iji,いじ
+単に,simply / merely,tanni,たんに
+機械,machine,kikai,きかい
+不可能,impossible,fukanō,ふかのう
+傾向,tendency / trend,keikō,けいこう
+車,car,kuruma,くるま
+通常,normal / usually,tsūjō,つうじょう
+かなり,quite / fairly,kanari,かなり
+久しぶり,long time no see,hisashiburi,ひさしぶり
+娘,daughter,musume,むすめ
+代わり,instead / replacement,kawari,かわり
+次々,one after another,tsugitsugi,つぎつぎ
+とにかく,anyway,tonikaku,とにかく
+相変わらず,as usual / still,aikawarazu,あいかわらず
+交換,swap / exchange,kōkan,こうかん
+色,color,iro,いろ
+通信,communication,tsūshin,つうしん
+数字,number / digit,sūji,すうじ
+限界,limit,genkai,げんかい
+さらに,furthermore / even more,sarani,さらに
+事件,incident / case,jiken,じけん
+適当,arbitrary / appropriate,tekitō,てきとう
+構成,structure / config,kōsei,こうせい
+早速,right away / at once,sassoku,さっそく
+明確,clear / explicit,meikaku,めいかく
+細かい,detailed / minor,komakai,こまかい
+写真,photo,shashin,しゃしん
+是非,by all means,zehi,ぜひ
+花,flower,hana,はな
+同じく,likewise / similarly,onajiku,おなじく
+時々,sometimes,tokidoki,ときどき
+すべて,all / everything,subete,すべて
+嫌,unpleasant / hate,iya,いや
+背景,background / context,haikei,はいけい
+先日,the other day,senjitsu,せんじつ
+実験,experiment,jikken,じっけん
+最終,final / last,saishū,さいしゅう
+光,light,hikari,ひかり
+無駄,waste / useless,muda,むだ
+せめて,at least,semete,せめて
+分析,analyze / analysis,bunseki,ぶんせき
+困難,difficulty / hard,konnan,こんなん
+内部,internal / inside,naibu,ないぶ
+多少,somewhat / a little,tashō,たしょう
+どうやら,apparently / seemingly,dōyara,どうやら
+いきなり,suddenly / abruptly,ikinari,いきなり
+提出,submit / submission,teishutsu,ていしゅつ
+会社,company,kaisha,かいしゃ
+自動,automatic / auto,jidō,じどう
+意識,awareness / conscious,ishiki,いしき
+研究,research / study,kenkyū,けんきゅう
+実行,run / execute,jikkō,じっこう
+活動,activity,katsudō,かつどう
+結論,conclusion,ketsuron,けつろん
+微妙,subtle / iffy,bimyō,びみょう
+整理,organize / tidy up,seiri,せいり
+課題,task / challenge,kadai,かだい
+動き,movement / motion,ugoki,うごき
+不安,anxiety / uneasy,fuan,ふあん
+特殊,special / unusual,tokushu,とくしゅ
+把握,grasp / understand,haaku,はあく
+登録,register / registration,tōroku,とうろく
+ようやく,finally / at last,yōyaku,ようやく
+店,shop / store,mise,みせ
+そもそも,in the first place,somosomo,そもそも
+金,money,kane,かね
+少なくとも,at least,sukunakutomo,すくなくとも
+依頼,request / ask,irai,いらい
+今夜,tonight,kon'ya,こんや
+作成,create / make,sakusei,さくせい
+速度,speed,sokudo,そくど
+道具,tool,dōgu,どうぐ
+いいえ,no,iie,いいえ
+比較,compare / comparison,hikaku,ひかく
+成果,result / outcome,seika,せいか
+行動,action / behavior,kōdō,こうどう
+制限,limit / restriction,seigen,せいげん
+不足,lack / shortage,fusoku,ふそく
+増加,increase / rise,zōka,ぞうか
+社会,society,shakai,しゃかい
+容易,easy / simple,yōi,ようい
+要素,element / component,yōso,ようそ
+解放,release / free,kaihō,かいほう
+むしろ,rather / if anything,mushiro,むしろ
+便利,convenient / handy,benri,べんり
+多数,many / majority,tasū,たすう
+急,sudden / urgent,kyū,きゅう
+準備,prepare / preparation,junbi,じゅんび
+前提,assumption / premise,zentei,ぜんてい
+友達,friend,tomodachi,ともだち
+参加,join / participate,sanka,さんか
+共通,common / shared,kyōtsū,きょうつう
+結婚,marry / marriage,kekkon,けっこん
+もう一度,once more / again,mōichido,もういちど
+自然,nature / natural,shizen,しぜん
+操作,operate / operation,sōsa,そうさ
+といっても,that said / though,toittemo,といっても
+とりあえず,for now / first,toriaezu,とりあえず
+午後,afternoon / p.m.,gogo,ごご
+保証,guarantee / warranty,hoshō,ほしょう
+電話,phone call / call,denwa,でんわ
+海,sea / ocean,umi,うみ
+少々,a little / a bit,shōshō,しょうしょう
+白い,white,shiroi,しろい
+方針,approach / policy,hōshin,ほうしん
+そういえば,come to think of it,sōieba,そういえば
+単なる,mere / just a,tannaru,たんなる
+複数,multiple / several,fukusū,ふくすう
+画面,screen,gamen,がめん
+すでに,already,sudeni,すでに
+主に,mainly / mostly,omoni,おもに
+夕方,evening,yūgata,ゆうがた
+直後,right after,chokugo,ちょくご
+中心,center / core,chūshin,ちゅうしん
+怖い,scary,kowai,こわい
+親,parent,oya,おや
+町,town,machi,まち
+優しい,kind / gentle,yasashii,やさしい
+翌日,the next day,yokujitsu,よくじつ
+宣言,declare / declaration,sengen,せんげん
+扱い,handling / treatment,atsukai,あつかい
+変化,change / shift,henka,へんか
+最低,minimum / worst,saitei,さいてい
+比較的,relatively,hikakuteki,ひかくてき
+相談,consult / discuss,sōdan,そうだん
+始め,start / beginning,hajime,はじめ
+人生,life,jinsei,じんせい
+怪しい,suspicious / fishy,ayashii,あやしい
+美しい,beautiful,utsukushii,うつくしい
+明日,tomorrow,ashita,あした
+姿,figure / appearance,sugata,すがた
+一人で,alone / by myself,hitoride,ひとりで
+改善,improve / improvement,kaizen,かいぜん
+性質,nature / property,seishitsu,せいしつ
+本日,today,honjitsu,ほんじつ
+手続き,procedure / process,tetsuzuki,てつづき
+慎重,careful / cautious,shinchō,しんちょう
+両方,both,ryōhō,りょうほう
+番号,number,bangō,ばんごう
+一層,even more,issō,いっそう
+元気,energetic / well,genki,げんき
+詳細,details,shōsai,しょうさい
+毎年,every year,maitoshi,まいとし
+完璧,perfect,kanpeki,かんぺき
+最終的,final / ultimately,saishūteki,さいしゅうてき
+解釈,interpret / interpretation,kaishaku,かいしゃく
+回答,answer / reply,kaitō,かいとう
+勝手,selfish / on its own,katte,かって
+個人的,personal,kojinteki,こじんてき
+有効,valid / enabled,yūkō,ゆうこう
+空,sky,sora,そら
+同時に,at the same time,dōjini,どうじに
+大いに,greatly / a lot,ōini,おおいに
+追加,add / addition,tsuika,ついか
+幅,width,haba,はば
+優先,priority / prioritize,yūsen,ゆうせん
+現象,phenomenon / behavior,genshō,げんしょう
+後ろ,behind / back,ushiro,うしろ
+好み,preference / taste,konomi,このみ
+監視,monitor / watch,kanshi,かんし
+安心,relief / peace of mind,anshin,あんしん
+用意,prepare / get ready,yōi,ようい
+事前,beforehand / prior,jizen,じぜん
+周り,surroundings / around,mawari,まわり
+いろいろ,various / all sorts,iroiro,いろいろ
+当初,initially / at first,tōsho,とうしょ
+男性,man / male,dansei,だんせい
+去年,last year,kyonen,きょねん
+強力,powerful / strong,kyōryoku,きょうりょく
+壁,wall,kabe,かべ
+ところで,by the way,tokorode,ところで
+現実,reality,genjitsu,げんじつ
+料理,cooking / cook,ryōri,りょうり
+文,sentence / statement,bun,ぶん
+気分,mood / feeling,kibun,きぶん
+割合,ratio / proportion,wariai,わりあい
+協力,cooperate / cooperation,kyōryoku,きょうりょく
+それぞれ,each / respectively,sorezore,それぞれ
+対処,deal with / cope,taisho,たいしょ
+基礎,basics / foundation,kiso,きそ
+不明,unknown / unclear,fumei,ふめい
+適切,appropriate / proper,tekisetsu,てきせつ
+食事,meal,shokuji,しょくじ
+痛い,painful / ouch,itai,いたい
+経験,experience,keiken,けいけん
+今朝,this morning,kesa,けさ
+わざわざ,bother to / on purpose,wazawaza,わざわざ
+大学,university / college,daigaku,だいがく
+不思議,strange / mysterious,fushigi,ふしぎ
+停止,stop / halt,teishi,ていし
+女の子,girl,onnanoko,おんなのこ
+根拠,basis / evidence,konkyo,こんきょ
+固定,fixed / pin,kotei,こてい
+地域,region / area,chiiki,ちいき
+立場,position / standpoint,tachiba,たちば
+なんとか,somehow,nantoka,なんとか
+箇所,spot / place,kasho,かしょ
+やっと,finally / at last,yatto,やっと
+あっさり,easily / simply,assari,あっさり
+費用,cost / expense,hiyō,ひよう
+症状,symptom,shōjō,しょうじょう
+保存,save / store,hozon,ほぞん
+重大,serious / critical,jūdai,じゅうだい
+瞬間,moment / instant,shunkan,しゅんかん
+赤い,red,akai,あかい
+予定,plans / schedule,yotei,よてい
+最悪,worst,saiaku,さいあく
+要するに,in short / basically,yōsuruni,ようするに
+平均,average,heikin,へいきん
+母親,mother,hahaoya,ははおや
+参考,reference,sankō,さんこう
+意見,opinion,iken,いけん
+横,side / beside,yoko,よこ
+連絡,contact / let know,renraku,れんらく
+妻,wife,tsuma,つま
+意図,intent / intention,ito,いと
+一致,match / agree,itchi,いっち
+時期,period / season,jiki,じき
+誤解,misunderstand,gokai,ごかい
+おかげで,thanks to,okagede,おかげで
+同意,agree / agreement,dōi,どうい
+仕組み,mechanism / how it works,shikumi,しくみ
+客,customer / guest,kyaku,きゃく
+記憶,memory / remember,kioku,きおく
+これまで,so far / until now,koremade,これまで
+窓,window,mado,まど
+来年,next year,rainen,らいねん
+深刻,serious / severe,shinkoku,しんこく
+静か,quiet,shizuka,しずか
+正式,official / formal,seishiki,せいしき
+分野,field / area,bun'ya,ぶんや
+口,mouth,kuchi,くち
+さすが,as expected / impressive,sasuga,さすが
+能力,ability / skill,nōryoku,のうりょく
+純粋,pure,junsui,じゅんすい
+採用,adopt / hire,saiyō,さいよう
+厳しい,strict / harsh,kibishii,きびしい
+直前,right before,chokuzen,ちょくぜん
+強調,emphasize / emphasis,kyōchō,きょうちょう
+学習,learning / learn,gakushū,がくしゅう
+画像,image / picture,gazō,がぞう
+理論,theory,riron,りろん
+無料,free / no charge,muryō,むりょう
+教育,education,kyōiku,きょういく
+活用,make use of / leverage,katsuyō,かつよう
+嬉しい,happy / glad,ureshii,うれしい
+拒否,reject / refuse,kyohi,きょひ
+よろしく,regards / please,yoroshiku,よろしく
+狙い,aim / goal,nerai,ねらい
+高度,advanced / altitude,kōdo,こうど
+責任,responsibility,sekinin,せきにん
+川,river,kawa,かわ
+紹介,introduce / introduction,shōkai,しょうかい
+過程,process,katei,かてい
+減少,decrease / decline,genshō,げんしょう
+ということは,which means / so,toiukotowa,ということは
+雨,rain,ame,あめ
+効率,efficiency,kōritsu,こうりつ
+他に,else / besides,hokani,ほかに
+前回,last time / previous,zenkai,ぜんかい
+単位,unit,tan'i,たんい
+事項,item / matter,jikō,じこう
+昼間,daytime,hiruma,ひるま
+向上,improve / boost,kōjō,こうじょう
+勘違い,mistake / mix-up,kanchigai,かんちがい
+配置,placement / layout,haichi,はいち
+役目,role / job,yakume,やくめ
+大きさ,size,ōkisa,おおきさ
+反応,reaction / react,hannō,はんのう
+向こう,over there / other side,mukō,むこう
+領域,region / domain,ryōiki,りょういき
+言語,language,gengo,げんご
+共有,share / sharing,kyōyū,きょうゆう
+一気に,all at once / in one go,ikkini,いっきに
+想定,assume / assumption,sōtei,そうてい
+低下,drop / decline,teika,ていか
+公開,publish / make public,kōkai,こうかい
+概念,concept,gainen,がいねん
+順調,on track / smooth,junchō,じゅんちょう
+空気,air / atmosphere,kūki,くうき
+どうにか,somehow,dōnika,どうにか
+役,role / part,yaku,やく
+原則,principle / as a rule,gensoku,げんそく
+候補,candidate / option,kōho,こうほ
+興味,interest,kyōmi,きょうみ
+違反,violation / violate,ihan,いはん
+緊急,urgent / emergency,kinkyū,きんきゅう
+ちょうど,exactly / just,chōdo,ちょうど
+味,taste / flavor,aji,あじ
+笑顔,smile,egao,えがお
+仲間,buddy / companion,nakama,なかま
+態度,attitude,taido,たいど
+幸い,fortunately / luckily,saiwai,さいわい
+従来,conventional / until now,jūrai,じゅうらい
+ぴったり,perfectly / exactly,pittari,ぴったり
+感情,emotion,kanjō,かんじょう
+機会,chance / opportunity,kikai,きかい
+人物,person / character,jinbutsu,じんぶつ
+大人,adult,otona,おとな
+続き,continuation / the rest,tsuzuki,つづき
+使い方,usage / how to use,tsukaikata,つかいかた
+病気,illness / sick,byōki,びょうき
+今更,at this point / this late,imasara,いまさら
+導入,introduce / adopt,dōnyū,どうにゅう
+無論,of course,muron,むろん
+他人,others / stranger,tanin,たにん
+確定,finalize / confirm,kakutei,かくてい
+大半,most / majority,taihan,たいはん
+それにしても,even so / anyway,sorenishitemo,それにしても
+高速,fast / high-speed,kōsoku,こうそく
+夏,summer,natsu,なつ
+父親,father,chichioya,ちちおや
+了解,got it / understood,ryōkai,りょうかい
+雰囲気,atmosphere / vibe,fun'iki,ふんいき
+施設,facility,shisetsu,しせつ
+動作,behavior / operation,dōsa,どうさ
+浅い,shallow,asai,あさい
+適用,apply / application,tekiyō,てきよう
+一時的,temporary,ichijiteki,いちじてき
+黒い,black,kuroi,くろい
+視点,perspective / viewpoint,shiten,してん
+明るい,bright / cheerful,akarui,あかるい
+右,right,migi,みぎ
+どれだけ,how much / how many,doredake,どれだけ
+息子,son,musuko,むすこ
+想像,imagine / imagination,sōzō,そうぞう
+じっくり,carefully / thoroughly,jikkuri,じっくり
+観点,standpoint / angle,kanten,かんてん
+たまに,occasionally / sometimes,tamani,たまに
+夜中,middle of the night,yonaka,よなか
+大幅,significant / drastic,ōhaba,おおはば
+まだまだ,still / not yet,madamada,まだまだ
+徹底的,thorough,tetteiteki,てっていてき
+事情,circumstances,jijō,じじょう
+残念,too bad / unfortunate,zannen,ざんねん
+まさに,exactly / precisely,masani,まさに
+必ずしも,necessarily,kanarazushimo,かならずしも
+勉強,study,benkyō,べんきょう
+列,column / line,retsu,れつ
+余地,room / leeway,yochi,よち
+こっそり,secretly / sneakily,kossori,こっそり
+かつて,once / formerly,katsute,かつて
+病院,hospital,byōin,びょういん
+建物,building,tatemono,たてもの
+若干,slightly / somewhat,jakkan,じゃっかん
+曖昧,vague / ambiguous,aimai,あいまい
+ついに,finally / at last,tsuini,ついに
+一見,at first glance,ikken,いっけん
+補助,assist / helper,hojo,ほじょ
+幸せ,happy / happiness,shiawase,しあわせ
+成長,growth / grow,seichō,せいちょう
+珍しい,rare / unusual,mezurashii,めずらしい
+形式,format / form,keishiki,けいしき
+肝心,crucial / essential,kanjin,かんじん
+意外,unexpected / surprising,igai,いがい
+戦略,strategy,senryaku,せんりゃく
+ほぼ,almost / nearly,hobo,ほぼ
+両者,both / the two,ryōsha,りょうしゃ
+席,seat,seki,せき
+距離,distance,kyori,きょり
+手元,at hand / local,temoto,てもと
+性格,personality / character,seikaku,せいかく
+完了,done / complete,kanryō,かんりょう
+継続,continue / continuation,keizoku,けいぞく
+解説,explanation / commentary,kaisetsu,かいせつ
+考慮,consider / account for,kōryo,こうりょ
+約束,promise,yakusoku,やくそく
+事業,business / project,jigyō,じぎょう
+村,village,mura,むら
+設計,design,sekkei,せっけい
+努力,effort,doryoku,どりょく
+独自,custom / own,dokuji,どくじ
+夫,husband,otto,おっと
+発行,issue / publish,hakkō,はっこう
+甘い,sweet / lenient,amai,あまい
+弱い,weak,yowai,よわい
+全員,everyone / all members,zen'in,ぜんいん
+歴史,history,rekishi,れきし
+発見,discover / discovery,hakken,はっけん
+手伝い,help,tetsudai,てつだい
+要因,factor / cause,yōin,よういん
+透明,transparent / clear,tōmei,とうめい
+作品,work / piece,sakuhin,さくひん
+常に,always / constantly,tsuneni,つねに
+選択肢,options / choices,sentakushi,せんたくし
+二度と,never again,nidoto,にどと
+価値,value / worth,kachi,かち
+暗い,dark / gloomy,kurai,くらい
+外部,external / outside,gaibu,がいぶ
+等しい,equal,hitoshii,ひとしい
+返事,reply / answer,henji,へんじ
+さて,well / now then,sate,さて
+以後,from now on / after,igo,いご
+遠い,far / distant,tōi,とおい
+自信,confidence,jishin,じしん
+精神,mind / spirit,seishin,せいしん
+地方,region / countryside,chihō,ちほう
+冷たい,cold / cool,tsumetai,つめたい
+戦争,war,sensō,せんそう
+取得,get / fetch,shutoku,しゅとく
+連携,integrate / cooperate,renkei,れんけい
+著しい,significant / striking,ichijirushii,いちじるしい
+有名,famous / well-known,yūmei,ゆうめい
+足,foot / leg,ashi,あし
+用,errand / business,yō,よう
+警察,police,keisatsu,けいさつ
+いつまでも,forever,itsumademo,いつまでも
+例外,exception,reigai,れいがい
+強制,force / compulsory,kyōsei,きょうせい
+時刻,time / time of day,jikoku,じこく
+希望,hope / wish,kibō,きぼう
+解消,resolve / clear up,kaishō,かいしょう
+検索,search / look up,kensaku,けんさく
+左,left,hidari,ひだり
+厄介,tricky / troublesome,yakkai,やっかい
+組織,organization,soshiki,そしき
+長期,long-term,chōki,ちょうき
+企業,company / enterprise,kigyō,きぎょう
+犬,dog,inu,いぬ
+熱い,hot,atsui,あつい
+反対,opposite / oppose,hantai,はんたい
+製品,product,seihin,せいひん
+なお,note that / still,nao,なお
+個人,individual / personal,kojin,こじん
+効果的,effective,kōkateki,こうかてき
+感覚,sense / feeling,kankaku,かんかく
+統一,unify / make consistent,tōitsu,とういつ
+排除,eliminate / exclude,haijo,はいじょ
+少年,boy,shōnen,しょうねん
+案外,surprisingly,angai,あんがい
+側面,aspect / side,sokumen,そくめん
+初期,initial / early,shoki,しょき
+確率,probability / chance,kakuritsu,かくりつ
+時には,sometimes / at times,toki ni wa,ときには
+仕様,spec / by design,shiyō,しよう
+文化,culture,bunka,ぶんか
+加工,process / edit,kakō,かこう
+制御,control,seigyo,せいぎょ
+薄い,thin / faint,usui,うすい
+文書,document,bunsho,ぶんしょ
+再開,resume / restart,saikai,さいかい
+項目,item / field,kōmoku,こうもく
+片方,one side / one of two,katahō,かたほう
+手紙,letter,tegami,てがみ
+駅,station,eki,えき
+土地,land,tochi,とち
+極端,extreme,kyokutan,きょくたん
+運動,exercise,undō,うんどう
+主要,main / major,shuyō,しゅよう
+合計,total / sum,gōkei,ごうけい
+一瞬,moment / instant,isshun,いっしゅん
+理屈,logic / reasoning,rikutsu,りくつ
+区別,distinguish / tell apart,kubetsu,くべつ
+歌,song,uta,うた
+何しろ,after all / anyway,nanishiro,なにしろ
+大好き,love / really like,daisuki,だいすき
+解除,cancel / unlock,kaijo,かいじょ
+本質,essence / core,honshitsu,ほんしつ
+高さ,height,takasa,たかさ
+運用,operate / operations,un'yō,うんよう
+不要,unnecessary / unneeded,fuyō,ふよう
+恥ずかしい,embarrassed / shy,hazukashii,はずかしい
+黒,black,kuro,くろ
+勢い,momentum / force,ikioi,いきおい
+権限,permission / authority,kengen,けんげん
+そのうち,eventually / soon,sonouchi,そのうち
+中央,center / middle,chūō,ちゅうおう
+無理やり,forcibly / by force,muriyari,むりやり
+時折,occasionally,tokiori,ときおり
+再度,again / once more,saido,さいど
+更新,update / renew,kōshin,こうしん
+修正,fix / correct,shūsei,しゅうせい
+回避,avoid / work around,kaihi,かいひ
+推測,guess / infer,suisoku,すいそく
+人気,popular / popularity,ninki,にんき
+後者,the latter,kōsha,こうしゃ
+重視,prioritize / emphasize,jūshi,じゅうし
+いわゆる,so-called,iwayuru,いわゆる
+診断,diagnose / diagnosis,shindan,しんだん
+映画,movie,eiga,えいが
+性能,performance,seinō,せいのう
+悪化,worsen / get worse,akka,あっか
+もしかして,maybe / by any chance,moshikashite,もしかして
+直ちに,immediately / at once,tadachini,ただちに
+編集,edit / editing,henshū,へんしゅう
+単語,word,tango,たんご
+深夜,late at night,shin'ya,しんや
+矛盾,contradict / inconsistent,mujun,むじゅん
+午前,morning / a.m.,gozen,ごぜん
+規則,rule / regulation,kisoku,きそく
+忙しい,busy,isogashii,いそがしい
+組み合わせ,combination,kumiawase,くみあわせ
+当たり前,obvious / natural,atarimae,あたりまえ
+構築,build / construct,kōchiku,こうちく
+貢献,contribute / contribution,kōken,こうけん
+的確,accurate / spot-on,tekikaku,てきかく
+なんだか,somehow / kind of,nandaka,なんだか
+入力,input / enter,nyūryoku,にゅうりょく
+参照,refer to / reference,sanshō,さんしょう
+酒,alcohol / sake,sake,さけ
+確立,establish,kakuritsu,かくりつ
+匂い,smell / scent,nioi,におい
+現に,in fact / actually,genni,げんに
+訳,reason / meaning,wake,わけ
+健康,health,kenkō,けんこう
+動機,motive / motivation,dōki,どうき
+政府,government,seifu,せいふ
+一連,series / sequence,ichiren,いちれん
+白,white,shiro,しろ
+満足,satisfied / satisfaction,manzoku,まんぞく
+予想,expect / guess,yosō,よそう
+練習,practice,renshū,れんしゅう
+楽しみ,fun / looking forward,tanoshimi,たのしみ
+加速,speed up / accelerate,kasoku,かそく
+裏,back / reverse side,ura,うら
+いっそ,might as well / rather,isso,いっそ
+商品,product / goods,shōhin,しょうひん
+未来,future,mirai,みらい
+起動,start / launch,kidō,きどう
+契約,contract,keiyaku,けいやく
+分類,classify / categorize,bunrui,ぶんるい
+やがて,eventually / soon,yagate,やがて
+委員,committee member,iin,いいん
+必死,desperate / frantic,hisshi,ひっし
+納得,be convinced / accept,nattoku,なっとく
+嘘,lie / no way,uso,うそ
+頻繁,frequent / frequently,hinpan,ひんぱん
+そっか,I see / oh right,sokka,そっか
+森,forest,mori,もり
+接続,connect / connection,setsuzoku,せつぞく
+指導,guidance / coaching,shidō,しどう
+船,ship / boat,fune,ふね
+到達,reach / arrive at,tōtatsu,とうたつ
+手間,effort / hassle,tema,てま
+順番,order / turn,junban,じゅんばん
+資源,resources,shigen,しげん
+緊張,nervous / tension,kinchō,きんちょう
+近年,recent years / lately,kinnen,きんねん
+先頭,front / head,sentō,せんとう
+そうですね,right / well,sōdesune,そうですね
+定義,define / definition,teigi,ていぎ
+大規模,large-scale,daikibo,だいきぼ
+感謝,thanks / gratitude,kansha,かんしゃ
+実質,effectively / substance,jisshitsu,じっしつ
+代表,representative,daihyō,だいひょう
+薬,medicine,kusuri,くすり
+寒い,cold,samui,さむい
+猫,cat,neko,ねこ
+安い,cheap,yasui,やすい
+綺麗,clean / pretty,kirei,きれい
+事故,accident,jiko,じこ
+馬,horse,uma,うま
+反映,reflect / apply,han'ei,はんえい
+調子,condition / shape,chōshi,ちょうし
+前日,the day before,zenjitsu,ぜんじつ
+決定的,decisive / definitive,ketteiteki,けっていてき
+狭い,narrow / cramped,semai,せまい
+経営,run a business,keiei,けいえい
+国民,citizens / the people,kokumin,こくみん
+床,floor,yuka,ゆか
+生徒,pupil / student,seito,せいと
+名称,name / title,meishō,めいしょう
+経済,economy,keizai,けいざい
+特性,property / trait,tokusei,とくせい
+おそらく,probably / likely,osoraku,おそらく
+雪,snow,yuki,ゆき
+思い,thought / feeling,omoi,おもい
+不安定,unstable / flaky,fuantei,ふあんてい
+上位,top / higher-level,jōi,じょうい
+今頃,about now / by now,imagoro,いまごろ
+都市,city,toshi,とし
+本当に,really / truly,hontōni,ほんとうに
+延長,extend / extension,enchō,えんちょう
+春,spring,haru,はる
+寂しい,lonely,sabishii,さびしい
+必要性,need / necessity,hitsuyōsei,ひつようせい
+否定,deny / negate,hitei,ひてい
+日時,date and time,nichiji,にちじ
+記述,write / describe,kijutsu,きじゅつ
+素晴らしい,wonderful / great,subarashii,すばらしい
+それじゃ,well then / then,soreja,それじゃ
+攻撃,attack,kōgeki,こうげき
+もはや,no longer / already,mohaya,もはや
+痛み,pain,itami,いたみ
+依存,depend / dependency,izon,いぞん
+素直,honest / straightforward,sunao,すなお
+もしかしたら,maybe / perhaps,moshikashitara,もしかしたら
+縦,vertical / length,tate,たて
+さっと,quickly / swiftly,satto,さっと
+機構,mechanism / system,kikō,きこう
+立派,fine / impressive,rippa,りっぱ
+兄,older brother,ani,あに
+だめ,no good / not allowed,dame,だめ
+提示,present / show,teiji,ていじ
+同一,identical / same,dōitsu,どういつ
+無限,infinite / infinity,mugen,むげん
+担当,in charge / responsible,tantō,たんとう
+熱,fever / heat,netsu,ねつ
+長さ,length,nagasa,ながさ
+正常,normal / working,seijō,せいじょう
+行,line / row,gyō,ぎょう
+承認,approve / approval,shōnin,しょうにん
+ちなみに,by the way,chinamini,ちなみに
+収集,collect / gather,shūshū,しゅうしゅう
+あるいは,or / perhaps,arui wa,あるいは
+音楽,music,ongaku,おんがく
+嫌い,dislike / hate,kirai,きらい
+次元,dimension / level,jigen,じげん
+きっちり,exactly / precisely,kitchiri,きっちり
+新聞,newspaper,shinbun,しんぶん
+年齢,age,nenrei,ねんれい
+原理,principle,genri,げんり
+膨大,huge / enormous,bōdai,ぼうだい
+要望,request / wish,yōbō,ようぼう
+期限,deadline / expiration,kigen,きげん
+過剰,excessive / excess,kajō,かじょう
+大部分,most / majority,daibubun,だいぶぶん
+望ましい,desirable / preferable,nozomashii,のぞましい
+衝突,collision / conflict,shōtotsu,しょうとつ
+なんでも,anything / whatever,nandemo,なんでも
+手順,steps / procedure,tejun,てじゅん
+なぜか,somehow / for some reason,nazeka,なぜか
+悲しい,sad,kanashii,かなしい
+個別,individual / separate,kobetsu,こべつ
+被害,damage / harm,higai,ひがい
+午前中,in the morning,gozenchū,ごぜんちゅう
+会議,meeting,kaigi,かいぎ
+中間,middle / intermediate,chūkan,ちゅうかん
+本体,main body / core,hontai,ほんたい
+次回,next time,jikai,じかい
+考え方,mindset / approach,kangaekata,かんがえかた
+表,table / chart,hyō,ひょう
+毎回,every time,maikai,まいかい
+うっかり,accidentally / carelessly,ukkari,うっかり
+案内,guide / show around,annai,あんない
+苦しい,painful / tough,kurushii,くるしい
+再現,reproduce / recreate,saigen,さいげん
+手がかり,clue / lead,tegakari,てがかり
+大して,that much / very,taishite,たいして
+治療,treatment / treat,chiryō,ちりょう
+わずか,slight / only a few,wazuka,わずか
+根本,root / foundation,konpon,こんぽん
+相性,compatibility / chemistry,aishō,あいしょう
+最新,latest / newest,saishin,さいしん
+家庭,home / family,katei,かてい
+穴,hole,ana,あな
+数値,value / numeric value,sūchi,すうち
+旅,journey / trip,tabi,たび
+保管,store / keep,hokan,ほかん
+問い合わせ,inquiry / query,toiawase,といあわせ
+それに,besides / plus,soreni,それに
+今月,this month,kongetsu,こんげつ
+回数,count / number of times,kaisū,かいすう
+方式,method / scheme,hōshiki,ほうしき
+懸念,concern / worry,ken'en,けねん
+判明,turn out / come to light,hanmei,はんめい
+石,stone / rock,ishi,いし
+秘密,secret,himitsu,ひみつ
+失礼,rude / impolite,shitsurei,しつれい
+世の中,the world / society,yononaka,よのなか
+主人,husband / master,shujin,しゅじん
+前半,first half,zenhan,ぜんはん
+報告書,report,hōkokusho,ほうこくしょ
+待機,wait / stand by,taiki,たいき
+それで,so / and then,sorede,それで
+一言,a word / a few words,hitokoto,ひとこと
+日頃,usually / everyday,higoro,ひごろ
+所詮,after all / in the end,shosen,しょせん
+動物,animal,dōbutsu,どうぶつ
+ずいぶん,quite / very,zuibun,ずいぶん
+両親,parents,ryōshin,りょうしん
+散々,terribly / thoroughly,sanzan,さんざん
+改良,improve / improvement,kairyō,かいりょう
+えっと,um / let me see,etto,えっと
+我慢,patience / put up with,gaman,がまん
+機関,institution / agency,kikan,きかん
+信頼,trust / rely on,shinrai,しんらい
+冬,winter,fuyu,ふゆ
+不可欠,essential / indispensable,fukaketsu,ふかけつ
+すごい,amazing / incredible,sugoi,すごい
+削除,delete / remove,sakujo,さくじょ
+予備,spare / backup,yobi,よび
+椅子,chair,isu,いす
+いつの間にか,before I knew it,itsunomanika,いつのまにか
+定期的,regular / periodic,teikiteki,ていきてき
+ぎりぎり,barely / just in time,girigiri,ぎりぎり
+教室,classroom,kyōshitsu,きょうしつ
+印象,impression,inshō,いんしょう
+自動的,automatic,jidōteki,じどうてき
+話題,topic / subject,wadai,わだい
+発表,announce / presentation,happyō,はっぴょう
+魚,fish,sakana,さかな
+手法,technique / method,shuhō,しゅほう
+学生,student,gakusei,がくせい
+該当,matching / applicable,gaitō,がいとう
+正当,legitimate / valid,seitō,せいとう
+ともかく,anyway / at any rate,tomokaku,ともかく
+肉,meat,niku,にく
+硬い,hard / stiff,katai,かたい
+幅広い,wide / broad,habahiroi,はばひろい
+東,east,higashi,ひがし
+おはよう,good morning,ohayō,おはよう
+権利,right / privilege,kenri,けんり
+警告,warning / warn,keikoku,けいこく
+健全,healthy / sound,kenzen,けんぜん
+女子,girl / women's,joshi,じょし
+制度,system / institution,seido,せいど
+限度,limit,gendo,げんど
+前者,the former,zensha,ぜんしゃ
+無関係,unrelated / irrelevant,mukankei,むかんけい
+根本的,fundamental,konponteki,こんぽんてき
+全国,nationwide,zenkoku,ぜんこく
+特有,specific / peculiar,tokuyū,とくゆう
+専門,specialty / expertise,senmon,せんもん
+現実的,realistic / practical,genjitsuteki,げんじつてき
+格好,appearance / look,kakkō,かっこう
+影,shadow,kage,かげ
+正午,noon / midday,shōgo,しょうご
+積極的,proactive / active,sekkyokuteki,せっきょくてき
+姿勢,posture / attitude,shisei,しせい
+水準,level / standard,suijun,すいじゅん
+不正,invalid / fraud,fusei,ふせい
+妹,younger sister,imōto,いもうと
+臨時,temporary / special,rinji,りんじ
+移行,migrate / transition,ikō,いこう
+遭遇,encounter / run into,sōgū,そうぐう
+客観的,objective,kyakkanteki,きゃっかんてき
+いよいよ,finally / at last,iyoiyo,いよいよ
+音声,audio / voice,onsei,おんせい
+邪魔,in the way / nuisance,jama,じゃま
+少女,girl,shōjo,しょうじょ
+緩和,ease / relax,kanwa,かんわ
+来週,next week,raishū,らいしゅう
+なんとなく,somehow / vaguely,nantonaku,なんとなく
+頂点,peak / vertex,chōten,ちょうてん
+ただし,however / but,tadashi,ただし
+効率的,efficient,kōritsuteki,こうりつてき
+一生,lifetime / forever,isshō,いっしょう
+第三者,third party,daisansha,だいさんしゃ
+風,style / manner,fū,ふう
+公園,park,kōen,こうえん
+設置,set up / install,setchi,せっち
+怒り,anger,ikari,いかり
+事例,case / example,jirei,じれい
+島,island,shima,しま
+本気,serious / for real,honki,ほんき
+庭,garden / yard,niwa,にわ
+政治,politics,seiji,せいじ
+犯人,culprit / criminal,hannin,はんにん
+文字通り,literally,mojidōri,もじどおり
+日々,daily / days,hibi,ひび
+割と,fairly / relatively,warito,わりと
+毎月,every month / monthly,maitsuki,まいつき
+論理,logic,ronri,ろんり
+応用,apply / practical use,ōyō,おうよう
+最適,optimal / best,saiteki,さいてき
+信用,trust / credit,shin'yō,しんよう
+問題ない,no problem / fine,mondainai,もんだいない
+階段,stairs,kaidan,かいだん
+危険性,risk / danger,kikensei,きけんせい
+材料,ingredients / materials,zairyō,ざいりょう
+秋,autumn / fall,aki,あき
+支障,hindrance / trouble,shishō,ししょう
+迅速,quick / prompt,jinsoku,じんそく
+噂,rumor,uwasa,うわさ
+現場,site / scene,genba,げんば
+まあまあ,so-so / okay,māmā,まあまあ
+冗談,joke,jōdan,じょうだん
+弟,younger brother,otōto,おとうと
+主張,claim / insist,shuchō,しゅちょう
+挨拶,greeting / greet,aisatsu,あいさつ
+週末,weekend,shūmatsu,しゅうまつ
+見事,splendid / brilliantly,migoto,みごと
+個々,individual / each,koko,ここ
+星,star,hoshi,ほし
+実質的,practical / effective,jisshitsuteki,じっしつてき
+細い,thin / slender,hosoi,ほそい
+単独,standalone / single,tandoku,たんどく
+少しずつ,little by little,sukoshizutsu,すこしずつ
+新規,new,shinki,しんき
+判定,determine / judgment,hantei,はんてい
+実に,really / truly,jitsuni,じつに
+苦労,trouble / hardship,kurō,くろう
+機器,device / equipment,kiki,きき
+香り,scent / fragrance,kaori,かおり
+体験,experience / try out,taiken,たいけん
+合理的,reasonable / rational,gōriteki,ごうりてき
+試み,attempt / try,kokoromi,こころみ
+結合,join / combine,ketsugō,けつごう
+別々,separate / separately,betsubetsu,べつべつ
+繰り返し,repetition / repeat,kurikaeshi,くりかえし
+早朝,early morning,sōchō,そうちょう
+欠点,drawback / flaw,ketten,けってん
+興味深い,interesting,kyōmibukai,きょうみぶかい
+西,west,nishi,にし
+明白,obvious / clear,meihaku,めいはく
+測定,measure / measurement,sokutei,そくてい
+焦点,focus,shōten,しょうてん
+無意味,pointless / meaningless,muimi,むいみ
+部品,component / part,buhin,ぶひん
+巨大,huge / giant,kyodai,きょだい
+論文,paper / thesis,ronbun,ろんぶん
+北,north,kita,きた
+旅行,travel / trip,ryokō,りょこう
+ご飯,meal / rice,gohan,ごはん
+姉,older sister,ane,あね
+発展,growth / develop,hatten,はってん
+干渉,interfere / interference,kanshō,かんしょう
+登場,appear / entrance,tōjō,とうじょう
+電源,power / power supply,dengen,でんげん
+傷,wound / scratch,kizu,きず
+万が一,just in case / if ever,mangaichi,まんがいち
+ついでに,while at it / also,tsuideni,ついでに
+通知,notify / notification,tsūchi,つうち
+標準,standard,hyōjun,ひょうじゅん
+あまりに,too / overly,amarini,あまりに
+検証,verify / validate,kenshō,けんしょう
+利益,profit / benefit,rieki,りえき
+到着,arrive / arrival,tōchaku,とうちゃく
+胸,chest,mune,むね
+選手,player / athlete,senshu,せんしゅ
+南,south,minami,みなみ
+無線,wireless / radio,musen,むせん
+物語,story / tale,monogatari,ものがたり
+相対,relative,sōtai,そうたい
+人工,artificial / man-made,jinkō,じんこう
+素敵,lovely / wonderful,suteki,すてき
+全体的,overall / general,zentaiteki,ぜんたいてき
+今週,this week,konshū,こんしゅう
+弱点,weakness / weak point,jakuten,じゃくてん
+口調,tone / way of speaking,kuchō,くちょう
+良好,good / fine,ryōkō,りょうこう
+もしも,if / in case,moshimo,もしも
+法律,law,hōritsu,ほうりつ
+二重,double,nijū,にじゅう
+重み,weight,omomi,おもみ
+平日,weekday,heijitsu,へいじつ
+解析,analyze / parse,kaiseki,かいせき
+箱,box,hako,はこ
+いくつか,several / some,ikutsuka,いくつか
+訓練,training / train,kunren,くんれん
+もともと,originally,motomoto,もともと
+机,desk,tsukue,つくえ
+暖かい,warm,atatakai,あたたかい
+おっと,oops / whoa,otto,おっと
+会場,venue / hall,kaijō,かいじょう
+もっとも,though / mind you,mottomo,もっとも
+出来事,event / happening,dekigoto,できごと
+形状,shape / form,keijō,けいじょう
+ますます,increasingly,masumasu,ますます
+統合,integrate / merge,tōgō,とうごう
+比率,ratio / proportion,hiritsu,ひりつ
+生産,production / produce,seisan,せいさん
+本番,production / real thing,honban,ほんばん
+国家,nation / state,kokka,こっか
+廊下,hallway / corridor,rōka,ろうか
+妥当,reasonable / valid,datō,だとう
+袋,bag,fukuro,ふくろ
+変換,convert / conversion,henkan,へんかん
+議論,discussion / debate,giron,ぎろん
+基盤,foundation / basis,kiban,きばん
+予想外,unexpected,yosōgai,よそうがい
+患者,patient,kanja,かんじゃ
+恋,love / romance,koi,こい
+ともあれ,anyway / in any case,tomoare,ともあれ
+定期,regular / periodic,teiki,ていき
+未知,unknown,michi,みち
+経由,via / through,keiyu,けいゆ
+青い,blue,aoi,あおい
+日中,daytime / during the day,nitchū,にっちゅう
+分解,break down / take apart,bunkai,ぶんかい
+恐怖,fear / terror,kyōfu,きょうふ
+冒頭,beginning / top,bōtō,ぼうとう
+次いで,then / next,tsuide,ついで
+緑,green,midori,みどり
+ほんの,just / mere,honno,ほんの
+紙,paper,kami,かみ
+底,bottom,soko,そこ
+夫婦,married couple,fūfu,ふうふ
+全般,overall / in general,zenpan,ぜんぱん
+平和,peace / peaceful,heiwa,へいわ
+抑制,suppress / curb,yokusei,よくせい
+迷惑,nuisance / trouble,meiwaku,めいわく
+観察,observe / observation,kansatsu,かんさつ
+この前,the other day / recently,konomae,このまえ
+授業,class / lesson,jugyō,じゅぎょう
+さようなら,goodbye,sayōnara,さようなら
+集団,group / crowd,shūdan,しゅうだん
+赤,red,aka,あか
+翌朝,next morning,yokuasa,よくあさ
+署名,sign / signature,shomei,しょめい
+修復,repair / restore,shūfuku,しゅうふく
+わざと,on purpose,wazato,わざと
+中断,interrupt / pause,chūdan,ちゅうだん
+真剣,serious / earnest,shinken,しんけん
+典型的,typical,tenkeiteki,てんけいてき
+先週,last week,senshū,せんしゅう
+せい,fault / blame,sei,せい
+今すぐ,right now / immediately,imasugu,いますぐ
+不満,complaint / discontent,fuman,ふまん
+支援,support / assistance,shien,しえん
+解明,figure out / clarify,kaimei,かいめい
+些細,minor / trivial,sasai,ささい
+いろんな,various,ironna,いろんな
+強化,strengthen / reinforce,kyōka,きょうか
+趣旨,point / purpose,shushi,しゅし
+つもり,intention / plan,tsumori,つもり
+保険,insurance,hoken,ほけん
+最大限,maximum / fullest,saidaigen,さいだいげん
+男の子,boy,otokonoko,おとこのこ
+今や,now / nowadays,imaya,いまや
+地面,ground,jimen,じめん
+依然,still / as before,izen,いぜん
+半数,half,hansū,はんすう
+取引,deal / transaction,torihiki,とりひき
+無用,unnecessary / useless,muyō,むよう
+左右,left and right,sayū,さゆう
+鳥,bird,tori,とり
+地下,underground / basement,chika,ちか
+仕方がない,oh well / can't be helped,shikataganai,しかたがない
+言い方,wording / phrasing,iikata,いいかた
+好ましい,preferable / desirable,konomashii,このましい
+海外,overseas / abroad,kaigai,かいがい
+得意,good at / strong point,tokui,とくい
+暇,free time / free,hima,ひま
+神,god,kami,かみ
+永久,permanent / forever,eikyū,えいきゅう
+市民,citizen,shimin,しみん
+抵抗,resist / resistance,teikō,ていこう
+絶対的,absolute,zettaiteki,ぜったいてき
+本物,real / genuine,honmono,ほんもの
+しょっちゅう,all the time / constantly,shotchū,しょっちゅう
+後日,later / another day,gojitsu,ごじつ
+隣,next to / neighbor,tonari,となり
+物理的,physical / physically,butsuriteki,ぶつりてき
+試験,exam / test,shiken,しけん
+間隔,interval / spacing,kankaku,かんかく
+混乱,confusion / chaos,konran,こんらん
+舞台,stage,butai,ぶたい
+市場,market,shijō,しじょう
+購入,purchase / buy,kōnyū,こうにゅう
+鋭い,sharp / keen,surudoi,するどい
+義務,duty / obligation,gimu,ぎむ
+真実,truth,shinjitsu,しんじつ
+卒業,graduate / graduation,sotsugyō,そつぎょう
+しょうがない,oh well / can't be helped,shōganai,しょうがない
+真面目,serious / diligent,majime,まじめ
+たまたま,by chance / happened to,tamatama,たまたま
+だいぶ,quite / a lot,daibu,だいぶ
+発言,remark / statement,hatsugen,はつげん
+昨夜,last night,yūbe,ゆうべ
+野菜,vegetable,yasai,やさい
+現時点,at this point / currently,genjiten,げんじてん
+当分,for a while / for now,tōbun,とうぶん
+教師,teacher,kyōshi,きょうし
+今に,before long / soon,imani,いまに
+行列,queue / matrix,gyōretsu,ぎょうれつ
+道路,road,dōro,どうろ
+直接的,direct,chokusetsuteki,ちょくせつてき
+外国,foreign country,gaikoku,がいこく
+非常,emergency,hijō,ひじょう
+早く,quickly / early,hayaku,はやく
+国際,international,kokusai,こくさい
+遅れ,delay / lag,okure,おくれ
+互い,each other / mutual,tagai,たがい
+もし,if,moshi,もし
+土,soil / dirt,tsuchi,つち
+やり方,way / method,yarikata,やりかた
+趣味,hobby / taste,shumi,しゅみ
+一杯,full / lots,ippai,いっぱい
+破壊,destroy / destruction,hakai,はかい
+門,gate,mon,もん
+携帯,cell phone / mobile,keitai,けいたい
+階層,hierarchy / layer,kaisō,かいそう
+柔軟,flexible,jūnan,じゅうなん
+概要,overview / summary,gaiyō,がいよう
+魅力,charm / appeal,miryoku,みりょく
+入り口,entrance / entry,iriguchi,いりぐち
+荷物,luggage / baggage,nimotsu,にもつ
+だいたい,roughly / mostly,daitai,だいたい
+全面的,full / complete,zenmenteki,ぜんめんてき
+早急,urgent / immediate,sōkyū,そうきゅう
+注目,attention / focus on,chūmoku,ちゅうもく
+表情,facial expression,hyōjō,ひょうじょう
+首,neck,kubi,くび
+無難,safe / safe bet,bunan,ぶなん
+そしたら,then / and then,soshitara,そしたら
+日常,everyday / daily life,nichijō,にちじょう
+大臣,minister,daijin,だいじん
+その上,besides / on top of that,sonoue,そのうえ
+問題点,issue / problem,mondaiten,もんだいてん
+平気,fine / not bothered,heiki,へいき
+仮に,suppose / temporarily,karini,かりに
+意思,intention / will,ishi,いし
+老人,elderly / old person,rōjin,ろうじん
+撮影,filming / photography,satsuei,さつえい
+総合的,overall / comprehensive,sōgōteki,そうごうてき
+玄関,front door / entryway,genkan,げんかん
+振る舞い,behavior,furumai,ふるまい
+当面,for now / for the moment,tōmen,とうめん
+恋人,partner / lover,koibito,こいびと
+同等,equivalent / equal,dōtō,どうとう
+思い出,memory / memories,omoide,おもいで
+検査,inspect / inspection,kensa,けんさ
+一時,temporarily / a while,ichiji,いちじ
+いかにも,indeed / truly,ikanimo,いかにも
+呼吸,breathing / breath,kokyū,こきゅう
+事実上,effectively / de facto,jijitsujō,じじつじょう
+順序,order / sequence,junjo,じゅんじょ
+品質,quality,hinshitsu,ひんしつ
+毎週,every week / weekly,maishū,まいしゅう
+不便,inconvenient,fuben,ふべん
+雲,cloud,kumo,くも
+靴,shoes,kutsu,くつ
+記事,article,kiji,きじ
+男女,men and women,danjo,だんじょ
+生,raw / live,nama,なま
+刺激,stimulus / stimulate,shigeki,しげき
+喜び,joy,yorokobi,よろこび
+若者,young people / youth,wakamono,わかもの
+おいおい,come on / hey now,oioi,おいおい
+境界,boundary / border,kyōkai,きょうかい
+作戦,strategy / plan,sakusen,さくせん
+交渉,negotiate / negotiation,kōshō,こうしょう
+安易,careless / too easy,an'i,あんい
+あえて,deliberately / dare to,aete,あえて
+こんにちは,hello,konnichiwa,こんにちは
+販売,sale / sell,hanbai,はんばい
+ひたすら,nonstop / intently,hitasura,ひたすら
+城,castle,shiro,しろ
+願い,wish / request,negai,ねがい
+資格,qualification,shikaku,しかく
+さよなら,goodbye / bye,sayonara,さよなら
+おかしな,strange / weird,okashina,おかしな
+まず,first / first of all,mazu,まず
+生命,life,seimei,せいめい
+理想的,ideal,risōteki,りそうてき
+腕,arm / skill,ude,うで
+徐々に,gradually,jojoni,じょじょに
+耳,ear,mimi,みみ
+びっくり,surprised / surprise,bikkuri,びっくり
+濃い,dark / strong,koi,こい
+定番,standard / go-to,teiban,ていばん
+損失,loss,sonshitsu,そんしつ
+特権,privilege,tokken,とっけん
+処分,get rid of / dispose of,shobun,しょぶん
+偉い,admirable / great,erai,えらい
+銀行,bank,ginkō,ぎんこう
+いいや,no / nope,iiya,いいや
+意志,will / intention,ishi,いし
+暑い,hot,atsui,あつい
+数年前,a few years ago,sūnenmae,すうねんまえ
+自宅,home,jitaku,じたく
+世紀,century,seiki,せいき
+試合,match / game,shiai,しあい
+適正,appropriate / proper,tekisei,てきせい
+要件,requirement,yōken,ようけん
+案の定,sure enough / as expected,annojō,あんのじょう
+最低限,minimum / at least,saiteigen,さいていげん
+厳密,strict / precise,genmitsu,げんみつ
+医療,medical care,iryō,いりょう
+科学,science,kagaku,かがく
+放送,broadcast,hōsō,ほうそう
+監督,director / coach,kantoku,かんとく
+章,chapter / section,shō,しょう
+出発,leave / departure,shuppatsu,しゅっぱつ
+必須,required / essential,hissu,ひっす
+重要性,importance,jūyōsei,じゅうようせい
+禁止,forbid / ban,kinshi,きんし
+てっきり,assumed / was sure,tekkiri,てっきり
+とっくに,long ago / already,tokkuni,とっくに
+運転,drive / driving,unten,うんてん
+住民,resident,jūmin,じゅうみん
+ひどい,terrible / awful,hidoi,ひどい
+同期,sync / peer,dōki,どうき
+場面,scene / situation,bamen,ばめん
+男子,boy / guy,danshi,だんし
+癖,habit / quirk,kuse,くせ
+奥,back / depths,oku,おく
+穏やか,calm / gentle,odayaka,おだやか
+一通り,roughly / once over,hitotōri,ひととおり
+偶然,by chance / coincidence,gūzen,ぐうぜん
+遠慮,hesitate / hold back,enryo,えんりょ
+文句,complaint,monku,もんく
+資金,funds / capital,shikin,しきん
+固有,specific / inherent,koyū,こゆう
+天井,ceiling,tenjō,てんじょう
+用途,use / purpose,yōto,ようと
+社長,company president,shachō,しゃちょう
+地元,hometown / local,jimoto,じもと
+乾杯,cheers,kanpai,かんぱい
+そうすれば,that way / then,sōsureba,そうすれば
+最善,best,saizen,さいぜん
+連続,in a row / consecutive,renzoku,れんぞく
+毎朝,every morning,maiasa,まいあさ
+前後,around / before and after,zengo,ぜんご
+緩い,loose / lenient,yurui,ゆるい
+掃除,clean / cleaning,sōji,そうじ
+実家,parents' home,jikka,じっか
+勝負,match / contest,shōbu,しょうぶ
+鏡,mirror,kagami,かがみ
+強制的,forced / forcibly,kyōseiteki,きょうせいてき
+よほど,really / greatly,yohodo,よほど
+電気,electricity / lights,denki,でんき
+この間,the other day / recently,konoaida,このあいだ
+近頃,lately / these days,chikagoro,ちかごろ
+利用者,user,riyōsha,りようしゃ
+団体,group / organization,dantai,だんたい
+波,wave,nami,なみ
+大会,tournament / convention,taikai,たいかい
+恩恵,benefit,onkei,おんけい
+金額,amount / sum,kingaku,きんがく
+極力,as much as possible,kyokuryoku,きょくりょく
+回路,circuit,kairo,かいろ
+応援,cheer on / support,ōen,おうえん
+書類,documents / paperwork,shorui,しょるい
+具合,condition / state,guai,ぐあい
+興奮,excited / excitement,kōfun,こうふん
+云々,and so on / etc,unnun,うんぬん
+いくら,how much,ikura,いくら
+価格,price,kakaku,かかく
+医者,doctor,isha,いしゃ
+季節,season,kisetsu,きせつ
+先月,last month,sengetsu,せんげつ

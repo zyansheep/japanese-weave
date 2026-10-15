@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, wordCount, isZeroFrench, normalizeFr, matchCase,
+  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, wordCount, isZeroJapanese, normalizeJa, matchCase,
 } from '../src/levels.js';
+import { STARTER } from '../src/starter.js';
 
 describe('level', () => {
   test('follows the synced stage, else 1; override wins; capped at the built level', () => {
@@ -14,63 +15,52 @@ describe('level', () => {
 });
 
 describe('word lists', () => {
-  test('L1 is the bundled starter list', () => {
-    const spec = ['et', 'mais', 'ou', 'donc', 'parce que', 'avec', 'sans', 'pour', 'très', 'aussi', 'bien', 'beaucoup', 'un peu',
-      'maintenant', 'toujours', 'peut-être', 'ici', 'voilà', 'oui', 'non', 'merci', 'le problème', 'la question', "l'idée",
-      'la réponse', 'important', 'possible', 'difficile'];
-    expect(L1_WORDS.map((w) => w.fr)).toEqual(spec);
+  test('L1 is the first 40 words of the bundled list, L2 the first 150', () => {
+    expect(L1_WORDS.map((w) => w.ja)).toEqual(STARTER.slice(0, 40).map((r) => r[0]));
+    expect(L2_WORDS.length).toBe(150);
+    expect(L1_WORDS.slice(0, 2).map((w) => w.ja)).toEqual(['でも', 'もう']);
   });
-  test('L2 is about 150 words, includes L1 and the fixed phrases, every entry glossed with a hint', () => {
-    expect(L2_WORDS.length).toBeGreaterThanOrEqual(140);
-    expect(L2_WORDS.length).toBeLessThanOrEqual(160);
-    const frs = L2_WORDS.map((w) => w.fr);
-    for (const w of L1_WORDS) expect(frs).toContain(w.fr);
-    for (const p of ["c'est", 'il y a', 'je pense que', 'il faut']) expect(frs).toContain(p);
-    expect(new Set(frs).size).toBe(frs.length);
+  test('every entry has a gloss, romaji and kana, and no duplicates', () => {
+    const jas = L2_WORDS.map((w) => w.ja);
+    expect(new Set(jas).size).toBe(jas.length);
     for (const w of L2_WORDS) {
       expect(w.en.length).toBeGreaterThan(0);
-      expect(w.hint.length).toBeGreaterThan(0);
+      expect(w.hint).toMatch(/^[a-zāīūēō' ]+$/);
+      expect(w.kana).toMatch(/^[ぁ-ゟ゠-ヿ]+$/);
     }
   });
 });
 
 describe('validateSwaps', () => {
-  test('keeps list words, canonicalizes accents, fills gloss and hint from the list', () => {
-    const out = validateSwaps(1, [{ o: 'very', f: 'tres', g: 'x', h: 'y', ctx: 'is very good' }]);
-    expect(out).toEqual([{ o: 'very', f: 'très', g: 'very', h: 'treh', ctx: 'is very good' }]);
+  test('keeps list words, fills gloss, romaji and kana from the list', () => {
+    const out = validateSwaps(1, [{ o: 'now', f: '今', g: 'x', h: 'y', ctx: 'works now' }]);
+    expect(out).toEqual([{ o: 'now', f: '今', g: 'now', h: 'ima', k: 'いま', ctx: 'works now' }]);
   });
   test('drops words off the level list and malformed entries', () => {
-    expect(validateSwaps(1, [{ o: 'in', f: 'dans' }])).toEqual([]);
-    expect(validateSwaps(2, [{ o: 'in', f: 'dans' }])[0].f).toBe('dans');
-    expect(validateSwaps(1, [{ o: 'and' }, null, { f: 'et' }, { o: '  ', f: 'et' }])).toEqual([]);
+    const l2only = L2_WORDS[100].ja;
+    expect(validateSwaps(1, [{ o: 'x', f: l2only }])).toEqual([]);
+    expect(validateSwaps(2, [{ o: 'x', f: l2only }])[0].f).toBe(l2only);
+    expect(validateSwaps(1, [{ o: 'but' }, null, { f: 'でも' }, { o: '  ', f: 'でも' }])).toEqual([]);
     expect(validateSwaps(1, 'nope')).toEqual([]);
   });
-  test('accepts the bare noun and keeps accents', () => {
-    const [s] = validateSwaps(1, [{ o: 'problem', f: 'probleme' }]);
-    expect(s.f).toBe('problème');
-    expect(s.g).toBe('problem');
-    const [t] = validateSwaps(1, [{ o: 'the problem', f: 'le problème' }]);
-    expect(t.f).toBe('le problème');
+  test('accepts the reading or katakana and shows the listed kanji', () => {
+    expect(validateSwaps(1, [{ o: 'now', f: 'いま' }])[0].f).toBe('今');
+    expect(validateSwaps(1, [{ o: 'problem', f: 'モンダイ' }])[0].f).toBe('問題');
+    expect(validateSwaps(1, [{ o: 'but', f: ' でも ' }])[0].f).toBe('でも');
+    expect(matchCase('でも', 'But')).toBe('でも');  // no letter case in Japanese
   });
-  test('matches capitalization of the original', () => {
-    expect(validateSwaps(1, [{ o: 'And', f: 'et' }])[0].f).toBe('Et');
-    expect(validateSwaps(1, [{ o: 'AND', f: 'et' }])[0].f).toBe('et');
-    expect(validateSwaps(1, [{ o: 'Because', f: 'parce que' }])[0].f).toBe('Parce que');
-    expect(matchCase("l'idée", 'The idea')).toBe("L'idée");
-  });
-  test('keeps accented homographs distinct and rejects blank replacements', () => {
-    expect(validateSwaps(2, [{ o: 'or', f: 'ou' }])[0].f).toBe('ou');
-    expect(validateSwaps(2, [{ o: 'where', f: 'où' }])[0].f).toBe('où');
+  test('rejects blank replacements', () => {
     expect(validateSwaps(2, [{ o: 'and', f: '' }, { o: 'and', f: '  ' }])).toEqual([]);
   });
   test('plugin words replace the bundled list and keep the event spelling and status', () => {
-    const words = [{ fr: 'la lumière', en: 'the light', hint: 'loo-myair', status: 'active' }];
-    expect(validateSwaps(1, [{ o: 'light', f: 'lumiere' }, { o: 'and', f: 'et' }], words))
-      .toEqual([{ o: 'light', f: 'lumière', g: 'light', h: 'loo-myair', ctx: '', word: 'la lumière', status: 'active' }]);
+    const words = [{ ja: '光', en: 'light', hint: 'hikari', kana: 'ひかり', status: 'active' }];
+    expect(validateSwaps(1, [{ o: 'light', f: 'ひかり' }, { o: 'but', f: 'でも' }], words))
+      .toEqual([{ o: 'light', f: '光', g: 'light', h: 'hikari', k: 'ひかり', ctx: '', word: '光', status: 'active' }]);
   });
-  test('normalizeFr', () => {
-    expect(normalizeFr(' Peut-Être ')).toBe('peut-etre');
-    expect(normalizeFr('l’idée')).toBe("l'idee");
+  test('normalizeJa', () => {
+    expect(normalizeJa(' タブン ')).toBe('たぶん');
+    expect(normalizeJa('ﾀﾌﾞﾝ')).toBe('たぶん');
+    expect(normalizeJa('多 分')).toBe('多分');
   });
 });
 
@@ -79,11 +69,11 @@ describe('guards', () => {
     expect(wordCount('')).toBe(0);
     expect(wordCount('  one two\n\nthree ')).toBe(3);
   });
-  test('zero-French topics', () => {
-    expect(isZeroFrench('if you take ibuprofen talk to your doctor first')).toBe(true);
-    expect(isZeroFrench('my lawyer says the lawsuit is fine')).toBe(true);
-    expect(isZeroFrench('call 911 in an emergency')).toBe(true);
-    expect(isZeroFrench('shipped the new onboarding flow today')).toBe(false);
-    expect(isZeroFrench('the taxi was late again')).toBe(false);
+  test('zero-Japanese topics', () => {
+    expect(isZeroJapanese('if you take ibuprofen talk to your doctor first')).toBe(true);
+    expect(isZeroJapanese('my lawyer says the lawsuit is fine')).toBe(true);
+    expect(isZeroJapanese('call 911 in an emergency')).toBe(true);
+    expect(isZeroJapanese('shipped the new onboarding flow today')).toBe(false);
+    expect(isZeroJapanese('the taxi was late again')).toBe(false);
   });
 });

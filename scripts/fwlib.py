@@ -1,7 +1,7 @@
-"""French Weave shared state: word statuses, stage, chat exposure, extension events.
+"""Japanese Weave shared state: word statuses, stage, chat exposure, extension events.
 
-Python 3.9+ standard library only. One state directory per user (FRENCH_WEAVE_HOME, default ~/.french-weave)
-holds everything; the Claude Code hook, the slash commands and the Chrome native messaging host all read and
+Python 3.9+ standard library only. One state directory per user (JAPANESE_WEAVE_HOME, default ~/.japanese-weave)
+holds everything; the Claude Code hook, the slash commands and the browser native messaging host all read and
 write it through this module.
 
 Statuses: queue -> active -> known, with shaky as the penalty box (see README "How words advance").
@@ -25,6 +25,7 @@ except ImportError:  # Windows: no locking (untested platform)
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 LEXICON = PLUGIN_ROOT / 'data' / 'lexicon.csv'
+ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Anki review words, ahead of the base list
 
 # ---- promotion rules (documented in README "How words advance") ----
 WINDOW = 20             # target number of active (learning) words
@@ -37,23 +38,21 @@ ASSUMED_WEIGHT = 1      # a day with only opt-in "assumed" exposure (fw.py log-c
 STAGES = [(400, 4), (150, 3), (40, 2)]  # (known words, stage): first match wins; otherwise Stage 1
 
 
-# Same spelling as an English word, so French use can't be told apart in English prose: never counted.
-UNMEASURABLE = {'important', 'possible', 'plus', 'comment', 'grand', 'simple', 'long', 'normal', 'excellent',
-                'terrible', 'impossible', 'mars', 'bravo', 'pardon', 'rouge', 'mince', 'sec', 'dire', 'porter',
-                'planter', 'charger', 'lever', 'lancer', 'quitter', 'payer', 'signer', 'proposer', 'copier', 'derrière'}
-DETERMINER = r"(?:le|la|les|l'|un|une|du|de la|ce|cette|mon|ma|ton|ta)\s*"
+KANJI = '\u3005\u3006\u4e00-\u9fff\uf900-\ufaff'   # 々 〆 and CJK ideographs
+KANA = '\u3041-\u309f\u30a0-\u30ff\uff66-\uff9f'   # hiragana, katakana (with ー), half-width katakana
+JAPANESE = re.compile(f'[{KANJI}{KANA}]')
 CODE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+", re.S)
 DEDUPE_DAYS = 45
 
 
 def home():
-    """The state dir: FRENCH_WEAVE_HOME, else the dir this copy was installed into by setup (<home>/app/scripts),
-    else ~/.french-weave."""
-    if os.environ.get('FRENCH_WEAVE_HOME'):
-        return Path(os.environ['FRENCH_WEAVE_HOME']).expanduser()
+    """The state dir: JAPANESE_WEAVE_HOME, else the dir this copy was installed into by setup (<home>/app/scripts),
+    else ~/.japanese-weave."""
+    if os.environ.get('JAPANESE_WEAVE_HOME'):
+        return Path(os.environ['JAPANESE_WEAVE_HOME']).expanduser()
     if PLUGIN_ROOT.name == 'app' and (PLUGIN_ROOT.parent / 'state.json').exists():
         return PLUGIN_ROOT.parent
-    return Path.home() / '.french-weave'
+    return Path.home() / '.japanese-weave'
 
 
 def today():
@@ -65,22 +64,51 @@ def days_between(a, b):
 
 
 def norm(text):
-    return unicodedata.normalize('NFC', str(text)).replace('’', "'").replace('‘', "'").lower().strip()
+    return unicodedata.normalize('NFKC', str(text)).replace('’', "'").replace('‘', "'").lower().strip()
 
 
-def key(fr):
-    return re.sub(r'\s+', ' ', norm(fr))
+def roman_key(text):
+    """Romaji folded for lookups: no macrons, apostrophes, spaces or hyphens, long vowels single (tōkyō, toukyou,
+    tokyo and Tōkyō all match)."""
+    text = unicodedata.normalize('NFD', norm(text))
+    text = re.sub(r"[\u0300-\u036f'’\s-]", '', text)
+    return re.sub(r'(?<=o)u|(?<=([aiueo]))\1', '', text)
 
 
-def load_lexicon(path=LEXICON):
+def key(ja):
+    return re.sub(r'\s+', ' ', norm(ja))
+
+
+def read_lexicon(path):
+    """Rows of a lexicon CSV (ja, en, hint, kana), first of each word only."""
     with open(path, encoding='utf-8', newline='') as file:
-        rows = [r for r in csv.DictReader(file) if (r.get('fr') or '').strip()]
+        rows = [r for r in csv.DictReader(file) if (r.get('ja') or '').strip()]
     seen, out = set(), []
     for r in rows:
-        k = key(r['fr'])
+        k = key(r['ja'])
         if k not in seen:
             seen.add(k)
-            out.append({'fr': r['fr'].strip(), 'en': r['en'].strip(), 'hint': r['hint'].strip()})
+            out.append({'ja': r['ja'].strip(), 'en': r['en'].strip(), 'hint': r['hint'].strip(),
+                        'kana': (r.get('kana') or '').strip()})
+    return out
+
+
+def load_lexicon(path=None):
+    """The word list in teaching order. Without a path: your Anki review words (state dir anki.csv, from `fw.py
+    anki`) first, then the base frequency list. A word in both keeps its Anki rank and the base list's gloss."""
+    if path:
+        return read_lexicon(path)
+    base = read_lexicon(LEXICON)
+    anki = home() / ANKI_LEXICON
+    if not anki.exists():
+        return base
+    by_key = {key(w['ja']): w for w in base}
+    out, seen = [], set()
+    for w in read_lexicon(anki) + base:
+        k = key(w['ja'])
+        if k not in seen:
+            seen.add(k)
+            out.append(by_key.get(k, w))
     return out
 
 
@@ -132,12 +160,17 @@ def locked(name='state.lock', blocking=True):
 
 # ---- state ----
 
-def new_state(day=None, lexicon=None, known_top=0):
-    """A fresh state; known_top marks the top lexicon words known before the first learning words are picked."""
+def new_state(day=None, lexicon=None, known_top=0, known=()):
+    """A fresh state; known_top (the top lexicon words) and known (words by name, like mature Anki cards) are
+    marked known before the first learning words are picked."""
     day = day or today()
     words = [blank(w) for w in (lexicon or load_lexicon())]
     state = {'schema': 1, 'created': day, 'stage': 1, 'stage_pinned': False, 'paused': False, 'words': words}
     seed_known(state, known_top, day)
+    for name in known:
+        w = find(state, name)
+        if w and w['status'] == 'queue':
+            set_status(w, 'known', day)
     refill(state, day)
     return state
 
@@ -158,11 +191,19 @@ def blank(word):
 
 
 def merge_lexicon(state, lexicon=None):
-    """Adds lexicon words the state doesn't have yet (a plugin update can grow the list); never drops any."""
-    have = {key(w['fr']) for w in state['words']}
-    for w in lexicon or load_lexicon():
-        if key(w['fr']) not in have:
+    """Adds lexicon words the state doesn't have yet (a plugin update or an Anki sync can grow the list), refreshes
+    glosses and hints, and puts the words in lexicon order (an Anki sync moves your review words to the front of
+    the queue). Never drops any: words no longer listed keep their status, at the end."""
+    lexicon = lexicon or load_lexicon()
+    rank = {key(w['ja']): i for i, w in enumerate(lexicon)}
+    have = {key(w['ja']): w for w in state['words']}
+    for w in lexicon:
+        k = key(w['ja'])
+        if k in have:
+            have[k].update(en=w['en'], hint=w['hint'], kana=w.get('kana', ''))
+        else:
             state['words'].append(blank(w))
+    state['words'].sort(key=lambda w: rank.get(key(w['ja']), len(rank)))
     return state
 
 
@@ -195,15 +236,20 @@ def editing():
         save_state(state)
 
 
-def find(state, fr):
-    k = key(fr)
+def find(state, word):
+    """The entry for a word as written (多分), in kana (たぶん) or in romaji (tabun)."""
+    k = key(word)
     for w in state['words']:
-        if key(w['fr']) == k:
+        if key(w['ja']) == k:
             return w
-    # Accept the bare noun for "le problème" style entries.
     for w in state['words']:
-        if re.sub(r"^(le |la |les |l')", '', key(w['fr'])) == k:
+        if w.get('kana') and key(w['kana']) == k:
             return w
+    r = roman_key(word)
+    if r and not JAPANESE.search(word):
+        for w in state['words']:
+            if roman_key(w['hint']) == r:
+                return w
     return None
 
 
@@ -228,7 +274,7 @@ def exposure_days(word, chat=None):
     genuine exposure). 'assumed' (counts ASSUMED_WEIGHT): opt-in log-chat-day marks for chats that can't be scanned."""
     since = word.get('added') or '0000'
     days = {d: 'assumed' for d in word.get('assumed') or [] if d >= since}
-    for d in list(word.get('days') or []) + list((chat or {}).get(word['fr'], {}).get('days', [])):
+    for d in list(word.get('days') or []) + list((chat or {}).get(word['ja'], {}).get('days', [])):
         if d >= since:
             days[d] = 'seen'
     return dict(sorted(days.items()))
@@ -285,14 +331,14 @@ def promote(state, day=None, chat=None):
 EVENTS = ('seen', 'assumed', 'flip', 'asked', 'peek', 'known', 'active')
 
 
-def apply_event(state, fr, kind, day=None):
+def apply_event(state, ja, kind, day=None):
     """Extension and command events. Returns False for unknown words or kinds.
 
     seen / assumed: exposure. flip (clicked back to English) / asked: shaky. peek (hovered for the meaning):
     blocks graduation of an active word, restarts a shaky word's clock, and a known word peeked on 2 different
     days within PEEK_WINDOW days becomes shaky. known / active: set directly (commands)."""
     day = day or today()
-    w = find(state, fr)
+    w = find(state, ja)
     if w is None or kind not in EVENTS:
         return False
     if kind in ('seen', 'assumed'):
@@ -347,33 +393,40 @@ def known_band(state):
         if queue_before + known_after <= best[0]:
             best = (queue_before + known_after, rank)
     n = best[1]
-    missing = [w['fr'] for w in words[:n] if w['status'] == 'queue']
-    extra = [w['fr'] for w in words[n:] if w['status'] == 'known']
+    missing = [w['ja'] for w in words[:n] if w['status'] == 'queue']
+    extra = [w['ja'] for w in words[n:] if w['status'] == 'known']
     return n, missing, extra
 
 
 def version(state):
-    blob = json.dumps([stage_for(state), state.get('paused'), [(w['fr'], w['status']) for w in introduced(state)]])
+    blob = json.dumps([stage_for(state), state.get('paused'), [(w['ja'], w['status']) for w in introduced(state)]])
     return hashlib.sha1(blob.encode()).hexdigest()[:10]
 
 
 def public_state(state):
     """What the extension gets: stage, pause flag, and the words in use."""
     return {'version': version(state), 'stage': stage_for(state), 'paused': bool(state.get('paused')),
-            'words': [{k: w[k] for k in ('fr', 'en', 'hint', 'status')} for w in introduced(state)]}
+            'words': [{k: w.get(k, '') for k in ('ja', 'en', 'hint', 'kana', 'status')} for w in introduced(state)]}
 
 
 # ---- chat exposure from Claude Code transcripts ----
 
-def pattern(fr):
-    word = norm(fr)
-    noun = re.match(r"(?:le |la |les |l')(.+)", word)
-    if noun:
-        noun = noun.group(1)
-        lead = r"(?<!\w)" + (DETERMINER if noun.isascii() else '')
-        return re.compile(lead + re.escape(noun) + r"s?(?![\w])")
-    tail = {'sans': r"(?![\w-])(?!\s+serif)", 'et': r"(?![\w-])(?!\s+al\b)"}.get(word, r"(?![\w-])")
-    return re.compile(r"(?<![\w'-])" + re.escape(word) + tail)
+def pattern(ja, kana=''):
+    """A word in chat prose: as written, or in kana when that is 3+ characters (shorter kana collides with ordinary
+    Japanese). Japanese has no spaces, so only same-script neighbors block a match: a kanji word can't sit inside a
+    longer kanji run (今 in 今日) and a kana word can't sit inside a kana run (いま in います)."""
+    forms = [norm(ja)]
+    if kana and len(kana) >= 3 and norm(kana) != forms[0]:
+        forms.append(norm(kana))
+    return re.compile('|'.join(_form(f) for f in forms))
+
+
+def _form(form):
+    if not JAPANESE.search(form):
+        return r"(?<![\w'-])" + re.escape(form) + r"(?![\w-])"
+    before = f'[{KANJI}]' if re.match(f'[{KANJI}]', form) else f'[{KANJI}{KANA}]'
+    after = f'[{KANJI}]' if re.search(f'[{KANJI}]$', form) else f'[{KANA}]'
+    return f'(?<!{before}){re.escape(form)}(?!{after})'
 
 
 def codex_home():
@@ -381,9 +434,9 @@ def codex_home():
 
 
 def transcript_roots():
-    """Chat transcripts to scan: FRENCH_WEAVE_TRANSCRIPTS, else Claude Code's projects and Codex's sessions."""
-    if os.environ.get('FRENCH_WEAVE_TRANSCRIPTS'):
-        return [Path(os.environ['FRENCH_WEAVE_TRANSCRIPTS']).expanduser()]
+    """Chat transcripts to scan: JAPANESE_WEAVE_TRANSCRIPTS, else Claude Code's projects and Codex's sessions."""
+    if os.environ.get('JAPANESE_WEAVE_TRANSCRIPTS'):
+        return [Path(os.environ['JAPANESE_WEAVE_TRANSCRIPTS']).expanduser()]
     claude = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude').expanduser() / 'projects'
     return [claude, codex_home() / 'sessions']
 
@@ -434,10 +487,11 @@ def local_day(stamp):
 def scan(words, index, roots=None, start='0000-00-00'):
     """Fold new transcript lines into the exposure index (mutated and returned)."""
     roots = [Path(r) for r in ([roots] if isinstance(roots, (str, Path)) else roots)] if roots else transcript_roots()
-    patterns = {fr: pattern(fr) for fr in words if norm(fr) not in UNMEASURABLE}
+    words = [w if isinstance(w, dict) else {'ja': w} for w in words]
+    patterns = {w['ja']: pattern(w['ja'], w.get('kana', '')) for w in words}
     counts, offsets, recent = index.setdefault('words', {}), index.setdefault('offsets', {}), index.setdefault('recent', {})
-    for fr in patterns:
-        counts.setdefault(fr, {'n': 0, 'days': []})
+    for ja in patterns:
+        counts.setdefault(ja, {'n': 0, 'days': []})
     since = time.mktime(time.strptime(start, '%Y-%m-%d')) if start > '0000' else 0
     for path in (p for root in roots if root.exists() for p in root.rglob('*.jsonl')):
         name = str(path)
@@ -451,16 +505,16 @@ def scan(words, index, roots=None, start='0000-00-00'):
             continue
         lines = Lines(path, offset)
         for day, text in replies(lines):
-            if day < start or 'French Weave' in text:
+            if day < start or 'Japanese Weave' in text:
                 continue
             digest = hashlib.sha1(text.encode()).hexdigest()[:16]
             if digest in recent:
                 continue  # forked and resumed chats copy old replies
             recent[digest] = day
             prose = norm(CODE.sub(' ', text))
-            for fr, regex in patterns.items():
+            for ja, regex in patterns.items():
                 if regex.search(prose):
-                    entry = counts[fr]
+                    entry = counts[ja]
                     entry['n'] += 1
                     if day not in entry['days']:
                         entry['days'] = sorted(entry['days'] + [day])[-60:]
@@ -479,7 +533,7 @@ def refresh_exposure():
             return False
         state = load_state()
         path = home() / 'exposure.json'
-        index = scan([w['fr'] for w in state['words']], read_json(path, {}) or {}, start=state.get('created', '0000-00-00'))
+        index = scan(state['words'], read_json(path, {}) or {}, start=state.get('created', '0000-00-00'))
         write_json(path, index)
     with editing():
         pass  # promotion runs on save

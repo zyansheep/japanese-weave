@@ -1,0 +1,401 @@
+rank,ja,kana,hint,en,tier,score
+801,恋人,こいびと,koibito,partner / lover,B,1933
+802,思い出,おもいで,omoide,memory / memories,B,1939
+803,常,つね,tsune,the norm / always,C,1942
+804,一時,いちじ,ichiji,temporarily / a while,B,1944
+805,微妙,びみょう,bimyō,subtle / iffy,T,1946
+806,三年,さんねん,sannen,three years,X,1947
+807,雲,くも,kumo,cloud,B,1951
+808,靴,くつ,kutsu,shoes,B,1951
+809,記事,きじ,kiji,article,B,1956
+810,頬,ほお,hō,cheek,C,1956
+811,課題,かだい,kadai,task / challenge,T,1958
+812,男女,だんじょ,danjo,men and women,B,1958
+813,生,なま,nama,raw / live,B,1959
+814,二度,にど,nido,two times / twice,X,1965
+815,喜び,よろこび,yorokobi,joy,B,1970
+816,対,たい,tai,versus / vs,C,1971
+817,秒,びょう,byō,second,X,1971
+818,骨,ほね,hone,bone,C,1973
+819,若者,わかもの,wakamono,young people / youth,B,1973
+820,武器,ぶき,buki,weapon,C,1974
+821,特殊,とくしゅ,tokushu,special / unusual,T,1978
+822,作戦,さくせん,sakusen,strategy / plan,B,1979
+823,ようやく,ようやく,yōyaku,finally / at last,A,1995
+824,城,しろ,shiro,castle,B,1996
+825,願い,ねがい,negai,wish / request,B,1998
+826,資格,しかく,shikaku,qualification,B,1998
+827,主,ぬし,nushi,master / owner,C,2002
+828,そもそも,そもそも,somosomo,in the first place,A,2004
+829,生命,せいめい,seimei,life,B,2004
+830,少なくとも,すくなくとも,sukunakutomo,at least,A,2009
+831,濃い,こい,koi,dark / strong,B,2014
+832,今夜,こんや,kon'ya,tonight,A,2021
+833,偉い,えらい,erai,admirable / great,B,2022
+834,速度,そくど,sokudo,speed,T,2023
+835,道具,どうぐ,dōgu,tool,T,2023
+836,銀行,ぎんこう,ginkō,bank,B,2024
+837,いいえ,いいえ,iie,no,A,2024
+838,笑み,えみ,emi,smile,C,2025
+839,意志,いし,ishi,will / intention,B,2027
+840,暑い,あつい,atsui,hot,B,2027
+841,自宅,じたく,jitaku,home,B,2029
+842,世紀,せいき,seiki,century,B,2029
+843,医療,いりょう,iryō,medical care,B,2039
+844,科学,かがく,kagaku,science,B,2039
+845,成果,せいか,seika,result / outcome,T,2039
+846,章,しょう,shō,chapter / section,B,2043
+847,容易,ようい,yōi,easy / simple,T,2059
+848,要素,ようそ,yōso,element / component,T,2059
+849,住民,じゅうみん,jūmin,resident,B,2061
+850,ひどい,ひどい,hidoi,terrible / awful,B,2061
+851,場面,ばめん,bamen,scene / situation,B,2062
+852,男子,だんし,danshi,boy / guy,B,2062
+853,癖,くせ,kuse,habit / quirk,B,2063
+854,穏やか,おだやか,odayaka,calm / gentle,B,2064
+855,むしろ,むしろ,mushiro,rather / if anything,A,2064
+856,偶然,ぐうぜん,gūzen,by chance / coincidence,B,2067
+857,文句,もんく,monku,complaint,B,2069
+858,資金,しきん,shikin,funds / capital,B,2071
+859,わし,わし,washi,eagle,X,2073
+860,天井,てんじょう,tenjō,ceiling,B,2082
+861,便利,べんり,benri,convenient / handy,T,2082
+862,社長,しゃちょう,shachō,company president,B,2083
+863,多数,たすう,tasū,many / majority,T,2083
+864,地元,じもと,jimoto,hometown / local,B,2083
+865,前提,ぜんてい,zentei,assumption / premise,T,2086
+866,前後,ぜんご,zengo,around / before and after,B,2089
+867,実家,じっか,jikka,parents' home,B,2093
+868,勝負,しょうぶ,shōbu,match / contest,B,2095
+869,鏡,かがみ,kagami,mirror,B,2097
+870,共通,きょうつう,kyōtsū,common / shared,T,2098
+871,電気,でんき,denki,electricity / lights,B,2101
+872,大した,たいした,taishita,great / big,C,2105
+873,団体,だんたい,dantai,group / organization,B,2109
+874,もう一度,もういちど,mōichido,once more / again,A,2109
+875,波,なみ,nami,wave,B,2111
+876,大会,たいかい,taikai,tournament / convention,B,2112
+877,金額,きんがく,kingaku,amount / sum,B,2113
+878,といっても,といっても,toittemo,that said / though,A,2116
+879,とりあえず,とりあえず,toriaezu,for now / first,A,2121
+880,左手,ひだりて,hidarite,left hand,C,2125
+881,書類,しょるい,shorui,documents / paperwork,B,2128
+882,具合,ぐあい,guai,condition / state,B,2128
+883,いくら,いくら,ikura,how much,B,2133
+884,価格,かかく,kakaku,price,B,2134
+885,医者,いしゃ,isha,doctor,B,2135
+886,季節,きせつ,kisetsu,season,B,2137
+887,知り合い,しりあい,shiriai,acquaintance,B,2138
+888,謎,なぞ,nazo,mystery / puzzle,B,2139
+889,少々,しょうしょう,shōshō,a little / a bit,A,2147
+890,神経,しんけい,shinkei,nerve,C,2148
+891,方針,ほうしん,hōshin,approach / policy,T,2150
+892,勇気,ゆうき,yūki,courage,B,2150
+893,一週間,いっしゅうかん,isshūkan,one week,X,2153
+894,そういえば,そういえば,sōieba,come to think of it,A,2154
+895,帰り,かえり,kaeri,return / way home,B,2159
+896,時計,とけい,tokei,clock / watch,B,2159
+897,何人,なんにん,nannin,how many people / a number of people,X,2161
+898,小学校,しょうがっこう,shōgakkō,elementary school,B,2162
+899,柔らかい,やわらかい,yawarakai,soft,B,2163
+900,単なる,たんなる,tannaru,mere / just a,T,2164
+901,昼,ひる,hiru,noon / lunch,B,2165
+902,複数,ふくすう,fukusū,multiple / several,T,2165
+903,画面,がめん,gamen,screen,T,2167
+904,すでに,すでに,sudeni,already,A,2169
+905,主に,おもに,omoni,mainly / mostly,A,2170
+906,苦手,にがて,nigate,bad at / not good at,B,2174
+907,夕方,ゆうがた,yūgata,evening,A,2174
+908,小説,しょうせつ,shōsetsu,novel,B,2175
+909,直後,ちょくご,chokugo,right after,A,2175
+910,炎,ほのお,honō,flame,C,2179
+911,産業,さんぎょう,sangyō,industry,B,2179
+912,丁寧,ていねい,teinei,polite / careful,B,2180
+913,電車,でんしゃ,densha,train,B,2184
+914,冷静,れいせい,reisei,calm / composed,B,2185
+915,易い,やすい,yasui,easy,X,2188
+916,部下,ぶか,buka,subordinate,B,2188
+917,橋,はし,hashi,bridge,B,2195
+918,世間,せけん,seken,society / the public,B,2199
+919,文章,ぶんしょう,bunshō,text / writing,B,2201
+920,端,はし,hashi,edge / end,B,2203
+921,都合,つごう,tsugō,convenience / timing,B,2204
+922,どうしたの,どうしたの,dōshitano,what's wrong?,C,2208
+923,地上,ちじょう,chijō,above ground,B,2208
+924,きつい,きつい,kitsui,tough / tight,B,2210
+925,危機,きき,kiki,crisis,B,2210
+926,食べ物,たべもの,tabemono,food,B,2212
+927,衝撃,しょうげき,shōgeki,shock / impact,B,2214
+928,幼い,おさない,osanai,very young / childish,C,2214
+929,業務,ぎょうむ,gyōmu,work / operations,B,2216
+930,職員,しょくいん,shokuin,staff / employee,B,2216
+931,翌日,よくじつ,yokujitsu,the next day,A,2216
+932,懐かしい,なつかしい,natsukashii,nostalgic,B,2218
+933,うまい,うまい,umai,good at / tasty,B,2220
+934,扱い,あつかい,atsukai,handling / treatment,T,2224
+935,一種,いっしゅ,isshu,a kind / a sort,B,2228
+936,最低,さいてい,saitei,minimum / worst,T,2228
+937,比較的,ひかくてき,hikakuteki,relatively,A,2229
+938,上手,じょうず,jōzu,good at / skilled,B,2230
+939,卵,たまご,tamago,egg,B,2236
+940,せっかく,せっかく,sekkaku,after all the trouble,C,2238
+941,味方,みかた,mikata,ally / supporter,B,2241
+942,始め,はじめ,hajime,start / beginning,T,2251
+943,怪しい,あやしい,ayashii,suspicious / fishy,T,2259
+944,間違いない,まちがいない,machigainai,no doubt / certain,B,2259
+945,犯罪,はんざい,hanzai,crime,B,2261
+946,働き,はたらき,hataraki,work / function,B,2263
+947,明日,あした,ashita,tomorrow,A,2271
+948,医師,いし,ishi,doctor / physician,C,2272
+949,驚き,おどろき,odoroki,surprise,B,2273
+950,人形,にんぎょう,ningyō,doll,B,2276
+951,一人で,ひとりで,hitoride,alone / by myself,A,2280
+952,近所,きんじょ,kinjo,neighborhood,B,2283
+953,地位,ちい,chii,status / position,B,2283
+954,大勢,おおぜい,ōzei,many people / crowd,B,2284
+955,性質,せいしつ,seishitsu,nature / property,T,2285
+956,現代,げんだい,gendai,modern day / today,B,2286
+957,本日,ほんじつ,honjitsu,today,A,2286
+958,手続き,てつづき,tetsuzuki,procedure / process,T,2289
+959,慎重,しんちょう,shinchō,careful / cautious,T,2292
+960,両方,りょうほう,ryōhō,both,A,2292
+961,番号,ばんごう,bangō,number,T,2295
+962,遊び,あそび,asobi,play / fun,B,2297
+963,皮,かわ,kawa,skin / peel,C,2298
+964,一層,いっそう,issō,even more,A,2300
+965,国内,こくない,kokunai,domestic,B,2303
+966,才能,さいのう,sainō,talent,B,2303
+967,映像,えいぞう,eizō,video / footage,B,2306
+968,足元,あしもと,ashimoto,at one's feet / footing,C,2310
+969,生物,せいぶつ,seibutsu,organism / biology,B,2312
+970,出身,しゅっしん,shusshin,origin / from,B,2313
+971,詳細,しょうさい,shōsai,details,T,2320
+972,毎年,まいとし,maitoshi,every year,A,2325
+973,完璧,かんぺき,kanpeki,perfect,T,2328
+974,永遠,えいえん,eien,forever / eternity,B,2329
+975,休み,やすみ,yasumi,break / day off,B,2331
+976,最終的,さいしゅうてき,saishūteki,final / ultimately,T,2334
+977,住宅,じゅうたく,jūtaku,housing / residence,B,2340
+978,仲,なか,naka,relationship / terms,B,2341
+979,表面,ひょうめん,hyōmen,surface,B,2345
+980,工場,こうじょう,kōjō,factory,B,2345
+981,個人的,こじんてき,kojinteki,personal,T,2351
+982,有効,ゆうこう,yūkō,valid / enabled,T,2351
+983,政策,せいさく,seisaku,policy,B,2353
+984,内側,うちがわ,uchigawa,inside / inner side,B,2356
+985,宇宙,うちゅう,uchū,space / universe,B,2359
+986,教授,きょうじゅ,kyōju,professor,B,2363
+987,仲良く,なかよく,nakayoku,getting along / nicely,B,2364
+988,真っ赤,まっか,makka,bright red,B,2366
+989,奇妙,きみょう,kimyō,strange / odd,B,2367
+990,同時に,どうじに,dōjini,at the same time,A,2370
+991,大いに,おおいに,ōini,greatly / a lot,A,2371
+992,幅,はば,haba,width,T,2376
+993,貴重,きちょう,kichō,precious / valuable,B,2382
+994,草,くさ,kusa,grass,B,2387
+995,現象,げんしょう,genshō,phenomenon / behavior,T,2391
+996,後半,こうはん,kōhan,second half / latter,B,2391
+997,兄弟,きょうだい,kyōdai,siblings / brothers,B,2392
+998,理想,りそう,risō,ideal,B,2397
+999,虫,むし,mushi,insect / bug,B,2398
+1000,好み,このみ,konomi,preference / taste,T,2400
+1001,二階,にかい,nikai,second floor / upstairs,X,2403
+1002,関心,かんしん,kanshin,interest / concern,B,2404
+1003,悲鳴,ひめい,himei,scream,C,2407
+1004,風景,ふうけい,fūkei,landscape / scenery,B,2411
+1005,お茶,おちゃ,ocha,tea,B,2416
+1006,事前,じぜん,jizen,beforehand / prior,T,2419
+1007,太い,ふとい,futoi,thick / fat,B,2428
+1008,雑誌,ざっし,zasshi,magazine,B,2429
+1009,お礼,おれい,orei,thanks / gratitude,B,2429
+1010,値段,ねだん,nedan,price / cost,B,2438
+1011,いろいろ,いろいろ,iroiro,various / all sorts,T,2442
+1012,当初,とうしょ,tōsho,initially / at first,A,2444
+1013,桜,さくら,sakura,cherry blossom,B,2457
+1014,親しい,したしい,shitashii,close / friendly,B,2458
+1015,去年,きょねん,kyonen,last year,A,2463
+1016,体力,たいりょく,tairyoku,stamina / strength,B,2463
+1017,食,しょく,shoku,food / diet,C,2464
+1018,素早い,すばやい,subayai,quick / swift,B,2467
+1019,地区,ちく,chiku,district / area,B,2471
+1020,布,ぬの,nuno,cloth / fabric,B,2471
+1021,感想,かんそう,kansō,thoughts / impressions,B,2474
+1022,強力,きょうりょく,kyōryoku,powerful / strong,T,2476
+1023,一時間,いちじかん,ichijikan,one hour,X,2477
+1024,玉,たま,tama,ball / bead,C,2477
+1025,何年,なんねん,nannen,how many years / how long,X,2478
+1026,気味,きみ,kimi,feeling / slightly,C,2479
+1027,何回,なんかい,nankai,how many times,X,2482
+1028,柱,はしら,hashira,pillar / post,B,2486
+1029,植物,しょくぶつ,shokubutsu,plant,B,2489
+1030,旦那,だんな,danna,husband,B,2489
+1031,ところで,ところで,tokorode,by the way,A,2490
+1032,青年,せいねん,seinen,young man / youth,B,2490
+1033,大声,おおごえ,ōgoe,loud voice,B,2493
+1034,優秀,ゆうしゅう,yūshū,excellent / talented,B,2497
+1035,文,ぶん,bun,sentence / statement,T,2498
+1036,生涯,しょうがい,shōgai,lifetime / career,B,2499
+1037,被害者,ひがいしゃ,higaisha,victim,B,2500
+1038,割合,わりあい,wariai,ratio / proportion,T,2500
+1039,途端,とたん,totan,the moment / just as,C,2501
+1040,屋根,やね,yane,roof,B,2504
+1041,悔しい,くやしい,kuyashii,frustrating / bitter,B,2511
+1042,犠牲,ぎせい,gisei,sacrifice,B,2513
+1043,筋,すじ,suji,line / logic,C,2516
+1044,身近,みぢか,mijika,familiar / close,B,2517
+1045,それぞれ,それぞれ,sorezore,each / respectively,A,2517
+1046,基礎,きそ,kiso,basics / foundation,T,2519
+1047,不明,ふめい,fumei,unknown / unclear,T,2523
+1048,予算,よさん,yosan,budget,B,2523
+1049,適切,てきせつ,tekisetsu,appropriate / proper,T,2525
+1050,体制,たいせい,taisei,system / setup,B,2529
+1051,常識,じょうしき,jōshiki,common sense,B,2533
+1052,今朝,けさ,kesa,this morning,A,2543
+1053,わざわざ,わざわざ,wazawaza,bother to / on purpose,A,2544
+1054,氷,こおり,kōri,ice,B,2555
+1055,根拠,こんきょ,konkyo,basis / evidence,T,2562
+1056,爪,つめ,tsume,nail / claw,C,2567
+1057,なんとか,なんとか,nantoka,somehow,A,2571
+1058,塩,しお,shio,salt,B,2572
+1059,事務,じむ,jimu,office work / admin,B,2574
+1060,人数,にんずう,ninzū,number of people,B,2574
+1061,悩み,なやみ,nayami,worry / trouble,B,2575
+1062,宿,やど,yado,inn / lodging,B,2578
+1063,箇所,かしょ,kasho,spot / place,T,2578
+1064,見た目,みため,mitame,looks / appearance,B,2580
+1065,やっと,やっと,yatto,finally / at last,A,2583
+1066,青,あお,ao,blue,B,2588
+1067,あっさり,あっさり,assari,easily / simply,A,2589
+1068,煙,けむり,kemuri,smoke,B,2589
+1069,費用,ひよう,hiyō,cost / expense,T,2589
+1070,本格的,ほんかくてき,honkakuteki,full-scale / proper,B,2591
+1071,丸,まる,maru,circle,B,2595
+1072,隙間,すきま,sukima,gap,B,2595
+1073,物質,ぶっしつ,busshitsu,substance / matter,B,2596
+1074,鉄,てつ,tetsu,iron,B,2598
+1075,うち,うち,uchi,home / our,B,2605
+1076,人口,じんこう,jinkō,population,B,2605
+1077,症状,しょうじょう,shōjō,symptom,T,2607
+1078,眠い,ねむい,nemui,sleepy,B,2611
+1079,重大,じゅうだい,jūdai,serious / critical,T,2613
+1080,辺,へん,hen,around / area,C,2613
+1081,鬼,おに,oni,demon / ogre,C,2615
+1082,ながらも,ながらも,nagaramo,though / although,X,2616
+1083,最悪,さいあく,saiaku,worst,T,2623
+1084,要するに,ようするに,yōsuruni,in short / basically,A,2626
+1085,職業,しょくぎょう,shokugyō,occupation / job,B,2630
+1086,景色,けしき,keshiki,view / scenery,B,2636
+1087,無言,むごん,mugon,silent / silence,C,2636
+1088,隙,すき,suki,opening / weak spot,C,2638
+1089,圧倒的,あっとうてき,attōteki,overwhelming,B,2639
+1090,参考,さんこう,sankō,reference,T,2644
+1091,素材,そざい,sozai,material / ingredient,B,2644
+1092,宗教,しゅうきょう,shūkyō,religion,B,2649
+1093,親子,おやこ,oyako,parent and child,B,2653
+1094,おかげで,おかげで,okagede,thanks to,A,2658
+1095,片手,かたて,katate,one hand,C,2659
+1096,仕組み,しくみ,shikumi,mechanism / how it works,T,2661
+1097,兵,へい,hei,soldier,C,2662
+1098,これまで,これまで,koremade,so far / until now,A,2667
+1099,赤ちゃん,あかちゃん,akachan,baby,B,2667
+1100,地図,ちず,chizu,map,B,2667
+1101,明かり,あかり,akari,light,B,2668
+1102,真ん中,まんなか,mannaka,middle / center,B,2669
+1103,岩,いわ,iwa,rock,B,2674
+1104,手前,てまえ,temae,this side / just before,B,2674
+1105,来年,らいねん,rainen,next year,A,2676
+1106,下手,へた,heta,bad at / poor,B,2677
+1107,深刻,しんこく,shinkoku,serious / severe,T,2678
+1108,出会い,であい,deai,encounter / meeting,B,2682
+1109,視界,しかい,shikai,field of view / sight,C,2684
+1110,風呂,ふろ,furo,bath,B,2684
+1111,疑い,うたがい,utagai,doubt / suspicion,B,2689
+1112,正式,せいしき,seishiki,official / formal,T,2692
+1113,分野,ぶんや,bun'ya,field / area,T,2695
+1114,模様,もよう,moyō,pattern,B,2700
+1115,さすが,さすが,sasuga,as expected / impressive,A,2700
+1116,死体,したい,shitai,corpse,C,2711
+1117,純粋,じゅんすい,junsui,pure,T,2712
+1118,週間,しゅうかん,shūkan,week,X,2715
+1119,脇,わき,waki,side / armpit,C,2716
+1120,彼氏,かれし,kareshi,boyfriend,B,2720
+1121,跡,あと,ato,trace / mark,B,2721
+1122,精神的,せいしんてき,seishinteki,mental / emotional,B,2721
+1123,愛情,あいじょう,aijō,love / affection,B,2730
+1124,直前,ちょくぜん,chokuzen,right before,A,2733
+1125,地獄,じごく,jigoku,hell,C,2734
+1126,人類,じんるい,jinrui,humanity / mankind,B,2738
+1127,番組,ばんぐみ,bangumi,TV show / program,B,2738
+1128,自転車,じてんしゃ,jitensha,bicycle / bike,B,2739
+1129,成績,せいせき,seiseki,grades / results,B,2740
+1130,感触,かんしょく,kanshoku,feel / touch,B,2746
+1131,悲しみ,かなしみ,kanashimi,sadness / sorrow,B,2746
+1132,筋肉,きんにく,kinniku,muscle,B,2748
+1133,厚い,あつい,atsui,thick,B,2754
+1134,思想,しそう,shisō,ideology / thought,B,2754
+1135,不幸,ふこう,fukō,misfortune / unhappy,B,2754
+1136,画像,がぞう,gazō,image / picture,T,2756
+1137,関係者,かんけいしゃ,kankeisha,people involved,B,2756
+1138,理論,りろん,riron,theory,T,2759
+1139,無料,むりょう,muryō,free / no charge,T,2761
+1140,果たして,はたして,hatashite,really / I wonder if,C,2766
+1141,教会,きょうかい,kyōkai,church,B,2769
+1142,よろしく,よろしく,yoroshiku,regards / please,A,2775
+1143,夢中,むちゅう,muchū,absorbed / hooked,B,2775
+1144,狙い,ねらい,nerai,aim / goal,T,2781
+1145,高度,こうど,kōdo,advanced / altitude,T,2783
+1146,会長,かいちょう,kaichō,chairman / president,B,2788
+1147,部隊,ぶたい,butai,unit / troops,C,2791
+1148,財産,ざいさん,zaisan,assets / fortune,B,2802
+1149,実感,じっかん,jikkan,real sense / feeling,B,2803
+1150,過程,かてい,katei,process,T,2804
+1151,何者,なにもの,nanimono,who / what person,C,2808
+1152,ということは,ということは,toiukotowa,which means / so,A,2808
+1153,生き物,いきもの,ikimono,creature / living thing,B,2823
+1154,美人,びじん,bijin,beautiful woman,B,2824
+1155,半年,はんとし,hantoshi,six months / half a year,B,2825
+1156,小学生,しょうがくせい,shōgakusei,elementary student,B,2834
+1157,ほっと,ほっと,hotto,relieved / with relief,B,2835
+1158,助け,たすけ,tasuke,help,B,2840
+1159,効率,こうりつ,kōritsu,efficiency,T,2842
+1160,暴力,ぼうりょく,bōryoku,violence,B,2850
+1161,全力,ぜんりょく,zenryoku,full effort / all out,B,2852
+1162,正体,しょうたい,shōtai,true identity,C,2854
+1163,実力,じつりょく,jitsuryoku,ability / real skill,B,2855
+1164,他に,ほかに,hokani,else / besides,A,2856
+1165,温泉,おんせん,onsen,hot spring,B,2861
+1166,前回,ぜんかい,zenkai,last time / previous,A,2862
+1167,単位,たんい,tan'i,unit,T,2863
+1168,熱心,ねっしん,nesshin,eager / enthusiastic,B,2864
+1169,事項,じこう,jikō,item / matter,T,2869
+1170,昼間,ひるま,hiruma,daytime,A,2870
+1171,派手,はで,hade,flashy / showy,B,2872
+1172,剣,けん,ken,sword,C,2874
+1173,ため息,ためいき,tameiki,sigh,B,2875
+1174,役目,やくめ,yakume,role / job,T,2882
+1175,大きさ,おおきさ,ōkisa,size,T,2883
+1176,最中,さいちゅう,saichū,in the middle of,C,2883
+1177,夕食,ゆうしょく,yūshoku,dinner,B,2885
+1178,領域,りょういき,ryōiki,region / domain,T,2887
+1179,枝,えだ,eda,branch,B,2891
+1180,服装,ふくそう,fukusō,outfit / clothes,B,2892
+1181,言語,げんご,gengo,language,T,2896
+1182,知恵,ちえ,chie,wisdom / wits,B,2896
+1183,祭り,まつり,matsuri,festival,B,2900
+1184,評判,ひょうばん,hyōban,reputation,B,2901
+1185,二回,にかい,nikai,twice,X,2905
+1186,屋敷,やしき,yashiki,mansion / estate,C,2908
+1187,というもの,というもの,toiumono,something like ... / something called ...,X,2910
+1188,足音,あしおと,ashioto,footsteps,C,2917
+1189,一気に,いっきに,ikkini,all at once / in one go,A,2931
+1190,制服,せいふく,seifuku,uniform,B,2935
+1191,ではないか,ではないか,dewanaika,isn't it?,X,2946
+1192,概念,がいねん,gainen,concept,T,2947
+1193,疲れ,つかれ,tsukare,fatigue / tiredness,B,2951
+1194,係,かかり,kakari,person in charge,B,2952
+1195,順調,じゅんちょう,junchō,on track / smooth,T,2954
+1196,わけではない,わけではない,wakedewanai,it does not mean that ... / I don't mean that ...,X,2958
+1197,本部,ほんぶ,honbu,headquarters,B,2960
+1198,世代,せだい,sedai,generation,B,2962
+1199,社員,しゃいん,shain,employee,B,2971
+1200,肉体,にくたい,nikutai,body / flesh,C,2972

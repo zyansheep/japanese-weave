@@ -1,153 +1,97 @@
-# Installing French Weave (instructions for a coding agent)
+# Installing Japanese Weave (instructions for a coding agent)
 
-You are setting up French Weave for the person you are working with. Follow these steps in order. Run every
-command yourself; the person only does the steps marked HUMAN. Write no French in anything you say during setup.
+You are setting up Japanese Weave for the person you are working with. Follow these steps in order. Run every
+command yourself; the person only does the steps marked HUMAN. Write no Japanese in anything you say during setup.
 
-`<repo>` below is what the person gave you: a GitHub `owner/name`, a git URL, or a local folder path.
+`<repo>` below is what the person gave you: a git URL or a local folder path. Python may be `python3` or only
+`python` (some NixOS setups); `sh <repo>/scripts/run` picks whichever is 3.9+, so use it instead of calling Python.
 
 ## 0. Ask a few questions and list the human steps, in one batch, before you start
 
-Run `codex --version` first: if it fails, leave Codex CLI out of question 2. Then, in Claude Code, send the
-human steps below as a short message and ask all four questions in one AskUserQuestion call (question 2
-multi-select, the default option first with "(default)" in its label). In Codex or anywhere else, send the
-human steps and the numbered questions as one chat message. Anyone who skips a question gets the default.
+Run `codex --version` first: if it fails, leave Codex CLI out of question 2. Then send the human steps below as a
+short message and ask the questions in one AskUserQuestion call (question 2 multi-select, the default option first
+with "(default)" in its label). Anyone who skips a question gets the default.
 
 Human steps (send as written):
 
-> Setting up French Weave. A few quick questions below; I'll do the rest, except these steps for you:
-> 1. If you pick the Chrome extension: at the end, open `chrome://extensions`, switch on **Developer mode**, click
->    **Load unpacked**, and pick the folder I give you, then click the French Weave toolbar icon and **Allow all
->    websites** (or tick **This site** on each site you want). Chrome doesn't let scripts do this part.
-> 2. If you pick the Chrome extension: a Gemini API key (free at https://aistudio.google.com/apikey), as a file
->    path now or pasted into the extension's popup at the end.
-> 3. If you pick Codex CLI: the next time you start `codex`, it asks you to review a new hook; choose
->    **Trust all and continue**.
+> Setting up Japanese Weave. A few quick questions below; I'll do the rest, except these steps for you:
+> 1. If you pick the browser extension, Firefox: open `about:debugging#/runtime/this-firefox`, click **Load Temporary
+>    Add-on…** and pick the manifest file I give you (to keep it across restarts, sign it once with
+>    `tools/sign-firefox.sh`). Chrome: `chrome://extensions`, **Developer mode**, **Load unpacked**, the folder I give
+>    you. Then click the Japanese Weave toolbar icon and **Allow all websites** (or tick **This site** per site).
+> 2. If you pick the browser extension: a Gemini API key (free at https://aistudio.google.com/apikey), as a file path
+>    now or pasted into the extension's popup at the end.
+> 3. If you pick Codex CLI: the next time you start `codex`, choose **Trust all and continue** for the new hook.
 
 Questions:
 
-1. How much French do you know already?
-   - None (default)
-   - A few basic words
-   - I can read simple French
-2. Where should French show up? (pick any)
-   - Claude Code (always on with the plugin)
-   - Codex CLI (default when installed; only offered if `codex --version` works)
-   - The Chrome extension on websites (default)
-   - A claude.ai / ChatGPT preferences block to paste
-3. If you picked the Chrome extension, which websites?
-   - Every site; turn any off from the toolbar (default)
-   - Only sites I turn on
-4. If you picked the Chrome extension, your Gemini API key:
-   - Paste it into the extension's popup at the end (default)
-   - A file that contains it: type its path (in Claude Code, under Other). Never paste the key itself here.
+1. How much Japanese do you know already? None (default) / A few basic words / I can read simple Japanese
+2. Where should Japanese show up? (pick any) Claude Code, including T3 Code (always on with the plugin) / Codex CLI
+   (default when installed) / The browser extension, Firefox or Chrome (default) / A claude.ai or ChatGPT block
+3. If you picked the extension, which websites? Every site; turn any off from the toolbar (default) / Only sites I
+   turn on
+4. If you picked the extension, your Gemini API key: Paste it into the popup at the end (default) / A file that
+   contains it (type its path under Other; never paste the key itself here)
+5. Do you use Anki for Japanese? Skip (default) / The path to collection.anki2 (under Other; usually
+   `~/.local/share/Anki2/<profile>/collection.anki2`). Cards under review go to the front of the word list.
 
-Steps 1 and 2 below don't depend on the answers: if you can keep working while the person answers, do them now;
-otherwise do them right after. Never ask for the key in chat, and never print it. If an answer looks like a key
-rather than a file path (for example it starts with `AIza`), don't pass it to setup or repeat it; tell the person to
-paste it into the extension popup instead.
-
-How the answers map to setup (step 3) and the hand-over (step 5):
+Never ask for the key in chat, and never print it. If an answer looks like a key rather than a path (it starts with
+`AIza`), don't pass it to setup; tell the person to paste it into the popup instead.
 
 | Answer | Effect |
 | --- | --- |
-| 1. None / a few basic words / simple French | `--known-top 0` / `--known-top 40` / `--known-top 150` |
+| 1. None / a few basic words / simple Japanese | `--known-top 0` / `--known-top 40` / `--known-top 150` |
 | 2. Codex CLI | `--codex` |
-| 2. Chrome extension | pass answers 3 and 4; give the Chrome steps at the end |
+| 2. Browser extension | pass answers 3 and 4; give the browser steps at the end |
 | 2. Preferences block | run `export` at the end |
 | 3. Every site / only sites I turn on | `--sites all` / `--sites ask` |
 | 4. A file path | `--gemini-key-file <path>` |
+| 5. A collection path | `--anki <path>` |
 
-`--known-top N` marks the N most common words in `data/lexicon.csv` as known, so the stage follows on its own
-(Stage 2 at 40 known words, Stage 3 at 150). It only touches words not introduced yet, so a rerun never resets or
-lowers anyone's progress.
-
-## 1. Check prerequisites
-
-```sh
-python3 -c 'import sys; assert sys.version_info >= (3, 9), sys.version; print(sys.version)'
-claude --version
-```
-
-Python 3.9+ (macOS system `python3` is fine) and Claude Code. Nothing else is needed: no pip installs, no Node.
-
-## 2. Install the Claude Code plugin
+## 1. Install the Claude Code plugin
 
 ```sh
 claude plugin marketplace add <repo>
-claude plugin install french-weave@french-weave
-claude plugin list | grep -A3 french-weave
+claude plugin install japanese-weave@japanese-weave
+claude plugin list | grep -A3 japanese-weave
 ```
 
-The plugin is enabled when the list shows it. It adds a prompt hook (the chat weaving) and `/french-weave:*` commands.
-
-## 3. Run setup
-
-Find the installed copy and run its setup script with the flags from the answers (table in step 0):
+## 2. Run setup
 
 ```sh
-FW="$(find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins" -path '*french-weave*' -path '*/scripts/fw.py' 2>/dev/null | sort | tail -1)"
-echo "$FW"
-python3 "$FW" setup --known-top 40 --sites all --gemini-key-file /path/to/key-file --codex   # for example
+FW_ROOT="$(dirname "$(find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins" -path '*japanese-weave*' -path '*/scripts/fw.py' 2>/dev/null | sort | tail -1)")"
+sh "$FW_ROOT/run" "$FW_ROOT/fw.py" setup --known-top 0 --sites all --anki /path/to/collection.anki2   # for example
 ```
 
-Without a key file, run setup without `--gemini-key-file`; the person pastes the key in the extension popup later.
-With `--codex`, setup adds a UserPromptSubmit hook to `~/.codex/hooks.json` (other hooks are kept; backups end in
-`.before-french-weave`) and sets `hooks = true` under `[features]` in `~/.codex/config.toml`. Codex runs a new hook
-only after the person trusts it at the next `codex` start; setup cannot do that for them. No AGENTS.md change is
-needed: the hook carries the rules every turn.
+If `find` prints nothing, run setup from a clone of `<repo>` (`sh <clone>/scripts/run <clone>/scripts/fw.py setup ...`);
+setup copies what it needs into `~/.japanese-weave`. Setup is safe to rerun and never resets word progress. It writes
+the state dir, `extension-firefox/` and `extension/` copies, and native host manifests for Firefox
+(`~/.mozilla/native-messaging-hosts`), Chrome and Chromium.
 
-If `find` prints nothing, run setup from a clone of `<repo>` instead (`python3 <clone>/scripts/fw.py setup ...`);
-setup copies what it needs, so the clone can be deleted afterwards.
+If the browser runs on a different machine from Claude Code, run setup there with `--remote <ssh-host-of-this-machine>`
+too: its native host then reaches the word state over ssh (key login required).
 
-If the person runs Chrome or Chromium with a custom `--user-data-dir`, add `--user-data-dir <that dir>` (repeatable):
-a browser started that way looks for native hosts only inside that dir.
-
-Setup is safe to run again (it keeps the person's word progress; leaving out `--sites` keeps the earlier choice).
-It always installs the extension folder and native host, even if the person didn't pick the extension. It creates:
-
-- `~/.french-weave/` (or `$FRENCH_WEAVE_HOME`): word state, the extension folder to load, the native host
-- Chrome and Chromium native messaging host manifests (user level, no sudo):
-  - Linux: `~/.config/google-chrome/NativeMessagingHosts/`, `~/.config/chromium/NativeMessagingHosts/`
-  - macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, `.../Chromium/NativeMessagingHosts/`
-
-## 4. Verify
+## 3. Verify
 
 ```sh
-python3 "$FW" check
-python3 "$FW" status
+sh "$FW_ROOT/run" "$FW_ROOT/fw.py" check
+sh "$FW_ROOT/run" "$FW_ROOT/fw.py" status
 ```
 
-Every `check` line must say `ok` (a `note` about the Gemini key is fine if the person will paste it in the popup).
-If one says `FAIL`, fix it before going on; rerunning setup fixes most.
+Every `check` line must say `ok` (a `note` about the Gemini key or Anki is fine).
 
-## 5. Hand over
+## 4. Hand over
 
-Tell the person, in plain English (leave out the items for things they didn't pick):
-
-1. Chrome extension: the HUMAN Chrome step with the exact folder from `check` (`~/.french-weave/extension` expanded
-   to a full path): `chrome://extensions` -> Developer mode on -> Load unpacked -> that folder. Then the French
-   Weave toolbar icon (puzzle piece menu -> pin it): every-site mode, click **Allow all websites** (Chrome asks
-   once; until then it only runs on X); only-sites-I-turn-on mode, tick **This site** on each site they want.
-2. Chrome extension, no key file given: click the French Weave toolbar icon (puzzle piece menu -> pin it) and paste
-   the Gemini key.
-3. Codex CLI: at the next `codex` start, choose **Trust all and continue** when it asks about the new hook.
-4. Chat weaving starts in the next Claude Code or Codex session they open (hooks load at session start), and never
-   in one-shot `claude -p` or `codex exec` runs (`FRENCH_WEAVE_OFF=1` turns it off anywhere else).
-5. Preferences block: run `python3 "$FW" export` (claude.ai) and `python3 "$FW" export --chatgpt` (ChatGPT) and
-   show each block as printed in a code block, with where to paste it; they use whichever applies. Re-export
-   about once a week.
-6. Commands: `/french-weave:status`, `/french-weave:known <word>`, `/french-weave:learn <word>`,
-   `/french-weave:stage 1-4|auto`, `/french-weave:pause`, `/french-weave:resume`, and `/french-weave:export` for a
-   claude.ai or ChatGPT preferences block.
-
-You are done when `check` is all `ok` and only the HUMAN steps above remain. If you cloned the repo only to read
-these instructions, delete that clone (setup keeps its own copy in `~/.french-weave`).
+Tell the person, in plain English, leaving out what they didn't pick: the browser steps with the exact paths from
+`check`; the Gemini key step if no key file was given; the Codex trust step; that chat weaving starts in the next
+Claude Code, T3 Code or Codex session they open; the export blocks if they picked them; and the commands
+(`/japanese-weave:status`, `known`, `learn`, `stage`, `anki`, `pause`, `resume`, `export`).
 
 ## Uninstall
 
 ```sh
-python3 "$FW" uninstall --codex  # removes the native host manifests and the Codex hook; keeps ~/.french-weave
-claude plugin uninstall french-weave@french-weave
+sh "$FW_ROOT/run" "$FW_ROOT/fw.py" uninstall --codex
+claude plugin uninstall japanese-weave@japanese-weave
 ```
 
-Then remove the extension in `chrome://extensions`, and delete `~/.french-weave` to drop the word progress.
+Then remove the extension from the browser, and delete `~/.japanese-weave` to drop the word progress.

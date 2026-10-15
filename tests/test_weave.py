@@ -13,8 +13,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'scripts'))
-os.environ['FRENCH_WEAVE_NO_REFRESH'] = '1'
-for name in ('CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED', 'FRENCH_WEAVE_FORCE', 'FRENCH_WEAVE_OFF'):
+os.environ['JAPANESE_WEAVE_NO_REFRESH'] = '1'
+for name in ('CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED', 'JAPANESE_WEAVE_FORCE', 'JAPANESE_WEAVE_OFF'):
     os.environ.pop(name, None)  # tests set these explicitly
 
 import fwlib  # noqa: E402
@@ -22,6 +22,8 @@ import weave  # noqa: E402
 import fw_host  # noqa: E402
 import fw  # noqa: E402
 import export  # noqa: E402
+import anki  # noqa: E402
+import kana  # noqa: E402
 
 
 def line(text, day='2026-10-09', sidechain=False):
@@ -29,8 +31,8 @@ def line(text, day='2026-10-09', sidechain=False):
                        'message': {'content': [{'type': 'text', 'text': text}]}})
 
 
-def word(fr, status='known'):
-    return {'fr': fr, 'en': 'meaning', 'hint': 'hint', 'status': status, 'added': '2026-10-01', 'changed': '',
+def word(ja, status='known'):
+    return {'ja': ja, 'en': 'meaning', 'hint': 'hint', 'status': status, 'added': '2026-10-01', 'changed': '',
             'days': [], 'last_bad': ''}
 
 
@@ -40,7 +42,7 @@ class Home(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
-        self.env = mock.patch.dict(os.environ, {'FRENCH_WEAVE_HOME': str(self.home / 'fw')})
+        self.env = mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': str(self.home / 'fw')})
         self.env.start()
 
     def tearDown(self):
@@ -49,23 +51,29 @@ class Home(unittest.TestCase):
 
 
 class Matching(unittest.TestCase):
-    def hits(self, fr, text):
-        return bool(fwlib.pattern(fr).search(fwlib.norm(text)))
+    def hits(self, ja, text, reading=''):
+        return bool(fwlib.pattern(ja, reading).search(fwlib.norm(text)))
 
     def test_word_matching(self):
-        self.assertTrue(self.hits('le moment', 'wait for le moment'))
-        self.assertFalse(self.hits('le moment', 'wait a moment'))
-        self.assertTrue(self.hits('le problème', 'the problème is'))
-        self.assertTrue(self.hits("l'idée", 'l’idée works'))
-        self.assertTrue(self.hits('sans', 'sans the cache'))
-        self.assertFalse(self.hits('sans', 'a sans-serif font'))
-        self.assertFalse(self.hits('sans', 'sans serif'))
-        self.assertTrue(self.hits('non', 'non, it failed'))
-        self.assertFalse(self.hits('non', 'a non-zero exit'))
-        self.assertTrue(self.hits('où', 'où it runs'))
-        self.assertFalse(self.hits('ou', 'où it runs'))
-        self.assertFalse(self.hits('dans', 'dansk'))
-        self.assertFalse(self.hits('et', 'Drake et al. found'))
+        self.assertTrue(self.hits('今', 'it works 今, really'))
+        self.assertFalse(self.hits('今', '今日 is fine'))  # inside a longer kanji word
+        self.assertTrue(self.hits('今日', '今日 is fine'))
+        self.assertTrue(self.hits('問題', 'この問題は簡単'))  # kana neighbors are particles, still the word
+        self.assertFalse(self.hits('問題', '問題点'))
+        self.assertTrue(self.hits('でも', 'でも the cache'))
+        self.assertFalse(self.hits('でも', 'どうでもいい'))  # inside a kana run
+        self.assertTrue(self.hits('多分', 'たぶん it works', 'たぶん'))  # the reading counts when 3+ kana
+        self.assertFalse(self.hits('今', 'います', 'いま'))  # short readings never count
+        self.assertTrue(self.hits('問題', 'Ｔhe 問題 is'))
+
+    def test_romaji(self):
+        cases = {'とうきょう': 'tōkyō', 'がっこう': 'gakkō', 'しゃしん': 'shashin', 'まっちゃ': 'matcha', 'きんえん': "kin'en",
+                 'せんせい': 'sensei', 'ジュース': 'jūsu', 'ちょっと': 'chotto', 'じゅうぶん': 'jūbun', 'もう': 'mō'}
+        for reading, roman in cases.items():
+            self.assertEqual(kana.romaji(reading), roman)
+        self.assertEqual(kana.romaji('おもう', verb_u=True), 'omou')
+        self.assertEqual(fwlib.roman_key('Tōkyō'), fwlib.roman_key('toukyou'))
+        self.assertEqual(fwlib.roman_key("kin'en"), fwlib.roman_key('kinen'))
 
 
 class Scan(unittest.TestCase):
@@ -75,37 +83,39 @@ class Scan(unittest.TestCase):
             chat = root / 'proj' / 'a.jsonl'
             chat.parent.mkdir()
             chat.write_text('\n'.join([
-                line('Done, et the build passes.'),
-                line('Done, et the build passes.'),  # forked copy: counted once
-                line('et inside a subagent', sidechain=True),
-                line('Run `git add et` then check https://x.test/et'),
-                line('French Weave notes: et, donc'),
-                line('Old reply, et it predates install.', day='2026-09-01'),
-            ]) + '\n' + line('partial donc'))  # no newline: half-written
+                line('Done, 今 the build passes.'),
+                line('Done, 今 the build passes.'),  # forked copy: counted once
+                line('今 inside a subagent', sidechain=True),
+                line('Run `git add 今` then check https://x.test/今'),
+                line('Japanese Weave notes: 今, でも'),
+                line('Old reply, 今 it predates install.', day='2026-09-01'),
+            ]) + '\n' + line('partial でも'))  # no newline: half-written
             (root / 'proj' / 's' / 'subagents').mkdir(parents=True)
-            (root / 'proj' / 's' / 'subagents' / 'b.jsonl').write_text(line('et donc') + '\n')
-            index = fwlib.scan(['et', 'donc', 'plus'], {}, root, start='2026-09-19')
-            self.assertEqual(index['words']['et'], {'n': 1, 'days': ['2026-10-09']})
-            self.assertEqual(index['words']['donc'], {'n': 0, 'days': []})
-            self.assertNotIn('plus', index['words'])
+            (root / 'proj' / 's' / 'subagents' / 'b.jsonl').write_text(line('今 でも') + '\n')
+            words = ['今', 'でも', {'ja': '多分', 'kana': 'たぶん'}]
+            index = fwlib.scan(words, {}, root, start='2026-09-19')
+            self.assertEqual(index['words']['今'], {'n': 1, 'days': ['2026-10-09']})
+            self.assertEqual(index['words']['でも'], {'n': 0, 'days': []})
             with open(chat, 'a') as file:
-                file.write('\n' + line('Et again, et donc.', day='2026-10-11') + '\n')
-            index = fwlib.scan(['et', 'donc', 'plus'], index, root, start='2026-09-19')
-            self.assertEqual(index['words']['et'], {'n': 2, 'days': ['2026-10-09', '2026-10-11']})
-            self.assertEqual(index['words']['donc']['n'], 2)  # the finished partial line and the new one
+                file.write('\n' + line('Again 今, 今 でも, たぶん.', day='2026-10-11') + '\n')
+            index = fwlib.scan(words, index, root, start='2026-09-19')
+            self.assertEqual(index['words']['今'], {'n': 2, 'days': ['2026-10-09', '2026-10-11']})
+            self.assertEqual(index['words']['でも']['n'], 2)  # the finished partial line and the new one
+            self.assertEqual(index['words']['多分']['n'], 1)
 
 
 class Rules(Home):
     def test_lexicon_is_well_formed(self):
         words = fwlib.load_lexicon()
-        self.assertEqual(len({fwlib.key(w['fr']) for w in words}), len(words))
+        self.assertEqual(len({fwlib.key(w['ja']) for w in words}), len(words))
         for w in words:
             self.assertTrue(w['en'] and w['hint'] and w['hint'] == w['hint'].lower(), w)
+            self.assertTrue(kana.is_kana(w['kana']) and fwlib.JAPANESE.search(w['ja']), w)
 
     def test_new_state_starts_small(self):
         state = fwlib.new_state('2026-10-01')
-        active = [w['fr'] for w in state['words'] if w['status'] == 'active']
-        self.assertEqual(active, ['et', 'mais', 'donc', 'avec', 'sans'])  # 5 new a day
+        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
+        self.assertEqual(active, [w['ja'] for w in fwlib.load_lexicon()[:5]])  # 5 new a day
         self.assertEqual(fwlib.stage_for(state), 1)
         for day in ('2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'):
             fwlib.promote(state, day, {})
@@ -113,61 +123,62 @@ class Rules(Home):
 
     def test_graduation_needs_three_clean_days(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'et': {'n': 5, 'days': ['2026-10-01', '2026-10-02']}}
+        chat = {'でも': {'n': 5, 'days': ['2026-10-01', '2026-10-02']}}
         fwlib.promote(state, '2026-10-02', chat)
-        self.assertEqual(fwlib.find(state, 'et')['status'], 'active')  # 2 days
-        fwlib.apply_event(state, 'et', 'seen', '2026-10-03')  # extension day + chat days
+        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')  # 2 days
+        fwlib.apply_event(state, 'でも', 'seen', '2026-10-03')  # extension day + chat days
         fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'et')['status'], 'known')
+        self.assertEqual(fwlib.find(state, 'でも')['status'], 'known')
 
     def test_peek_blocks_graduation_and_assumed_alone_never_graduates(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'mais': {'n': 3, 'days': ['2026-10-01', '2026-10-02', '2026-10-03']}}
-        fwlib.apply_event(state, 'mais', 'peek', '2026-10-02')
+        chat = {'もう': {'n': 3, 'days': ['2026-10-01', '2026-10-02', '2026-10-03']}}
+        fwlib.apply_event(state, 'もう', 'peek', '2026-10-02')
         fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'mais')['status'], 'active')  # peek inside the last 3 days
-        chat['mais']['days'] += ['2026-10-04', '2026-10-05']
+        self.assertEqual(fwlib.find(state, 'もう')['status'], 'active')  # peek inside the last 3 days
+        chat['もう']['days'] += ['2026-10-04', '2026-10-05']
         fwlib.promote(state, '2026-10-05', chat)
-        self.assertEqual(fwlib.find(state, 'mais')['status'], 'known')  # last 3 days (03-05) are peek-free
+        self.assertEqual(fwlib.find(state, 'もう')['status'], 'known')  # last 3 days (03-05) are peek-free
         for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.apply_event(state, 'donc', 'assumed', day)
+            fwlib.apply_event(state, '今', 'assumed', day)
         fwlib.promote(state, '2026-10-04', {})
-        self.assertEqual(fwlib.find(state, 'donc')['status'], 'active')  # 4 assumed days, never seen
-        fwlib.apply_event(state, 'donc', 'seen', '2026-10-05')
+        self.assertEqual(fwlib.find(state, '今')['status'], 'active')  # 4 assumed days, never seen
+        fwlib.apply_event(state, '今', 'seen', '2026-10-05')
         fwlib.promote(state, '2026-10-05', {})
-        self.assertEqual(fwlib.find(state, 'donc')['status'], 'known')
+        self.assertEqual(fwlib.find(state, '今')['status'], 'known')
 
     def test_flip_makes_shaky_and_recovers_after_7_clean_days(self):
         state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, 'avec', 'flip', '2026-10-04')
+        fwlib.apply_event(state, '中', 'flip', '2026-10-04')
         fwlib.promote(state, '2026-10-10', {})
-        self.assertEqual(fwlib.find(state, 'avec')['status'], 'shaky')
-        fwlib.apply_event(state, 'avec', 'peek', '2026-10-09')  # restarts the clock
+        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
+        fwlib.apply_event(state, '中', 'peek', '2026-10-09')  # restarts the clock
         fwlib.promote(state, '2026-10-15', {})
-        self.assertEqual(fwlib.find(state, 'avec')['status'], 'shaky')
+        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
         fwlib.promote(state, '2026-10-16', {})
-        self.assertEqual(fwlib.find(state, 'avec')['status'], 'known')
+        self.assertEqual(fwlib.find(state, '中')['status'], 'known')
 
     def test_known_word_peeked_twice_in_a_week_becomes_shaky(self):
         state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, 'sans', 'known', '2026-10-01')
-        fwlib.apply_event(state, 'sans', 'peek', '2026-10-02')
-        self.assertEqual(fwlib.find(state, 'sans')['status'], 'known')
-        fwlib.apply_event(state, 'sans', 'peek', '2026-10-02')  # same day: once
-        self.assertEqual(fwlib.find(state, 'sans')['status'], 'known')
-        fwlib.apply_event(state, 'sans', 'peek', '2026-10-08')
-        self.assertEqual(fwlib.find(state, 'sans')['status'], 'shaky')
+        fwlib.apply_event(state, '前', 'known', '2026-10-01')
+        fwlib.apply_event(state, '前', 'peek', '2026-10-02')
+        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
+        fwlib.apply_event(state, '前', 'peek', '2026-10-02')  # same day: once
+        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
+        fwlib.apply_event(state, '前', 'peek', '2026-10-08')
+        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
 
     def test_refill_cap_and_shaky_block(self):
         state = fwlib.new_state('2026-10-01')
         for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
             fwlib.promote(state, day, {})
-        for fr in ('et', 'mais', 'donc', 'avec', 'sans', 'très'):
-            fwlib.apply_event(state, fr, 'known', '2026-10-05')
+        top = [w['ja'] for w in fwlib.load_lexicon()]
+        for ja in top[:6]:
+            fwlib.apply_event(state, ja, 'known', '2026-10-05')
         fwlib.promote(state, '2026-10-05', {})
         self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW - 1)  # 20-6+5
-        for fr in ('aussi', 'maintenant', 'pour', 'parce que', 'toujours'):
-            fwlib.apply_event(state, fr, 'flip', '2026-10-06')
+        for ja in top[6:11]:
+            fwlib.apply_event(state, ja, 'flip', '2026-10-06')
         before = sum(w['status'] != 'queue' for w in state['words'])
         fwlib.promote(state, '2026-10-06', {})
         self.assertEqual(sum(w['status'] != 'queue' for w in state['words']), before)  # 5 shaky: no new words
@@ -176,46 +187,59 @@ class Rules(Home):
         state = fwlib.new_state('2026-10-01')
         stages = []
         for i, w in enumerate(state['words'][:400], 1):
-            fwlib.apply_event(state, w['fr'], 'known', '2026-10-01')
+            fwlib.apply_event(state, w['ja'], 'known', '2026-10-01')
             if i in (39, 40, 149, 150, 399, 400):
                 stages.append(fwlib.stage_for(state))
         self.assertEqual(stages, [1, 2, 2, 3, 3, 4])
         state['stage'], state['stage_pinned'] = 1, True
         self.assertEqual(fwlib.stage_for(state), 1)
 
-    def test_find_accepts_bare_nouns_and_case(self):
+    def test_find_accepts_kana_and_romaji(self):
         state = fwlib.new_state('2026-10-01')
-        self.assertEqual(fwlib.find(state, 'Problème')['fr'], 'le problème')
-        self.assertEqual(fwlib.find(state, 'L’idée')['fr'], "l'idée")
+        self.assertEqual(fwlib.find(state, 'たぶん')['ja'], '多分')
+        self.assertEqual(fwlib.find(state, 'Tabun')['ja'], '多分')
+        self.assertEqual(fwlib.find(state, 'jitsuwa')['ja'], '実は')
+        self.assertEqual(fwlib.find(state, 'jitsu wa')['ja'], '実は')
+        self.assertEqual(fwlib.find(state, 'mondai')['ja'], '問題')
         self.assertIsNone(fwlib.find(state, 'nope'))
+
+    def test_merge_reorders_and_keeps_progress(self):
+        state = fwlib.new_state('2026-10-01')
+        fwlib.apply_event(state, '今', 'known', '2026-10-01')
+        lexicon = fwlib.load_lexicon(fwlib.LEXICON)
+        moved = [lexicon[100], lexicon[0]] + [w for i, w in enumerate(lexicon) if i not in (0, 100)]
+        fwlib.merge_lexicon(state, moved)
+        self.assertEqual([w['ja'] for w in state['words'][:2]], [lexicon[100]['ja'], lexicon[0]['ja']])
+        self.assertEqual(fwlib.find(state, '今')['status'], 'known')
+        self.assertEqual(len(state['words']), len(lexicon))
 
 
 class Brief(Home):
-    seen = {'et': {'n': 40, 'days': [f'2026-10-0{i}' for i in range(1, 8)]},
-            'dans': {'n': 400, 'days': ['2026-10-08', '2026-10-09', '2026-10-10']},
-            'pire': {'n': 0, 'days': []}}
+    seen = {'でも': {'n': 40, 'days': [f'2026-10-0{i}' for i in range(1, 8)]},
+            '中': {'n': 400, 'days': ['2026-10-08', '2026-10-09', '2026-10-10']},
+            '最悪': {'n': 0, 'days': []}}
 
     def state(self, stage=2):
-        words = [word('et'), word('dans'), word('pire'), word('ensemble', 'active'), word('malgré', 'shaky'), word('quoi', 'queue')]
+        words = [word('でも'), word('中'), word('最悪'), word('一緒に', 'active'), word('結局', 'shaky'), word('何', 'queue')]
         return {'stage': stage, 'stage_pinned': True, 'paused': False, 'words': words}
 
     def test_tiers(self):
-        self.assertEqual(weave.tier(word('et'), self.seen), 'lot')
-        self.assertEqual(weave.tier(word('dans'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('pire'), self.seen), 'rare')
-        self.assertEqual(weave.tier(word('plus'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('ensemble', 'active'), self.seen), 'learn')
+        self.assertEqual(weave.tier(word('でも'), self.seen), 'lot')
+        self.assertEqual(weave.tier(word('中'), self.seen), 'some')
+        self.assertEqual(weave.tier(word('最悪'), self.seen), 'rare')
+        self.assertEqual(weave.tier(word('もっと'), self.seen), 'some')
+        self.assertEqual(weave.tier(word('一緒に', 'active'), self.seen), 'learn')
 
     def test_brief_text(self):
         lines = weave.brief(self.state(), self.seen).split('\n')
         self.assertIn('about 12%', lines[0])
         self.assertIn('never over 20%', lines[0])
         self.assertIn('at most 4 in one sentence', lines[0])
-        self.assertIn('Never a French sentence', lines[0])
+        self.assertIn('never conjugated', lines[0])
         self.assertIn('never in files, code', lines[0])
-        self.assertTrue(lines[1].endswith(': malgré = meaning, "hint"; ensemble = meaning, "hint"'))
-        self.assertTrue(lines[2].endswith(': pire') and lines[3].endswith(': dans') and lines[4].endswith(': meaning → et'))
-        self.assertNotIn('quoi', '\n'.join(lines))  # queued words are not in use yet
+        self.assertTrue(lines[1].endswith(': 結局 = meaning, "hint"; 一緒に = meaning, "hint"'))
+        self.assertTrue(lines[2].endswith(': 最悪') and lines[3].endswith(': 中') and lines[4].endswith(': meaning → でも'))
+        self.assertNotIn('何', '\n'.join(lines[1:]))  # queued words are not in use yet
         three = weave.brief(self.state(3), self.seen)
         self.assertIn('about 25%', three)
         self.assertNotIn('"hint"', three)
@@ -224,34 +248,36 @@ class Brief(Home):
     def test_recall_every_third_turn_shaky_first(self):
         state = self.state()
         picks = [weave.next_recall(state, 's1') for _ in range(7)]
-        self.assertEqual([p and p['fr'] for p in picks], ['malgré', None, None, 'ensemble', None, None, None])
+        self.assertEqual([p and p['ja'] for p in picks], ['結局', None, None, '一緒に', None, None, None])
         self.assertIsNone(weave.next_recall(state, None))
-        self.assertIn('Recall: malgré?', weave.brief(state, {}, picks[0]))
+        self.assertIn('Recall: 結局?', weave.brief(state, {}, picks[0]))
 
     def test_calibration(self):
-        words = [word('et'), word('donc'), word('mais'), word('simple', 'active'), word('le chien', 'active'), word('plus')]
+        words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active'), word('もっと')]
         state = {'stage': 2, 'stage_pinned': True, 'words': words}
         english = 'The build passes and the cache is warm, so nothing else needs doing before the release goes out today. ' * 3
         self.assertEqual(weave.share(english, words), (0, 57, 0, 0))
-        woven = 'The build passes, et the cache is warm, donc nothing else needs le chien, mais plus simple things wait. ' * 3
-        self.assertEqual(weave.share(woven + '```et donc mais```\n(le chien = the dog, "luh shyan")\nRecall: et?', words), (15, 57, 3, 0))
+        woven = 'The build passes, でも the cache is warm, だから nothing else needs 問題, 今 もっと 簡単 things wait. ' * 3
+        self.assertEqual(weave.share(woven + '```でも だから```\n(問題 = problem, "mondai")\nRecall: でも?', words), (18, 54, 6, 0))
         self.assertIn('under the 12% target', weave.calibration(english, state))
         self.assertIn('over the 20% cap', weave.calibration(woven, state))
-        self.assertEqual(weave.calibration('Done, et pushed.', state), '')
-        french = ("J'ai ajouté une section à README.md. Elle dit qu'un export vide supprime les lignes, mais la table reste, "
-                  "et je n'ai rien exécuté. Les autres problèmes sont dans sync.py, donc dis-moi si je dois les corriger. ") * 2
-        self.assertIn('slipped into French sentences', weave.calibration(french, state))
-        overlap = [word('faire'), word('faire attention'), word('tout'), word('tout le monde')]
-        self.assertEqual(weave.share('Please faire attention, tout le monde, then faire it. ' * 6, overlap)[0], 36)  # 2 + 3 + 1 per sentence, not 8
+        self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
+        japanese = ('README.md にセクションを追加しました。空のエクスポートは行を削除しますが、テーブルは残ります。'
+                    '他の問題は sync.py にあるので、直すかどうか教えてください。') * 2
+        self.assertIn('slipped into Japanese sentences', weave.calibration(japanese, state))
+        state3 = dict(state, stage=3)
+        self.assertNotIn('slipped', weave.calibration(japanese, state3))  # Japanese sentences are the point at Stage 3
+        overlap = [word('一緒'), word('一緒に'), word('今'), word('今日')]
+        self.assertEqual(weave.share('Let us go 一緒に, 今日 then 一緒 it. ' * 6, overlap)[0], 18)  # 3 per sentence
 
     def test_last_reply(self):
         log = self.home / 'chat.jsonl'
-        log.write_text('\n'.join([line('old reply, et more'), line('sub', sidechain=True),
+        log.write_text('\n'.join([line('old reply, 今 more'), line('sub', sidechain=True),
                                   json.dumps({'type': 'user', 'message': {'content': 'next'}}),
-                                  line('latest reply, donc done'), line('sub2', sidechain=True)]) + '\n')
-        self.assertEqual(weave.last_reply(log), 'latest reply, donc done')
+                                  line('latest reply, でも done'), line('sub2', sidechain=True)]) + '\n')
+        self.assertEqual(weave.last_reply(log), 'latest reply, でも done')
         with mock.patch.object(weave, 'TAIL', len(log.read_bytes()) // 2):
-            self.assertEqual(weave.last_reply(log), 'latest reply, donc done')
+            self.assertEqual(weave.last_reply(log), 'latest reply, でも done')
 
     def run_hook(self, payload, **env):
         result = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'weave.py'), '--hook'], input=json.dumps(payload),
@@ -263,19 +289,20 @@ class Brief(Home):
         out = json.loads(self.run_hook({'session_id': 'x', 'transcript_path': str(self.home / 'missing.jsonl')}))
         context = out['hookSpecificOutput']['additionalContext']
         self.assertEqual(out['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
-        self.assertIn('French Weave (Stage 1)', context)
-        self.assertIn('Recall: et?', context)
-        self.assertLess(len(context), 3000)
+        self.assertIn('Japanese Weave (Stage 1)', context)
+        self.assertIn('Recall: でも?', context)
+        self.assertLess(len(context), 3200)
         fw.main(['pause'])
         self.assertEqual(self.run_hook({'session_id': 'x'}), '')
         fw.main(['resume'])
-        self.assertIn('French Weave', self.run_hook({}))
+        self.assertIn('Japanese Weave', self.run_hook({}))
 
-    def test_no_french_in_scripted_runs(self):
-        self.assertIn('French Weave', self.run_hook({}))  # no claude parent here: weave by default
-        self.assertEqual(self.run_hook({}, FRENCH_WEAVE_OFF='1'), '')
-        self.assertEqual(self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-py'), '')
-        self.assertIn('French Weave', self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-cli', CLAUDE_CODE_SESSION_ATTENDED='0'))
+    def test_no_japanese_in_scripted_runs(self):
+        self.assertIn('Japanese Weave', self.run_hook({}))  # no claude parent here: weave by default
+        self.assertEqual(self.run_hook({}, JAPANESE_WEAVE_OFF='1'), '')
+        # Agent SDK scripts stay silent, except under T3 Code (which these tests may themselves run under).
+        self.assertEqual(self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-py') != '', weave.t3_host())
+        self.assertIn('Japanese Weave', self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-cli', CLAUDE_CODE_SESSION_ATTENDED='0'))
         one_shot = ['claude', '-p', '--model', 'haiku', 'Reply OK']
         remote = ['claude', '--print', '--sdk-url', 'https://example.invalid/v1/code/sessions/x', '--session-id', 'x',
                   '--input-format', 'stream-json', '--output-format', 'stream-json']
@@ -289,8 +316,52 @@ class Brief(Home):
         self.assertFalse(weave.interactive({}, args_check=lambda: one_shot))
         self.assertTrue(weave.interactive({}, args_check=lambda: remote))
         self.assertTrue(weave.interactive({'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'}, args_check=lambda: remote))
-        self.assertTrue(weave.interactive({'FRENCH_WEAVE_FORCE': '1'}, args_check=lambda: one_shot))
-        self.assertFalse(weave.interactive({'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts'}, args_check=lambda: []))
+        self.assertTrue(weave.interactive({'JAPANESE_WEAVE_FORCE': '1'}, args_check=lambda: one_shot))
+        self.assertFalse(weave.interactive({'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts'}, args_check=lambda: [], host_check=lambda: False))
+        self.assertTrue(weave.interactive({'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts'}, args_check=lambda: [], host_check=lambda: True))
+
+    def test_t3_code_threads_weave(self):
+        inner = f'import sys, os; sys.path.insert(0, {str(ROOT / "scripts")!r}); import weave; print(weave.t3_host(os.getpid()))'
+        outer = f'import subprocess; subprocess.run(["claude", "-c", {inner!r}], executable={sys.executable!r})'
+        t3 = subprocess.run(['t3', '-c', outer, 'serve'], executable=sys.executable, capture_output=True, text=True)
+        self.assertEqual(t3.stdout.strip(), 'True', t3.stderr)  # claude started by `t3 serve`
+        tree = {30: (['/bin/sh', '-c', 'hook'], 20), 20: (['claude', '--input-format', 'stream-json'], 10),
+                10: (['/nix/store/x-t3-cli/lib/t3/t3', 'serve', '--port', '3773'], 1)}
+        self.assertTrue(weave.t3_host(30, lookup=lambda pid: tree.get(pid, ([], 0))))
+        app = '/nix/store/x-t3code/T3 Code'  # the desktop app runs its server on its own Electron binary
+        tree[10] = ([f'{app}/t3code', f'{app}/resources/app.asar/apps/server/dist/bin.mjs', '--bootstrap-fd', '3'], 1)
+        self.assertTrue(weave.t3_host(30, lookup=lambda pid: tree.get(pid, ([], 0))))
+        tree[10] = ([f'{app}/t3code'], 1)  # the app's window process never starts claude itself
+        self.assertFalse(weave.t3_host(30, lookup=lambda pid: tree.get(pid, ([], 0))))
+        tree[10] = (['node', 'agent-script.mjs'], 5)  # an SDK script, even one run from a T3 terminal
+        tree[5] = (['/nix/store/x-t3-cli/lib/t3/t3', 'serve'], 1)
+        self.assertFalse(weave.t3_host(30, lookup=lambda pid: tree.get(pid, ([], 0))))
+
+    def test_t3_glosses_in_abbr_popovers(self):
+        state = fwlib.new_state('2026-10-01')
+        self.assertFalse(weave.abbr_glosses(state, host_check=lambda: True))  # off until the user opts in
+        state['prefs'] = {'chat_glosses': 'abbr'}
+        self.assertTrue(weave.abbr_glosses(state, host_check=lambda: True))
+        self.assertFalse(weave.abbr_glosses(state, host_check=lambda: False))  # a terminal would show raw tags
+        recall = {'ja': 'でも', 'kana': 'でも', 'en': 'but / however', 'hint': 'demo'}
+        footer, popover = weave.brief(state, {}, recall), weave.brief(state, {}, recall, markup=True)
+        self.assertIn('footer line', footer)
+        self.assertNotIn('<abbr', footer)
+        self.assertIn('<abbr title="hiragana reading · meaning">', popover)
+        self.assertNotIn('footer line', popover)
+        self.assertIn('Recall: <abbr title="but / however">でも</abbr>', popover)  # the answer hides until clicked
+        kanji = {'ja': '問題', 'kana': 'もんだい', 'en': 'problem', 'hint': 'mondai'}
+        self.assertIn('Recall: <abbr title="もんだい · problem">問題</abbr>', weave.brief(state, {}, kanji, markup=True))
+        with mock.patch('sys.stdout', new=io.StringIO()):
+            fw.main(['glosses', 'abbr'])
+        self.assertEqual(fwlib.load_state()['prefs']['chat_glosses'], 'abbr')
+
+    def test_share_counts_abbr_glossed_words_once(self):
+        words = [word('でも'), word('問題', 'active')]
+        plain = 'The build passes, でも the cache has a 問題 that needs a closer look before we ship it today. ' * 3
+        glossed = plain.replace('でも', '<abbr title="demo · but / however">でも</abbr>').replace(
+            '問題', '<abbr title="mondai · problem">問題</abbr>')
+        self.assertEqual(weave.share(glossed, words), weave.share(plain, words))
 
 
 def grown(known, seed=1):
@@ -304,7 +375,7 @@ def grown(known, seed=1):
         chosen.discard(i)
     chosen.update(range(known, min(len(words), known + known // 20)))
     for i in chosen:
-        fwlib.apply_event(state, words[i]['fr'], 'known', '2026-01-01')
+        fwlib.apply_event(state, words[i]['ja'], 'known', '2026-01-01')
     for day in range(2, 7):
         fwlib.promote(state, f'2026-01-0{day}', {})
     return state
@@ -314,21 +385,21 @@ class Scale(Home):
     def test_known_band(self):
         state = grown(400)
         n, missing, extra = fwlib.known_band(state)
-        known = {w['fr'] for w in state['words'] if w['status'] == 'known'}
-        band = {w['fr'] for w in state['words'][:n]}
-        self.assertEqual(known, (band - set(missing) - {w['fr'] for w in state['words'][:n] if w['status'] in ('active', 'shaky')}) | set(extra))
+        known = {w['ja'] for w in state['words'] if w['status'] == 'known'}
+        band = {w['ja'] for w in state['words'][:n]}
+        self.assertEqual(known, (band - set(missing) - {w['ja'] for w in state['words'][:n] if w['status'] in ('active', 'shaky')}) | set(extra))
 
     def test_brief_and_exports_stay_small(self):
         for known in (50, 400, 1000):
             state = grown(known)
-            brief = weave.brief(state, {}, {'fr': 'et', 'en': 'and', 'hint': 'ay'})
+            brief = weave.brief(state, {}, {'ja': 'でも', 'en': 'but', 'hint': 'demo'})
             about, respond = export.chatgpt(state)
             self.assertLessEqual(len(about), export.CHATGPT_LIMIT)
             self.assertLessEqual(len(respond), export.CHATGPT_LIMIT)
             self.assertLess(len(export.claude_ai(state)), 6000)
             if known >= 400:
-                self.assertIn('most common French words', brief)
-                self.assertLess(len(brief.encode()), 3100, known)
+                self.assertIn('most common Japanese words', brief)
+                self.assertLess(len(brief), 3400, known)
 
     def test_state_line_round_trips(self):
         for known in (30, 400):
@@ -338,11 +409,11 @@ class Scale(Home):
             self.assertEqual(parsed['stage'], fwlib.stage_for(state))
             self.assertEqual(parsed['synced'], '1970-01-01T00:00Z')
             active = sorted((w for w in state['words'] if w['status'] == 'active'), key=lambda w: w['added'])
-            self.assertEqual(parsed['active'], [(w['fr'], w['en'], w['hint']) for w in active])
+            self.assertEqual(parsed['active'], [(w['ja'], w['en'], w['hint']) for w in active])
             shaky = [w for w in state['words'] if w['status'] == 'shaky']
             self.assertEqual(len(parsed['shaky']), len(shaky))
             if known < export.KNOWN_LIST_MAX:
-                self.assertEqual(parsed['known'], [w['fr'] for w in state['words'] if w['status'] == 'known'])
+                self.assertEqual(parsed['known'], [w['ja'] for w in state['words'] if w['status'] == 'known'])
             else:
                 n = fwlib.known_band(state)[0]
                 self.assertIn(f'up to about the {export.ordinal(n)} most frequent', parsed['known'])
@@ -353,9 +424,9 @@ class Scale(Home):
             export.mark_exported(state, 'claude-ai')
         self.assertIsNone(weave.export_notice(state))  # same version
         with fwlib.editing() as state:
-            fwlib.apply_event(state, 'et', 'known')
+            fwlib.apply_event(state, 'でも', 'known')
         self.assertIsNone(weave.export_notice(state, now=time.time() + 86400))  # changed, but fresh
-        self.assertIn('/french-weave:export', weave.export_notice(state, now=time.time() + 8 * 86400))
+        self.assertIn('/japanese-weave:export', weave.export_notice(state, now=time.time() + 8 * 86400))
         self.assertIsNone(weave.export_notice(fwlib.load_state(), now=time.time() + 9 * 86400))  # only once
 
     def test_log_chat_day_counts_but_never_graduates_alone(self):
@@ -363,7 +434,7 @@ class Scale(Home):
         for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
             self.assertGreater(export.log_chat_day(state, day), 0)
             fwlib.promote(state, day, {})
-        self.assertEqual(fwlib.find(state, 'et')['status'], 'active')
+        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')
 
 
 class Blocks(unittest.TestCase):
@@ -395,16 +466,16 @@ class Codex(Home):
         data = {'turn_id': 't', 'session_id': 's'}
         self.assertFalse(weave.interactive({}, data, exec_check=lambda: True))
         self.assertTrue(weave.interactive({}, data, exec_check=lambda: False))
-        self.assertTrue(weave.interactive({'FRENCH_WEAVE_FORCE': '1'}, data, exec_check=lambda: True))
+        self.assertTrue(weave.interactive({'JAPANESE_WEAVE_FORCE': '1'}, data, exec_check=lambda: True))
         code = f'import sys, os; sys.path.insert(0, {str(ROOT / "scripts")!r}); import weave; print(weave.codex_exec(os.getpid()))'
         sh = subprocess.run(['codex', '-c', code, 'exec'], executable=sys.executable, capture_output=True, text=True)
         self.assertEqual(sh.stdout.strip(), 'True', sh.stderr)
 
     def test_codex_transcript_replies(self):
         lines = [json.dumps({'type': 'response_item', 'timestamp': '2026-10-09T10:00:00Z',
-                             'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Fixed, donc it ships.'}]}}),
-                 json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': 'et'}]}})]
-        self.assertEqual([t for _, t in fwlib.replies(lines)], ['Fixed, donc it ships.'])
+                             'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Fixed, だから it ships.'}]}}),
+                 json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': '今'}]}})]
+        self.assertEqual([t for _, t in fwlib.replies(lines)], ['Fixed, だから it ships.'])
 
 
 class Host(Home):
@@ -422,8 +493,8 @@ class Host(Home):
     def test_protocol(self):
         ping, state, events, after, bad = self.converse(
             {'type': 'ping'}, {'type': 'state'},
-            {'type': 'events', 'events': [{'word': 'Mais', 'kind': 'flip'}, {'word': 'et', 'kind': 'seen'},
-                                          {'word': 'zzz', 'kind': 'seen'}, {'word': 'et', 'kind': 'typed'}]},
+            {'type': 'events', 'events': [{'word': 'もう', 'kind': 'flip'}, {'word': 'でも', 'kind': 'seen'},
+                                          {'word': 'zzz', 'kind': 'seen'}, {'word': 'でも', 'kind': 'typed'}]},
             {'type': 'state'}, {'type': 'nope'})
         self.assertEqual(ping, {'ok': True, 'host': 1})
         self.assertEqual(state['stage'], 1)
@@ -431,7 +502,7 @@ class Host(Home):
         self.assertNotIn('geminiKey', state)
         self.assertEqual(state['prefs'], {})
         self.assertEqual(events, {'ok': True, 'applied': 2})
-        self.assertEqual(after['words'][0], {'fr': 'mais', 'en': 'but', 'hint': 'meh', 'status': 'shaky'})
+        self.assertEqual(after['words'][0], {'ja': 'もう', 'en': 'already / anymore', 'hint': 'mō', 'kana': 'もう', 'status': 'shaky'})
         self.assertNotEqual(after['version'], state['version'])
         self.assertFalse(bad['ok'])
 
@@ -463,6 +534,14 @@ class Setup(Home):
             fw.main(['setup', '--gemini-key-file', str(key)])
         home = self.home / 'fw'
         self.assertIn('Load unpacked', out.getvalue())
+        self.assertIn('Load Temporary Add-on', out.getvalue())
+        firefox = json.loads((home / 'extension-firefox' / 'manifest.json').read_text())
+        self.assertEqual(firefox['browser_specific_settings']['gecko']['id'], fw.GECKO_ID)
+        self.assertEqual(firefox['background'], {'scripts': ['src/background.js'], 'type': 'module'})
+        self.assertNotIn('key', firefox)
+        mozilla = self.home / ('Library/Application Support/Mozilla/NativeMessagingHosts' if sys.platform == 'darwin'
+                               else '.mozilla/native-messaging-hosts')
+        self.assertEqual(json.loads((mozilla / f'{fw.HOST_NAME}.json').read_text())['allowed_extensions'], [fw.GECKO_ID])
         self.assertTrue((home / 'extension' / 'manifest.json').exists())
         self.assertFalse((home / 'extension' / 'test').exists())
         self.assertEqual((home / 'gemini_key').read_text().strip(), FAKE_KEY)
@@ -516,13 +595,13 @@ class Setup(Home):
     def test_rerun_never_resets_or_downgrades(self):
         self.run_setup()  # top 5 become learning words
         with fwlib.editing() as state:
-            fwlib.apply_event(state, 'et', 'flip')  # shaky
-            fwlib.apply_event(state, 'mais', 'seen')
+            fwlib.apply_event(state, 'でも', 'flip')  # shaky
+            fwlib.apply_event(state, 'もう', 'seen')
         state = self.run_setup('--known-top', '150', '--sites', 'ask')
-        by = {w['fr']: w for w in state['words']}
-        self.assertEqual(by['et']['status'], 'shaky')
-        self.assertEqual(by['mais']['status'], 'active')
-        self.assertEqual(by['mais']['days'], [fwlib.today()])
+        by = {w['ja']: w for w in state['words']}
+        self.assertEqual(by['でも']['status'], 'shaky')
+        self.assertEqual(by['もう']['status'], 'active')
+        self.assertEqual(by['もう']['days'], [fwlib.today()])
         self.assertEqual(sum(w['status'] == 'known' for w in state['words'][:150]), 145)
         self.assertEqual(fwlib.stage_for(state), 2)  # 145 known: stage 3 comes once the learning words graduate
         self.assertEqual(state['prefs'], {'extension_sites': 'ask'})
@@ -543,12 +622,102 @@ class Setup(Home):
         with self.assertRaises(SystemExit), mock.patch('sys.stderr', new=io.StringIO()):
             fw.main(['setup', '--dry-run', '--sites', 'some'])
 
+    def test_remote_setup_proxies_over_ssh_and_keeps_no_state(self):
+        self.run_setup('--remote', 'functor')
+        launcher = (self.home / 'fw' / 'app' / 'fw-host').read_text()
+        self.assertIn('ssh -T -o BatchMode=yes', launcher)
+        self.assertIn('functor .japanese-weave/app/fw-host', launcher)
+        self.assertFalse((self.home / 'fw' / 'state.json').exists())
+
     def test_extension_id_matches_manifest_key(self):
         import base64
         import hashlib
         key = json.loads((ROOT / 'extension' / 'manifest.json').read_text())['key']
         digest = hashlib.sha256(base64.b64decode(key)).hexdigest()[:32]
         self.assertEqual(''.join(chr(ord('a') + int(c, 16)) for c in digest), fw.EXTENSION_ID)
+
+
+def collection(path, cards, types=None):
+    """A minimal Anki collection (current schema, with Anki's unicase collation): one note type per field layout,
+    notes and cards as given."""
+    import sqlite3
+    con = sqlite3.connect(str(path))
+    con.create_collation('unicase', lambda a, b: (a.casefold() > b.casefold()) - (a.casefold() < b.casefold()))
+    con.executescript('create table fields (ntid integer, ord integer, name text collate unicase,'
+                      ' primary key (ntid, ord)) without rowid;'
+                      'create unique index idx_fields_name_ntid on fields (name, ntid);'
+                      'create table decks (id integer, name text collate unicase);'
+                      'create table notes (id integer, mid integer, flds text);'
+                      'create table cards (id integer, nid integer, did integer, type integer, queue integer, ivl integer);')
+    con.execute('insert into decks values (1, ?)', ('Japanese\x1fCore 2k',))
+    con.execute('insert into decks values (2, ?)', ('Spanish',))
+    types = types or {10: ['Vocabulary-Kanji', 'Vocabulary-Furigana', 'Vocabulary-English'], 20: ['Front', 'Back']}
+    for ntid, names in types.items():
+        for i, name in enumerate(names):
+            con.execute('insert into fields values (?, ?, ?)', (ntid, i, name))
+    for nid, (mid, fields, did, ctype, queue, ivl) in enumerate(cards, 1):
+        con.execute('insert into notes values (?, ?, ?)', (nid, mid, '\x1f'.join(fields)))
+        con.execute('insert into cards values (?, ?, ?, ?, ?, ?)', (nid, nid, did, ctype, queue, ivl))
+    con.commit()
+    con.close()
+
+
+class Anki(Home):
+    CARDS = [
+        (10, ['問題', '問題[もんだい]', 'problem, question'], 1, 2, 2, 40),     # mature review
+        (10, ['食べる', '食[た]べる', 'to eat'], 1, 2, 2, 5),                  # young review, not in the base list
+        (10, ['猫', '猫[ねこ]', '<b>cat</b>'], 1, 1, 1, -600),                  # learning
+        (10, ['犬', '犬[いぬ]', 'dog'], 1, 0, 0, 0),                            # new: skipped
+        (10, ['鳥', '鳥[とり]', 'bird'], 1, 2, -1, 30),                         # suspended: skipped
+        (20, ['これはペンです。', 'This is a pen.'], 1, 2, 2, 10),              # a sentence: skipped
+        (20, ['勉強', 'study'], 1, 2, 2, 25),                                   # Front/Back, reading from the base list
+    ]
+
+    def test_review_words_order_and_fields(self):
+        path = self.home / 'collection.anki2'
+        collection(path, self.CARDS)
+        words, report = anki.review_words(path, base=fwlib.read_lexicon(fwlib.LEXICON))
+        self.assertEqual([w['ja'] for w in words], ['問題', '勉強', '食べる', '猫'])
+        eat = words[2]
+        self.assertEqual((eat['kana'], eat['hint'], eat['en'], eat['mature']), ('たべる', 'taberu', 'eat', False))
+        self.assertEqual(words[3]['en'], 'cat')
+        self.assertTrue(words[0]['mature'] and words[1]['mature'])
+        self.assertEqual(report['skipped'], {'sentence or not a word': 1})
+        self.assertEqual(anki.review_words(path, deck='spanish')[0], [])
+
+    def test_skips_kana_charts_conjugations_and_explanations(self):
+        path = self.home / 'collection.anki2'
+        yomitan = ('<div class="yomitan-glossary"><i>(★, Jitendex.org [2025-08-01])</i> <span><div data-sc-content='
+                   '"sense-group"><span data-sc-class="tag" data-sc-content="part-of-speech-info">noun</span>'
+                   '<span data-sc-class="tag" data-sc-content="misc-info">kana</span><div data-sc-content="sense">'
+                   '<ul data-sc-content="glossary"><li>Italy</li></ul></div></div></span>'
+                   '<style>.yomitan-glossary { color: red; }</style></div>')
+        types = {30: ['Word', 'Furigana', 'meaning'], 40: ['id', 'hiragana', 'katakana', 'Rōmaji'], 20: ['Front', 'Back'],
+                 50: ['Conjugation', 'Infinitive', 'Base'], 60: ['grammatical concept', 'usage']}
+        collection(path, [
+            (30, ['イタリア', 'イタリア', yomitan], 1, 2, 2, 40),               # Yomitan glossary: no tags
+            (40, ['1', 'ぎゃ', 'ギャ', 'gya'], 1, 2, 2, 40),                   # kana chart: romaji is no meaning
+            (20, ['ぎゅ', 'gyu'], 1, 2, 2, 40),                                 # kana drill on Front/Back
+            (50, ['書[か]かない', 'to write', '書[か]く'], 1, 2, 2, 40),          # conjugated form
+            (50, ['書[か]く', 'to write', '書[か]く'], 1, 2, 2, 30),             # its dictionary form
+            (60, ['まで', 'A particle which indicates the extent or degree to which something reaches, such as a '
+                         'place, time or inanimate object.'], 1, 2, 2, 40),    # grammar explanation
+        ], types)
+        words, report = anki.review_words(path)
+        self.assertEqual([(w['ja'], w['en']) for w in words], [('イタリア', 'italy'), ('書く', 'write')])
+        self.assertEqual(report['skipped'], {'no English meaning': 2, 'romaji, not a meaning': 1,
+                                             'conjugated form': 1})
+
+    def test_sync_puts_anki_words_first_and_marks_mature_known(self):
+        path = self.home / 'collection.anki2'
+        collection(path, self.CARDS)
+        with mock.patch('sys.stdout', new=io.StringIO()):
+            fw.main(['anki', str(path)])
+        state = fwlib.load_state()
+        self.assertEqual([w['ja'] for w in state['words'][:4]], ['問題', '勉強', '食べる', '猫'])
+        self.assertEqual([w['status'] for w in state['words'][:2]], ['known', 'known'])
+        self.assertEqual(fwlib.find(state, '食べる')['status'], 'active')  # first in line for learning
+        self.assertEqual(fwlib.find(state, 'taberu')['ja'], '食べる')
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/weave.py\" --hook",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run\" \"${CLAUDE_PLUGIN_ROOT}/scripts/weave.py\" --hook",
             "timeout": 15
           }
         ]
