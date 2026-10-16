@@ -14,9 +14,11 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
+import hub  # noqa: E402
 import knowledge  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
+SYNC_EVERY = 120  # with a collector: sync the cache in the background when it is older than this
 # Stage: (target % of words in Japanese, cap %, max Japanese words in one sentence).
 STAGES = {1: (6, 10, 2), 2: (12, 20, 4), 3: (25, 35, 4), 4: (40, 55, 4)}
 LOT, SOME = (6, 30), (3, 10)  # chat exposure (distinct days, replies) for the "seen a lot" and "sometimes" tiers
@@ -31,17 +33,19 @@ ABBR = re.compile(r'<abbr\b[^>]*>(.*?)</abbr>', re.I | re.S)  # T3 gloss markup:
 
 
 def exposure():
-    """Per-word chat exposure; starts a background refresh when the index is stale or missing."""
+    """Per-word chat exposure. Starts a background refresh when the index is stale or missing, or with a collector
+    set, when the cache is (that sync also sends this machine's new chat replies and anything queued)."""
     path = fwlib.home() / 'exposure.json'
     data = fwlib.read_json(path, {}) or {}
-    try:
-        fresh = time.time() - path.stat().st_mtime < STALE
-    except OSError:
-        fresh = False
-    if not fresh and not os.environ.get('JAPANESE_WEAVE_NO_REFRESH'):
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve().with_name('fw.py')), 'refresh'],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+    if fwlib.collector_url():
+        fresh = not hub.stale(SYNC_EVERY)
+    else:
+        try:
+            fresh = time.time() - path.stat().st_mtime < STALE
+        except OSError:
+            fresh = False
+    if not fresh:
+        knowledge.start_refresh()  # `fw.py refresh`, never waited on
     return data.get('words', {})
 
 
@@ -332,8 +336,7 @@ def export_notice(state, now=None):
     now = now or time.time()
     if now - exported['at'] < STALE_EXPORT_DAYS * 86400:
         return None
-    with fwlib.editing() as fresh:
-        fresh.setdefault('exported', {})['noticed'] = True
+    hub.submit({'kind': 'noticed'}, wait=False)
     return ('Japanese Weave: the block you pasted into claude.ai or ChatGPT is over a week behind your word list. '
             'Run /japanese-weave:export to refresh it.')
 

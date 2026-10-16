@@ -69,7 +69,9 @@ the state dir, `extension-firefox/` and `extension/` copies, and native host man
 (`~/.mozilla/native-messaging-hosts`), Chrome and Chromium.
 
 If the browser runs on a different machine from Claude Code, run setup there with `--remote <ssh-host-of-this-machine>`
-too: its native host then reaches the word state over ssh (key login required).
+too: its native host then reaches the word state over ssh (key login required). If the person already runs a
+collector for several machines (README, "Several machines"), add `--collector <its URL>` instead; setup then keeps a
+cache of the collector's word state and stops with instructions if the collector has none yet.
 
 ## 3. Verify
 

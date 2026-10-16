@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import struct
 import subprocess
 import sys
@@ -21,6 +22,7 @@ import fwlib  # noqa: E402
 import weave  # noqa: E402
 import fw_host  # noqa: E402
 import fw  # noqa: E402
+import hub  # noqa: E402
 import export  # noqa: E402
 import anki  # noqa: E402
 import feedback  # noqa: E402
@@ -625,7 +627,8 @@ class Collector(Home):
         self.assertEqual(refused.exception.code, 415)
         refused.exception.close()
         self.assertEqual(feedback.forward(self.url, [self.item()], 'phone')['ok'], False)
-        self.assertEqual(feedback.remote_health(self.url), {'ok': True, 'interactions': 1})
+        health = feedback.remote_health(self.url)
+        self.assertEqual((health['ok'], health['interactions'], health['state']), (True, 1, False))
         self.assertEqual([(r['surface'], r['kind']) for r in feedback.remote_recent(self.url)], [('t3', 'pin')])
 
     def test_mirror_follows_the_collector_and_starts_over_after_a_reset(self):
@@ -667,6 +670,222 @@ class Collector(Home):
         reply = fw_host.handle({'type': 'log', 'items': [self.item()]})
         self.assertFalse(reply['ok'])  # so the extension keeps them queued and retries
         self.assertIn('unreachable', reply['error'])
+
+
+class Hub(Home):
+    """The word state on a collector (its own state dir, on a local port) and this machine keeping a cache of it."""
+
+    def setUp(self):
+        super().setUp()
+        import threading
+        from http.server import ThreadingHTTPServer
+        self.server_home = self.home / 'collector-home'
+        with fwlib.using_home(self.server_home):
+            hub.submit({'kind': 'seed', 'n': 40})  # the collector's own setup: the state lives there
+        handler = type('TestHandler', (collector.Handler,), {'db': self.server_home / 'interactions.sqlite',
+                                                             'home': self.server_home, 'log_message': lambda *args: None})
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f'http://127.0.0.1:{self.server.server_address[1]}'
+        self.join(self.url)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        super().tearDown()
+
+    def join(self, url):
+        fwlib.home().mkdir(parents=True, exist_ok=True)
+        (fwlib.home() / 'collector').write_text(url + '\n')
+
+    def served(self):
+        with fwlib.using_home(self.server_home):
+            return fwlib.load_state(create=False)
+
+    def ops(self):
+        import sqlite3
+        con = sqlite3.connect(str(self.server_home / 'interactions.sqlite'))
+        try:
+            return con.execute('SELECT kind, machine FROM ops ORDER BY rowid').fetchall()
+        finally:
+            con.close()
+
+    def learning(self, state):
+        return [w['ja'] for w in state['words'] if w['status'] == 'active']
+
+    def test_changes_go_to_the_collector_and_the_cache_follows(self):
+        cache = fwlib.load_state()  # no copy yet: fetched
+        self.assertEqual(cache, self.served())
+        word = self.learning(cache)[0]
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['known', word])
+            fw.main(['challenge', '1.5'])
+        self.assertIn(f'Known: {word}', out.getvalue())
+        self.assertNotIn('Saved here', out.getvalue())
+        self.assertEqual(fwlib.find(self.served(), word)['status'], 'known')
+        self.assertEqual(self.served()['prefs'], {'challenge': 1.5})
+        self.assertEqual(fwlib.load_state(), self.served())  # the cache was refreshed after each change
+        peeked = self.learning(cache)[1]
+        self.assertEqual(fw_host.handle({'type': 'events', 'events': [{'word': peeked, 'kind': 'peek'}]})['applied'], 1)
+        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [fwlib.today()])
+        self.assertEqual(fw_host.handle({'type': 'state'})['version'], fwlib.version(self.served()))
+        self.assertEqual([k for k, _ in self.ops()], ['seed', 'mark', 'set', 'events'])  # seed: its own setup
+        self.assertEqual({m for _, m in self.ops()}, {socket.gethostname()[:64]})
+        self.assertTrue((self.server_home / knowledge.COMMANDS).exists())  # the replay's command log lives there too
+        self.assertFalse((fwlib.home() / knowledge.COMMANDS).exists())
+        with self.assertRaises(fwlib.RemoteState):
+            with fwlib.editing():
+                pass
+
+    def test_changes_wait_here_while_the_collector_is_down(self):
+        fwlib.load_state()
+        word = self.learning(self.served())[0]
+        self.join('http://127.0.0.1:9')  # nothing listens there
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['known', word])
+            fw.main(['pause'])
+            fw.main(['status'])
+        self.assertIn('Saved here', out.getvalue())
+        self.assertIn('Showing the copy here', out.getvalue())
+        self.assertEqual(fwlib.find(fwlib.load_state(), word)['status'], 'known')  # shows at once
+        self.assertTrue(fwlib.load_state()['paused'])
+        self.assertEqual(fwlib.find(self.served(), word)['status'], 'active')
+        self.assertEqual(len(hub.pending()), 2)
+        self.assertEqual(fw_host.handle({'type': 'state'})['paused'], True)  # the browser still gets an answer
+        self.join(self.url)
+        self.assertEqual(hub.sync(scan=False), (True, None))
+        self.assertEqual(hub.pending(), [])
+        self.assertEqual((fwlib.find(self.served(), word)['status'], self.served()['paused']), ('known', True))
+        self.assertEqual(fwlib.load_state(), self.served())
+        resent = hub.stamp({'kind': 'set', 'paused': False})
+        self.assertEqual(hub.post(self.url, [resent])['results'][0], {'ok': True})
+        self.assertEqual(hub.post(self.url, [resent])['results'][0], {'ok': True, 'duplicate': True})  # a lost reply
+
+    def test_the_hook_reads_the_cache_and_never_waits(self):
+        fwlib.load_state()
+        self.join('http://127.0.0.1:9')
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO('{}')), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        self.assertIn('Japanese Weave', json.loads(out.getvalue())['hookSpecificOutput']['additionalContext'])
+        fwlib.write_json(fwlib.home() / 'state.json', dict(fwlib.load_state(), exported={'at': 1, 'version': 'old'}))
+        self.assertIn('over a week behind', weave.export_notice(fwlib.load_state()))
+        self.assertEqual([op['kind'] for op in hub.pending()], ['noticed'])  # queued, not waited on
+        self.assertIsNone(weave.export_notice(fwlib.load_state()))  # shown once
+
+    def test_chat_replies_from_two_machines_count_once(self):
+        state = fwlib.load_state()
+        word = self.learning(state)[0]
+        chats = self.home / 'chats'
+        (chats / 'p').mkdir(parents=True)
+        (chats / 'p' / 'a.jsonl').write_text(line(f'Done, {word} works.', day=fwlib.today()) + '\n')
+        with mock.patch.dict(os.environ, {'JAPANESE_WEAVE_TRANSCRIPTS': str(chats)}):
+            self.assertTrue(fwlib.refresh_exposure())
+            self.assertTrue(fwlib.refresh_exposure())  # nothing new
+            with mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': str(self.home / 'other')}):
+                self.join(self.url)  # another machine with a copy of the same chat (a forked session)
+                self.assertTrue(fwlib.refresh_exposure())
+        with fwlib.using_home(self.server_home):
+            counts = fwlib.read_json(fwlib.home() / 'exposure.json')['words']
+        self.assertEqual(counts[word], {'n': 1, 'days': [fwlib.today()]})
+        self.assertEqual(counts[self.learning(state)[1]], {'n': 0, 'days': []})
+        self.assertIn(str(chats / 'p' / 'a.jsonl'), fwlib.read_json(fwlib.home() / fwlib.SCAN)['offsets'])
+        hub.pull()
+        self.assertEqual(fwlib.read_json(fwlib.home() / 'exposure.json')['words'][word]['n'], 1)
+
+    def test_anki_words_go_to_the_front_on_the_collector(self):
+        fwlib.load_state()
+        words = [{'ja': '猫', 'en': 'cat', 'hint': 'neko', 'kana': 'ねこ', 'interval': 40, 'mature': True},
+                 {'ja': '机', 'en': 'desk', 'hint': 'tsukue', 'kana': 'つくえ', 'interval': 2, 'mature': False}]
+        result = hub.submit({'kind': 'anki', 'words': words, 'known': ['猫']})
+        self.assertEqual((result['ok'], result['known']), (True, 1))
+        self.assertTrue((self.server_home / fwlib.ANKI_LEXICON).exists())
+        self.assertFalse((fwlib.home() / fwlib.ANKI_LEXICON).exists())
+        self.assertEqual([w['ja'] for w in fwlib.load_state()['words'][:2]], ['猫', '机'])
+        self.assertEqual(fwlib.find(fwlib.load_state(), '猫')['status'], 'known')
+
+    def test_bad_ops_are_refused_one_by_one(self):
+        good = hub.stamp({'kind': 'set', 'paused': True})
+        reply = hub.post(self.url, [hub.stamp({'kind': 'drop_tables'}), good,
+                                    hub.stamp({'kind': 'events', 'events': [{'word': 'x', 'kind': 'known'}]}),
+                                    hub.stamp({'kind': 'set', 'prefs': {'challenge': 7}}), {'kind': 'set'}])
+        self.assertEqual([r['ok'] for r in reply['results']], [False, True, False, False, False])
+        self.assertTrue(self.served()['paused'])
+        with self.assertRaises(ValueError):
+            hub.submit({'kind': 'mark', 'words': [], 'as': 'forgotten'})
+
+    def test_an_unchanged_state_is_not_sent_again(self):
+        fwlib.load_state()
+        rev = fwlib.read_json(fwlib.home() / hub.SYNCED)['rev']
+        with fwlib.using_home(self.server_home):
+            with fwlib.editing():
+                pass  # promotion with nothing to promote: nothing rewritten
+            self.assertEqual(hub.snapshot(rev), (200, {'ok': True, 'rev': rev, 'unchanged': True}))
+            hub.submit({'kind': 'set', 'stage': 2})
+            self.assertNotIn('unchanged', hub.snapshot(rev)[1])
+
+    def test_moving_this_machines_state_to_a_new_collector(self):
+        empty = self.home / 'empty-collector'
+        handler = type('EmptyHandler', (collector.Handler,), {'db': empty / 'interactions.sqlite', 'home': empty,
+                                                              'log_message': lambda *args: None})
+        from http.server import ThreadingHTTPServer
+        import threading
+        server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        url = f'http://127.0.0.1:{server.server_address[1]}'
+        try:
+            (fwlib.home() / 'collector').unlink()
+            with mock.patch.object(Path, 'home', return_value=self.home), mock.patch.dict(os.environ, {
+                    'XDG_CONFIG_HOME': '', 'CODEX_HOME': str(self.home / 'codex')}), mock.patch('sys.stdout', new=io.StringIO()):
+                fw.main(['setup', '--known-top', '10'])
+                mine = fwlib.load_state()
+                with self.assertRaises(SystemExit) as refused:
+                    fw.main(['setup', '--collector', url])
+                self.assertIn('has no word state yet', str(refused.exception.code))
+                self.assertIn('state.json', str(refused.exception.code))
+                self.assertIsNone(fwlib.collector_url())  # left as it was
+                self.assertEqual(feedback.request(url + '/v1/state')['ok'], False)
+                import shutil
+                empty.mkdir(exist_ok=True)
+                shutil.copy2(fwlib.home() / 'state.json', empty / 'state.json')  # the documented move
+                fw.main(['setup', '--collector', url])
+            self.assertEqual(fwlib.collector_url(), url)
+            self.assertEqual(fwlib.load_state(), mine)
+            self.assertEqual(fwlib.read_json(fwlib.home() / 'before-collector' / 'state.json'), mine)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
+class LocalExposure(Home):
+    def test_scans_resume_and_older_offsets_carry_over(self):
+        state = fwlib.load_state()
+        word = [w['ja'] for w in state['words'] if w['status'] == 'active'][0]
+        chats = self.home / 'chats'
+        (chats / 'p').mkdir(parents=True)
+        chat = chats / 'p' / 'a.jsonl'
+        chat.write_text(line(f'Done, {word} works.', day=fwlib.today()) + '\n')
+        with mock.patch.dict(os.environ, {'JAPANESE_WEAVE_TRANSCRIPTS': str(chats)}):
+            fwlib.refresh_exposure()
+            fwlib.refresh_exposure()
+            self.assertEqual(fwlib.read_json(fwlib.home() / 'exposure.json')['words'][word]['n'], 1)
+            (fwlib.home() / fwlib.SCAN).unlink()  # an older install: offsets in exposure.json
+            index = fwlib.read_json(fwlib.home() / 'exposure.json')
+            fwlib.write_json(fwlib.home() / 'exposure.json', dict(index, offsets={str(chat): chat.stat().st_size}))
+            with open(chat, 'a') as handle:
+                handle.write(line(f'Again {word}.', day=fwlib.today()) + '\n')
+            fwlib.refresh_exposure()
+        self.assertEqual(fwlib.read_json(fwlib.home() / 'exposure.json')['words'][word]['n'], 2)
+        self.assertNotIn('offsets', fwlib.read_json(fwlib.home() / 'exposure.json'))
+        self.assertEqual(self.ops_kinds(), ['exposure', 'exposure'])
+
+    def ops_kinds(self):
+        import sqlite3
+        con = sqlite3.connect(str(feedback.default_path()))
+        try:
+            return [k for k, in con.execute('SELECT kind FROM ops ORDER BY rowid')]
+        finally:
+            con.close()
 
 
 class Setup(Home):
@@ -734,8 +953,14 @@ class Setup(Home):
         return fwlib.load_state(create=False)
 
     def test_collector_flag_sets_and_clears_the_collector(self):
-        self.run_setup('--collector', 'http://functor:7853/')
-        self.assertEqual(fwlib.collector_url(), 'http://functor:7853')
+        with self.assertRaises(SystemExit) as refused:  # no state here, and the collector can't be reached
+            self.run_setup('--collector', 'http://127.0.0.1:9/')
+        self.assertIn('did not answer', str(refused.exception.code))
+        self.assertIsNone(fwlib.collector_url())  # left as it was
+        own = self.run_setup()
+        self.run_setup('--collector', 'http://127.0.0.1:9/')  # down for now: this state becomes the cache meanwhile
+        self.assertEqual(fwlib.collector_url(), 'http://127.0.0.1:9')
+        self.assertEqual(json.loads((fwlib.home() / 'before-collector' / 'state.json').read_text()), own)
         self.run_setup('--collector', 'off')
         self.assertIsNone(fwlib.collector_url())
         with self.assertRaises(SystemExit), mock.patch('sys.stderr', new=io.StringIO()):

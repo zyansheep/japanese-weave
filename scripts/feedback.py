@@ -11,10 +11,14 @@ Stored in <state dir>/interactions.sqlite (schema 2):
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
 
+  ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
+                and the op as JSON
+
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
 the peek rate). With a collector configured (setup --collector), the native host forwards items to it instead (see
 collector.py), and knowledge.py reads a local mirror of the collector's database (sync_mirror).
 """
+import gzip
 import json
 import math
 from pathlib import Path
@@ -48,6 +52,13 @@ CREATE TABLE IF NOT EXISTS contexts (
   shown_at INTEGER,
   seq INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (surface, view, context)
+);
+CREATE TABLE IF NOT EXISTS ops (
+  uid TEXT PRIMARY KEY,
+  at INTEGER NOT NULL,
+  machine TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  body TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS interactions (
   id INTEGER PRIMARY KEY,
@@ -225,7 +236,7 @@ def sync_mirror(collector, path, timeout=4, pages=20):
         for _ in range(pages):
             after_id = con.execute('SELECT coalesce(max(id), 0) FROM interactions').fetchone()[0]
             after_seq = con.execute('SELECT coalesce(max(seq), 0) FROM contexts').fetchone()[0]
-            reply = _request(f'{collector.rstrip("/")}/v1/export?after={after_id}&seq={after_seq}&limit={EXPORT_PAGE}',
+            reply = request(f'{collector.rstrip("/")}/v1/export?after={after_id}&seq={after_seq}&limit={EXPORT_PAGE}',
                              timeout=timeout)
             if not isinstance(reply, dict) or not reply.get('ok'):
                 return False, (reply or {}).get('error', 'collector did not answer')
@@ -264,34 +275,38 @@ def load(path=None):
     return rows, contexts
 
 
-def _request(url, body=None, timeout=5):
+def request(url, body=None, timeout=5):
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'} if data else {})
+    headers = dict({'Content-Type': 'application/json'} if data else {}, **{'Accept-Encoding': 'gzip'})
+    req = urllib.request.Request(url, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as res:
-            return json.loads(res.read().decode('utf-8'))
+            raw = res.read()
+            if res.headers.get('Content-Encoding') == 'gzip':
+                raw = gzip.decompress(raw)
+            return json.loads(raw.decode('utf-8'))
     except urllib.error.HTTPError as error:
         with error:
             try:
                 return json.loads(error.read().decode('utf-8'))
             except ValueError:
                 return {'ok': False, 'error': f'collector answered HTTP {error.code}'}
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, EOFError) as error:
         return {'ok': False, 'error': f'collector unreachable: {error}'}
 
 
 def forward(collector, items, surface):
     """Sends items to a collector (collector.py); its reply, or {ok: false, error} so callers keep them queued."""
-    reply = _request(collector.rstrip('/') + '/v1/interactions', {'surface': surface, 'items': items})
+    reply = request(collector.rstrip('/') + '/v1/interactions', {'surface': surface, 'items': items})
     return reply if isinstance(reply, dict) else {'ok': False, 'error': 'collector reply is not an object'}
 
 
 def remote_recent(collector, limit=20):
-    reply = _request(f'{collector.rstrip("/")}/v1/recent?limit={int(limit)}')
+    reply = request(f'{collector.rstrip("/")}/v1/recent?limit={int(limit)}')
     if not isinstance(reply, dict) or not reply.get('ok'):
         raise OSError((reply or {}).get('error', 'collector did not answer'))
     return reply['items']
 
 
 def remote_health(collector):
-    return _request(collector.rstrip('/') + '/v1/health', timeout=3)
+    return request(collector.rstrip('/') + '/v1/health', timeout=3)

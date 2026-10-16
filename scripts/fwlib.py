@@ -1,8 +1,9 @@
 """Japanese Weave shared state: word statuses, stage, chat exposure, extension events.
 
 Python 3.9+ standard library only. One state directory per user (JAPANESE_WEAVE_HOME, default ~/.japanese-weave)
-holds everything; the Claude Code hook, the slash commands and the browser native messaging host all read and
-write it through this module.
+holds everything; the Claude Code hook, the slash commands and the browser native messaging host all read it through
+this module and change it through hub.py. With a collector set, the state lives on the collector's machine and the
+files here are a cache of it (see hub.py).
 
 Statuses: queue -> active -> known, with shaky as the penalty box (see README "How words advance").
 """
@@ -15,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import threading
 import time
 import unicodedata
 
@@ -45,14 +47,31 @@ DEDUPE_DAYS = 45
 
 
 def collector_url():
-    """The collector (collector.py) that gloss interactions go to, set by `fw.py setup --collector URL`; None: local."""
+    """The collector (collector.py) set by `fw.py setup --collector URL`: it holds the word state and the gloss log for
+    every machine, and this one keeps a cache. None: the state lives here."""
     path = home() / 'collector'
     return path.read_text().strip() or None if path.exists() else None
 
 
+_local = threading.local()
+
+
+@contextlib.contextmanager
+def using_home(path):
+    """Within this thread, the state dir is path (the collector serves its own state dir, also in tests)."""
+    previous = getattr(_local, 'home', None)
+    _local.home = Path(path)
+    try:
+        yield
+    finally:
+        _local.home = previous
+
+
 def home():
-    """The state dir: JAPANESE_WEAVE_HOME, else the dir this copy was installed into by setup (<home>/app/scripts),
-    else ~/.japanese-weave."""
+    """The state dir: set by using_home in this thread, else JAPANESE_WEAVE_HOME, else the dir this copy was installed
+    into by setup (<home>/app/scripts), else ~/.japanese-weave."""
+    if getattr(_local, 'home', None) is not None:
+        return _local.home
     if os.environ.get('JAPANESE_WEAVE_HOME'):
         return Path(os.environ['JAPANESE_WEAVE_HOME']).expanduser()
     if PLUGIN_ROOT.name == 'app' and (PLUGIN_ROOT.parent / 'state.json').exists():
@@ -135,6 +154,14 @@ def write_json(path, data):
                 temporary.unlink()
 
 
+def write_json_lines(path, items):
+    """One JSON value per line, replacing the file atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile('w', dir=path.parent, delete=False, encoding='utf-8') as file:
+        file.writelines(json.dumps(item, ensure_ascii=False) + '\n' for item in items)
+    os.replace(file.name, path)
+
+
 def read_json(path, default=None):
     try:
         with open(path, encoding='utf-8') as file:
@@ -212,14 +239,26 @@ def merge_lexicon(state, lexicon=None):
     return state
 
 
+class NoState(RuntimeError):
+    """A collector is set but this machine has no copy of its state, and the collector can't be reached."""
+
+
 def load_state(create=True, lock=True):
-    """The saved state; creates it on first use. lock=False when the caller already holds state.lock."""
+    """The saved state; creates it on first use. lock=False when the caller already holds state.lock. With a collector
+    set this is the cached copy; without one yet, it is fetched (never created here)."""
     path = home() / 'state.json'
     state = read_json(path)
     if isinstance(state, dict) and isinstance(state.get('words'), list):
         return state
     if not create:
         return None
+    if collector_url():
+        import hub
+        ok, error = hub.pull()
+        state = read_json(path)
+        if ok and isinstance(state, dict):
+            return state
+        raise NoState(f'no copy of the word state from {collector_url()} yet: {error}')
     with locked() if lock else contextlib.nullcontext():
         if not path.exists():
             write_json(path, new_state())
@@ -230,15 +269,24 @@ def save_state(state):
     write_json(home() / 'state.json', state)
 
 
+class RemoteState(RuntimeError):
+    """The state lives on the collector: change it with hub.submit, not here."""
+
+
 @contextlib.contextmanager
 def editing():
-    """Load, let the caller change, promote and save the state under the lock."""
+    """Load, let the caller change, promote and save the state under the lock. Only where the state lives: with a
+    collector set, changes go through hub.submit instead."""
+    if collector_url():
+        raise RemoteState(f'the word state lives on {collector_url()}; change it with hub.submit')
     with locked():
         state = load_state(lock=False)
+        before = json.dumps(state, sort_keys=True)
         merge_lexicon(state)
         yield state
         promote(state)
-        save_state(state)
+        if json.dumps(state, sort_keys=True) != before:  # unchanged: caches elsewhere needn't fetch it again
+            save_state(state)
 
 
 def find(state, word):
@@ -423,14 +471,19 @@ def public_state(state):
 
 # ---- chat exposure from Claude Code transcripts ----
 
+def forms(ja, kana=''):
+    """How a word can appear in chat prose (normalized): as written, or in kana when that is 3+ characters (shorter
+    kana collides with ordinary Japanese)."""
+    out = [norm(ja)]
+    if kana and len(kana) >= 3 and norm(kana) != out[0]:
+        out.append(norm(kana))
+    return out
+
+
 def pattern(ja, kana=''):
-    """A word in chat prose: as written, or in kana when that is 3+ characters (shorter kana collides with ordinary
-    Japanese). Japanese has no spaces, so only same-script neighbors block a match: a kanji word can't sit inside a
-    longer kanji run (今 in 今日) and a kana word can't sit inside a kana run (いま in います)."""
-    forms = [norm(ja)]
-    if kana and len(kana) >= 3 and norm(kana) != forms[0]:
-        forms.append(norm(kana))
-    return re.compile('|'.join(_form(f) for f in forms))
+    """A word in chat prose (see forms). Japanese has no spaces, so only same-script neighbors block a match: a kanji
+    word can't sit inside a longer kanji run (今 in 今日) and a kana word can't sit inside a kana run (いま in います)."""
+    return re.compile('|'.join(_form(f) for f in forms(ja, kana)))
 
 
 def _form(form):
@@ -496,15 +549,23 @@ def local_day(stamp):
         return str(stamp)[:10]
 
 
-def scan(words, index, roots=None, start='0000-00-00'):
-    """Fold new transcript lines into the exposure index (mutated and returned)."""
+def read_replies(words, offsets, roots=None, start='0000-00-00'):
+    """New transcript lines since offsets (path -> byte offset, mutated): [{d: digest, day, words: [ja]}] for the
+    main-thread replies that use any of the words. Code, links and replies about the plugin itself don't count."""
     roots = [Path(r) for r in ([roots] if isinstance(roots, (str, Path)) else roots)] if roots else transcript_roots()
     words = [w if isinstance(w, dict) else {'ja': w} for w in words]
-    patterns = {w['ja']: pattern(w['ja'], w.get('kana', '')) for w in words}
-    counts, offsets, recent = index.setdefault('words', {}), index.setdefault('offsets', {}), index.setdefault('recent', {})
-    for ja in patterns:
-        counts.setdefault(ja, {'n': 0, 'days': []})
+    written = {w['ja']: forms(w['ja'], w.get('kana', '')) for w in words}
+    compiled = {}
+
+    def uses(w, prose):  # a cheap substring test first: compiling every word's pattern takes seconds
+        if not any(f in prose for f in written[w['ja']]):
+            return False
+        if w['ja'] not in compiled:
+            compiled[w['ja']] = pattern(w['ja'], w.get('kana', ''))
+        return bool(compiled[w['ja']].search(prose))
+
     since = time.mktime(time.strptime(start, '%Y-%m-%d')) if start > '0000' else 0
+    out = []
     for path in (p for root in roots if root.exists() for p in root.rglob('*.jsonl')):
         name = str(path)
         try:
@@ -519,34 +580,73 @@ def scan(words, index, roots=None, start='0000-00-00'):
         for day, text in replies(lines):
             if day < start or 'Japanese Weave' in text:
                 continue
-            digest = hashlib.sha1(text.encode()).hexdigest()[:16]
-            if digest in recent:
-                continue  # forked and resumed chats copy old replies
-            recent[digest] = day
             prose = norm(CODE.sub(' ', text))
-            for ja, regex in patterns.items():
-                if regex.search(prose):
-                    entry = counts[ja]
-                    entry['n'] += 1
-                    if day not in entry['days']:
-                        entry['days'] = sorted(entry['days'] + [day])[-60:]
+            used = [w['ja'] for w in words if uses(w, prose)]
+            if used:
+                out.append({'d': hashlib.sha1(text.encode()).hexdigest()[:16], 'day': day, 'words': used})
         offsets[name] = lines.offset
+    for name in [k for k in offsets if not os.path.exists(k)]:
+        del offsets[name]
+    return out
+
+
+def fold(index, found, words=()):
+    """Adds replies (read_replies) to the exposure index (mutated and returned): {words: {ja: {n, days}}, recent:
+    {digest: day}}. A reply already counted (same digest: forked and resumed chats copy old replies, and two machines
+    may send the same one) counts once. words: entries to create at zero, so every listed word has a count."""
+    counts, recent = index.setdefault('words', {}), index.setdefault('recent', {})
+    for ja in words:
+        counts.setdefault(ja, {'n': 0, 'days': []})
+    for reply in found:
+        if reply['d'] in recent:
+            continue
+        recent[reply['d']] = reply['day']
+        for ja in reply['words']:
+            entry = counts.setdefault(ja, {'n': 0, 'days': []})
+            entry['n'] += 1
+            if reply['day'] not in entry['days']:
+                entry['days'] = sorted(entry['days'] + [reply['day']])[-60:]
     cutoff = (dt.date.today() - dt.timedelta(days=DEDUPE_DAYS)).isoformat()
     index['recent'] = {k: v for k, v in recent.items() if v >= cutoff}
-    index['offsets'] = {k: v for k, v in offsets.items() if os.path.exists(k)}
     index['updated'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     return index
 
 
+def scan(words, index, roots=None, start='0000-00-00'):
+    """Fold new transcript lines into the exposure index (mutated and returned); its offsets say where to resume."""
+    found = read_replies(words, index.setdefault('offsets', {}), roots, start)
+    return fold(index, found, [w if isinstance(w, str) else w['ja'] for w in words])
+
+
+SCAN = 'scan.json'  # where this machine's transcript scan resumes: {offsets: {path: byte offset}}
+
+
+def scan_cursor():
+    """This machine's scan offsets. Older installs kept them in exposure.json."""
+    cursor = read_json(home() / SCAN)
+    if isinstance(cursor, dict) and isinstance(cursor.get('offsets'), dict):
+        return cursor
+    old = (read_json(home() / 'exposure.json', {}) or {}).get('offsets')
+    return {'offsets': old if isinstance(old, dict) else {}}
+
+
 def refresh_exposure():
-    """Scan new transcript lines, then re-apply promotion. Skips if another refresh is running."""
+    """Scan this machine's new transcript lines and count them, then re-apply promotion. With a collector set, the
+    replies go to it (hub.py). Skips if another refresh is running."""
     with locked('exposure.lock', blocking=False) as got:
         if not got:
             return False
         state = load_state()
-        path = home() / 'exposure.json'
-        index = scan(state['words'], read_json(path, {}) or {}, start=state.get('created', '0000-00-00'))
-        write_json(path, index)
-    with editing():
-        pass  # promotion runs on save
+        cursor = scan_cursor()
+        found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'))
+        import hub
+        if collector_url():
+            if found and not hub.send_exposure(found):
+                return False  # the cursor stays, so the same replies go again next time
+        elif found:
+            hub.run(hub.stamp({'kind': 'exposure', 'replies': found}))
+        else:
+            with editing():
+                pass  # promotion runs on save
+        write_json(home() / SCAN, cursor)
     return True

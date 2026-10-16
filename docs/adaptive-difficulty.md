@@ -136,12 +136,13 @@ word; nothing at all if the log shrank since the last refresh. Every move is rec
 ## Where it runs
 
 - `scripts/knowledge.py`: the model (pure replay from the log), selection value helpers, the controller, transitions.
-- With a collector, a local mirror (`mirror.sqlite`) is kept in sync from `GET /v1/export` (interactions by id,
-  contexts by a change sequence). The export only answers requests addressed to the collector's own host name, so a
-  web page can't read it through DNS rebinding.
-- `fw.py refresh` syncs, replays from scratch, applies transitions in a short state edit, and writes knowledge.json.
-  It runs one at a time (a non-blocking lock). The hook starts it in the background when exposure is stale; the
-  native host starts it in the background when knowledge.json is over 15 minutes old. Nothing waits on the network.
+- With a collector, the replay runs there, next to the log and the word state: the collector refreshes
+  knowledge.json every 10 minutes, and every other machine gets it with its cached copy of the state (hub.py). The
+  collector only answers requests addressed to its own host name, so a web page can't read it through DNS rebinding.
+- Without one, `fw.py refresh` replays from scratch, applies transitions in a short state edit, and writes
+  knowledge.json. It runs one at a time (a non-blocking lock). The hook starts it in the background when exposure is
+  stale; the native host starts it in the background when knowledge.json is over 15 minutes old. Nothing waits on
+  the network.
 - The native host's state reply carries, per word, k and its uncertainty, and the challenge and budget. They are
   not part of the word-state version, so the extension's cache isn't cleared when they change.
 

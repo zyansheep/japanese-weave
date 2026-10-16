@@ -13,6 +13,9 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
 
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
 evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
+
+With a collector set, the state lives on the collector: replies come from this machine's cache (refreshed when it is
+over STATE_MAX_AGE seconds old) and changes go to the collector (hub.py), waiting here while it can't be reached.
 """
 import json
 from pathlib import Path
@@ -23,9 +26,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import feedback  # noqa: E402
+import hub  # noqa: E402
 import knowledge  # noqa: E402
 
 MAX_EVENTS = 500
+STATE_MAX_AGE = 60
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
@@ -51,8 +56,7 @@ def handle(message):
     if kind == 'ping':
         return {'ok': True, 'host': 1}
     if kind == 'state':
-        with fwlib.editing() as state:
-            pass  # applies today's promotion before answering
+        state, _ = hub.current(STATE_MAX_AGE)  # here: applies today's promotion; with a collector: its cache
         reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {})
         key = fwlib.home() / 'gemini_key'
         if key.exists():
@@ -62,18 +66,18 @@ def handle(message):
         events = message.get('events')
         if not isinstance(events, list):
             return {'ok': False, 'error': 'events must be a list'}
-        applied = 0
         today = fwlib.today()
-        with fwlib.editing() as state:
-            for event in events[:MAX_EVENTS]:
-                if not isinstance(event, dict) or event.get('kind') not in ('seen', 'flip', 'peek'):
-                    continue
-                day = event.get('day') if isinstance(event.get('day'), str) and DAY.match(event['day']) else today
-                if day > today:
-                    day = today
-                if isinstance(event.get('word'), str) and fwlib.apply_event(state, event['word'], event['kind'], day):
-                    applied += 1
-        return {'ok': True, 'applied': applied}
+        clean = []
+        for event in events[:MAX_EVENTS]:
+            if not isinstance(event, dict) or event.get('kind') not in ('seen', 'flip', 'peek'):
+                continue
+            word = event.get('word')
+            day = event.get('day') if isinstance(event.get('day'), str) and DAY.match(event['day']) else today
+            if isinstance(word, str) and 0 < len(word) <= 100:
+                clean.append({'word': word, 'kind': event['kind'], 'day': min(day, today)})
+        if not clean:
+            return {'ok': True, 'applied': 0}
+        return {'ok': True, 'applied': hub.submit({'kind': 'events', 'events': clean}).get('applied', 0)}
     if kind == 'log':
         items = message.get('items')
         if not isinstance(items, list):
@@ -86,8 +90,7 @@ def handle(message):
         challenge = message.get('challenge')
         if not knowledge.valid_challenge(challenge):
             return {'ok': False, 'error': f'challenge must be one of {list(knowledge.CHALLENGES)}'}
-        with fwlib.editing() as state:
-            state.setdefault('prefs', {})['challenge'] = challenge
+        hub.submit({'kind': 'set', 'prefs': {'challenge': challenge}})
         return {'ok': True, 'challenge': challenge}
     return {'ok': False, 'error': 'unknown message type'}
 
@@ -100,8 +103,8 @@ def adaptive(state, words):
         entry = (know.get('words') or {}).get(w['ja'])
         if entry:
             w['k'], w['sd'] = round(entry['k'], 2), round(entry['sd'], 2)
-    if knowledge.is_stale(know) and (fwlib.collector_url() or feedback.default_path().exists()):
-        knowledge.start_refresh()
+    if not fwlib.collector_url() and knowledge.is_stale(know) and feedback.default_path().exists():
+        knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
     scale = (know.get('controller') or {}).get('scale', 1.0)
     return {'challenge': challenge, 'budget': round(challenge * scale, 3), 'rate': know.get('rate')}

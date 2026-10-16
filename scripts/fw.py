@@ -12,8 +12,9 @@
                                                      turn on (ask); --anki: run `anki` too; --remote: this
                                                      machine only runs the browser, the word state lives on
                                                      SSH_HOST (the native host talks to it over ssh);
-                                                     --collector URL|off: send gloss peeks and flips to a
-                                                     collector (see `collector`) instead of a local database
+                                                     --collector URL|off: the word state and the gloss log
+                                                     live on that collector (see `collector`) and this
+                                                     machine keeps a cache of them; off: back to local
   fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--dry-run]
                                                      put the words on your Anki cards under review (learning
                                                      or review, not new or suspended) at the front of the
@@ -24,10 +25,12 @@
                                                      long each stayed open and the glossed words around it
                                                      (from the collector when one is set)
   fw.py collector run|install --listen HOST:PORT [--db PATH]
-                                                     the collector: one database for gloss interactions from
-                                                     every machine and surface, reached over a private network
-                                                     such as Tailscale; install: a systemd user service running
-                                                     the installed copy (enable lingering so it runs logged out)
+                                                     the collector: the one home of the word state and the gloss
+                                                     log for every machine and surface, reached over a private
+                                                     network such as Tailscale; run it in the state dir of the
+                                                     always-on machine (its own plugin uses it directly);
+                                                     install: a systemd user service running the installed copy
+                                                     (enable lingering so it runs logged out)
   fw.py known WORD...                                mark words as known
   fw.py learn WORD...                                put words back in the learning set (shaky)
   fw.py stage N|auto                                 pin the stage (1-4) or let it follow known words
@@ -36,6 +39,8 @@
                                                      on hover or click (needs a T3 build that renders them), or
                                                      in a footer line (default)
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
+                                                     (with a collector: send them and anything queued, and
+                                                     refresh the cached state)
   fw.py setup --codex [--dry-run]                    also add the chat hook to Codex CLI (~/.codex or $CODEX_HOME)
   fw.py export [--claude-ai | --chatgpt] [--log-day] paste-ready block for claude.ai preferences or ChatGPT
   fw.py log-chat-day                                 opt-in: count today as exposure for your learning words
@@ -50,6 +55,7 @@ import platform
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -60,6 +66,7 @@ import fwlib  # noqa: E402
 import export  # noqa: E402
 import anki  # noqa: E402
 import feedback  # noqa: E402
+import hub  # noqa: E402
 import knowledge  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
@@ -291,10 +298,20 @@ def setup(args):
         remote_file.write_text(args.remote + '\n')
     elif remote_file.exists():
         remote_file.unlink()
+    previous = fwlib.collector_url()
     if args.collector == 'off':
         (home / 'collector').unlink(missing_ok=True)
+        (home / hub.SYNCED).unlink(missing_ok=True)  # the cache is this machine's own state again
     elif args.collector:
         (home / 'collector').write_text(args.collector.rstrip('/') + '\n')
+    if fwlib.collector_url() and not args.remote:
+        problem = join_collector(home, fwlib.collector_url())
+        if problem:
+            if previous:
+                (home / 'collector').write_text(previous + '\n')
+            else:
+                (home / 'collector').unlink(missing_ok=True)
+            sys.exit(problem)
     if key:
         path = home / 'gemini_key'
         path.write_text(key + '\n')
@@ -305,28 +322,61 @@ def setup(args):
         print(f'  Gemini key:  {"stored here" if key else "from " + args.remote + " if setup stored one there, else paste it in the popup"}')
         human_steps(home, browsers, args.sites or 'all', True)  # the key may come from the remote side
         return
+    collector = fwlib.collector_url()
     if args.anki:  # first, so your Anki words are the first learning words
         anki_sync(argparse.Namespace(collection=args.anki, deck=None, mature_days=anki.MATURE_DAYS, no_known=False,
                                      dry_run=False))
-    with fwlib.locked():
-        if not (home / 'state.json').exists():  # first run: seed known words before the first learning words
-            fwlib.save_state(fwlib.new_state(known_top=args.known_top))
-    with fwlib.editing() as state:  # later runs: adds new lexicon words, seeds only words not yet introduced
-        fwlib.seed_known(state, args.known_top)
-        if args.sites:
-            state.setdefault('prefs', {})['extension_sites'] = args.sites
+    if args.known_top or not collector:  # here, the first run creates the state; later runs add new lexicon words
+        hub.submit({'kind': 'seed', 'n': args.known_top})  # seeds only words not yet introduced
+    if args.sites:
+        hub.submit({'kind': 'set', 'prefs': {'extension_sites': args.sites}})
+    state, error = hub.current()
     if args.codex:
         setup_codex(False)
     print('Japanese Weave is set up.')
-    print(f'  word state:  {home / "state.json"} (Stage {fwlib.stage_for(state)}, '
+    where = f'on {collector}, cached in {home / "state.json"}' if collector else str(home / 'state.json')
+    print(f'  word state:  {where} (Stage {fwlib.stage_for(state)}, '
           f'{sum(w["status"] == "known" for w in state["words"])} known, '
           f'{sum(w["status"] == "active" for w in state["words"])} learning words)')
+    if error:
+        print(f'  ({collector} did not answer: {error}; the copy here is from the last sync)')
     sites = (state.get('prefs') or {}).get('extension_sites', 'all')
     print(f'  extension:   {"every site; turn any off from the toolbar" if sites == "all" else "only sites you turn on"}')
     print(f'  native host: {", ".join(info["host_manifests"])}')
     print(f'  Gemini key:  {"stored for the extension" if key or (home / "gemini_key").exists() else "not stored; paste it in the extension popup"}')
     human_steps(home, browsers, sites, key or (home / 'gemini_key').exists())
     print('Chat weaving runs wherever the plugin is enabled; sessions opened from now on pick it up.')
+
+
+MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')
+
+
+def join_collector(home, collector):
+    """None when this machine can keep a cache of the collector's word state, else why not. The first time, this
+    machine's own state (if any) is kept in before-collector/, since the collector's replaces it."""
+    health = feedback.remote_health(collector)
+    if health.get('ok') and health.get('host') == socket.gethostname() and health.get('home') == str(home):
+        return (f'{collector} is this machine, serving this state dir: the word state already lives here, so set up '
+                'without --collector.')
+    own = (home / 'state.json').exists() and not (home / hub.SYNCED).exists()
+    if health.get('ok') and health.get('state') is False:
+        if own:
+            return (f'{collector} has no word state yet. To move this machine\'s there, stop the collector, copy '
+                    f'{", ".join(n for n in MOVED if (home / n).exists())} from {home} into its state dir, start it, '
+                    'and rerun this.')
+        return f'{collector} has no word state yet: run fw.py setup on that machine first, then rerun this.'
+    if own:
+        backup = home / 'before-collector'
+        backup.mkdir(exist_ok=True)
+        for name in MOVED:
+            if (home / name).exists() and not (backup / name).exists():
+                shutil.copy2(home / name, backup / name)
+        print(f'From now on the word state on {collector} is the one in use; this machine\'s own is kept in {backup}.')
+    synced, error = hub.sync(scan=False)
+    if not synced and not (home / 'state.json').exists():
+        return (f'The word state lives on {collector}, which did not answer: {error}. Set it up there first '
+                '(fw.py setup on that machine, then fw.py collector install), then rerun this.')
+    return None
 
 
 def human_steps(home, browsers, sites, has_key):
@@ -367,20 +417,13 @@ def anki_sync(args):
         for w in words[:40]:
             print(f'  {w["ja"]} = {w["en"]}, "{w["hint"]}"{"  (mature)" if w["mature"] else ""}')
         return
-    home = fwlib.home()
-    home.mkdir(parents=True, exist_ok=True)
-    anki.write_csv(home / fwlib.ANKI_LEXICON, words)
     known = [] if args.no_known else [w['ja'] for w in mature]
-    with fwlib.locked():
-        if not (home / 'state.json').exists():  # first run: mature cards known before the first learning words
-            fwlib.save_state(fwlib.new_state(known=known))
-    with fwlib.editing() as state:  # merge_lexicon puts them at the front of the queue
-        entries = [e for e in map(lambda name: fwlib.find(state, name), known) if e]
-        for entry in entries:  # learning words keep learning; only words not introduced yet jump to known
-            if entry['status'] == 'queue':
-                fwlib.set_status(entry, 'known', fwlib.today())
-        seeded = sum(e['status'] == 'known' for e in entries)
-    print(f'Front of the list: {len(words)} Anki words; {seeded} mature ones known. '
+    result = hub.submit({'kind': 'anki', 'words': words, 'known': known})
+    if result.get('queued'):
+        print(f'{len(words)} Anki words are saved here and go to the front of the list once {fwlib.collector_url()} '
+              'can be reached (the next sync sends them).')
+        return
+    print(f'Front of the list: {len(words)} Anki words; {result.get("known", 0)} mature ones known. '
           f'Rerun `fw.py anki` whenever you like; it never resets progress.')
 
 
@@ -395,8 +438,18 @@ def check(_args):
         print(f'{"ok  " if passed else "FAIL"} {what}')
 
     remote = (home / 'remote').read_text().strip() if (home / 'remote').exists() else None
+    collector = fwlib.collector_url()
     if remote:
         print(f'note word state lives on {remote} (this machine runs only the browser side)')
+    elif collector:
+        state = fwlib.load_state(create=False)
+        pulled = (fwlib.read_json(home / hub.SYNCED, {}) or {}).get('pulled')
+        when = time.strftime('%Y-%m-%d %H:%M', time.localtime(pulled)) if pulled else 'never'
+        report(state is not None, f'copy of the word state on {collector} (last refreshed {when})'
+               + (f', Stage {fwlib.stage_for(state)}' if state else ''))
+        waiting = len(hub.pending())
+        if waiting:
+            print(f'note {waiting} change(s) wait here for {collector}; `fw.py refresh` sends them')
     else:
         state = fwlib.load_state(create=False)
         report(state is not None, f'word state at {home / "state.json"}' + (f' (Stage {fwlib.stage_for(state)})' if state else ''))
@@ -423,14 +476,14 @@ def check(_args):
         report(enabled, f'Codex hook in {fwlib.codex_home() / "hooks.json"} with [features] hooks = true '
                         '(Codex asks you to trust it on first start)')
     anki_csv = home / fwlib.ANKI_LEXICON
-    if not remote:
+    if not remote and not collector:
         print(f'{"ok  " if anki_csv.exists() else "note"} Anki words '
               f'{"at the front of the list (" + str(len(fwlib.read_lexicon(anki_csv))) + ")" if anki_csv.exists() else "not synced; run fw.py anki <collection.anki2>"}')
-    collector = fwlib.collector_url()
     if collector:
         health = feedback.remote_health(collector)
-        report(health.get('ok') is True, f'collector {collector} answers'
-               + (f' ({health.get("interactions")} interactions)' if health.get('ok') else f': {health.get("error")}'))
+        report(health.get('ok') is True and health.get('state') is not False, f'collector {collector} answers'
+               + (f' ({health.get("interactions")} interactions)' if health.get('ok') else f': {health.get("error")}')
+               + (' but has no word state yet' if health.get('state') is False else ''))
     has_key = (home / 'gemini_key').exists()
     print(f'{"ok  " if has_key else "note"} Gemini key {"stored by setup" if has_key else "not stored; paste it in the extension popup"}')
     if not ok:
@@ -458,8 +511,8 @@ def uninstall(args):
 
 
 def status(_args):
-    with fwlib.editing() as state:
-        pass
+    state, error = hub.current()
+    stale_note(error)
     by = {}
     for w in state['words']:
         by.setdefault(w['status'], []).append(w)
@@ -478,35 +531,31 @@ def status(_args):
         print(f'  next stage at {nxt} known words')
 
 
+def stale_note(error):
+    if error:
+        print(f'({fwlib.collector_url()} did not answer: {error}. Showing the copy here from the last sync.)')
+
+
+def queued_note(result):
+    if result.get('queued'):
+        print(f'(Saved here: {fwlib.collector_url()} did not answer, so the next sync sends it.)')
+
+
 def mark(kind):
     def run(args):
-        missing, done, canonical = [], [], []
-        with fwlib.editing() as state:
-            for chunk in (c for arg in args.words for c in arg.split(',')):
-                chunk = chunk.strip()
-                # "jitsu wa" (romaji for 実は) is one word; "ima demo" is two.
-                for word in [chunk] if fwlib.find(state, chunk) or ' ' not in chunk else chunk.split():
-                    if fwlib.apply_event(state, word, kind):
-                        done.append(word)
-                        canonical.append(fwlib.find(state, word)['ja'])
-                    else:
-                        missing.append(word)
-        if canonical:  # timestamped, so the knowledge replay applies them at the right moment
-            knowledge.log_command(canonical, 'known' if kind == 'known' else 'learn')
-        if done:
-            print(f'{"Known" if kind == "known" else "Back to learning"}: {", ".join(done)}')
-        if missing:
-            print(f'Not in the word list: {", ".join(missing)}')
+        result = hub.submit({'kind': 'mark', 'words': args.words, 'as': kind})
+        if result.get('done'):
+            print(f'{"Known" if kind == "known" else "Back to learning"}: {", ".join(result["done"])}')
+        if result.get('missing'):
+            print(f'Not in the word list: {", ".join(result["missing"])}')
+        queued_note(result)
     return run
 
 
 def stage(args):
-    with fwlib.editing() as state:
-        if args.value == 'auto':
-            state['stage_pinned'] = False
-        else:
-            state['stage'], state['stage_pinned'] = int(args.value), True
-    print(f'Stage {fwlib.stage_for(state)}{" (pinned)" if state["stage_pinned"] else " (automatic)"}')
+    queued_note(hub.submit({'kind': 'set', 'stage': 'auto' if args.value == 'auto' else int(args.value)}))
+    state = fwlib.load_state()
+    print(f'Stage {fwlib.stage_for(state)}{" (pinned)" if state.get("stage_pinned") else " (automatic)"}')
 
 
 def log_cmd(args):
@@ -560,24 +609,22 @@ def collector_cmd(args):
 
 
 def glosses(args):
-    with fwlib.editing() as state:
-        state.setdefault('prefs', {})['chat_glosses'] = args.style
+    queued_note(hub.submit({'kind': 'set', 'prefs': {'chat_glosses': args.style}}))
     print('T3 Code chats: each Japanese word shows its romaji and meaning on hover or click.' if args.style == 'abbr' else
           'T3 Code chats: learning words are glossed in a footer line.')
 
 
 def pause(value):
     def run(_args):
-        with fwlib.editing() as state:
-            state['paused'] = value
+        queued_note(hub.submit({'kind': 'set', 'paused': value}))
         print('Japanese Weave paused: no Japanese in chat or on websites until you resume.' if value else 'Japanese Weave resumed.')
     return run
 
 
 def export_cmd(args):
-    with fwlib.editing() as state:
-        logged = export.log_chat_day(state) if args.log_day else 0
-        export.mark_exported(state, 'chatgpt' if args.chatgpt else 'claude-ai')
+    result = hub.submit({'kind': 'exported', 'target': 'chatgpt' if args.chatgpt else 'claude-ai',
+                         'log_day': bool(args.log_day)})
+    state, logged = fwlib.load_state(), result.get('logged', 0)
     if args.chatgpt:
         about, respond = export.chatgpt(state)
         print(f'ChatGPT > Settings > Personalization > Custom instructions. Each field holds {export.CHATGPT_LIMIT} '
@@ -593,12 +640,18 @@ def export_cmd(args):
 
 
 def log_chat_day(_args):
-    with fwlib.editing() as state:
-        logged = export.log_chat_day(state)
+    result = hub.submit({'kind': 'chat_day'})
+    logged = result.get('logged', 0)
+    queued_note(result)
     print(f'Counted today as chat exposure for {logged} learning words (never enough on its own to make a word known).')
 
 
 def refresh(_args):
+    if fwlib.collector_url():
+        synced, error = hub.sync()
+        if not synced:
+            print(f'sync failed: {error}', file=sys.stderr)
+        return
     fwlib.refresh_exposure()
     try:
         knowledge.refresh()
@@ -606,10 +659,18 @@ def refresh(_args):
         print(f'knowledge refresh failed: {error.__class__.__name__}: {error}', file=sys.stderr)
 
 
-def knowledge_cmd(args):
+def fresh_knowledge():
+    """(state, knowledge): replayed here, or the collector's, refreshed in the cache."""
+    if fwlib.collector_url():
+        state, error = hub.current()
+        stale_note(error)
+        return state, knowledge.load()
     know = knowledge.refresh() or knowledge.load()
-    with fwlib.editing() as state:
-        pass
+    return hub.current()[0], know
+
+
+def knowledge_cmd(args):
+    state, know = fresh_knowledge()
     words = know.get('words') or {}
     rate = know.get('rate') or {}
     challenge = knowledge.challenge_of(state)
@@ -619,8 +680,7 @@ def knowledge_cmd(args):
     print(f'  browser, last {rate.get("days", 3)} days: '
           + (f'{per100} peeks per 100 words shown ({rate.get("peeks")} peeks, {rate.get("shownWords")} words)'
              if per100 is not None else 'nothing shown yet'))
-    print(f'  log: {know.get("rows", 0)} interactions' + (f' (sync failed: {know["syncError"]})' if know.get('syncError') else '')
-          + f'; T3 offset {(know.get("offset") or {}).get("t3", 0)}')
+    print(f'  log: {know.get("rows", 0)} interactions; T3 offset {(know.get("offset") or {}).get("t3", 0)}')
     status = {w['ja']: w['status'] for w in state['words']}
     ranked = sorted(words.items(), key=lambda kv: -kv[1]['n'])[:args.limit]
     if ranked:
@@ -636,9 +696,7 @@ def knowledge_cmd(args):
 
 
 def why(args):
-    know = knowledge.refresh() or knowledge.load()
-    with fwlib.editing() as state:
-        pass
+    state, know = fresh_knowledge()
     w = fwlib.find(state, args.word)
     if w is None:
         sys.exit(f'Not in the word list: {args.word}')
@@ -666,8 +724,7 @@ def challenge_cmd(args):
     value = int(value) if value == int(value) else value
     if value not in knowledge.CHALLENGES:
         sys.exit(f'Choose one of: off, {", ".join(str(c) for c in knowledge.CHALLENGES[1:])}')
-    with fwlib.editing() as state:
-        state.setdefault('prefs', {})['challenge'] = value
+    queued_note(hub.submit({'kind': 'set', 'prefs': {'challenge': value}}))
     print(f'Adaptive difficulty: {"off" if not value else f"aiming at {value} peeks per 100 words shown"}.')
 
 
@@ -740,7 +797,10 @@ def main(argv=None):
     p.set_defaults(run=export_cmd)
     sub.add_parser('log-chat-day').set_defaults(run=log_chat_day)
     args = parser.parse_args(argv)
-    args.run(args)
+    try:
+        args.run(args)
+    except fwlib.NoState as error:
+        sys.exit(f'Japanese Weave: {error}')
 
 
 if __name__ == '__main__':

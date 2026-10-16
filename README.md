@@ -42,7 +42,8 @@ Human steps (browsers don't let scripts do these):
 
 **Browser on another machine.** The word state lives where Claude Code runs. On the machine with the browser, clone
 this repo and run `python3 scripts/fw.py setup --remote <ssh-host>`: the native host there forwards the extension's
-messages to `<ssh-host>` over ssh (key login, no password prompt; `BatchMode=yes`).
+messages to `<ssh-host>` over ssh (key login, no password prompt; `BatchMode=yes`). For several machines that each
+run Claude Code or a browser, use a collector instead ([Several machines](#several-machines)).
 
 **claude.ai or ChatGPT.** Run `/japanese-weave:export` (or `--chatgpt`) and paste the block, or paste a ready-made
 level from [blocks/](blocks/level-01.md).
@@ -126,13 +127,29 @@ stayed open, and where the other glossed words of the same paragraph or message 
 you were reading that spot, so the words around it that you didn't open are the evidence that you knew them; this
 log is the data for estimating that. `fw.py log` shows the latest entries.
 
-By default it goes to `interactions.sqlite` in the state folder. To keep one log for several machines, run the
-collector on an always-on one and point the others at it, over a private network such as Tailscale:
+By default it goes to `interactions.sqlite` in the state folder.
+
+## Several machines
+
+To learn from one word list on several machines (Claude Code on two computers, a browser on a third), run the
+collector on an always-on one, over a private network such as Tailscale. It becomes the one home of the word state
+and of the gloss log; every other machine keeps a cache:
 
 ```sh
-fw.py collector install --listen 100.64.0.4:7853      # on the always-on machine: a systemd user service
-fw.py setup --collector http://functor:7853            # on each browser machine (off: back to local)
+fw.py setup                                           # on the always-on machine: its own state, as usual
+fw.py collector install --listen 100.64.0.4:7853      # there too: a systemd user service in the same state folder
+fw.py setup --collector http://functor:7853           # on each other machine (off: back to its own state)
 ```
+
+Every change (`known`, `learn`, the dial, a browser peek, an Anki sync, the words used in chat replies) goes to the
+collector, which applies it and keeps a record of it; the other machine then refreshes its cache. The chat hook
+never waits on the network: it reads the cache and syncs in the background every couple of minutes. If the
+collector can't be reached, changes wait on that machine (and show there at once) until the next sync. The always-on
+machine's own plugin uses the shared state folder directly, without `--collector`.
+
+If the machine you point at a collector already has a word list and the collector has none yet, setup stops and
+says which files to copy over (state.json and its neighbours) to move that list there. Joining a collector that has
+one keeps this machine's old list in `before-collector/` in the state folder.
 
 T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL` set to the collector's
 `/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches.

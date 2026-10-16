@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Japanese Weave collector: one HTTP service that stores gloss interactions from every surface (the browser
-extension through its native host, T3 Code through its server) in one SQLite database. Run it on an always-on
-machine and reach it over a private network such as Tailscale. Python 3.9+, standard library only.
+"""Japanese Weave collector: the one home of the word state and of the gloss interaction log, for every machine and
+surface (the browser extension through its native host, T3 Code through its server, the chat hook and commands on
+any machine). Run it on an always-on machine, in the same state dir as that machine's own plugin, and reach it over a
+private network such as Tailscale. Python 3.9+, standard library only.
 
   collector.py --listen HOST:PORT [--db PATH]
 
-  POST /v1/interactions  {"surface": "browser"|"t3", "items": [...]}
-                         -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py)
-  GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (knowledge.py)
+  GET  /v1/state?rev=REV  the word state, knowledge estimates and chat counts, for a machine's cache (hub.py)
+                          -> {"ok": true, "rev", "state", "knowledge", "exposure"} or {"ok": true, "unchanged": true}
+  POST /v1/ops            {"machine", "ops": [...]}: changes to the word state, applied in order (hub.py)
+                          -> {"ok": true, "results": [...], "rev"}
+  POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
+                          -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py)
+  GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (feedback.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
-  GET  /v1/health                                                   -> {"ok": true, "interactions": n}
+  GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
+
+Every few minutes it also applies the day's promotion rules and refreshes the knowledge estimates (hub.maintain).
 
 Bind it to the private network's address only (the Tailscale IP), not to every interface. Writes must be JSON
 (Content-Type: application/json): a web page can't send that cross-site without a CORS preflight, which this server
@@ -17,27 +24,46 @@ never approves, so pages open in a browser on the network can't write to the log
 addressed to this machine by name or address (the Host header), so a page can't reach it through DNS rebinding.
 """
 import argparse
+import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
 import sys
+import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feedback  # noqa: E402
+import fwlib  # noqa: E402
+import hub  # noqa: E402
 
 MAX_BODY = 1024 * 1024
+MAX_OPS_BODY = 8 * 1024 * 1024  # an Anki sync carries every review word
+MAINTAIN_EVERY = 600
 
 
 class Handler(BaseHTTPRequestHandler):
     db = None  # set by serve()
-    server_version = 'JapaneseWeaveCollector/1'
+    home = None  # the state dir; None: the usual one (tests serve another)
+    server_version = 'JapaneseWeaveCollector/2'
+
+    def handle_one_request(self):
+        if self.home is None:
+            return super().handle_one_request()
+        with fwlib.using_home(self.home):
+            return super().handle_one_request()
 
     def reply(self, status, body):
         data = json.dumps(body, ensure_ascii=False).encode('utf-8')
+        packed = len(data) > 4096 and 'gzip' in self.headers.get('Accept-Encoding', '')
+        if packed:  # the word state is about 0.5 MB of JSON
+            data = gzip.compress(data, 6)
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        if packed:
+            self.send_header('Content-Encoding', 'gzip')
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -62,8 +88,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.reply(400, {'ok': False, 'error': 'after, seq and limit must be numbers'})
             return self.reply(200, dict(feedback.export(after, seq, limit, self.db), ok=True))
+        if url.path == '/v1/state':
+            return self.reply(*hub.snapshot(query.get('rev', [''])[0]))
         if url.path == '/v1/health':
-            return self.reply(200, {'ok': True, 'interactions': feedback.count(self.db)})
+            return self.reply(200, {'ok': True, 'interactions': feedback.count(self.db), 'host': socket.gethostname(),
+                                    'home': str(fwlib.home()), 'state': (fwlib.home() / 'state.json').exists()})
         if url.path == '/v1/recent':
             try:
                 limit = max(1, min(500, number('limit', 20)))
@@ -75,7 +104,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.host_allowed():
             return
-        if urlsplit(self.path).path != '/v1/interactions':
+        path = urlsplit(self.path).path
+        if path not in ('/v1/interactions', '/v1/ops'):
             return self.reply(404, {'ok': False, 'error': 'not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
             return self.reply(415, {'ok': False, 'error': 'send application/json'})
@@ -83,12 +113,14 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get('Content-Length', '0'))
         except ValueError:
             size = -1
-        if not 0 < size <= MAX_BODY:
+        if not 0 < size <= (MAX_OPS_BODY if path == '/v1/ops' else MAX_BODY):
             return self.reply(413, {'ok': False, 'error': 'body missing or too large'})
         try:
             body = json.loads(self.rfile.read(size).decode('utf-8'))
         except (ValueError, UnicodeDecodeError):
             return self.reply(400, {'ok': False, 'error': 'body is not JSON'})
+        if path == '/v1/ops':
+            return self.reply(*hub.receive(body, self.db))
         if not isinstance(body, dict) or body.get('surface') not in feedback.SURFACES or not isinstance(body.get('items'), list):
             return self.reply(400, {'ok': False, 'error': 'need {"surface": "browser"|"t3", "items": [...]}'})
         self.reply(200, dict(feedback.record(body['items'], body['surface'], self.db), ok=True))
@@ -97,10 +129,20 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f'{self.address_string()} {fmt % args}\n')
 
 
+def maintain_forever():
+    while True:
+        try:
+            hub.maintain()
+        except Exception as error:  # keep serving; try again next round
+            print(f'maintenance failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
+        time.sleep(MAINTAIN_EVERY)
+
+
 def serve(host, port, db=None):
     Handler.db = db
     feedback.connect(db).close()  # create the database before the first request
     server = ThreadingHTTPServer((host, port), Handler)
+    threading.Thread(target=maintain_forever, daemon=True).start()
     print(f'Japanese Weave collector on http://{host}:{port} -> {db or feedback.default_path()}', flush=True)
     server.serve_forever()
 

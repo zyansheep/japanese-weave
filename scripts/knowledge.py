@@ -324,17 +324,19 @@ def is_stale(knowledge=None, now=None):
 
 
 def refresh(now=None):
-    """Sync the mirror, replay, steer the dial, apply guarded status moves, write knowledge.json. One at a time;
-    returns the new knowledge, or None when another refresh is running."""
+    """Replay the gloss log, steer the dial, apply guarded status moves, write knowledge.json. One at a time; returns
+    the new knowledge, or None when another refresh is running. With a collector set, the collector does this and
+    the cache here is refreshed instead (hub.py)."""
+    if fwlib.collector_url():
+        import hub
+        ok, error = hub.sync(scan=False)
+        return dict(load(), synced=ok, syncError=error)
     now = now if now is not None else time.time()
     now_ms, today = int(now * 1000), time.strftime('%Y-%m-%d', time.localtime(now))
     with fwlib.locked(LOCK, blocking=False) as got:
         if not got:
             return None
-        collector = fwlib.collector_url()
-        source = fwlib.home() / feedback.MIRROR_NAME if collector else feedback.default_path()
-        synced, sync_error = feedback.sync_mirror(collector, source) if collector else (True, None)
-        rows, contexts = feedback.load(source)
+        rows, contexts = feedback.load(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
         listed = {w['ja'] for w in state['words'] if w['status'] != 'queue'}
@@ -359,7 +361,7 @@ def refresh(now=None):
                         fwlib.set_status(w, after, today)
                         applied.append({'day': today, 'word': ja, 'from': before, 'to': after})
         knowledge = {
-            'updated': now, 'rows': len(rows), 'synced': synced, 'syncError': sync_error,
+            'updated': now, 'rows': len(rows),
             'offset': {s: round(v, 3) for s, v in offset.items()},
             'challenge': challenge, 'controller': controller,
             'budget': round(challenge * controller.get('scale', 1.0), 3) if challenge else 0,
