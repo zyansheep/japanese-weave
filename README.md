@@ -114,6 +114,25 @@ kana count for their word.
 `JAPANESE_WEAVE_OFF=1` turns the hook off anywhere; `JAPANESE_WEAVE_FORCE=1` weaves in a script. Health,
 medication, legal, money, safety, emergency and driving topics get no Japanese at all.
 
+## Gloss interaction log
+
+Every time you open a gloss (hover a word in the browser, or hover or click an `<abbr>` word in T3 Code chats) and
+every time you flip a word back to English, Japanese Weave records which word it was, when, how long the gloss
+stayed open, and where the other glossed words of the same paragraph or message sat, by position only. A peek shows
+you were reading that spot, so the words around it that you didn't open are the evidence that you knew them; this
+log is the data for estimating that. `fw.py log` shows the latest entries.
+
+By default it goes to `interactions.sqlite` in the state folder. To keep one log for several machines, run the
+collector on an always-on one and point the others at it, over a private network such as Tailscale:
+
+```sh
+fw.py collector install --listen 100.64.0.4:7853      # on the always-on machine: a systemd user service
+fw.py setup --collector http://functor:7853            # on each browser machine (off: back to local)
+```
+
+T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL` set to the collector's
+`/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches.
+
 ## Privacy
 
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, STATE_KEY, PENDING_KEY } from '../src/hostsource.js';
+import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
 import { memoryStorage } from '../src/cache.js';
 import { validateSwaps } from '../src/levels.js';
 import { buildSystemPrompt } from '../src/prompt.js';
@@ -107,5 +107,33 @@ describe('events', () => {
   });
   it('readCached ignores empty state', async () => {
     expect(await readCached(memoryStorage({ [STATE_KEY]: { words: [] } }))).toBeNull();
+  });
+});
+
+describe('interaction log', () => {
+  const now = 1_800_000_000_000;
+  const peek = { kind: 'peek', word: 'et', at: now - 2000, dwellMs: 1234.4, view: 'a1b2', context: 'c0ffee', position: 1,
+    box: [10.2, 400, 600, 80.6], annotations: [['de', 12.4, 0], ['et', 140, 0.2]] };
+  it('keeps words, timing and positions, rounded, and nothing else', () => {
+    expect(cleanInteraction({ ...peek, text: 'page text' }, now)).toEqual({ kind: 'peek', word: 'et', at: now - 2000,
+      dwellMs: 1234, view: 'a1b2', context: 'c0ffee', position: 1, box: [10, 400, 600, 81], annotations: [['de', 12, 0], ['et', 140, 0]] });
+  });
+  it('rejects anything malformed', () => {
+    for (const bad of [{ ...peek, kind: 'seen' }, { ...peek, word: '' }, { ...peek, view: 'has spaces' },
+      { ...peek, at: now + 3_600_000 }, { ...peek, dwellMs: -1 }, { ...peek, position: 1.5 }, { ...peek, box: [1, 2, 3] },
+      { ...peek, annotations: [['de', 'left', 0]] }, { ...peek, annotations: Array(201).fill(['de', 0, 0]) }, null]) {
+      expect(cleanInteraction(bad, now)).toBeNull();
+    }
+  });
+  it('flush sends the log and clears it; a host without the log keeps the queue', async () => {
+    const storage = memoryStorage();
+    await queueLog(storage, [cleanInteraction(peek, now)]);
+    const old = await flushLog({ storage, send: async () => ({ ok: false, error: 'unknown message type' }) });
+    expect(old.sent).toBe(0);
+    expect((await storage.get([LOG_KEY]))[LOG_KEY]).toHaveLength(1);
+    const sent = [];
+    expect((await flushLog({ storage, send: async (m) => { sent.push(m); return { ok: true, stored: 1 }; } })).sent).toBe(1);
+    expect(sent.map((m) => [m.type, m.items.length])).toEqual([['log', 1]]);
+    expect((await storage.get([LOG_KEY]))[LOG_KEY]).toEqual([]);
   });
 });

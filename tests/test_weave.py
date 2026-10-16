@@ -23,6 +23,8 @@ import fw_host  # noqa: E402
 import fw  # noqa: E402
 import export  # noqa: E402
 import anki  # noqa: E402
+import feedback  # noqa: E402
+import collector  # noqa: E402
 import kana  # noqa: E402
 
 
@@ -523,6 +525,76 @@ class Host(Home):
 FAKE_KEY = 'AIzaTEST_placeholder_not_a_real_key_0000'
 
 
+class Feedback(Home):
+    def test_log_stores_gloss_interactions(self):
+        now = int(time.time() * 1000)
+        item = {'kind': 'peek', 'word': '問題', 'at': now - 5000, 'dwellMs': 1200, 'view': 'ab12', 'context': 'c0ffee',
+                'position': 1, 'box': [10, 400, 600, 80], 'annotations': [['今', 12, 0], ['問題', 140, 0], ['でも', 300, 20]]}
+        bad = [dict(item, kind='seen'), dict(item, annotations=[['今', 'left', 0]]), dict(item, at=now + 3_600_000),
+               dict(item, view='has spaces'), 'not an item']
+        reply = fw_host.handle({'type': 'log', 'items': [item, dict(item, kind='flip', dwellMs=0)] + bad})
+        self.assertEqual(reply, {'ok': True, 'stored': 2})
+        self.assertFalse(fw_host.handle({'type': 'log', 'items': 'nope'})['ok'])
+        rows = feedback.recent()
+        self.assertEqual([(r['kind'], r['word'], r['position'], r['dwellMs']) for r in rows],
+                         [('flip', '問題', 1, 0), ('peek', '問題', 1, 1200)])
+        self.assertEqual(rows[1]['annotations'], [['今', 12, 0], ['問題', 140, 0], ['でも', 300, 20]])
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['log'])
+        self.assertIn('peek 問題  open 1.2s, 2 other glossed words in the passage', out.getvalue())
+
+
+class Collector(Home):
+    """A collector on a random local port, as on the always-on machine; this machine's native host forwards to it."""
+
+    def setUp(self):
+        super().setUp()
+        import threading
+        from http.server import ThreadingHTTPServer
+        self.db = self.home / 'collector' / 'interactions.sqlite'
+        handler = type('TestHandler', (collector.Handler,), {'db': self.db, 'log_message': lambda *args: None})
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f'http://127.0.0.1:{self.server.server_address[1]}'
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        super().tearDown()
+
+    def item(self, kind='peek'):
+        return {'kind': kind, 'word': '問題', 'at': int(time.time() * 1000) - 1000, 'dwellMs': 800, 'view': 'v1',
+                'context': 'm1', 'position': 0, 'box': [0, 0, 500, 40], 'annotations': [['問題', 4, 0], ['今', 90, 0]]}
+
+    def test_collector_stores_json_and_refuses_page_style_posts(self):
+        import urllib.request
+        self.assertEqual(feedback.forward(self.url, [self.item('pin'), {'kind': 'bad'}], 't3'), {'ok': True, 'stored': 1})
+        # A web page can only send a "simple" cross-site POST (text/plain, forms) without a preflight: refused.
+        form = urllib.request.Request(self.url + '/v1/interactions', data=b'{"surface": "t3", "items": []}',
+                                      headers={'Content-Type': 'text/plain'})
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(form, timeout=5)
+        self.assertEqual(refused.exception.code, 415)
+        self.assertEqual(feedback.forward(self.url, [self.item()], 'phone')['ok'], False)
+        self.assertEqual(feedback.remote_health(self.url), {'ok': True, 'interactions': 1})
+        self.assertEqual([(r['surface'], r['kind']) for r in feedback.remote_recent(self.url)], [('t3', 'pin')])
+
+    def test_native_host_forwards_to_the_collector_and_keeps_items_when_it_is_down(self):
+        state_dir = fwlib.home()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / 'collector').write_text(self.url + '\n')
+        self.assertEqual(fw_host.handle({'type': 'log', 'items': [self.item()]}), {'ok': True, 'stored': 1})
+        self.assertFalse(feedback.default_path().exists())  # nothing kept locally
+        self.assertEqual(feedback.count(self.db), 1)
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['log'])
+        self.assertIn('browser peek 問題  open 0.8s, 1 other glossed word in the passage', out.getvalue())
+        (state_dir / 'collector').write_text('http://127.0.0.1:9\n')  # nothing listens there
+        reply = fw_host.handle({'type': 'log', 'items': [self.item()]})
+        self.assertFalse(reply['ok'])  # so the extension keeps them queued and retries
+        self.assertIn('unreachable', reply['error'])
+
+
 class Setup(Home):
     def test_setup_installs_extension_host_and_key(self):
         key = self.home / 'key.txt'
@@ -582,6 +654,14 @@ class Setup(Home):
                 'XDG_CONFIG_HOME': '', 'CODEX_HOME': str(self.home / 'codex')}), mock.patch('sys.stdout', new=io.StringIO()):
             fw.main(['setup', *flags])
         return fwlib.load_state(create=False)
+
+    def test_collector_flag_sets_and_clears_the_collector(self):
+        self.run_setup('--collector', 'http://functor:7853/')
+        self.assertEqual(fwlib.collector_url(), 'http://functor:7853')
+        self.run_setup('--collector', 'off')
+        self.assertIsNone(fwlib.collector_url())
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', new=io.StringIO()):
+            self.run_setup('--collector', 'functor:7853')
 
     def test_known_top_seeds_before_first_learning_words(self):
         state = self.run_setup('--known-top', '40')

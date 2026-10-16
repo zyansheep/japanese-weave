@@ -1,6 +1,7 @@
 // Decision cache: key -> swaps. Storage adapter is injected (chrome.storage.local in the extension).
-// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
-const chrome = globalThis.browser ?? globalThis.chrome;
+// Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`. Looked up on use, not at import,
+// so a test that installs the global after another module imported this one still reaches it.
+const local = () => (globalThis.browser ?? globalThis.chrome).storage.local;
 const PREFIX = 'c:';
 
 export function createCache(storage, { max = 5000, pruneBy = 1000, pruneEvery = 100 } = {}) {
@@ -62,8 +63,8 @@ export function memoryStorage(initial = {}) {
 }
 
 export const chromeStorage = {
-  get: (keys) => chrome.storage.local.get(keys),
-  set: (obj) => chrome.storage.local.set(obj),
-  remove: (keys) => chrome.storage.local.remove(keys),
-  getAll: () => chrome.storage.local.get(null),
+  get: (keys) => local().get(keys),
+  set: (obj) => local().set(obj),
+  remove: (keys) => local().remove(keys),
+  getAll: () => local().get(null),
 };

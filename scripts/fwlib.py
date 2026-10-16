@@ -45,6 +45,12 @@ CODE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+", re.S)
 DEDUPE_DAYS = 45
 
 
+def collector_url():
+    """The collector (collector.py) that gloss interactions go to, set by `fw.py setup --collector URL`; None: local."""
+    path = home() / 'collector'
+    return path.read_text().strip() or None if path.exists() else None
+
+
 def home():
     """The state dir: JAPANESE_WEAVE_HOME, else the dir this copy was installed into by setup (<home>/app/scripts),
     else ~/.japanese-weave."""

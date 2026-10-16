@@ -7,6 +7,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "geminiKey"?: stored key if setup saved one}
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
+  {"type": "log", "items": [{"kind": "peek"|"flip", "word", "at", "dwellMs", "view", "context", "position", "box",
+                             "annotations"}]}  -> {"ok": true, "stored": n}  (see feedback.py)
 """
 import json
 from pathlib import Path
@@ -16,6 +18,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
+import feedback  # noqa: E402
 
 MAX_EVENTS = 500
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -66,6 +69,14 @@ def handle(message):
                 if isinstance(event.get('word'), str) and fwlib.apply_event(state, event['word'], event['kind'], day):
                     applied += 1
         return {'ok': True, 'applied': applied}
+    if kind == 'log':
+        items = message.get('items')
+        if not isinstance(items, list):
+            return {'ok': False, 'error': 'items must be a list'}
+        collector = fwlib.collector_url()
+        if collector:  # one database for every machine; a failure keeps the items queued in the extension
+            return feedback.forward(collector, items, 'browser')
+        return {'ok': True, 'stored': feedback.record(items, 'browser')}
     return {'ok': False, 'error': 'unknown message type'}
 
 

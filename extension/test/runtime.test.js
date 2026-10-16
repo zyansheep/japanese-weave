@@ -19,6 +19,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
   let delayed = null;
   let release;
   const hostEvents = [];
+  const hostLog = [];
   let hostState = { version: 'test.1', stage: 1, paused: false, prefs: { extension_sites: 'ask' }, words: [
     { ja: 'et', en: 'and', hint: 'ay', status: 'active' },
     { ja: 'très', en: 'very', hint: 'treh', status: 'shaky' },
@@ -58,6 +59,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
         sendNativeMessage: async (_host, msg) => {
           if (msg.type === 'state') return { ok: true, ...structuredClone(hostState), geminiKey: 'synthetic-host' };
           if (msg.type === 'events') { hostEvents.push(...msg.events); return { ok: true, applied: msg.events.length }; }
+          if (msg.type === 'log') { hostLog.push(...msg.items); return { ok: true, stored: msg.items.length }; }
           return { ok: false };
         },
       },
@@ -142,7 +144,14 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     await wait(20);
     expect(span.textContent).toBe('and');
     expect(local.pendingEvents.map((e) => e.kind)).toEqual(['seen', 'peek', 'flip']);
+    // The log keeps every peek (with how long its gloss stayed open, logged when it closes) and the flip, unlike the
+    // once-a-day events; the focus-only gloss is not a peek.
+    expect(local.pendingLog.map((e) => e.kind)).toEqual(['peek', 'peek', 'flip']);
+    expect(local.pendingLog.every((e) => e.word === 'et' && e.position === 0 && e.dwellMs >= 0)).toBe(true);
+    expect(local.pendingLog[0].annotations).toEqual([['et', 0, 0]]);
+    expect(new Set(local.pendingLog.map((e) => `${e.view}/${e.context}`)).size).toBe(1);
     expect(await dispatch({ type: 'event', word: 'bonjour', event: 'seen' }, page())).toEqual({ ok: false }); // not a known word
+    expect(await dispatch({ ...local.pendingLog[0], type: 'interaction', word: 'bonjour' }, page())).toEqual({ ok: false });
     // Nothing in the DOM names the word or the revision; pages can't forge events with fake spans or synthetic input.
     expect(win.document.body.innerHTML).not.toMatch(/data-fw-(word|key)/);
     const fake = win.document.createElement('span');
@@ -167,6 +176,9 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     await call({ type: 'syncWords' });
     expect(hostEvents.map((e) => `${e.word}:${e.kind}`)).toEqual(['et:seen', 'et:peek', 'et:flip']);
     expect(JSON.stringify(hostEvents)).not.toContain('cats');
+    expect(hostLog.map((e) => e.kind)).toEqual(['peek', 'peek', 'flip']);
+    expect(JSON.stringify(hostLog)).not.toContain('cats');
+    expect(local.pendingLog).toHaveLength(0);
     expect(local.pendingEvents).toHaveLength(0);
 
     const beforeClear = modelCalls;

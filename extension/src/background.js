@@ -6,7 +6,7 @@ import { requestSwaps } from './engine.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount } from './levels.js';
 import { hashKey } from './hash.js';
-import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday } from './hostsource.js';
+import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
@@ -88,7 +88,11 @@ async function swaps(msg, sender) {
   }
 }
 
-const flush = () => locked(() => flushEvents({ storage: chromeStorage, send }));
+const flush = () => locked(async () => {
+  const result = await flushEvents({ storage: chromeStorage, send });
+  await flushLog({ storage: chromeStorage, send });
+  return result;
+});
 let flushTimer = null;
 function scheduleFlush() {
   clearTimeout(flushTimer);
@@ -102,6 +106,16 @@ async function record(msg, sender) {
   const word = (await readCached(chromeStorage))?.words.find((w) => exactJa(w.ja) === exactJa(msg.word));
   if (!word) return { ok: false };
   await locked(() => queueEvents(chromeStorage, [{ word: word.ja, kind: msg.event }]));
+  scheduleFlush();
+  return { ok: true };
+}
+
+// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state.
+async function logInteraction(msg, sender) {
+  const ctx = await context();
+  const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
+  if (!item || !(await readCached(chromeStorage))?.words.some((w) => exactJa(w.ja) === exactJa(item.word))) return { ok: false };
+  await locked(() => queueLog(chromeStorage, [item]));
   scheduleFlush();
   return { ok: true };
 }
@@ -152,7 +166,7 @@ async function status() {
     pastedKey: !!data.apiKey, hostKey: !!data.hostKey, modelStatus: data.modelStatus || null };
 }
 
-// Pages may only ask for config, swaps and events; everything else is popup-only.
+// Pages may only ask for config, swaps, events and interactions; everything else is popup-only.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || sender.id !== chrome.runtime.id) return false;
   const popup = sender.url === chrome.runtime.getURL('src/popup.html');
@@ -161,10 +175,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     config: context,
     swaps: () => swaps(msg, sender),
     event: () => record(msg, sender),
+    interaction: () => logInteraction(msg, sender),
     status, syncWords, clearCache,
     save: () => save(msg),
   };
-  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event'].includes(msg.type)))) return false;
+  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));
   return true;
 });

@@ -6,6 +6,9 @@ export const HOST = 'com.japaneseweave.host';
 export const STATE_KEY = 'wordState';
 export const PENDING_KEY = 'pendingEvents';
 export const SENT_KEY = 'seenSent';
+export const LOG_KEY = 'pendingLog';
+const LOG_MAX = 500;
+const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
 export function parseState(data) {
@@ -97,6 +100,49 @@ export async function flushEvents({ storage, send }) {
     const rest = (now[PENDING_KEY] || []).slice(pending.length); // events queued while we were sending
     await storage.set({ [PENDING_KEY]: rest });
     return { sent: pending.length, applied: reply.applied };
+  } catch (e) {
+    return { sent: 0, error: String(e?.message || e) };
+  }
+}
+
+// One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every
+// glossed word in the same passage sat relative to the passage. Words and positions only, never page text.
+// Returns null for anything malformed.
+export function cleanInteraction(msg, now = Date.now()) {
+  const num = (x) => typeof x === 'number' && Number.isFinite(x);
+  const word = (x) => typeof x === 'string' && x.length > 0 && x.length <= 40;
+  const id = (x) => typeof x === 'string' && /^[\w:-]{1,64}$/.test(x);
+  if (!msg || !['peek', 'flip'].includes(msg.kind) || !word(msg.word) || !id(msg.view) || !id(msg.context)) return null;
+  if (!num(msg.at) || msg.at < now - 86400000 || msg.at > now + 60000) return null;
+  if (!num(msg.dwellMs) || msg.dwellMs < 0 || msg.dwellMs > 600000 || !Number.isInteger(msg.position)) return null;
+  if (!Array.isArray(msg.box) || msg.box.length !== 4 || !msg.box.every(num)) return null;
+  if (!Array.isArray(msg.annotations) || msg.annotations.length > ANNOTATIONS_MAX) return null;
+  if (!msg.annotations.every((a) => Array.isArray(a) && a.length === 3 && word(a[0]) && num(a[1]) && num(a[2]))) return null;
+  const round = (x) => Math.round(x);
+  return { kind: msg.kind, word: msg.word, at: round(msg.at), dwellMs: round(msg.dwellMs), view: msg.view,
+    context: msg.context, position: msg.position, box: msg.box.map(round),
+    annotations: msg.annotations.map(([w, x, y]) => [w, round(x), round(y)]) };
+}
+
+export async function queueLog(storage, items) {
+  const obj = await storage.get([LOG_KEY]);
+  const pending = Array.isArray(obj[LOG_KEY]) ? obj[LOG_KEY] : [];
+  pending.push(...items);
+  await storage.set({ [LOG_KEY]: pending.slice(-LOG_MAX) });
+  return pending.length;
+}
+
+// Sends queued interactions to the host's log; keeps them queued if the host is missing or older than the log.
+export async function flushLog({ storage, send }) {
+  const obj = await storage.get([LOG_KEY]);
+  const pending = Array.isArray(obj[LOG_KEY]) ? obj[LOG_KEY] : [];
+  if (!pending.length) return { sent: 0 };
+  try {
+    const reply = await send({ type: 'log', items: pending });
+    if (!reply?.ok) throw new Error(reply?.error || 'host refused the log');
+    const now = await storage.get([LOG_KEY]);
+    await storage.set({ [LOG_KEY]: (now[LOG_KEY] || []).slice(pending.length) });
+    return { sent: pending.length, stored: reply.stored };
   } catch (e) {
     return { sent: 0, error: String(e?.message || e) };
   }

@@ -24,6 +24,9 @@ const failures = new Map(); // text key -> failed model attempts; retried with b
 const MAX_RETRIES = 3;
 const TIP_DELAY_MS = 700; // a beat to recall the word before the meaning appears
 let tipTimer = null;
+let openTip = null; // { span, at }: a gloss opened by a hover dwell, logged with its dwell when it closes
+// One page load, so the host's log can tell repeat visits apart. getRandomValues also works on plain-http pages.
+const VIEW = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 const send = (msg) => chrome.runtime.sendMessage(msg);
 const on = () => config?.hasKey && !config.paused && siteEnabled(config.settings, location.href) && hasSiteAccess(location.href, config.origins);
 const targets = () => selector(location.href);
@@ -44,9 +47,31 @@ function record(span, event) {
     if (!r?.ok && daily) seen.delete(id);
   }).catch(() => { if (daily) seen.delete(id); });
 }
+// For the host's log: the peeked or flipped word, and every glossed word in its passage by position only, since
+// unpeeked words next to a peek are the evidence that the reader knew them.
+function logInteraction(span, kind, at, dwellMs) {
+  const passage = span.closest(targets());
+  const key = passage && keys.get(passage);
+  if (!key || !on()) return;
+  const spans = [...passage.querySelectorAll(`span.${SWAP_CLASS}`)].filter((s) => isSwap(s) && swapWord(s));
+  if (!spans.includes(span)) return;
+  const box = passage.getBoundingClientRect();
+  const annotations = spans.map((s) => {
+    const r = s.getBoundingClientRect();
+    return [swapWord(s), r.left - box.left, r.top - box.top];
+  });
+  void send({ type: 'interaction', kind, word: swapWord(span), at, dwellMs, view: VIEW,
+    context: key.slice(key.indexOf(':') + 1), position: spans.indexOf(span),
+    box: [box.left + window.scrollX, box.top + window.scrollY, box.width, box.height], annotations }).catch(() => {});
+}
 // The gloss appears only after a short dwell; reaching it counts as a peek (the reader needed the meaning).
 function hideTip() {
   clearTimeout(tipTimer); tipTimer = null;
+  if (openTip) {
+    const { span, at } = openTip;
+    openTip = null;
+    if (span.isConnected) logInteraction(span, 'peek', at, Date.now() - at);
+  }
   for (const el of document.querySelectorAll(`.${SWAP_CLASS}.fw-tip`)) el.classList.remove('fw-tip');
 }
 function armTip(e) {
@@ -57,7 +82,10 @@ function armTip(e) {
     tipTimer = null;
     if (!span.isConnected || span.classList.contains('fw-en')) return;
     span.classList.add('fw-tip');
-    if (e.type === 'mouseover') record(span, 'peek'); // a page can focus a span from script, so focus never counts
+    if (e.type === 'mouseover') { // a page can focus a span from script, so focus never counts
+      record(span, 'peek');
+      openTip = { span, at: Date.now() };
+    }
   }, TIP_DELAY_MS);
 }
 function disarmTip(e) {
@@ -186,7 +214,10 @@ function reveal(e) {
   if (e.type === 'keydown' && !['Enter', ' '].includes(e.key)) return;
   e.preventDefault(); e.stopPropagation();
   hideTip();
-  if (toggle(span)) record(span, 'flip');
+  if (toggle(span)) {
+    record(span, 'flip');
+    logInteraction(span, 'flip', Date.now(), 0);
+  }
   observer?.takeRecords();
 }
 chrome.runtime.onMessage.addListener((msg) => {

@@ -11,13 +11,23 @@
                                                      --sites: extension on every site (all) or only ones you
                                                      turn on (ask); --anki: run `anki` too; --remote: this
                                                      machine only runs the browser, the word state lives on
-                                                     SSH_HOST (the native host talks to it over ssh)
+                                                     SSH_HOST (the native host talks to it over ssh);
+                                                     --collector URL|off: send gloss peeks and flips to a
+                                                     collector (see `collector`) instead of a local database
   fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--dry-run]
                                                      put the words on your Anki cards under review (learning
                                                      or review, not new or suspended) at the front of the
                                                      list; mature cards (interval >= N days, default 21)
                                                      become known unless --no-known
   fw.py status                                       stage, word counts, learning words
+  fw.py log [N]                                      the latest N gloss peeks and flips (default 20), with how
+                                                     long each stayed open and the glossed words around it
+                                                     (from the collector when one is set)
+  fw.py collector run|install --listen HOST:PORT [--db PATH]
+                                                     the collector: one database for gloss interactions from
+                                                     every machine and surface, reached over a private network
+                                                     such as Tailscale; install: a systemd user service running
+                                                     the installed copy (enable lingering so it runs logged out)
   fw.py known WORD...                                mark words as known
   fw.py learn WORD...                                put words back in the learning set (shaky)
   fw.py stage N|auto                                 pin the stage (1-4) or let it follow known words
@@ -42,11 +52,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import export  # noqa: E402
 import anki  # noqa: E402
+import feedback  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -217,15 +229,23 @@ def write_launcher(home, remote=None, remote_home=None):
     return launcher
 
 
-def install_extensions(root, home):
-    """Stable copies: the plugin cache path changes on every update, browsers need fixed paths."""
-    for name, ignore in (('extension', shutil.ignore_patterns('test', 'node_modules', 'package.json', 'bun.lock')),
-                         ('app/scripts', shutil.ignore_patterns('__pycache__')), ('app/data', None)):
-        source = root / ('extension' if name == 'extension' else name.split('/')[1])
-        target = home / name
+def install_app(root, home):
+    """Stable copies of the scripts and word lists: launchers and services need fixed paths."""
+    for name, ignore in (('scripts', shutil.ignore_patterns('__pycache__')), ('data', None)):
+        target = home / 'app' / name
         if target.exists():
             shutil.rmtree(target)
-        shutil.copytree(source, target, ignore=ignore)
+        shutil.copytree(root / name, target, ignore=ignore)
+
+
+def install_extensions(root, home):
+    """Stable copies: the plugin cache path changes on every update, browsers need fixed paths."""
+    install_app(root, home)
+    target = home / 'extension'
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(root / 'extension', target,
+                    ignore=shutil.ignore_patterns('test', 'node_modules', 'package.json', 'bun.lock'))
     firefox = home / 'extension-firefox'
     if firefox.exists():
         shutil.rmtree(firefox)
@@ -262,6 +282,10 @@ def setup(args):
         remote_file.write_text(args.remote + '\n')
     elif remote_file.exists():
         remote_file.unlink()
+    if args.collector == 'off':
+        (home / 'collector').unlink(missing_ok=True)
+    elif args.collector:
+        (home / 'collector').write_text(args.collector.rstrip('/') + '\n')
     if key:
         path = home / 'gemini_key'
         path.write_text(key + '\n')
@@ -390,6 +414,11 @@ def check(_args):
     if not remote:
         print(f'{"ok  " if anki_csv.exists() else "note"} Anki words '
               f'{"at the front of the list (" + str(len(fwlib.read_lexicon(anki_csv))) + ")" if anki_csv.exists() else "not synced; run fw.py anki <collection.anki2>"}')
+    collector = fwlib.collector_url()
+    if collector:
+        health = feedback.remote_health(collector)
+        report(health.get('ok') is True, f'collector {collector} answers'
+               + (f' ({health.get("interactions")} interactions)' if health.get('ok') else f': {health.get("error")}'))
     has_key = (home / 'gemini_key').exists()
     print(f'{"ok  " if has_key else "note"} Gemini key {"stored by setup" if has_key else "not stored; paste it in the extension popup"}')
     if not ok:
@@ -462,6 +491,56 @@ def stage(args):
     print(f'Stage {fwlib.stage_for(state)}{" (pinned)" if state["stage_pinned"] else " (automatic)"}')
 
 
+def log_cmd(args):
+    collector = fwlib.collector_url()
+    try:
+        rows = feedback.remote_recent(collector, args.limit) if collector else feedback.recent(args.limit)
+    except OSError as error:
+        sys.exit(f'Collector {collector}: {error}')
+    if not rows:
+        print('No gloss peeks or flips logged yet.')
+        return
+    for row in rows:
+        when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row['at'] / 1000))
+        around = len(row['annotations']) - 1
+        print(f'{when}  {row["surface"]:<7} {row["kind"]:<4} {row["word"]}  open {row["dwellMs"] / 1000:.1f}s, '
+              f'{around} other glossed word{"" if around == 1 else "s"} in the passage')
+
+
+def collector_arg(value):
+    if value != 'off' and not re.match(r'^https?://[^/\s]+/?$', value):
+        raise argparse.ArgumentTypeError('a URL like http://functor:7853, or off')
+    return value
+
+
+COLLECTOR_UNIT = 'japanese-weave-collector.service'
+
+
+def collector_cmd(args):
+    import collector
+    if args.action == 'run':
+        collector.main(['--listen', args.listen] + (['--db', args.db] if args.db else []))
+        return
+    home = fwlib.home()
+    install_app(fwlib.PLUGIN_ROOT, home)
+    unit = Path.home() / '.config' / 'systemd' / 'user' / COLLECTOR_UNIT
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    command = [python_path(), str(home / 'app' / 'scripts' / 'collector.py'), '--listen', args.listen]
+    if args.db:
+        command += ['--db', str(Path(args.db).expanduser().resolve())]
+    unit.write_text('[Unit]\nDescription=Japanese Weave collector (gloss interactions from every machine)\n'
+                    'After=network-online.target\nWants=network-online.target\n\n'
+                    f'[Service]\nExecStart={shlex.join(command)}\nRestart=on-failure\nRestartSec=10\n\n'
+                    '[Install]\nWantedBy=default.target\n')
+    for step in (['daemon-reload'], ['enable', COLLECTOR_UNIT], ['restart', COLLECTOR_UNIT]):
+        subprocess.run(['systemctl', '--user', *step], check=True)
+    print(f'Collector installed as the systemd user service {COLLECTOR_UNIT}, listening on {args.listen}.')
+    linger = subprocess.run(['loginctl', 'show-user', os.environ.get('USER', ''), '--property=Linger'],
+                            capture_output=True, text=True).stdout.strip()
+    if linger != 'Linger=yes':
+        print('Lingering is off, so it stops when you log out: sudo loginctl enable-linger $USER')
+
+
 def glosses(args):
     with fwlib.editing() as state:
         state.setdefault('prefs', {})['chat_glosses'] = args.style
@@ -518,6 +597,8 @@ def main(argv=None):
     p.add_argument('--browsers', default='firefox,chrome', help='human steps to print: firefox, chrome or both')
     p.add_argument('--anki', metavar='COLLECTION', help='also run `anki COLLECTION`')
     p.add_argument('--remote', metavar='SSH_HOST', help='browser-only machine; the word state lives on SSH_HOST')
+    p.add_argument('--collector', metavar='URL|off', type=collector_arg,
+                   help='send gloss interactions to this collector, e.g. http://functor:7853; off: keep them local')
     p.add_argument('--remote-home', metavar='DIR', help='state dir on SSH_HOST (default ~/.japanese-weave)')
     p.add_argument('--dry-run', action='store_true')
     p.set_defaults(run=setup)
@@ -541,6 +622,14 @@ def main(argv=None):
     p = sub.add_parser('stage')
     p.add_argument('value', choices=['1', '2', '3', '4', 'auto'])
     p.set_defaults(run=stage)
+    p = sub.add_parser('collector')
+    p.add_argument('action', choices=['run', 'install'])
+    p.add_argument('--listen', required=True, metavar='HOST:PORT')
+    p.add_argument('--db', metavar='PATH')
+    p.set_defaults(run=collector_cmd)
+    p = sub.add_parser('log')
+    p.add_argument('limit', nargs='?', type=int, default=20)
+    p.set_defaults(run=log_cmd)
     p = sub.add_parser('glosses')
     p.add_argument('style', choices=['abbr', 'footer'])
     p.set_defaults(run=glosses)
