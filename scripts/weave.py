@@ -4,7 +4,6 @@
 Usage: weave.py --hook   (reads the hook JSON on stdin, prints hook JSON)
        weave.py          (prints the plain brief, for checking)
 """
-import html
 import json
 import os
 from pathlib import Path
@@ -15,7 +14,6 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
-import kana as kana_lib  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
 # Stage: (target % of words in Japanese, cap %, max Japanese words in one sentence).
@@ -118,12 +116,9 @@ def brief(state, seen, recall=None, markup=False):
             + (band_line(state) if banded else
                f'Seen sometimes (about 2 in 3 places one fits): {group("some")}\n'
                f'Seen a lot, as default swaps (write the Japanese every time the English word has that meaning): {group("lot", swap)}'))
-    if recall:
-        reading = '' if kana_lib.is_kana(recall['ja']) or not recall.get('kana') else f'{recall["kana"]} · '
-        answer = (f'<abbr title="{html.escape(reading + recall["en"])}">{recall["ja"]}</abbr>'
-                  if markup else f'{recall["ja"]} = {recall["en"]}, "{recall["hint"]}"')
+    if recall and not markup:  # with popover glosses every word already tests recall, so no extra lines
         text += (f'\nIf this reply is longer than a few sentences, open it with "Recall: {recall["ja"]}?" on its own line '
-                 f'and end it{"" if markup else ", after the footer,"} with: Recall: {answer}')
+                 f'and end it, after the footer, with: Recall: {recall["ja"]} = {recall["en"]}, "{recall["hint"]}"')
     return text
 
 
@@ -354,8 +349,9 @@ def main(argv):
         return 0
     if state.get('paused'):
         return 0
-    text = brief(state, exposure(), next_recall(state, data.get('session_id')) if hook else None,
-                 markup=hook and abbr_glosses(state))
+    markup = hook and abbr_glosses(state)
+    text = brief(state, exposure(), next_recall(state, data.get('session_id')) if hook and not markup else None,
+                 markup=markup)
     if hook:
         try:
             reply = last_reply(data['transcript_path'])

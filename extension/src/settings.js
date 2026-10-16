@@ -4,9 +4,12 @@ export const DEFAULT_SETTINGS = {
   enabled: true,
   model: 'gemini-3.8-flash',
   levelOverride: 0, // 0 = follow the Claude Code stage (Level 1 without the plugin)
+  density: 0, // percent of a passage's words to swap; 0 = the level's per-sentence rule
   newSitesEnabled: null, // null = what setup chose (prefs.extension_sites), else on
   siteOverrides: {}, // hostname -> true/false, set from the popup
 };
+
+export const DENSITIES = [0, 3, 5, 8, 10, 15, 20, 25, 30, 40];
 
 export function cleanSettings(s = {}) {
   const d = { ...DEFAULT_SETTINGS, siteOverrides: {} };
@@ -14,6 +17,7 @@ export function cleanSettings(s = {}) {
   if (typeof s.newSitesEnabled === 'boolean') d.newSitesEnabled = s.newSitesEnabled;
   if (['gemini-3.8-flash', 'gemini-3.5-flash-lite'].includes(s.model)) d.model = s.model;
   if (Number.isInteger(s.levelOverride) && s.levelOverride >= 0 && s.levelOverride <= 4) d.levelOverride = s.levelOverride;
+  if (DENSITIES.includes(s.density)) d.density = s.density;
   for (const [host, enabled] of Object.entries(s.siteOverrides || {})) {
     if (/^(?=.{1,253}$)[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/.test(host) && typeof enabled === 'boolean') d.siteOverrides[host] = enabled;
   }

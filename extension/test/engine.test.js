@@ -7,7 +7,8 @@ import { hashKey } from '../src/hash.js';
 const geminiReply = (tweets) => ({
   ok: true,
   status: 200,
-  json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ tweets }) }] } }] }),
+  json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ tweets }) }] } }],
+    usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 200, thoughtsTokenCount: 50 } }),
 });
 
 describe('gemini', () => {
@@ -25,7 +26,8 @@ describe('gemini', () => {
     expect(calls[0].url).toBe(`${API_BASE}gemini-3.8-flash:generateContent`);
     expect(calls[0].init.headers['x-goog-api-key']).toBe('K');
     expect(calls[0].url).not.toContain('K');
-    expect(out.get('a')[0].f).toBe('でも');
+    expect(out.byId.get('a')[0].f).toBe('でも');
+    expect(out.usage).toEqual({ input: 1000, output: 250 }); // thinking tokens bill as output
   });
   test('HTTP error and bad JSON throw', async () => {
     await expect(callGemini({ fetchImpl: async () => ({ ok: false, status: 503 }), apiKey: 'K', model: 'm', body: {} })).rejects.toThrow('HTTP 503');
@@ -99,6 +101,25 @@ describe('engine', () => {
     expect(r.results.a.map((s) => s.f)).toEqual(['大きい']);
     const two = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 2, batch: [{ id: 'a', text }], words, fetchImpl });
     expect(two.results.a.map((s) => s.f)).toEqual(['でも', '大きい']);
+    // A density sends each passage a target (12 words at 10% -> 1) and caps it there, learning words first.
+    const sent = [];
+    const tracked = async (url, init) => { sent.push(JSON.parse(init.body).contents[0].parts[0].text); return fetchImpl(); };
+    const dense = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 2, batch: [{ id: 'a', text }], words, fetchImpl: tracked, density: 10 });
+    expect(sent[0]).toContain('"target":1');
+    expect(dense.results.a.map((s) => s.f)).toEqual(['大きい']);
+  });
+  test('usage lists every billed attempt, including an unusable answer before the fallback', async () => {
+    const replies = [
+      { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'not json' }] } }], usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 10 } }) },
+      geminiReply([{ id: 'a', swaps: [] }]),
+    ];
+    const r = await requestSwaps({ apiKey: 'K', model: 'gemini-3.8-flash', level: 1, batch: [{ id: 'a', text: 'x and y in y' }], fetchImpl: async () => replies.shift() });
+    expect(r.usage).toEqual([
+      { model: 'gemini-3.8-flash', input: 900, output: 10 },
+      { model: 'gemini-3.5-flash-lite', input: 1000, output: 250 },
+    ]);
+    const failed = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 1, batch: [], fetchImpl: async () => ({ ok: false, status: 503 }) }).catch((e) => e);
+    expect(failed.usage).toEqual([]); // refused requests are not billed
   });
 });
 

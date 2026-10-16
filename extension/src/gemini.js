@@ -19,7 +19,8 @@ export function buildRequest({ system, user, schema, thinkingLevel = THINKING_LE
   };
 }
 
-// Returns Map<id, swaps[]> from the model's JSON. Throws on HTTP error, timeout, or unparseable output.
+// Returns { byId: Map<id, swaps[]>, usage: { input, output } } (tokens; thinking counts as output). Throws on HTTP
+// error, timeout, or unparseable output.
 export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, body, timeoutMs = 20000 }) {
   const res = await fetchImpl(`${API_BASE}${model}:generateContent`, {
     method: 'POST',
@@ -38,8 +39,15 @@ export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, 
     throw error;
   }
   const data = await res.json();
+  const meta = data?.usageMetadata || {};
+  const usage = { input: meta.promptTokenCount || 0, output: (meta.candidatesTokenCount || 0) + (meta.thoughtsTokenCount || 0) };
   const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-  return parseSwapsResponse(text);
+  try {
+    return { byId: parseSwapsResponse(text), usage };
+  } catch (e) {
+    e.usage = usage; // an unusable answer is still billed
+    throw e;
+  }
 }
 
 export function parseSwapsResponse(text) {

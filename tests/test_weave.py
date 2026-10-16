@@ -351,9 +351,8 @@ class Brief(Home):
         self.assertNotIn('<abbr', footer)
         self.assertIn('<abbr title="hiragana reading · meaning">', popover)
         self.assertNotIn('footer line', popover)
-        self.assertIn('Recall: <abbr title="but / however">でも</abbr>', popover)  # the answer hides until clicked
-        kanji = {'ja': '問題', 'kana': 'もんだい', 'en': 'problem', 'hint': 'mondai'}
-        self.assertIn('Recall: <abbr title="もんだい · problem">問題</abbr>', weave.brief(state, {}, kanji, markup=True))
+        self.assertIn('Recall: でも?', footer)
+        self.assertNotIn('Recall', popover)  # popover glosses already test recall on every word
         with mock.patch('sys.stdout', new=io.StringIO()):
             fw.main(['glosses', 'abbr'])
         self.assertEqual(fwlib.load_state()['prefs']['chat_glosses'], 'abbr')
@@ -575,6 +574,7 @@ class Collector(Home):
         with self.assertRaises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(form, timeout=5)
         self.assertEqual(refused.exception.code, 415)
+        refused.exception.close()
         self.assertEqual(feedback.forward(self.url, [self.item()], 'phone')['ok'], False)
         self.assertEqual(feedback.remote_health(self.url), {'ok': True, 'interactions': 1})
         self.assertEqual([(r['surface'], r['kind']) for r in feedback.remote_recent(self.url)], [('t3', 'pin')])

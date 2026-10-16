@@ -8,6 +8,7 @@ import { resolveLevel, exactJa, isZeroJapanese, wordCount } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
+import { recordUsage, readUsage } from './usage.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -73,19 +74,27 @@ async function swaps(msg, sender) {
       const { wordState, apiKey, hostKey } = await store.get(['wordState', 'apiKey', 'hostKey']);
       const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
       return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, words: wordState?.words, fetchImpl,
-        shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: i.key, text: i.text })) });
+        shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: i.key, text: i.text })),
+        density: ctx.settings.density });
     });
     return await locked(async () => {
+      await recordSpent(fresh?.usage);
       if (!fresh || (await context()).revision !== ctx.revision) return { results: {}, stale: true };
       await cache.setMany(fresh.results);
       await store.set({ modelStatus: { at: Date.now(), error: '', model: fresh.model } });
       return { results: { ...results, ...fresh.results } };
     });
   } catch (e) {
+    await locked(() => recordSpent(e?.usage));
     const error = e?.message || 'Model request failed';
     await store.set({ modelStatus: { at: Date.now(), error } });
     return { results, error, retryAfterMs: e?.retryAfterMs };
   }
+}
+
+// Every billed attempt counts toward usage, including an answer that was unusable before the fallback.
+async function recordSpent(spent) {
+  for (const { model, ...tokens } of spent || []) await recordUsage(chromeStorage, model, tokens);
 }
 
 const flush = () => locked(async () => {
@@ -163,7 +172,8 @@ async function status() {
   const config = await context();
   const data = await store.get(['wordState', 'apiKey', 'hostKey', 'modelStatus']);
   return { config, words: data.wordState?.words?.length || 0, fetchedAt: data.wordState?.fetchedAt || 0,
-    pastedKey: !!data.apiKey, hostKey: !!data.hostKey, modelStatus: data.modelStatus || null };
+    pastedKey: !!data.apiKey, hostKey: !!data.hostKey, modelStatus: data.modelStatus || null,
+    usage: await readUsage(chromeStorage) };
 }
 
 // Pages may only ask for config, swaps, events and interactions; everything else is popup-only.

@@ -1,6 +1,6 @@
-import { resolveLevel, MAX_BUILT_LEVEL } from './levels.js';
+import { resolveLevel } from './levels.js';
 import { MODELS } from './gemini.js';
-import { siteEnabled, siteOn, hasSiteAccess } from './settings.js';
+import { siteEnabled, siteOn, hasSiteAccess, DENSITIES } from './settings.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -15,6 +15,10 @@ const send = async (msg) => {
   if (res?.error && !('ok' in res)) throw new Error(res.error);
   return res;
 };
+
+const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+const usd = (n) => (n >= 1 ? `$${n.toFixed(2)}` : n >= 0.01 ? `$${n.toFixed(3)}` : n > 0 ? '<$0.01' : '$0');
+const usageLine = (u) => (u?.calls ? `${u.calls} calls · ${tokens(u.input + u.output)} tokens · ~${usd(u.usd)}` : 'none yet');
 
 function ago(t) {
   if (!t) return '';
@@ -39,8 +43,12 @@ async function refresh() {
   $('accessNote').textContent = s.newSitesEnabled
     ? (all ? 'On for every site except the ones you turn off. Webmail, AI chat and local addresses start off.' : 'Your browser needs your OK before this can run on other sites.')
     : 'Off on sites until you turn them on here.';
-  const { stage, chosen } = resolveLevel(s, c.stage);
-  $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (Claude Code stage ${stage})` : ''}${chosen > MAX_BUILT_LEVEL ? ` · L${MAX_BUILT_LEVEL} rules for now` : ''}`;
+  const { stage, chosen, effective } = resolveLevel(s, c.stage);
+  const amount = s.density ? `${s.density}% of words` : effective <= 1 ? '~1 word per 1–2 sentences' : '1–2 words per sentence';
+  $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
+  $('density').value = String(s.density || 0);
+  $('usageToday').textContent = usageLine(status.usage?.today);
+  $('usageTotal').textContent = status.usage?.total?.calls ? `${usageLine(status.usage.total)} since ${status.usage.since}` : 'none yet';
   $('levelOverride').value = String(s.levelOverride || 0);
   $('model').value = s.model;
   $('apiKey').value = '';
@@ -89,6 +97,13 @@ async function inject() {
   } catch { $('notice').textContent = 'Reload this page to start. Browsers block extensions on some pages.'; }
 }
 
+for (const value of DENSITIES) {
+  const opt = document.createElement('option');
+  opt.value = String(value);
+  opt.textContent = value ? `${value}% of words` : 'Auto (by level)';
+  $('density').appendChild(opt);
+}
+
 for (const [id, label] of Object.entries(MODELS)) {
   const opt = document.createElement('option');
   opt.value = id;
@@ -100,6 +115,7 @@ $('enabled').addEventListener('change', (e) => run(() => save({ settings: { enab
 $('newSitesEnabled').addEventListener('change', (e) => run(() => save({ settings: { newSitesEnabled: e.target.value === 'true' } })));
 $('levelOverride').addEventListener('change', (e) => run(() => save({ settings: { levelOverride: Number(e.target.value) || 0 } })));
 $('model').addEventListener('change', (e) => run(() => save({ settings: { model: e.target.value } })));
+$('density').addEventListener('change', (e) => run(() => save({ settings: { density: Number(e.target.value) || 0 } })));
 $('apiKey').addEventListener('change', (e) => run(() => save({ apiKey: e.target.value })));
 $('siteEnabled').addEventListener('change', (e) => run(async () => {
   const enabled = e.target.checked;

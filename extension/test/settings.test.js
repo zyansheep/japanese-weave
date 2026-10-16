@@ -18,3 +18,9 @@ it('webmail, AI chat and local addresses start off; a popup choice wins', () => 
   expect(siteEnabled(withChoices, 'https://example.com/')).toBe(false);
   expect(siteEnabled({ ...chosen, newSitesEnabled: false }, 'https://mail.google.com/')).toBe(true);
 });
+
+it('density is a percent from the offered list, 0 (the level rule) otherwise', () => {
+  expect(cleanSettings().density).toBe(0);
+  expect(cleanSettings({ density: 15 }).density).toBe(15);
+  for (const bad of [7, -5, 100, '15', 15.5]) expect(cleanSettings({ density: bad }).density).toBe(0);
+});

@@ -85,9 +85,15 @@ export function sentenceCount(text) {
   return Math.max(1, String(text).split(/[.!?…]+(?:\s|$)|\n+/).filter((s) => wordCount(s) >= 3).length);
 }
 
-// Density ceiling per passage, one use per Japanese word, learning words (active/shaky) kept before known ones.
-export function capSwaps(level, swaps, text, sharedWords) {
-  const max = (level <= 1 ? 1 : 2) * sentenceCount(text);
+// Swaps a passage should get at a density (percent of its words); also the ceiling then.
+export function swapTarget(text, density) {
+  return Math.round((wordCount(text) * density) / 100);
+}
+
+// Density ceiling per passage (the level's per-sentence rule, or the density target), one use per Japanese word,
+// learning words (active/shaky) kept before known ones.
+export function capSwaps(level, swaps, text, sharedWords, density = 0) {
+  const max = density > 0 ? swapTarget(text, density) : (level <= 1 ? 1 : 2) * sentenceCount(text);
   const status = new Map((sharedWords || []).map((w) => [w.ja, w.status]));
   const rank = (s) => (status.get(s.word) && status.get(s.word) !== 'known' ? 0 : 1);
   const used = new Set();

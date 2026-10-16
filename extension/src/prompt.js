@@ -1,5 +1,5 @@
 // System prompt and response schema per level. Adapted from French Weave's prompt, which was tuned on real tweets.
-import { wordsForLevel } from './levels.js';
+import { wordsForLevel, swapTarget } from './levels.js';
 
 export const RESPONSE_SCHEMA = {
   type: 'object',
@@ -36,9 +36,12 @@ const entry = ({ ja, en }) => `${ja} = ${en}`;
 
 // With the plugin's word state, learning words (active, then shaky) are the target and known words are filler.
 // Without it, the bundled level list is used.
-export function buildSystemPrompt(level, sharedWords, shownToday = []) {
+// density: percent of words to swap, given per passage as "target" (see buildUserContent); 0: the level's rule.
+export function buildSystemPrompt(level, sharedWords, shownToday = [], percent = 0) {
   const lvl = level <= 1 ? 1 : 2;
-  const density = lvl === 1
+  const density = percent > 0
+    ? `about ${percent}% of the words. Each passage comes with a "target": the number of swaps it should get. Aim for exactly that many, spread across its sentences; fewer only when no listed word fits`
+    : lvl === 1
     ? 'about one Japanese word every sentence or two. Count per sentence, not per passage: a passage of four sentences should usually get two or more swaps'
     : 'one or two Japanese words in every sentence. Count per sentence, not per passage: a passage of four sentences should usually get four or more swaps';
   let vocabulary;
@@ -78,6 +81,6 @@ Output: JSON only. For every passage return {"id": "<same id>", "swaps": [...]}.
 Default is to swap. Return empty swaps only when a rule forbids it or no list word fits.`;
 }
 
-export function buildUserContent(batch) {
-  return 'Passages:\n' + JSON.stringify(batch.map(({ id, text }) => ({ id, text })));
+export function buildUserContent(batch, density = 0) {
+  return 'Passages:\n' + JSON.stringify(batch.map(({ id, text }) => (density > 0 ? { id, text, target: swapTarget(text, density) } : { id, text })));
 }

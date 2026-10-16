@@ -20,6 +20,10 @@ describe('prompt', () => {
   });
   test('user content and schema shape', () => {
     expect(buildUserContent([{ id: 'a', text: 'hi', extra: 1 }])).toBe('Passages:\n[{"id":"a","text":"hi"}]');
+    const twenty = Array(20).fill('word').join(' ');
+    expect(buildUserContent([{ id: 'a', text: twenty }], 15)).toContain('"target":3');
+    expect(buildSystemPrompt(2, undefined, [], 15)).toContain('about 15% of the words');
+    expect(buildSystemPrompt(2)).not.toContain('"target"');
     expect(RESPONSE_SCHEMA.properties.passages.items.required).toEqual(['id', 'swaps']);
     expect(RESPONSE_SCHEMA.properties.passages.items.properties.swaps.items.required).toEqual(['o', 'f', 'g', 'h', 'ctx']);
   });

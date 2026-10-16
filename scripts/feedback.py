@@ -142,10 +142,11 @@ def _request(url, body=None, timeout=5):
         with urllib.request.urlopen(req, timeout=timeout) as res:
             return json.loads(res.read().decode('utf-8'))
     except urllib.error.HTTPError as error:
-        try:
-            return json.loads(error.read().decode('utf-8'))
-        except ValueError:
-            return {'ok': False, 'error': f'collector answered HTTP {error.code}'}
+        with error:
+            try:
+                return json.loads(error.read().decode('utf-8'))
+            except ValueError:
+                return {'ok': False, 'error': f'collector answered HTTP {error.code}'}
     except (OSError, ValueError) as error:
         return {'ok': False, 'error': f'collector unreachable: {error}'}
 

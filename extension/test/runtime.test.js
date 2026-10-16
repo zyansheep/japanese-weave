@@ -77,7 +77,8 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
       const body = JSON.parse(init.body);
       const items = JSON.parse(body.contents[0].parts[0].text.replace(/^Passages:\n/, ''));
       const passages = items.map(({ id, text }) => ({ id, swaps: text.includes(' and ') ? [{ o: 'and', f: 'et', ctx: '' }] : [] }));
-      return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify({ passages }) }] } }] });
+      return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify({ passages }) }] } }],
+        usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 300 } });
     },
   });
   const call = (msg) => dispatch(msg, popup);
@@ -108,6 +109,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     contentListeners.push(...messageListeners.splice(beforeContent));
     await wait();
     expect(modelCalls).toBe(1);
+    expect((await call({ type: 'status' })).usage.today).toMatchObject({ calls: 1, input: 2000, output: 300 });
     const el = win.document.querySelector('#reading');
     expect(el.querySelector('.fw-word')?.textContent).toBe('et');
     expect(win.document.querySelectorAll('.fw-word').length).toBe(1);
