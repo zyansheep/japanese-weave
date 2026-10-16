@@ -11,7 +11,10 @@ const LOG_MAX = 500;
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
+// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k and its uncertainty sd when the
+// gloss log has evidence; the dial (challenge, peeks per 100 words), its budget, and the realized peek rate.
 export function parseState(data) {
+  const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const words = [];
   const seen = new Set();
   for (const w of data?.words || []) {
@@ -21,7 +24,7 @@ export function parseState(data) {
     if (!ja || !en || seen.has(ja)) continue;
     seen.add(ja);
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
-      status: typeof w.status === 'string' ? w.status : 'active' });
+      status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -30,6 +33,10 @@ export function parseState(data) {
     stage: stage >= 1 && stage <= 4 ? stage : 1,
     paused: data?.paused === true,
     sites: data?.prefs?.extension_sites === 'ask' ? 'ask' : 'all', // setup's default for sites not set in the popup
+    challenge: num(data?.challenge) && data.challenge > 0 ? data.challenge : 0,
+    budget: num(data?.budget) && data.budget > 0 ? data.budget : 0,
+    rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
+      shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
     words,
   };
 }
@@ -106,22 +113,25 @@ export async function flushEvents({ storage, send }) {
 }
 
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every
-// glossed word in the same passage sat relative to the passage. Words and positions only, never page text.
-// Returns null for anything malformed.
+// glossed word in the same passage sat relative to the passage. Words and positions only, never page text. uid makes
+// a resend harmless. kind 'shown' instead marks when a passage's Japanese first came on screen, with its word count:
+// the denominator of the peek rate. Returns null for anything malformed.
 export function cleanInteraction(msg, now = Date.now()) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const word = (x) => typeof x === 'string' && x.length > 0 && x.length <= 40;
   const id = (x) => typeof x === 'string' && /^[\w:-]{1,64}$/.test(x);
-  if (!msg || !['peek', 'flip'].includes(msg.kind) || !word(msg.word) || !id(msg.view) || !id(msg.context)) return null;
+  if (!msg || !['peek', 'flip', 'shown'].includes(msg.kind) || !id(msg.view) || !id(msg.context)) return null;
   if (!num(msg.at) || msg.at < now - 86400000 || msg.at > now + 60000) return null;
-  if (!num(msg.dwellMs) || msg.dwellMs < 0 || msg.dwellMs > 600000 || !Number.isInteger(msg.position)) return null;
   if (!Array.isArray(msg.box) || msg.box.length !== 4 || !msg.box.every(num)) return null;
   if (!Array.isArray(msg.annotations) || msg.annotations.length > ANNOTATIONS_MAX) return null;
   if (!msg.annotations.every((a) => Array.isArray(a) && a.length === 3 && word(a[0]) && num(a[1]) && num(a[2]))) return null;
   const round = (x) => Math.round(x);
-  return { kind: msg.kind, word: msg.word, at: round(msg.at), dwellMs: round(msg.dwellMs), view: msg.view,
-    context: msg.context, position: msg.position, box: msg.box.map(round),
+  const common = { kind: msg.kind, at: round(msg.at), view: msg.view, context: msg.context, box: msg.box.map(round),
     annotations: msg.annotations.map(([w, x, y]) => [w, round(x), round(y)]) };
+  if (msg.kind === 'shown') return Number.isInteger(msg.words) && msg.words > 0 && msg.words <= 10000 ? { ...common, words: msg.words } : null;
+  if (!word(msg.word) || !num(msg.dwellMs) || msg.dwellMs < 0 || msg.dwellMs > 600000 || !Number.isInteger(msg.position)) return null;
+  if (msg.uid !== undefined && !id(msg.uid)) return null;
+  return { ...common, word: msg.word, dwellMs: round(msg.dwellMs), position: msg.position, ...(msg.uid ? { uid: msg.uid } : {}) };
 }
 
 export async function queueLog(storage, items) {

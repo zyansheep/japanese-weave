@@ -22,7 +22,14 @@ const host = (reply) => async () => reply;
 describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
-    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', words: REPLY.words });
+    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, rate: null, words: REPLY.words });
+  });
+  it('carries per-word estimates and the dial', () => {
+    const words = [{ ...REPLY.words[0], k: 0.4, sd: 0.8 }, { ...REPLY.words[1], k: 'high', sd: 1 }];
+    const s = parseState({ ...REPLY, words, challenge: 1.5, budget: 2.1, rate: { per100: 1.2, peeks: 6, shownWords: 500, days: 3 } });
+    expect(s.words.map((w) => [w.k, w.sd])).toEqual([[0.4, 0.8], [undefined, undefined]]);
+    expect([s.challenge, s.budget, s.rate]).toEqual([1.5, 2.1, { per100: 1.2, peeks: 6, shownWords: 500, days: 3 }]);
+    expect(parseState({ ...REPLY, challenge: -1, rate: { per100: null } })).toMatchObject({ challenge: 0, rate: null });
   });
   it('reads the site default setup chose; anything but "ask" means all sites', () => {
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'ask' } }).sites).toBe('ask');
@@ -117,11 +124,17 @@ describe('interaction log', () => {
   it('keeps words, timing and positions, rounded, and nothing else', () => {
     expect(cleanInteraction({ ...peek, text: 'page text' }, now)).toEqual({ kind: 'peek', word: 'et', at: now - 2000,
       dwellMs: 1234, view: 'a1b2', context: 'c0ffee', position: 1, box: [10, 400, 600, 81], annotations: [['de', 12, 0], ['et', 140, 0]] });
+    expect(cleanInteraction({ ...peek, uid: 'a1b2-7' }, now).uid).toBe('a1b2-7');
+  });
+  it('shown records carry the passage word count instead of a word', () => {
+    const shown = { kind: 'shown', at: now, view: 'a1b2', context: 'c0ffee', words: 48, box: [0, 0, 600, 80], annotations: [['de', 1, 0]] };
+    expect(cleanInteraction(shown, now)).toEqual(shown);
+    for (const words of [0, 1.5, 10001, '48']) expect(cleanInteraction({ ...shown, words }, now)).toBeNull();
   });
   it('rejects anything malformed', () => {
     for (const bad of [{ ...peek, kind: 'seen' }, { ...peek, word: '' }, { ...peek, view: 'has spaces' },
       { ...peek, at: now + 3_600_000 }, { ...peek, dwellMs: -1 }, { ...peek, position: 1.5 }, { ...peek, box: [1, 2, 3] },
-      { ...peek, annotations: [['de', 'left', 0]] }, { ...peek, annotations: Array(201).fill(['de', 0, 0]) }, null]) {
+      { ...peek, annotations: [['de', 'left', 0]] }, { ...peek, annotations: Array(201).fill(['de', 0, 0]) }, { ...peek, uid: 'a b' }, null]) {
       expect(cleanInteraction(bad, now)).toBeNull();
     }
   });

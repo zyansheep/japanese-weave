@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, wordCount, isZeroJapanese, normalizeJa, matchCase,
+  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -61,6 +61,66 @@ describe('validateSwaps', () => {
     expect(normalizeJa(' タブン ')).toBe('たぶん');
     expect(normalizeJa('ﾀﾌﾞﾝ')).toBe('たぶん');
     expect(normalizeJa('多 分')).toBe('多分');
+  });
+});
+
+describe('choosing swaps', () => {
+  const text = 'It was a big day and a very long one, but fine.'; // 12 words, one sentence
+  const words = [
+    { ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' },
+    { ja: 'でも', en: 'but', hint: 'demo', status: 'known' },
+    { ja: 'もう', en: 'already', hint: 'mō', status: 'known' },
+    { ja: 'とても', en: 'very', hint: 'totemo', status: 'known' },
+  ];
+  const swaps = validateSwaps(1, [
+    { o: 'but', f: 'でも', ctx: 'x but' }, { o: 'very', f: 'とても', ctx: 'very' }, { o: 'but', f: 'でも', ctx: 'y but' },
+    { o: 'already', f: 'もう', ctx: 'already' }, { o: 'big', f: '大きい', ctx: 'a big' },
+  ], words);
+  test('capSwaps: the level rule or the density, one use per word, learning words first', () => {
+    expect(capSwaps(1, swaps, text, words).map((s) => s.f)).toEqual(['大きい']);
+    expect(capSwaps(2, swaps, text, words).map((s) => s.f)).toEqual(['でも', '大きい']);
+    expect(capSwaps(2, swaps, text, words, 25).map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
+    expect(selectSwaps(2, swaps, text, words)).toEqual(capSwaps(2, swaps, text, words)); // the dial off
+  });
+
+  // 200 words, 10 learning candidates and 10 known ones, room for all of them.
+  const long = Array(200).fill('word').join(' ');
+  const pool = (k, sd = 0.01, status = 'shaky') => Array.from({ length: 10 }, (_, i) => ({ ja: `l${i}`, en: 'x', hint: '', status, k: k(i), sd }));
+  const known = Array.from({ length: 10 }, (_, i) => ({ ja: `k${i}`, en: 'x', hint: '', status: 'known' }));
+  const candidates = (list) => list.map((w) => ({ o: 'x', f: w.ja, g: 'x', h: '', ctx: '', word: w.ja, status: w.status }));
+  const pick = (list, opts) => selectSwaps(2, candidates(list), long, list, { density: 20, seed: 7, ...opts }).map((s) => s.word);
+
+  test('learning words go by learning value and fit the budget; known words fill the rest', () => {
+    const learning = pool((i) => i * 0.5); // peek chances from 0.5 (k 0) down to 0.01 (k 4.5)
+    const out = pick([...learning, ...known], { budgetPer100: 0.5 }); // 1 expected peek in 200 words
+    const chosen = out.filter((w) => w.startsWith('l'));
+    expect(chosen).toContain('l2'); // k 1.0 is the closest to a 25% peek chance
+    expect(chosen).not.toContain('l9');
+    const spent = chosen.map((w) => 1 / (1 + Math.exp(learning.find((l) => l.ja === w).k))).reduce((a, b) => a + b, 0);
+    expect(spent).toBeLessThan(1 + 0.5);
+    expect(out.filter((w) => w.startsWith('k'))).toHaveLength(10);
+    expect(pick([...learning, ...known], { budgetPer100: 0.5 })).toEqual(out); // same passage, same day: same words
+  });
+  test('the budget scales the number of learning words', () => {
+    const learning = pool(() => 1.1);
+    const count = (budgetPer100) => pick(learning, { budgetPer100 }).length;
+    expect(count(0.25)).toBeLessThanOrEqual(3); // 0.5 expected peeks at p 0.25: two words, maybe a third
+    expect(count(1)).toBeGreaterThanOrEqual(8);
+    expect(count(3)).toBe(10);
+  });
+  test('the first word that does not fit still gets in, with probability remaining / p', () => {
+    const learning = pool(() => 0); // p 0.5 each
+    const counts = Array.from({ length: 400 }, (_, seed) => selectSwaps(2, candidates(learning), Array(20).fill('w').join(' '), learning,
+      { density: 50, budgetPer100: 1, seed }).length); // 0.2 expected peeks: one word 40% of the time
+    const share = counts.filter((n) => n === 1).length / counts.length;
+    expect(counts.every((n) => n <= 1)).toBe(true);
+    expect(share).toBeGreaterThan(0.3);
+    expect(share).toBeLessThan(0.5);
+  });
+  test('one active word not yet shown today goes first, outside the budget', () => {
+    const learning = [...pool(() => 4), { ja: 'new', en: 'x', hint: '', status: 'active' }];
+    expect(pick(learning, { budgetPer100: 1e-6 })).toEqual(['new']);
+    expect(pick(learning, { budgetPer100: 1e-6, shownToday: ['new'] })).toEqual([]);
   });
 });
 

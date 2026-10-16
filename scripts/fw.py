@@ -60,6 +60,7 @@ import fwlib  # noqa: E402
 import export  # noqa: E402
 import anki  # noqa: E402
 import feedback  # noqa: E402
+import knowledge  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -479,13 +480,19 @@ def status(_args):
 
 def mark(kind):
     def run(args):
-        missing, done = [], []
+        missing, done, canonical = [], [], []
         with fwlib.editing() as state:
             for chunk in (c for arg in args.words for c in arg.split(',')):
                 chunk = chunk.strip()
                 # "jitsu wa" (romaji for 実は) is one word; "ima demo" is two.
                 for word in [chunk] if fwlib.find(state, chunk) or ' ' not in chunk else chunk.split():
-                    (done if fwlib.apply_event(state, word, kind) else missing).append(word)
+                    if fwlib.apply_event(state, word, kind):
+                        done.append(word)
+                        canonical.append(fwlib.find(state, word)['ja'])
+                    else:
+                        missing.append(word)
+        if canonical:  # timestamped, so the knowledge replay applies them at the right moment
+            knowledge.log_command(canonical, 'known' if kind == 'known' else 'learn')
         if done:
             print(f'{"Known" if kind == "known" else "Back to learning"}: {", ".join(done)}')
         if missing:
@@ -593,6 +600,75 @@ def log_chat_day(_args):
 
 def refresh(_args):
     fwlib.refresh_exposure()
+    try:
+        knowledge.refresh()
+    except Exception as error:  # never let the estimates break the exposure refresh
+        print(f'knowledge refresh failed: {error.__class__.__name__}: {error}', file=sys.stderr)
+
+
+def knowledge_cmd(args):
+    know = knowledge.refresh() or knowledge.load()
+    with fwlib.editing() as state:
+        pass
+    words = know.get('words') or {}
+    rate = know.get('rate') or {}
+    challenge = knowledge.challenge_of(state)
+    print('Adaptive difficulty: ' + (f'aiming at {challenge} peeks per 100 words shown (budget {know.get("budget")})'
+                                     if challenge else 'off (fw.py challenge 1.5 turns it on)'))
+    per100 = rate.get('per100')
+    print(f'  browser, last {rate.get("days", 3)} days: '
+          + (f'{per100} peeks per 100 words shown ({rate.get("peeks")} peeks, {rate.get("shownWords")} words)'
+             if per100 is not None else 'nothing shown yet'))
+    print(f'  log: {know.get("rows", 0)} interactions' + (f' (sync failed: {know["syncError"]})' if know.get('syncError') else '')
+          + f'; T3 offset {(know.get("offset") or {}).get("t3", 0)}')
+    status = {w['ja']: w['status'] for w in state['words']}
+    ranked = sorted(words.items(), key=lambda kv: -kv[1]['n'])[:args.limit]
+    if ranked:
+        print('  most evidence (word, status, peek chance in the browser, evidence weight):')
+    for ja, entry in ranked:
+        p = knowledge.sigmoid(-entry['k'])
+        print(f'    {ja}  {status.get(ja, "?"):<6} p {p:.2f}  n {entry["n"]:.1f}  opened {entry["opened"]} of {entry["obs"]}')
+    moves = know.get('moves') or []
+    for m in moves[-5:]:
+        print(f'  moved {m["word"]}: {m["from"]} -> {m["to"]} on {m["day"]}')
+    if know.get('veto'):
+        print(f'  held back from graduating: {", ".join(know["veto"])}')
+
+
+def why(args):
+    know = knowledge.refresh() or knowledge.load()
+    with fwlib.editing() as state:
+        pass
+    w = fwlib.find(state, args.word)
+    if w is None:
+        sys.exit(f'Not in the word list: {args.word}')
+    entry = (know.get('words') or {}).get(w['ja'])
+    print(f'{w["ja"]} ({w["en"]}, "{w["hint"]}"): {w["status"]} since {w["changed"] or "never"}')
+    if not entry:
+        print('  no evidence in the gloss log yet: the day rules decide (3 exposure days without a peek)')
+        return
+    p = knowledge.sigmoid(-entry['k'])
+    print(f'  prior {entry["mu"]}  knowledge {entry["k"]} +- {entry["sd"]}  browser peek chance {p:.2f}; '
+          f'opened {entry["opened"]} of {entry["obs"]} observations, {entry["recent"]} in the last 14 days')
+    for h in entry['history']:
+        when = time.strftime('%Y-%m-%d %H:%M', time.localtime(h['at'] / 1000))
+        print(f'    {when}  {h["surface"]:<7} {"opened" if h["y"] else "not opened"}'
+              f'{" (glance)" if 0 < h["y"] < 1 else ""}  weight {h["w"]}  -> k {h["k"]}')
+    for m in (know.get('moves') or []):
+        if m['word'] == w['ja']:
+            print(f'  moved {m["from"]} -> {m["to"]} on {m["day"]}')
+    if w['ja'] in (know.get('veto') or []):
+        print('  held back from graduating: still peeked too often')
+
+
+def challenge_cmd(args):
+    value = float(args.value) if args.value != 'off' else 0
+    value = int(value) if value == int(value) else value
+    if value not in knowledge.CHALLENGES:
+        sys.exit(f'Choose one of: off, {", ".join(str(c) for c in knowledge.CHALLENGES[1:])}')
+    with fwlib.editing() as state:
+        state.setdefault('prefs', {})['challenge'] = value
+    print(f'Adaptive difficulty: {"off" if not value else f"aiming at {value} peeks per 100 words shown"}.')
 
 
 def main(argv=None):
@@ -633,6 +709,15 @@ def main(argv=None):
     p = sub.add_parser('stage')
     p.add_argument('value', choices=['1', '2', '3', '4', 'auto'])
     p.set_defaults(run=stage)
+    p = sub.add_parser('knowledge')
+    p.add_argument('--limit', type=int, default=15)
+    p.set_defaults(run=knowledge_cmd)
+    p = sub.add_parser('why')
+    p.add_argument('word')
+    p.set_defaults(run=why)
+    p = sub.add_parser('challenge')
+    p.add_argument('value', help='off, ' + ', '.join(str(c) for c in knowledge.CHALLENGES[1:]))
+    p.set_defaults(run=challenge_cmd)
     p = sub.add_parser('collector')
     p.add_argument('action', choices=['run', 'install'])
     p.add_argument('--listen', required=True, metavar='HOST:PORT')

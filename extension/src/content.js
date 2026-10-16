@@ -4,6 +4,7 @@ import { flatten, applySwaps, revert, toggle, isSwap, swapWord, SWAP_CLASS } fro
 import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
 import { selector, readable } from './page.js';
+import { wordCount } from './levels.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -15,6 +16,8 @@ let timer = null;
 let generation = 0;
 const memo = new Map();
 const keys = new WeakMap(); // element -> revision:text hash, kept off the DOM so pages can't read it
+const sizes = new WeakMap(); // element -> its word count, for shown records
+const shownContexts = new Set(); // passages already logged as shown in this page load
 const pending = new Map();
 const inflight = new Set();
 const tracked = new Set();
@@ -27,6 +30,7 @@ let tipTimer = null;
 let openTip = null; // { span, at }: a gloss opened by a hover dwell, logged with its dwell when it closes
 // One page load, so the host's log can tell repeat visits apart. getRandomValues also works on plain-http pages.
 const VIEW = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
+let logged = 0; // numbers interactions within the view, so a resent one is stored once
 const send = (msg) => chrome.runtime.sendMessage(msg);
 const on = () => config?.hasKey && !config.paused && siteEnabled(config.settings, location.href) && hasSiteAccess(location.href, config.origins);
 const targets = () => selector(location.href);
@@ -47,22 +51,37 @@ function record(span, event) {
     if (!r?.ok && daily) seen.delete(id);
   }).catch(() => { if (daily) seen.delete(id); });
 }
-// For the host's log: the peeked or flipped word, and every glossed word in its passage by position only, since
-// unpeeked words next to a peek are the evidence that the reader knew them.
-function logInteraction(span, kind, at, dwellMs) {
-  const passage = span.closest(targets());
-  const key = passage && keys.get(passage);
-  if (!key || !on()) return;
+// Every glossed word in a passage by position only (never page text), for the host's log.
+function describe(passage) {
   const spans = [...passage.querySelectorAll(`span.${SWAP_CLASS}`)].filter((s) => isSwap(s) && swapWord(s));
-  if (!spans.includes(span)) return;
   const box = passage.getBoundingClientRect();
   const annotations = spans.map((s) => {
     const r = s.getBoundingClientRect();
     return [swapWord(s), r.left - box.left, r.top - box.top];
   });
-  void send({ type: 'interaction', kind, word: swapWord(span), at, dwellMs, view: VIEW,
-    context: key.slice(key.indexOf(':') + 1), position: spans.indexOf(span),
-    box: [box.left + window.scrollX, box.top + window.scrollY, box.width, box.height], annotations }).catch(() => {});
+  return { spans, annotations, box: [box.left + window.scrollX, box.top + window.scrollY, box.width, box.height] };
+}
+// For the host's log: the peeked or flipped word and its passage, since unpeeked words next to a peek are the
+// evidence that the reader knew them.
+function logInteraction(span, kind, at, dwellMs) {
+  const passage = span.closest(targets());
+  const key = passage && keys.get(passage);
+  if (!key || !on()) return;
+  const { spans, annotations, box } = describe(passage);
+  if (!spans.includes(span)) return;
+  void send({ type: 'interaction', kind, word: swapWord(span), at, dwellMs, view: VIEW, uid: `${VIEW}-${++logged}`,
+    context: key.slice(key.indexOf(':') + 1), position: spans.indexOf(span), box, annotations }).catch(() => {});
+}
+// The first time a passage's Japanese is on screen in this page load: its word count is the peek rate's denominator.
+function logShown(span) {
+  const passage = span.closest(targets());
+  const key = passage && keys.get(passage);
+  const context = key && key.slice(key.indexOf(':') + 1);
+  if (!key || !on() || !sizes.get(passage) || document.visibilityState === 'hidden' || shownContexts.has(context)) return;
+  shownContexts.add(context);
+  const { annotations, box } = describe(passage);
+  void send({ type: 'interaction', kind: 'shown', at: Date.now(), view: VIEW, context, words: sizes.get(passage), box,
+    annotations }).catch(() => {});
 }
 // The gloss appears only after a short dwell; reaching it counts as a peek (the reader needed the meaning).
 function hideTip() {
@@ -94,7 +113,7 @@ function disarmTip(e) {
 }
 function seenVisible() {
   if (document.visibilityState === 'hidden') return;
-  for (const span of visibleWords) if (span.isConnected) record(span, 'seen');
+  for (const span of visibleWords) if (span.isConnected) { record(span, 'seen'); logShown(span); }
 }
 function paint(el, key) {
   if (!on() || keys.get(el) !== key || !readable(el, location.href)) return;
@@ -112,6 +131,7 @@ function consider(el) {
   const text = flatten(el).text;
   const key = `${config.revision}:${hashKey(text)}`;
   keys.set(el, key);
+  sizes.set(el, wordCount(text));
   if (memo.has(key)) { paint(el, key); return; }
   let p = pending.get(key);
   if (!p) { p = { text, els: new Set() }; pending.set(key, p); }

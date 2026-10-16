@@ -7,8 +7,12 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "geminiKey"?: stored key if setup saved one}
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
-  {"type": "log", "items": [{"kind": "peek"|"flip", "word", "at", "dwellMs", "view", "context", "position", "box",
-                             "annotations"}]}  -> {"ok": true, "stored": n}  (see feedback.py)
+  {"type": "log", "items": [{"kind": "peek"|"flip"|"shown", ...}]}  -> {"ok": true, "stored", "duplicates", "rejected"}
+                                                                     (see feedback.py)
+  {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
+
+The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
+evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
 """
 import json
 from pathlib import Path
@@ -19,6 +23,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import feedback  # noqa: E402
+import knowledge  # noqa: E402
 
 MAX_EVENTS = 500
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -52,7 +57,7 @@ def handle(message):
         key = fwlib.home() / 'gemini_key'
         if key.exists():
             reply['geminiKey'] = key.read_text().strip()
-        return reply
+        return dict(reply, **adaptive(state, reply['words']))
     if kind == 'events':
         events = message.get('events')
         if not isinstance(events, list):
@@ -76,8 +81,30 @@ def handle(message):
         collector = fwlib.collector_url()
         if collector:  # one database for every machine; a failure keeps the items queued in the extension
             return feedback.forward(collector, items, 'browser')
-        return {'ok': True, 'stored': feedback.record(items, 'browser')}
+        return dict(feedback.record(items, 'browser'), ok=True)
+    if kind == 'prefs':
+        challenge = message.get('challenge')
+        if not knowledge.valid_challenge(challenge):
+            return {'ok': False, 'error': f'challenge must be one of {list(knowledge.CHALLENGES)}'}
+        with fwlib.editing() as state:
+            state.setdefault('prefs', {})['challenge'] = challenge
+        return {'ok': True, 'challenge': challenge}
     return {'ok': False, 'error': 'unknown message type'}
+
+
+def adaptive(state, words):
+    """Per-word estimates and the dial for the extension; starts a background refresh when they are stale. Never
+    waits on the network: the refresh runs in its own process."""
+    know = knowledge.load()
+    for w in words:
+        entry = (know.get('words') or {}).get(w['ja'])
+        if entry:
+            w['k'], w['sd'] = round(entry['k'], 2), round(entry['sd'], 2)
+    if knowledge.is_stale(know) and (fwlib.collector_url() or feedback.default_path().exists()):
+        knowledge.start_refresh()
+    challenge = knowledge.challenge_of(state)
+    scale = (know.get('controller') or {}).get('scale', 1.0)
+    return {'challenge': challenge, 'budget': round(challenge * scale, 3), 'rate': know.get('rate')}
 
 
 def main():

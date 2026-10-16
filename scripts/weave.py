@@ -14,6 +14,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
+import knowledge  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
 # Stage: (target % of words in Japanese, cap %, max Japanese words in one sentence).
@@ -57,13 +58,20 @@ def tier(word, seen):
     return 'some' if days >= SOME[0] and replies >= SOME[1] else 'rare'
 
 
-def brief(state, seen, recall=None, markup=False):
+def brief(state, seen, recall=None, markup=False, know=None):
     """The per-turn instructions. markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each
-    Japanese word carries its own gloss instead of a footer line."""
+    Japanese word carries its own gloss instead of a footer line. know: knowledge.json (adaptive difficulty), which
+    orders learning words by learning value, most useful first."""
     stage = fwlib.stage_for(state)
     target, cap, per_sentence = STAGES[min(stage, 4)]
     entry = lambda w: w['ja'] if w['status'] == 'known' else f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
-    words = sorted(fwlib.introduced(state), key=lambda w: (w['status'] != 'shaky', -seen.get(w['ja'], {}).get('n', 0)))
+    def usefulness(w):
+        if not know or w['status'] == 'known':
+            return 0
+        estimate = knowledge.word_estimate(know, w['ja'], 't3')
+        return -knowledge.learning_value(estimate[0] if estimate else 0.5)
+    words = sorted(fwlib.introduced(state),
+                   key=lambda w: (usefulness(w), w['status'] != 'shaky', -seen.get(w['ja'], {}).get('n', 0)))
     swap = lambda w: f'{w["en"]} → {w["ja"]}'
     def group(name, show=entry):
         picked = [w for w in words if tier(w, seen) == name]
@@ -351,7 +359,7 @@ def main(argv):
         return 0
     markup = hook and abbr_glosses(state)
     text = brief(state, exposure(), next_recall(state, data.get('session_id')) if hook and not markup else None,
-                 markup=markup)
+                 markup=markup, know=knowledge.load())
     if hook:
         try:
             reply = last_reply(data['transcript_path'])

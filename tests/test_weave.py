@@ -26,6 +26,7 @@ import anki  # noqa: E402
 import feedback  # noqa: E402
 import collector  # noqa: E402
 import kana  # noqa: E402
+import knowledge  # noqa: E402
 
 
 def line(text, day='2026-10-09', sidechain=False):
@@ -149,9 +150,17 @@ class Rules(Home):
         fwlib.promote(state, '2026-10-05', {})
         self.assertEqual(fwlib.find(state, '今')['status'], 'known')
 
-    def test_flip_makes_shaky_and_recovers_after_7_clean_days(self):
+    def test_flip_counts_like_a_peek_day_and_shaky_recovers_after_7_clean_days(self):
         state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, '中', 'flip', '2026-10-04')
+        fwlib.apply_event(state, '前', 'known', '2026-10-01')
+        fwlib.apply_event(state, '前', 'flip', '2026-10-02')  # one flip is often a test click
+        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
+        fwlib.apply_event(state, '前', 'flip', '2026-10-05')
+        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
+        learning = fwlib.find(state, state['words'][0]['ja'])
+        fwlib.apply_event(state, learning['ja'], 'flip', '2026-10-05')
+        self.assertEqual((learning['status'], learning['last_bad']), ('active', '2026-10-05'))  # restarts graduation
+        fwlib.apply_event(state, '中', 'asked', '2026-10-04')
         fwlib.promote(state, '2026-10-10', {})
         self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
         fwlib.apply_event(state, '中', 'peek', '2026-10-09')  # restarts the clock
@@ -170,7 +179,7 @@ class Rules(Home):
         fwlib.apply_event(state, '前', 'peek', '2026-10-08')
         self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
 
-    def test_refill_cap_and_shaky_block(self):
+    def test_refill_cap_and_shaky_words_take_learning_slots(self):
         state = fwlib.new_state('2026-10-01')
         for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
             fwlib.promote(state, day, {})
@@ -180,10 +189,11 @@ class Rules(Home):
         fwlib.promote(state, '2026-10-05', {})
         self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW - 1)  # 20-6+5
         for ja in top[6:11]:
-            fwlib.apply_event(state, ja, 'flip', '2026-10-06')
+            fwlib.apply_event(state, ja, 'asked', '2026-10-06')
         before = sum(w['status'] != 'queue' for w in state['words'])
         fwlib.promote(state, '2026-10-06', {})
-        self.assertEqual(sum(w['status'] != 'queue' for w in state['words']), before)  # 5 shaky: no new words
+        # 14 active + 5 shaky fill 19 of 20 slots: one new word, where 5 shaky words used to stop all new words
+        self.assertEqual(sum(w['status'] != 'queue' for w in state['words']), before + 1)
 
     def test_stage_auto_and_pinned(self):
         state = fwlib.new_state('2026-10-01')
@@ -503,8 +513,10 @@ class Host(Home):
         self.assertNotIn('geminiKey', state)
         self.assertEqual(state['prefs'], {})
         self.assertEqual(events, {'ok': True, 'applied': 2})
-        self.assertEqual(after['words'][0], {'ja': 'もう', 'en': 'already / anymore', 'hint': 'mō', 'kana': 'もう', 'status': 'shaky'})
-        self.assertNotEqual(after['version'], state['version'])
+        mou = next(w for w in after['words'] if w['ja'] == 'もう')  # a flip restarts a learning word's count
+        self.assertEqual({k: mou[k] for k in ('ja', 'en', 'hint', 'kana', 'status')},
+                         {'ja': 'もう', 'en': 'already / anymore', 'hint': 'mō', 'kana': 'もう', 'status': 'active'})
+        self.assertEqual(after['version'], state['version'])  # no status changed: the extension keeps its cache
         self.assertFalse(bad['ok'])
 
     def test_state_reply_carries_prefs(self):
@@ -532,7 +544,7 @@ class Feedback(Home):
         bad = [dict(item, kind='seen'), dict(item, annotations=[['今', 'left', 0]]), dict(item, at=now + 3_600_000),
                dict(item, view='has spaces'), 'not an item']
         reply = fw_host.handle({'type': 'log', 'items': [item, dict(item, kind='flip', dwellMs=0)] + bad})
-        self.assertEqual(reply, {'ok': True, 'stored': 2})
+        self.assertEqual(reply, {'ok': True, 'stored': 2, 'duplicates': 0, 'rejected': 5})
         self.assertFalse(fw_host.handle({'type': 'log', 'items': 'nope'})['ok'])
         rows = feedback.recent()
         self.assertEqual([(r['kind'], r['word'], r['position'], r['dwellMs']) for r in rows],
@@ -541,6 +553,42 @@ class Feedback(Home):
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
             fw.main(['log'])
         self.assertIn('peek 問題  open 1.2s, 2 other glossed words in the passage', out.getvalue())
+
+
+class FeedbackStore(Home):
+    def item(self, **extra):
+        return dict({'kind': 'peek', 'word': '問題', 'at': int(time.time() * 1000) - 1000, 'dwellMs': 900, 'view': 'v1',
+                     'context': 'c1', 'position': 0, 'box': [0, 0, 500, 40], 'annotations': [['問題', 4, 0]]}, **extra)
+
+    def test_resends_are_stored_once_and_shown_records_describe_contexts(self):
+        first = feedback.record([self.item(uid='u1'), self.item(uid='u2')], 'browser')
+        again = feedback.record([self.item(uid='u1')], 'browser')  # the reply was lost, the extension resent it
+        self.assertEqual((first['stored'], again['stored'], again['duplicates']), (2, 0, 1))
+        shown = dict(self.item(), kind='shown', words=48)
+        del shown['word'], shown['position'], shown['dwellMs']
+        self.assertEqual(feedback.record([shown, dict(shown, words=0)], 'browser'), {'stored': 1, 'duplicates': 0, 'rejected': 1})
+        week_old = self.item(at=int(time.time() * 1000) - 6 * feedback.DAY_MS)  # an offline laptop's queue
+        self.assertEqual(feedback.record([week_old], 'browser')['stored'], 1)
+        rows, contexts = feedback.load()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual((contexts[('browser', 'v1', 'c1')]['words'], bool(contexts[('browser', 'v1', 'c1')]['shown_at'])), (48, True))
+
+    def test_schema_1_databases_are_migrated_in_place(self):
+        import sqlite3
+        path = self.home / 'old.sqlite'
+        con = sqlite3.connect(str(path))
+        con.executescript("""CREATE TABLE contexts (surface TEXT NOT NULL, view TEXT NOT NULL, context TEXT NOT NULL,
+            left REAL, top REAL, width REAL, height REAL, annotations TEXT NOT NULL, PRIMARY KEY (surface, view, context));
+            CREATE TABLE interactions (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, surface TEXT NOT NULL, kind TEXT NOT NULL,
+            word TEXT NOT NULL, dwell_ms INTEGER NOT NULL, view TEXT NOT NULL, context TEXT NOT NULL, position INTEGER NOT NULL);
+            INSERT INTO contexts VALUES ('browser', 'v0', 'c0', 0, 0, 1, 1, '[]');
+            INSERT INTO interactions VALUES (1, 5, 'browser', 'peek', 'x', 9, 'v0', 'c0', 0);
+            PRAGMA user_version = 1;""")
+        con.close()
+        self.assertEqual(feedback.record([self.item(uid='u9')], 'browser', path)['stored'], 1)
+        rows, contexts = feedback.load(path)
+        self.assertEqual([r['uid'] for r in rows], [None, 'u9'])
+        self.assertEqual(sorted(c['seq'] for c in contexts.values()), [1, 2])
 
 
 class Collector(Home):
@@ -567,7 +615,8 @@ class Collector(Home):
 
     def test_collector_stores_json_and_refuses_page_style_posts(self):
         import urllib.request
-        self.assertEqual(feedback.forward(self.url, [self.item('pin'), {'kind': 'bad'}], 't3'), {'ok': True, 'stored': 1})
+        self.assertEqual(feedback.forward(self.url, [self.item('pin'), {'kind': 'bad'}], 't3'),
+                         {'ok': True, 'stored': 1, 'duplicates': 0, 'rejected': 1})
         # A web page can only send a "simple" cross-site POST (text/plain, forms) without a preflight: refused.
         form = urllib.request.Request(self.url + '/v1/interactions', data=b'{"surface": "t3", "items": []}',
                                       headers={'Content-Type': 'text/plain'})
@@ -579,11 +628,36 @@ class Collector(Home):
         self.assertEqual(feedback.remote_health(self.url), {'ok': True, 'interactions': 1})
         self.assertEqual([(r['surface'], r['kind']) for r in feedback.remote_recent(self.url)], [('t3', 'pin')])
 
+    def test_mirror_follows_the_collector_and_starts_over_after_a_reset(self):
+        feedback.forward(self.url, [self.item(), self.item('pin')], 't3')
+        mirror = self.home / 'mirror.sqlite'
+        self.assertEqual(feedback.sync_mirror(self.url, mirror), (True, None))
+        feedback.forward(self.url, [self.item('flip')], 'browser')
+        feedback.sync_mirror(self.url, mirror)
+        rows, contexts = feedback.load(mirror)
+        self.assertEqual([r['kind'] for r in rows], ['peek', 'pin', 'flip'])
+        self.assertEqual(set(contexts), {('t3', 'v1', 'm1'), ('browser', 'v1', 'm1')})
+        self.db.unlink()  # the collector's database was reset and holds less than the mirror
+        for suffix in ('-wal', '-shm'):
+            Path(str(self.db) + suffix).unlink(missing_ok=True)
+        feedback.forward(self.url, [self.item()], 't3')
+        self.assertEqual(feedback.sync_mirror(self.url, mirror)[0], True)
+        self.assertEqual([r['kind'] for r in feedback.load(mirror)[0]], ['peek'])
+        self.assertFalse(feedback.sync_mirror('http://127.0.0.1:9', mirror)[0])  # down: the mirror stays as it was
+
+    def test_requests_for_another_host_name_are_refused(self):
+        import urllib.request
+        rebound = urllib.request.Request(self.url + '/v1/export', headers={'Host': 'attacker.example:7853'})
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(rebound, timeout=5)
+        self.assertEqual(refused.exception.code, 421)
+        refused.exception.close()
+
     def test_native_host_forwards_to_the_collector_and_keeps_items_when_it_is_down(self):
         state_dir = fwlib.home()
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / 'collector').write_text(self.url + '\n')
-        self.assertEqual(fw_host.handle({'type': 'log', 'items': [self.item()]}), {'ok': True, 'stored': 1})
+        self.assertEqual(fw_host.handle({'type': 'log', 'items': [self.item()]})['stored'], 1)
         self.assertFalse(feedback.default_path().exists())  # nothing kept locally
         self.assertEqual(feedback.count(self.db), 1)
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
@@ -679,7 +753,7 @@ class Setup(Home):
     def test_rerun_never_resets_or_downgrades(self):
         self.run_setup()  # top 5 become learning words
         with fwlib.editing() as state:
-            fwlib.apply_event(state, 'でも', 'flip')  # shaky
+            fwlib.apply_event(state, 'でも', 'asked')  # shaky
             fwlib.apply_event(state, 'もう', 'seen')
         state = self.run_setup('--known-top', '150', '--sites', 'ask')
         by = {w['ja']: w for w in state['words']}
@@ -802,6 +876,180 @@ class Anki(Home):
         self.assertEqual([w['status'] for w in state['words'][:2]], ['known', 'known'])
         self.assertEqual(fwlib.find(state, '食べる')['status'], 'active')  # first in line for learning
         self.assertEqual(fwlib.find(state, 'taberu')['ja'], '食べる')
+
+
+def episode(rows, contexts, surface, view, notes, opened, at, dwell=1500, kind='peek'):
+    """One reading episode: a context with these glossed words ([word, x, y]) and peeks on the opened indexes."""
+    contexts[(surface, view, 'c')] = {'surface': surface, 'view': view, 'context': 'c', 'annotations': notes,
+                                     'words': None, 'shown_at': None}
+    for i in opened:
+        rows.append({'id': len(rows) + 1, 'at': at + i, 'surface': surface, 'kind': kind, 'word': notes[i][0],
+                     'dwell_ms': dwell, 'view': view, 'context': 'c', 'position': i, 'uid': None})
+
+
+def simulated_reader(seed=1, count=600):
+    """Peeks drawn from known chances: 30 known words (p 0.05), 10 learning (0.5), 10 in between (0.25); each episode
+    glosses 3 to 12 of them. Only episodes with a peek are logged, as in real use."""
+    import random
+    rng = random.Random(seed)
+    truth = dict([(f'k{i}', 3.0) for i in range(30)] + [(f'l{i}', 0.0) for i in range(10)] + [(f'm{i}', 1.1) for i in range(10)])
+    rows, contexts, at = [], {}, 0
+    for e in range(count):
+        at += 60_000
+        picked = rng.sample(list(truth), rng.randint(3, 12))
+        opened = [i for i, w in enumerate(picked) if rng.random() < knowledge.sigmoid(-truth[w])]
+        if opened:
+            episode(rows, contexts, 'browser', f'v{e}', [[w, 10 * i, 0] for i, w in enumerate(picked)], opened, at)
+    return truth, rows, contexts, at + knowledge.SETTLE_MS + 1
+
+
+class Knowledge(Home):
+    NOW = 1_800_000_000_000
+
+    def test_one_word_episodes_carry_no_evidence(self):
+        rows, contexts = [], {}
+        episode(rows, contexts, 'browser', 'v1', [['今', 0, 0]], [0], self.NOW - 3_600_000)
+        words, _ = knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW)
+        self.assertEqual((words['今'].k, words['今'].obs), (1.0, 1))  # logged only because it was peeked: says nothing
+
+    def test_replay_recovers_the_true_peek_chances(self):
+        import statistics
+        truth, rows, contexts, now = simulated_reader()
+        words, _ = knowledge.replay(rows, contexts, set(truth), {}, [], now)
+        p = {g: knowledge.sigmoid(-statistics.median(words[w].k for w in truth if w[0] == g)) for g in 'klm'}
+        self.assertLess(p['k'], 0.1)
+        self.assertTrue(0.38 < p['l'] < 0.62, p)
+        self.assertTrue(0.18 < p['m'] < 0.36, p)
+
+    def test_observations(self):
+        notes = [['今', 0, 0], ['問題', 50, 0], ['でも', 0, 20], ['多分', 0, 40], ['中', 0, 60], ['。', 80, 60]]
+        listed = {'今', '問題', 'でも', '多分', '中'}
+        row = lambda i, dwell=1500, kind='peek': {'kind': kind, 'word': notes[i][0], 'dwell_ms': dwell, 'position': i}
+        context = {'annotations': notes}
+        got = dict((w, (y, weight)) for w, y, weight in knowledge.observations('browser', context, [row(2, 400)], listed))
+        self.assertEqual(got['でも'], (0.6, 1.0))  # a glance: soft evidence
+        self.assertEqual((got['今'], got['問題']), ((0.0, 1.0), (0.0, 1.0)))  # above the peek: read
+        self.assertEqual((got['多分'], got['中']), ((0.0, 0.5), (0.0, 0.25)))  # below it: maybe not
+        self.assertEqual(knowledge.observations('t3', context, [row(2, 200)], listed), [])  # the mouse passing over
+        got = dict((w, y) for w, y, _ in knowledge.observations('t3', context, [row(5, 900, 'pin')], listed))
+        self.assertEqual(got, {})  # the whole sentence was read in English
+        two = [['今', 0, 0], ['。', 10, 0], ['でも', 0, 20], ['？', 10, 20]]
+        got = dict((w, y) for w, y, _ in knowledge.observations('t3', {'annotations': two}, [{'kind': 'pin', 'word': '？',
+                                                                'dwell_ms': 900, 'position': 3}], {'今', 'でも'}))
+        self.assertEqual(got, {'今': 0.0})  # only the translated sentence is excluded
+
+    def test_episodes_split_at_gaps_and_wait_to_settle(self):
+        rows, contexts = [], {}
+        notes = [['今', 0, 0], ['でも', 10, 0]]
+        episode(rows, contexts, 'browser', 'v1', notes, [0], self.NOW - 3_600_000)
+        episode(rows, contexts, 'browser', 'v1', notes, [1], self.NOW - 1_800_000)
+        episode(rows, contexts, 'browser', 'v1', notes, [0], self.NOW - 60_000)  # still being read
+        self.assertEqual([len(e[2]) for e in knowledge.episodes(rows, contexts, self.NOW)], [1, 1])
+
+    def word_entry(self, k, n, command_at=None):
+        w = knowledge.Word(1.0)
+        w.k, w.n, w.recent, w.command_at = k, n, [self.NOW], command_at
+        return w
+
+    def test_plan_moves(self):
+        state = {'words': [word('a', 'shaky'), word('b', 'shaky'), word('c', 'known'), word('d', 'active'),
+                           word('e', 'shaky'), word('f', 'known'), word('g', 'shaky')]}
+        words = {'a': self.word_entry(4, 20), 'b': self.word_entry(4, 1),  # b: too little evidence
+                 'c': self.word_entry(-2, 20), 'd': self.word_entry(-2, 20),
+                 'e': self.word_entry(4, 20, command_at=self.NOW - knowledge.DAY_MS),  # right after `learn`
+                 'f': self.word_entry(0.5, 20), 'g': self.word_entry(4, 20)}
+        moves, veto = knowledge.plan_moves(state, words, {}, self.NOW)
+        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky'), ('g', 'shaky', 'known')])
+        self.assertEqual(veto, ['d'])
+        moves, _ = knowledge.plan_moves(state, words, {'known': 2}, self.NOW)
+        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky')])  # 3 a day per direction
+
+    def test_vetoed_words_wait_to_graduate(self):
+        state = {'words': [dict(word('今', 'active'), days=['2026-10-01', '2026-10-02', '2026-10-03'],
+                                changed='2026-10-01')]}
+        fwlib.promote(state, '2026-10-10', chat={}, veto={'今'})
+        self.assertEqual(state['words'][0]['status'], 'active')
+        fwlib.promote(state, '2026-10-10', chat={}, veto=set())
+        self.assertEqual(state['words'][0]['status'], 'known')
+
+    def test_steer(self):
+        self.assertEqual(knowledge.steer(None, 2, 0.5, 100, 'd1'), {'scale': 1.0, 'day': ''})  # too little reading
+        once = knowledge.steer(None, 2, 0.5, 400, 'd1')
+        self.assertEqual(once, {'scale': 2.0, 'day': 'd1'})
+        self.assertEqual(knowledge.steer(once, 2, 0.5, 400, 'd1'), once)  # once a day
+        self.assertEqual(knowledge.steer(once, 2, 0.01, 400, 'd2')['scale'], 4.0)
+        self.assertEqual(knowledge.steer(once, 0, 0.5, 400, 'd2'), once)  # dial off
+
+    def test_refresh_moves_words_and_ignores_a_shrunk_log(self):
+        with fwlib.editing() as state:
+            listed = [w for w in state['words'] if w['status'] != 'queue']
+            target = listed[0]['ja']
+            fwlib.set_status(listed[0], 'shaky', fwlib.today())
+            others = [w['ja'] for w in listed[1:]]
+        now = time.time()
+        items = []
+        for e in range(40):  # target never opened, another word opened each time
+            notes = [[target, 0, 0]] + [[w, 40 * (i + 1), 0] for i, w in enumerate(others)]
+            items.append({'kind': 'peek', 'word': others[e % len(others)], 'at': int((now - 3600 - e * 60) * 1000),
+                          'dwellMs': 1500, 'view': f'v{e}', 'context': 'c', 'position': 1 + e % len(others),
+                          'box': [0, 0, 500, 40], 'annotations': notes, 'uid': f'u{e}'})
+        feedback.record(items, 'browser')
+        know = knowledge.refresh(now)  # the dial is off: only the day rules move words
+        self.assertEqual((know['rows'], know['moves'], know['challenge']), (40, [], 0))
+        fw_host.handle({'type': 'prefs', 'challenge': 1.5})
+        fwlib.write_json(knowledge.path(), {'rows': 10_000})  # the log used to be longer: don't trust it
+        know = knowledge.refresh(now)
+        self.assertEqual((know['rows'], know['moves']), (40, []))
+        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'shaky')
+        know = knowledge.refresh(now)
+        self.assertEqual([(m['word'], m['to']) for m in know['moves']], [(target, 'known')])
+        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'known')
+        self.assertLess(know['words'][target]['k'] - know['words'][target]['mu'], 3)
+        self.assertGreater(know['words'][target]['k'], know['words'][others[0]]['k'])
+
+    def test_commands_set_knowledge_and_immunity(self):
+        rows, contexts = [], {}
+        knowledge.log_command(['今'], 'learn', now=self.NOW / 1000 - 3600)
+        episode(rows, contexts, 'browser', 'v1', [['今', 0, 0], ['でも', 10, 0]], [1], self.NOW - 1_800_000)
+        words, _ = knowledge.replay(rows, contexts, {'今', 'でも'}, {'今': 400}, knowledge.read_commands(), self.NOW)
+        self.assertEqual(words['今'].mu, 3.0)  # a long Anki interval
+        self.assertGreater(words['今'].k, 0)  # learn set it to 0, then it went unopened next to a peek
+        self.assertLess(words['今'].k, 1)
+        self.assertEqual(words['今'].command_at, self.NOW - 3_600_000)
+
+    def test_host_and_commands_carry_the_dial(self):
+        self.assertEqual(fw_host.handle({'type': 'prefs', 'challenge': 1.5}), {'ok': True, 'challenge': 1.5})
+        self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': True})['ok'])
+        self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': 7})['ok'])
+        state = fw_host.handle({'type': 'state'})
+        first = state['words'][0]['ja']
+        fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'},
+                                            'words': {first: {'k': 0.3, 'sd': 0.9}}})
+        state = fw_host.handle({'type': 'state'})
+        self.assertEqual((state['challenge'], state['budget']), (1.5, 3.0))
+        self.assertEqual({k: state['words'][0][k] for k in ('k', 'sd')}, {'k': 0.3, 'sd': 0.9})
+        self.assertNotIn('k', state['words'][1])
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['challenge', 'off'])
+            fw.main(['why', first])
+        self.assertIn('Adaptive difficulty: off.', out.getvalue())
+        self.assertIn('no evidence in the gloss log yet', out.getvalue())  # the refresh found no log
+        self.assertEqual(fw_host.handle({'type': 'state'})['challenge'], 0)
+        with self.assertRaises(SystemExit):
+            fw.main(['challenge', '5'])
+
+    def test_the_extension_offers_the_same_dial(self):
+        import re
+        js = (ROOT / 'extension' / 'src' / 'settings.js').read_text(encoding='utf-8')
+        values = re.search(r'export const CHALLENGES = \[([^\]]*)\]', js).group(1)
+        self.assertEqual(tuple(float(v) for v in values.split(',')), knowledge.CHALLENGES)
+
+    def test_chat_orders_learning_words_by_learning_value(self):
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False,
+                 'words': [word('一緒に', 'active'), word('結局', 'shaky'), word('多分', 'active')]}
+        know = {'offset': {'t3': 0.0}, 'words': {'多分': {'k': 1.1, 'sd': 0.5}, '一緒に': {'k': 4, 'sd': 0.5}}}
+        line = weave.brief(state, {}, know=know).split('\n')[1]
+        self.assertTrue(line.endswith(': 多分 = meaning, "hint"; 結局 = meaning, "hint"; 一緒に = meaning, "hint"'), line)
 
 
 if __name__ == '__main__':

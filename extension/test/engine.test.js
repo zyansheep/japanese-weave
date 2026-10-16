@@ -84,29 +84,15 @@ describe('engine', () => {
     await requestSwaps(args);
     expect(models.slice(3)).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
   });
-  test('caps density per sentence, one use per word, learning words kept before known filler', async () => {
-    const words = [
-      { ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' },
-      { ja: 'でも', en: 'but', hint: 'demo', status: 'known' },
-      { ja: 'もう', en: 'already', hint: 'mō', status: 'known' },
-      { ja: 'とても', en: 'very', hint: 'totemo', status: 'known' },
-    ];
-    const swaps = [
-      { o: 'but', f: 'でも', ctx: 'x but' }, { o: 'very', f: 'とても', ctx: 'very' }, { o: 'but', f: 'でも', ctx: 'y but' },
-      { o: 'already', f: 'もう', ctx: 'already' }, { o: 'big', f: '大きい', ctx: 'a big' },
-    ];
-    const fetchImpl = async () => geminiReply([{ id: 'a', swaps }]);
-    const text = 'It was a big day and a very long one, but fine.';
-    const r = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 1, batch: [{ id: 'a', text }], words, fetchImpl });
-    expect(r.results.a.map((s) => s.f)).toEqual(['大きい']);
-    const two = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 2, batch: [{ id: 'a', text }], words, fetchImpl });
-    expect(two.results.a.map((s) => s.f)).toEqual(['でも', '大きい']);
-    // A density sends each passage a target (12 words at 10% -> 1) and caps it there, learning words first.
+  test('returns every validated swap, uncapped; a density sends each passage a target', async () => {
+    const words = [{ ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' }, { ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
+    const swaps = [{ o: 'but', f: 'でも', ctx: 'x but' }, { o: 'big', f: '大きい', ctx: 'a big' }, { o: 'very', f: 'とても', ctx: 'very' }];
     const sent = [];
-    const tracked = async (url, init) => { sent.push(JSON.parse(init.body).contents[0].parts[0].text); return fetchImpl(); };
-    const dense = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 2, batch: [{ id: 'a', text }], words, fetchImpl: tracked, density: 10 });
+    const fetchImpl = async (url, init) => { sent.push(JSON.parse(init.body).contents[0].parts[0].text); return geminiReply([{ id: 'a', swaps }]); };
+    const text = 'It was a big day and a very long one, but fine.';
+    const r = await requestSwaps({ apiKey: 'K', model: 'gemini-3.5-flash-lite', level: 1, batch: [{ id: 'a', text }], words, fetchImpl, density: 10 });
     expect(sent[0]).toContain('"target":1');
-    expect(dense.results.a.map((s) => s.f)).toEqual(['大きい']);
+    expect(r.results.a.map((s) => s.f)).toEqual(['でも', '大きい']); // とても isn't on the list
   });
   test('usage lists every billed attempt, including an unusable answer before the fallback', async () => {
     const replies = [

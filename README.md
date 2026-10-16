@@ -69,6 +69,7 @@ way round.
 | `/japanese-weave:known <word>` | Mark a word known: kanji, kana or romaji (`多分`, `たぶん`, `tabun`) |
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
+| `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
@@ -95,9 +96,12 @@ whose name contains NAME.
 ## How words advance
 
 - **Exposure day**: a day you saw the word in a chat reply, or on a web page.
-- **Learning (active)**: up to 20 at a time; at most 5 new words a day, and none while 5 or more are shaky.
+- **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day.
 - **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
-- **Flip or `learn` → shaky**; **shaky → known** after 7 days with no flip or peek.
+- **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
+  often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or
+  peek. With adaptive difficulty on, evidence from the gloss log can also move words (see
+  [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md)).
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
 
 | Stage | Japanese in a reply | Per sentence | Shape |
@@ -132,6 +136,19 @@ fw.py setup --collector http://functor:7853            # on each browser machine
 
 T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL` set to the collector's
 `/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches.
+
+## Adaptive difficulty
+
+From the log, Japanese Weave estimates for every word how likely you are to open its gloss, and uses that to keep
+web pages at a steady level: set a challenge (`fw.py challenge 1.5`, the command above, or the popup), the number of
+glosses you'd open per 100 words shown, and each page gets the learning words closest to a 25% chance of being
+opened, as many as fit that budget, with known words filling the rest. A daily controller nudges the budget until
+your real rate matches the dial. Chat uses the same estimates to order its learning words. Strong evidence also moves
+words between learning and known, a few a day. It's off (0) by default.
+
+`fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
+one word's estimate and every observation behind it. The design, with its sources:
+[docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
 
 ## Privacy
 

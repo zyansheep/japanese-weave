@@ -28,9 +28,8 @@ LEXICON = PLUGIN_ROOT / 'data' / 'lexicon.csv'
 ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Anki review words, ahead of the base list
 
 # ---- promotion rules (documented in README "How words advance") ----
-WINDOW = 20             # target number of active (learning) words
+WINDOW = 20             # learning slots: active plus shaky words
 NEW_PER_DAY = 5         # new words per day, including the first day
-SHAKY_BLOCK = 5         # no new words while this many or more are shaky
 GRADUATE_DAYS = 3       # active -> known: exposure days needed, and length of the clean streak
 SHAKY_DAYS = 7          # shaky -> known: days with no new flip, asked or peek
 PEEK_WINDOW = 7         # a known word peeked on 2 different days within this many days becomes shaky
@@ -287,14 +286,12 @@ def exposure_days(word, chat=None):
 
 
 def refill(state, day, cap=NEW_PER_DAY):
-    """Fill the learning set up to WINDOW from lexicon order, at most cap new words per day, none while
-    SHAKY_BLOCK or more words are shaky."""
+    """Fill the learning set (active plus shaky words, which are being relearned) up to WINDOW from lexicon order,
+    at most cap new words per day."""
     words = state['words']
-    if sum(w['status'] == 'shaky' for w in words) >= SHAKY_BLOCK:
-        return 0
     last_day, count = state.get('refilled') or ['', 0]
     count = count if last_day == day else 0
-    room = min(WINDOW - sum(w['status'] == 'active' for w in words), cap - count)
+    room = min(WINDOW - sum(w['status'] in ('active', 'shaky') for w in words), cap - count)
     added = 0
     for w in words:
         if added >= room:
@@ -319,13 +316,19 @@ def graduates(word, chat=None):
     return clean and 'seen' in days.values()
 
 
-def promote(state, day=None, chat=None):
+def graduation_veto():
+    """Active words the gloss log says aren't known yet (knowledge.py): day counts alone don't graduate them."""
+    return set((read_json(home() / 'knowledge.json', {}) or {}).get('veto') or [])
+
+
+def promote(state, day=None, chat=None, veto=None):
     """Applies the promotion rules for today. Idempotent: safe to call as often as you like."""
     day = day or today()
     if chat is None:
         chat = (read_json(home() / 'exposure.json', {}) or {}).get('words', {})
+    veto = graduation_veto() if veto is None else veto
     for w in state['words']:
-        if w['status'] == 'active' and graduates(w, chat):
+        if w['status'] == 'active' and w['ja'] not in veto and graduates(w, chat):
             set_status(w, 'known', day)
         elif w['status'] == 'shaky' and days_between(w['last_bad'] or w['changed'], day) >= SHAKY_DAYS:
             set_status(w, 'known', day)
@@ -340,9 +343,10 @@ EVENTS = ('seen', 'assumed', 'flip', 'asked', 'peek', 'known', 'active')
 def apply_event(state, ja, kind, day=None):
     """Extension and command events. Returns False for unknown words or kinds.
 
-    seen / assumed: exposure. flip (clicked back to English) / asked: shaky. peek (hovered for the meaning):
-    blocks graduation of an active word, restarts a shaky word's clock, and a known word peeked on 2 different
-    days within PEEK_WINDOW days becomes shaky. known / active: set directly (commands)."""
+    seen / assumed: exposure. asked: shaky. peek (hovered for the meaning) and flip (clicked back to English): block
+    graduation of an active word (a flip restarts its count), restart a shaky word's clock, and a known word opened
+    on 2 different days within PEEK_WINDOW days becomes shaky (one flip is often a test click). known / active: set
+    directly (commands)."""
     day = day or today()
     w = find(state, ja)
     if w is None or kind not in EVENTS:
@@ -351,10 +355,12 @@ def apply_event(state, ja, kind, day=None):
         field = 'days' if kind == 'seen' else 'assumed'
         if w['status'] != 'queue' and day not in (w.get(field) or []):
             w[field] = sorted((w.get(field) or []) + [day])[-60:]
-    elif kind in ('flip', 'asked'):
+    elif kind == 'asked':
         w['last_bad'] = day
         set_status(w, 'shaky', day)
-    elif kind == 'peek':
+    elif kind in ('peek', 'flip'):
+        if kind == 'flip' and w['status'] == 'active':
+            w['last_bad'] = day  # restarts its graduation count
         peeks = w.setdefault('peeks', [])
         if not peeks or peeks[-1] != day:
             peeks.append(day)

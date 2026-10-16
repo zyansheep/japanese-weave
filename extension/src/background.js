@@ -4,9 +4,9 @@
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
 import { hashKey } from './hash.js';
-import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog } from './hostsource.js';
+import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, localDay } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -35,7 +35,9 @@ const ready = (async () => {
   await store.set({ settings: cleanSettings(settings) });
 })();
 
-// What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped.
+// What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped. The
+// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial: the cache holds every validated
+// candidate and the dial only changes which of them selectSwaps picks, so turning it never costs a model call.
 async function context() {
   await ready;
   const data = await store.get(['settings', 'wordState', 'apiKey', 'hostKey', 'epoch']);
@@ -46,8 +48,10 @@ async function context() {
   const hasKey = !!(data.apiKey || data.hostKey);
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
-  const revision = hashKey(JSON.stringify([data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
-  return { settings, level, revision, hasKey, paused, origins, stage: state?.stage || 0 };
+  const cacheRevision = hashKey(JSON.stringify(['candidates', data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
+  const challenge = state?.challenge || 0;
+  const revision = hashKey(JSON.stringify([cacheRevision, challenge]));
+  return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0 };
 }
 
 const activeOn = (ctx, url) => ctx.hasKey && !ctx.paused && siteEnabled(ctx.settings, url) && hasSiteAccess(url, ctx.origins);
@@ -64,32 +68,48 @@ async function swaps(msg, sender) {
   if (!Array.isArray(msg.items) || msg.items.length > 8) throw new Error('Invalid text batch');
   const items = msg.items.filter((i) => i && typeof i.text === 'string' && i.text.length <= 2000 &&
     wordCount(i.text) >= 6 && !isZeroJapanese(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
-  const results = await cache.getMany(items.map((i) => i.key));
-  const misses = items.filter((i) => !(i.key in results));
-  if (!misses.length) return { results };
+  const cacheKey = (i) => `${ctx.cacheRevision}:${hashKey(i.text)}`;
+  const cached = await cache.getMany(items.map(cacheKey));
+  const choose = await chooser(ctx);
+  const picked = (candidates) => Object.fromEntries(items.filter((i) => cacheKey(i) in candidates)
+    .map((i) => [i.key, choose(i.text, candidates[cacheKey(i)])]));
+  const misses = items.filter((i) => !(cacheKey(i) in cached));
+  if (!misses.length) return { results: picked(cached) };
   try {
     const fresh = await modelCall(async () => {
-      if ((await context()).revision !== ctx.revision) return null;
+      if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
       if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
       const { wordState, apiKey, hostKey } = await store.get(['wordState', 'apiKey', 'hostKey']);
       const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
       return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, words: wordState?.words, fetchImpl,
-        shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: i.key, text: i.text })),
+        shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: cacheKey(i), text: i.text })),
         density: ctx.settings.density });
     });
     return await locked(async () => {
       await recordSpent(fresh?.usage);
-      if (!fresh || (await context()).revision !== ctx.revision) return { results: {}, stale: true };
-      await cache.setMany(fresh.results);
+      const now = await context();
+      if (!fresh || now.cacheRevision !== ctx.cacheRevision) return { results: {}, stale: true };
+      await cache.setMany(fresh.results); // still good candidates if only the dial moved meanwhile
       await store.set({ modelStatus: { at: Date.now(), error: '', model: fresh.model } });
-      return { results: { ...results, ...fresh.results } };
+      return now.revision === ctx.revision ? { results: picked({ ...cached, ...fresh.results }) } : { results: {}, stale: true };
     });
   } catch (e) {
     await locked(() => recordSpent(e?.usage));
     const error = e?.message || 'Model request failed';
     await store.set({ modelStatus: { at: Date.now(), error } });
-    return { results, error, retryAfterMs: e?.retryAfterMs };
+    return { results: picked(cached), error, retryAfterMs: e?.retryAfterMs };
   }
+}
+
+// Picks each passage's swaps from its cached candidates (selectSwaps): the dial's budget and the host's per-word
+// estimates, seeded by the passage and the day so a passage repaints the same way.
+async function chooser(ctx) {
+  const { wordState } = await store.get(['wordState']);
+  const day = localDay();
+  const shown = await shownToday(chromeStorage, day);
+  const budgetPer100 = ctx.challenge ? wordState?.budget || ctx.challenge : 0;
+  return (text, swaps) => selectSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
+    shownToday: shown, seed: parseInt(hashKey(`${day}:${text}`).slice(-8), 16) });
 }
 
 // Every billed attempt counts toward usage, including an answer that was unusable before the fallback.
@@ -123,7 +143,8 @@ async function record(msg, sender) {
 async function logInteraction(msg, sender) {
   const ctx = await context();
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
-  if (!item || !(await readCached(chromeStorage))?.words.some((w) => exactJa(w.ja) === exactJa(item.word))) return { ok: false };
+  const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
+  if (!item || (item.kind !== 'shown' && !(await listed(item.word)))) return { ok: false };
   await locked(() => queueLog(chromeStorage, [item]));
   scheduleFlush();
   return { ok: true };
@@ -136,6 +157,13 @@ async function syncWords() {
   if (res.changed) await locked(() => cache.clear());
   await broadcast();
   return { ok: !res.error, error: res.error, count: res.state?.words?.length || 0, stage: res.state?.stage || 0 };
+}
+
+// The adaptive-difficulty dial (peeks per 100 words shown, 0: off) lives in the word state, shared with chat.
+async function setChallenge(msg) {
+  const reply = await send({ type: 'prefs', challenge: msg.challenge });
+  if (!reply?.ok) return { ok: false, error: reply?.error || 'the Japanese Weave host refused the setting' };
+  return syncWords();
 }
 
 async function clearCache() {
@@ -172,6 +200,7 @@ async function status() {
   const config = await context();
   const data = await store.get(['wordState', 'apiKey', 'hostKey', 'modelStatus']);
   return { config, words: data.wordState?.words?.length || 0, fetchedAt: data.wordState?.fetchedAt || 0,
+    budget: data.wordState?.budget || 0, rate: data.wordState?.rate || null,
     pastedKey: !!data.apiKey, hostKey: !!data.hostKey, modelStatus: data.modelStatus || null,
     usage: await readUsage(chromeStorage) };
 }
@@ -188,6 +217,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     interaction: () => logInteraction(msg, sender),
     status, syncWords, clearCache,
     save: () => save(msg),
+    setChallenge: () => setChallenge(msg),
   };
   if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));

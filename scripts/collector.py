@@ -5,18 +5,22 @@ machine and reach it over a private network such as Tailscale. Python 3.9+, stan
 
   collector.py --listen HOST:PORT [--db PATH]
 
-  POST /v1/interactions  {"surface": "browser"|"t3", "items": [...]}  -> {"ok": true, "stored": n}  (see feedback.py)
+  POST /v1/interactions  {"surface": "browser"|"t3", "items": [...]}
+                         -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py)
+  GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (knowledge.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                                   -> {"ok": true, "interactions": n}
 
 Bind it to the private network's address only (the Tailscale IP), not to every interface. Writes must be JSON
 (Content-Type: application/json): a web page can't send that cross-site without a CORS preflight, which this server
-never approves, so pages open in a browser on the network can't write to the log.
+never approves, so pages open in a browser on the network can't write to the log. Every request must also be
+addressed to this machine by name or address (the Host header), so a page can't reach it through DNS rebinding.
 """
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import socket
 import sys
 from urllib.parse import parse_qs, urlsplit
 
@@ -38,19 +42,39 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def host_allowed(self):
+        host = (self.headers.get('Host') or '').rsplit(':', 1)[0].strip('[]').lower()
+        name = socket.gethostname().lower()
+        if host in (self.server.server_address[0], 'localhost', '127.0.0.1', name) or host.startswith(name + '.'):
+            return True
+        self.reply(421, {'ok': False, 'error': 'address this collector by its own host name'})
+        return False
+
     def do_GET(self):
+        if not self.host_allowed():
+            return
         url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        number = lambda name, default: int(query.get(name, [str(default)])[0])
+        if url.path == '/v1/export':
+            try:
+                after, seq, limit = number('after', 0), number('seq', 0), max(1, min(feedback.EXPORT_PAGE, number('limit', 1000)))
+            except ValueError:
+                return self.reply(400, {'ok': False, 'error': 'after, seq and limit must be numbers'})
+            return self.reply(200, dict(feedback.export(after, seq, limit, self.db), ok=True))
         if url.path == '/v1/health':
             return self.reply(200, {'ok': True, 'interactions': feedback.count(self.db)})
         if url.path == '/v1/recent':
             try:
-                limit = max(1, min(500, int(parse_qs(url.query).get('limit', ['20'])[0])))
+                limit = max(1, min(500, number('limit', 20)))
             except ValueError:
                 return self.reply(400, {'ok': False, 'error': 'limit must be a number'})
             return self.reply(200, {'ok': True, 'items': feedback.recent(limit, self.db)})
         self.reply(404, {'ok': False, 'error': 'not found'})
 
     def do_POST(self):
+        if not self.host_allowed():
+            return
         if urlsplit(self.path).path != '/v1/interactions':
             return self.reply(404, {'ok': False, 'error': 'not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
@@ -67,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {'ok': False, 'error': 'body is not JSON'})
         if not isinstance(body, dict) or body.get('surface') not in feedback.SURFACES or not isinstance(body.get('items'), list):
             return self.reply(400, {'ok': False, 'error': 'need {"surface": "browser"|"t3", "items": [...]}'})
-        self.reply(200, {'ok': True, 'stored': feedback.record(body['items'], body['surface'], self.db)})
+        self.reply(200, dict(feedback.record(body['items'], body['surface'], self.db), ok=True))
 
     def log_message(self, fmt, *args):  # one line per request on stderr, for journalctl
         sys.stderr.write(f'{self.address_string()} {fmt % args}\n')

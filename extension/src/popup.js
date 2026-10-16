@@ -1,6 +1,6 @@
 import { resolveLevel } from './levels.js';
 import { MODELS } from './gemini.js';
-import { siteEnabled, siteOn, hasSiteAccess, DENSITIES } from './settings.js';
+import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -47,6 +47,11 @@ async function refresh() {
   const amount = s.density ? `${s.density}% of words` : effective <= 1 ? '~1 word per 1–2 sentences' : '1–2 words per sentence';
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
   $('density').value = String(s.density || 0);
+  $('challenge').value = String(c.challenge || 0);
+  $('challenge').disabled = !status.words; // the dial lives in the native host's word state
+  const rate = status.rate;
+  $('rateInfo').textContent = rate ? `${rate.per100} per 100 words (${rate.peeks} in ${rate.shownWords}, ${rate.days} days)`
+    : status.words ? 'nothing logged yet' : 'needs the native host';
   $('usageToday').textContent = usageLine(status.usage?.today);
   $('usageTotal').textContent = status.usage?.total?.calls ? `${usageLine(status.usage.total)} since ${status.usage.since}` : 'none yet';
   $('levelOverride').value = String(s.levelOverride || 0);
@@ -104,6 +109,13 @@ for (const value of DENSITIES) {
   $('density').appendChild(opt);
 }
 
+for (const value of CHALLENGES) {
+  const opt = document.createElement('option');
+  opt.value = String(value);
+  opt.textContent = value ? `${value} peeks per 100 words` : 'Off';
+  $('challenge').appendChild(opt);
+}
+
 for (const [id, label] of Object.entries(MODELS)) {
   const opt = document.createElement('option');
   opt.value = id;
@@ -116,6 +128,11 @@ $('newSitesEnabled').addEventListener('change', (e) => run(() => save({ settings
 $('levelOverride').addEventListener('change', (e) => run(() => save({ settings: { levelOverride: Number(e.target.value) || 0 } })));
 $('model').addEventListener('change', (e) => run(() => save({ settings: { model: e.target.value } })));
 $('density').addEventListener('change', (e) => run(() => save({ settings: { density: Number(e.target.value) || 0 } })));
+$('challenge').addEventListener('change', (e) => run(async () => {
+  const res = await send({ type: 'setChallenge', challenge: Number(e.target.value) });
+  await refresh();
+  if (!res?.ok) $('notice').textContent = `Could not set the challenge (${res?.error || 'no native host'})`;
+}));
 $('apiKey').addEventListener('change', (e) => run(() => save({ apiKey: e.target.value })));
 $('siteEnabled').addEventListener('change', (e) => run(async () => {
   const enabled = e.target.checked;
