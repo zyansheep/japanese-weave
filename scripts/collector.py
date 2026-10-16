@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
     def host_allowed(self):
         host = (self.headers.get('Host') or '').rsplit(':', 1)[0].strip('[]').lower()
         name = socket.gethostname().lower()
-        if host in (self.server.server_address[0], 'localhost', '127.0.0.1', name) or host.startswith(name + '.'):
+        if host in (self.server.server_address[0], 'localhost', '127.0.0.1', name):  # exact: no lookalike names
             return True
         self.reply(421, {'ok': False, 'error': 'address this collector by its own host name'})
         return False
@@ -152,6 +152,9 @@ def main(argv=None):
     parser.add_argument('--listen', required=True, metavar='HOST:PORT', help='for example 100.64.0.4:7853')
     parser.add_argument('--db', help='SQLite file (default: interactions.sqlite in the state dir)')
     args = parser.parse_args(argv)
+    if fwlib.collector_url():
+        sys.exit(f'{fwlib.home()} points at a collector ({fwlib.collector_url()}): the collector serves its own state '
+                 'dir, so remove its "collector" file first.')
     host, _, port = args.listen.rpartition(':')
     serve(host.strip('[]'), int(port), args.db)
 

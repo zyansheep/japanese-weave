@@ -47,7 +47,8 @@ class Home(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
-        self.env = mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': str(self.home / 'fw')})
+        self.env = mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': str(self.home / 'fw'),
+                                                'JAPANESE_WEAVE_TRANSCRIPTS': str(self.home / 'no-chats')})  # never yours
         self.env.start()
 
     def tearDown(self):
@@ -727,6 +728,9 @@ class Hub(Home):
         self.assertEqual(fwlib.load_state(), self.served())  # the cache was refreshed after each change
         peeked = self.learning(cache)[1]
         self.assertEqual(fw_host.handle({'type': 'events', 'events': [{'word': peeked, 'kind': 'peek'}]})['applied'], 1)
+        self.assertEqual(fwlib.find(fwlib.load_state(), peeked)['peeks'], [fwlib.today()])  # shown here at once
+        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [])  # the browser never waits: sent by a sync
+        self.assertEqual(hub.sync(), (True, None))
         self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [fwlib.today()])
         self.assertEqual(fw_host.handle({'type': 'state'})['version'], fwlib.version(self.served()))
         self.assertEqual([k for k, _ in self.ops()], ['seed', 'mark', 'set', 'events'])  # seed: its own setup
@@ -803,6 +807,51 @@ class Hub(Home):
         self.assertFalse((fwlib.home() / fwlib.ANKI_LEXICON).exists())
         self.assertEqual([w['ja'] for w in fwlib.load_state()['words'][:2]], ['猫', '机'])
         self.assertEqual(fwlib.find(fwlib.load_state(), '猫')['status'], 'known')
+
+    def test_a_machine_with_its_own_state_keeps_it_when_the_first_pull_replaces_it(self):
+        with fwlib.using_home(self.home / 'fw'):  # this machine had its own list before the collector file appeared
+            (fwlib.home() / 'collector').unlink()
+            own = fwlib.load_state()
+            fwlib.write_json(fwlib.home() / 'exposure.json', {'words': {}, 'offsets': {'/chat.jsonl': 42}})
+        self.join(self.url)
+        self.assertEqual(hub.sync(scan=False), (True, None))  # e.g. the hook's background sync, before setup ran
+        self.assertEqual(fwlib.read_json(fwlib.home() / hub.BEFORE / 'state.json'), own)
+        self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.SCAN), {'offsets': {'/chat.jsonl': 42}})
+        self.assertEqual(fwlib.load_state(), self.served())
+
+    def test_one_failing_op_never_holds_up_the_rest(self):
+        fwlib.load_state()
+        self.assertIn('day', hub.validate(hub.stamp({'kind': 'noticed', 'day': '2025-02-30'})))
+        self.assertIn('at', hub.validate(hub.stamp({'kind': 'noticed', 'at': 'soon'})))
+        self.assertFalse(fw_host.handle({'type': 'events', 'events': [{'word': 'x', 'kind': 'peek', 'day': '2025-02-30'}]})
+                         ['applied'])  # an impossible day becomes today, never stored
+        self.assertEqual(hub.pending()[0]['events'][0]['day'], fwlib.today())
+        real = hub._apply_here
+        calls = []
+
+        def flaky(op):
+            calls.append(op['kind'])
+            if len(calls) == 1:
+                raise KeyError('boom')
+            return real(op)
+        with mock.patch.object(hub, '_apply_here', flaky), mock.patch('sys.stderr', new=io.StringIO()):
+            hub.submit({'kind': 'set', 'paused': True}, wait=False)
+            self.assertEqual(hub.sync(scan=False), (True, None))
+        self.assertEqual(calls, ['events', 'set'])
+        self.assertEqual((hub.pending(), self.served()['paused']), ([], True))
+
+    def test_the_collector_serves_only_its_own_state_and_name(self):
+        import urllib.request
+        lookalike = urllib.request.Request(self.url + '/v1/state', headers={'Host': socket.gethostname() + '.evil.example'})
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(lookalike, timeout=5)
+        self.assertEqual(refused.exception.code, 421)
+        refused.exception.close()
+        with fwlib.using_home(self.server_home):
+            (fwlib.home() / 'collector').write_text('http://elsewhere:7853\n')
+            with self.assertRaises(SystemExit) as stopped:
+                collector.main(['--listen', '127.0.0.1:0'])
+        self.assertIn('remove its "collector" file', str(stopped.exception.code))
 
     def test_bad_ops_are_refused_one_by_one(self):
         good = hub.stamp({'kind': 'set', 'paused': True})
@@ -958,9 +1007,12 @@ class Setup(Home):
         self.assertIn('did not answer', str(refused.exception.code))
         self.assertIsNone(fwlib.collector_url())  # left as it was
         own = self.run_setup()
-        self.run_setup('--collector', 'http://127.0.0.1:9/')  # down for now: this state becomes the cache meanwhile
-        self.assertEqual(fwlib.collector_url(), 'http://127.0.0.1:9')
-        self.assertEqual(json.loads((fwlib.home() / 'before-collector' / 'state.json').read_text()), own)
+        with self.assertRaises(SystemExit) as refused:  # this machine has its own list: only for a confirmed state
+            self.run_setup('--collector', 'http://127.0.0.1:9/')
+        self.assertIn('nothing changed', str(refused.exception.code))
+        self.assertIsNone(fwlib.collector_url())
+        self.assertEqual(fwlib.load_state(), own)
+        (fwlib.home() / 'collector').write_text('http://127.0.0.1:9\n')
         self.run_setup('--collector', 'off')
         self.assertIsNone(fwlib.collector_url())
         with self.assertRaises(SystemExit), mock.patch('sys.stderr', new=io.StringIO()):

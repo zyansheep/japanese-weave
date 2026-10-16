@@ -14,12 +14,12 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
 evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
 
-With a collector set, the state lives on the collector: replies come from this machine's cache (refreshed when it is
-over STATE_MAX_AGE seconds old) and changes go to the collector (hub.py), waiting here while it can't be reached.
+With a collector set, the state lives on the collector: replies come from this machine's cache and changes are queued
+here and shown in it at once; a background sync (refreshed when the cache is over STATE_MAX_AGE seconds old) sends
+them and refreshes the cache. The browser never waits on the network.
 """
 import json
 from pathlib import Path
-import re
 import struct
 import sys
 
@@ -31,7 +31,6 @@ import knowledge  # noqa: E402
 
 MAX_EVENTS = 500
 STATE_MAX_AGE = 60
-DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
 def read_message(stream):
@@ -56,7 +55,7 @@ def handle(message):
     if kind == 'ping':
         return {'ok': True, 'host': 1}
     if kind == 'state':
-        state, _ = hub.current(STATE_MAX_AGE)  # here: applies today's promotion; with a collector: its cache
+        state, _ = hub.current(STATE_MAX_AGE, wait=False)  # here: applies today's promotion; else the cache
         reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {})
         key = fwlib.home() / 'gemini_key'
         if key.exists():
@@ -72,12 +71,12 @@ def handle(message):
             if not isinstance(event, dict) or event.get('kind') not in ('seen', 'flip', 'peek'):
                 continue
             word = event.get('word')
-            day = event.get('day') if isinstance(event.get('day'), str) and DAY.match(event['day']) else today
+            day = event['day'] if hub.is_day(event.get('day')) else today
             if isinstance(word, str) and 0 < len(word) <= 100:
                 clean.append({'word': word, 'kind': event['kind'], 'day': min(day, today)})
         if not clean:
             return {'ok': True, 'applied': 0}
-        return {'ok': True, 'applied': hub.submit({'kind': 'events', 'events': clean}).get('applied', 0)}
+        return {'ok': True, 'applied': hub.submit({'kind': 'events', 'events': clean}, wait=False).get('applied', 0)}
     if kind == 'log':
         items = message.get('items')
         if not isinstance(items, list):
@@ -90,7 +89,7 @@ def handle(message):
         challenge = message.get('challenge')
         if not knowledge.valid_challenge(challenge):
             return {'ok': False, 'error': f'challenge must be one of {list(knowledge.CHALLENGES)}'}
-        hub.submit({'kind': 'set', 'prefs': {'challenge': challenge}})
+        hub.submit({'kind': 'set', 'prefs': {'challenge': challenge}}, wait=False)
         return {'ok': True, 'challenge': challenge}
     return {'ok': False, 'error': 'unknown message type'}
 

@@ -348,12 +348,9 @@ def setup(args):
     print('Chat weaving runs wherever the plugin is enabled; sessions opened from now on pick it up.')
 
 
-MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')
-
-
 def join_collector(home, collector):
-    """None when this machine can keep a cache of the collector's word state, else why not. The first time, this
-    machine's own state (if any) is kept in before-collector/, since the collector's replaces it."""
+    """None when this machine can keep a cache of the collector's word state, else why not. The first pull keeps this
+    machine's own state (if any) in before-collector/ (hub.keep_own_state), since the collector's replaces it."""
     health = feedback.remote_health(collector)
     if health.get('ok') and health.get('host') == socket.gethostname() and health.get('home') == str(home):
         return (f'{collector} is this machine, serving this state dir: the word state already lives here, so set up '
@@ -362,20 +359,19 @@ def join_collector(home, collector):
     if health.get('ok') and health.get('state') is False:
         if own:
             return (f'{collector} has no word state yet. To move this machine\'s there, stop the collector, copy '
-                    f'{", ".join(n for n in MOVED if (home / n).exists())} from {home} into its state dir, start it, '
-                    'and rerun this.')
+                    f'{", ".join(n for n in hub.MOVED if (home / n).exists())} from {home} into its state dir, start '
+                    'it, and rerun this.')
         return f'{collector} has no word state yet: run fw.py setup on that machine first, then rerun this.'
-    if own:
-        backup = home / 'before-collector'
-        backup.mkdir(exist_ok=True)
-        for name in MOVED:
-            if (home / name).exists() and not (backup / name).exists():
-                shutil.copy2(home / name, backup / name)
-        print(f'From now on the word state on {collector} is the one in use; this machine\'s own is kept in {backup}.')
+    if own and health.get('state') is not True:  # unreachable, or an older collector that only keeps the gloss log
+        return (f'{collector} did not confirm it holds a word state ({health.get("error") or "an older collector?"}). '
+                'This machine has its own, so nothing changed: update and start the collector, then rerun this.')
     synced, error = hub.sync(scan=False)
     if not synced and not (home / 'state.json').exists():
         return (f'The word state lives on {collector}, which did not answer: {error}. Set it up there first '
                 '(fw.py setup on that machine, then fw.py collector install), then rerun this.')
+    if own:
+        print(f'From now on the word state on {collector} is the one in use; this machine\'s own is kept in '
+              f'{home / hub.BEFORE}.')
     return None
 
 
@@ -648,7 +644,7 @@ def log_chat_day(_args):
 
 def refresh(_args):
     if fwlib.collector_url():
-        synced, error = hub.sync()
+        synced, error = hub.sync(timeout=hub.FLUSH_TIMEOUT)  # in the background: it can wait longer
         if not synced:
             print(f'sync failed: {error}', file=sys.stderr)
         return

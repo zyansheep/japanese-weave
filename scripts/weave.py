@@ -39,9 +39,10 @@ def exposure():
     data = fwlib.read_json(path, {}) or {}
     if fwlib.collector_url():
         fresh = not hub.stale(SYNC_EVERY)
-    else:
+    else:  # every refresh writes scan.json, also when no reply was new
+        scanned = fwlib.home() / fwlib.SCAN
         try:
-            fresh = time.time() - path.stat().st_mtime < STALE
+            fresh = time.time() - (scanned if scanned.exists() else path).stat().st_mtime < STALE
         except OSError:
             fresh = False
     if not fresh:

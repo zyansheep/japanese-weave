@@ -20,10 +20,14 @@ Ops (each also carries uid, day, at and machine; see stamp):
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
 log of everything that changed the word state sit side by side.
 """
+import datetime as dt
 import hashlib
 import json
+import os
 import re
+import shutil
 import socket
+import tempfile
 import sys
 import time
 from urllib.parse import quote
@@ -41,13 +45,28 @@ OPS_LOCK = 'ops.lock'      # one op at a time where the state lives
 OUTBOX_LOCK = 'outbox.lock'
 SYNC_LOCK = 'sync.lock'
 TIMEOUT = 4                # seconds per request to the collector
+SLOW = {'anki': 60}        # ops that take longer to apply (an Anki sync carries every review word)
+FLUSH_TIMEOUT = 15         # a background flush can wait longer for a batch
 BATCH = 20                 # queued ops per request
 REPLIES_PER_OP = 500
 MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
 PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed')  # applied to the cache while queued
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
+MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')  # a machine's own state
+BEFORE = 'before-collector'  # where a machine's own state is kept when it first takes the collector's
 DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def is_day(value):
+    """A real calendar day as YYYY-MM-DD (2025-02-30 is not)."""
+    if not isinstance(value, str) or not DAY.match(value):
+        return False
+    try:
+        dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'challenge': knowledge.valid_challenge,
          'extension_sites': lambda v: v in ('all', 'ask')}
 
@@ -64,12 +83,14 @@ def validate(op):
     """None when the op is well formed, else what is wrong (ops arrive over the network)."""
     text = lambda x, n=100: isinstance(x, str) and 0 < len(x) <= n
     texts = lambda xs, most, n=100: isinstance(xs, list) and len(xs) <= most and all(text(x, n) for x in xs)
-    day = lambda x: isinstance(x, str) and bool(DAY.match(x))
+    day = is_day
     integer = lambda x, low, high: isinstance(x, int) and not isinstance(x, bool) and low <= x <= high
     if not isinstance(op, dict):
         return 'an op is a JSON object'
     if not text(op.get('uid'), 64) or not day(op.get('day')):
         return 'an op needs a uid and a day (YYYY-MM-DD)'
+    if not integer(op.get('at'), 0, 10 ** 14) or not isinstance(op.get('machine', ''), str):
+        return 'an op needs at (ms since the epoch)'
     kind = op.get('kind')
     if kind == 'events':
         events = op.get('events')
@@ -146,7 +167,8 @@ def apply(state, op):
     if kind == 'seed':
         return {'seeded': fwlib.seed_known(state, op['n'], day)}
     if kind == 'anki':  # the words reach the front of the list through anki.csv (run writes it first)
-        entries = [e for e in (fwlib.find(state, name) for name in op['known']) if e]
+        by_key = {fwlib.key(w['ja']): w for w in state['words']}  # thousands of words: one lookup each
+        entries = [e for e in (by_key.get(fwlib.key(name)) or fwlib.find(state, name) for name in op['known']) if e]
         for e in entries:  # learning words keep learning; only words not introduced yet jump to known
             if e['status'] == 'queue':
                 fwlib.set_status(e, 'known', day)
@@ -186,8 +208,11 @@ def run(op, db=None):
 
 def _apply_here(op):
     home, kind = fwlib.home(), op['kind']
-    if kind == 'anki':
-        anki.write_csv(home / fwlib.ANKI_LEXICON, op['words'])
+    if kind == 'anki':  # replaced whole, so a reader never sees half of it
+        with tempfile.NamedTemporaryFile(dir=home, suffix='.csv', delete=False) as handle:
+            temporary = handle.name
+        anki.write_csv(temporary, op['words'])
+        os.replace(temporary, home / fwlib.ANKI_LEXICON)
     with fwlib.locked():
         if not (home / 'state.json').exists():  # first use: known words before the first learning words are picked
             fwlib.save_state(fwlib.new_state(known_top=op['n'] if kind == 'seed' else 0,
@@ -198,9 +223,10 @@ def _apply_here(op):
         index = fwlib.read_json(path, {}) or {}
         index.pop('offsets', None)  # each machine keeps its own, in scan.json
         before = set(index.get('recent') or {})
-        fwlib.fold(index, op['replies'], [w['ja'] for w in fwlib.load_state()['words']])
+        replies = [r for r in op['replies'] if r['day'] <= fwlib.today()]  # a clock ahead can't count future days
+        fwlib.fold(index, replies, [w['ja'] for w in fwlib.load_state()['words']])
         fwlib.write_json(path, index)
-        counted = len({r['d'] for r in op['replies']} - before)
+        counted = len({r['d'] for r in replies} - before)
     with fwlib.editing() as state:  # merges anki.csv into the list, applies, promotes, saves
         result = apply(state, op)
     if kind == 'mark' and result['canonical']:  # timestamped, so the knowledge replay applies them at the right moment
@@ -224,7 +250,7 @@ def submit(op, wait=True):
     if not url:
         return run(op)
     if wait and flush(url)[0]:
-        reply = post(url, [op])
+        reply = post(url, [op], SLOW.get(op['kind'], TIMEOUT))
         if reply is not None:
             pull(url, force=True)
             return reply['results'][0]
@@ -266,26 +292,32 @@ def pending():
 
 
 def flush(url=None, timeout=TIMEOUT):
-    """Sends queued ops, in order. Returns (none left, how many were sent)."""
+    """Sends queued ops, in order. Returns (none left, how many were sent). The outbox is only locked to read and
+    to drop what was sent, so queueing never waits on the network (a resend is applied once: same uid)."""
     url = url or fwlib.collector_url()
     with fwlib.locked(OUTBOX_LOCK):
-        ops = left = pending()
-        while left:
-            batch = left[:BATCH]
-            reply = post(url, batch, timeout)
-            if reply is None:
-                break
-            for op, result in zip(batch, reply['results']):
-                if not result.get('ok'):  # malformed: never worth resending
-                    print(f'Japanese Weave: the collector refused a queued {op.get("kind")} change: '
-                          f'{result.get("error")}', file=sys.stderr)
-            left = left[len(batch):]
+        ops = pending()
+    sent = set()
+    for start in range(0, len(ops), BATCH):
+        batch = ops[start:start + BATCH]
+        reply = post(url, batch, max([timeout] + [SLOW.get(op.get('kind'), 0) for op in batch]))
+        if reply is None:
+            break
+        for op, result in zip(batch, reply['results']):
+            if not result.get('ok'):  # malformed, or it failed there: resending won't help
+                print(f'Japanese Weave: the collector refused a queued {op.get("kind")} change: '
+                      f'{result.get("error")}', file=sys.stderr)
+            sent.add(op.get('uid'))
+    if not sent:
+        return not ops, 0
+    with fwlib.locked(OUTBOX_LOCK):
+        left = [op for op in pending() if op.get('uid') not in sent]
         path = fwlib.home() / OUTBOX
-        if not left:
-            path.unlink(missing_ok=True)
-        elif len(left) < len(ops):
+        if left:
             fwlib.write_json_lines(path, left)
-    return not left, len(ops) - len(left)
+        else:
+            path.unlink(missing_ok=True)
+    return not left, len(sent)
 
 
 def provisional(op):
@@ -316,16 +348,33 @@ def pull(url=None, timeout=TIMEOUT, force=False):
         return False, 'the collector sent no word state'
     with fwlib.locked():
         if changed:
+            if not (home / SYNCED).exists():  # the first time: this machine's own state, if any, is kept
+                keep_own_state(home)
             if not (home / fwlib.SCAN).exists():  # older installs kept the scan offsets in exposure.json
                 fwlib.write_json(home / fwlib.SCAN, fwlib.scan_cursor())
             for op in pending():  # still queued here: keep showing them
                 if op.get('kind') in PROVISIONAL and not validate(op):
-                    apply(state, op)
+                    try:
+                        apply(state, op)
+                    except Exception:  # never let one queued change stop the refresh
+                        pass
             fwlib.save_state(state)
             fwlib.write_json(home / 'knowledge.json', reply.get('knowledge') or {})
             fwlib.write_json(home / 'exposure.json', reply.get('exposure') or {})
         fwlib.write_json(home / SYNCED, {'pulled': time.time(), 'rev': reply.get('rev'), 'collector': url})
     return True, None
+
+
+def keep_own_state(home):
+    """Copies this machine's own state files into before-collector/ (once each) before the collector's replace them."""
+    own = [name for name in MOVED if (home / name).exists()]
+    if not own:
+        return
+    backup = home / BEFORE
+    backup.mkdir(exist_ok=True)
+    for name in own:
+        if not (backup / name).exists():
+            shutil.copy2(home / name, backup / name)
 
 
 def stale(seconds):
@@ -353,23 +402,28 @@ def sync(scan=True, timeout=TIMEOUT):
         if not got:
             return True, None  # another sync is running
         sent_all, sent = flush(url, timeout)
-        if not sent_all:
-            return False, f'{url} unreachable; {len(pending())} change(s) wait here'
         if scan and (fwlib.home() / 'state.json').exists():
             fwlib.refresh_exposure()
-        return pull(url, timeout, force=bool(sent))
+        pulled, error = pull(url, timeout, force=bool(sent))
+        if pulled and not sent_all:  # the cache is fresh, still showing what waits here
+            return False, f'{len(pending())} change(s) wait here: {url} did not take them'
+        return pulled, error
 
 
-def current(max_age=0):
+def current(max_age=0, wait=True):
     """The state to read: where it lives, with today's promotion applied; or the cache, refreshed first when older
-    than max_age seconds. Returns (state, error): error says why a stale cache couldn't be refreshed."""
+    than max_age seconds (wait False: refreshed in the background instead). Returns (state, error): error says why a
+    stale cache couldn't be refreshed."""
     if not fwlib.collector_url():
         with fwlib.editing() as state:
             pass
         return state, None
     error = None
-    if stale(max_age):
-        ok, error = sync(scan=False)
+    if stale(max_age) and (fwlib.home() / 'state.json').exists():
+        if wait:
+            ok, error = sync(scan=False)
+        else:
+            knowledge.start_refresh()
     return fwlib.load_state(), error
 
 
@@ -407,7 +461,13 @@ def receive(body, db=None):
         return 400, {'ok': False, 'error': f'need {{"ops": [...]}} with at most {MAX_OPS} ops'}
     if not (fwlib.home() / 'state.json').exists():
         return 409, {'ok': False, 'error': NO_STATE}
-    results = [run(op, db) for op in body['ops']]
+    results = []
+    for op in body['ops']:
+        try:
+            results.append(run(op, db))
+        except Exception as error:  # reported to the sender, who drops it; the next ops still apply
+            print(f'op failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
+            results.append({'ok': False, 'error': f'failed on the collector: {error.__class__.__name__}: {error}'})
     return 200, {'ok': True, 'results': results, 'rev': revision()}
 
 

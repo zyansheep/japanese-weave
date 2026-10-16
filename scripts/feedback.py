@@ -19,6 +19,7 @@ the peek rate). With a collector configured (setup --collector), the native host
 collector.py), and knowledge.py reads a local mirror of the collector's database (sync_mirror).
 """
 import gzip
+import http.client
 import json
 import math
 from pathlib import Path
@@ -291,7 +292,7 @@ def request(url, body=None, timeout=5):
                 return json.loads(error.read().decode('utf-8'))
             except ValueError:
                 return {'ok': False, 'error': f'collector answered HTTP {error.code}'}
-    except (OSError, ValueError, EOFError) as error:
+    except (OSError, ValueError, EOFError, http.client.HTTPException) as error:
         return {'ok': False, 'error': f'collector unreachable: {error}'}
 
 
