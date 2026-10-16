@@ -564,7 +564,7 @@ def read_replies(words, offsets, roots=None, start='0000-00-00'):
             compiled[w['ja']] = pattern(w['ja'], w.get('kana', ''))
         return bool(compiled[w['ja']].search(prose))
 
-    since = time.mktime(time.strptime(start, '%Y-%m-%d')) if start > '0000' else 0
+    since = time.mktime(time.strptime(start, '%Y-%m-%d')) if start > '0000-00-00' else 0
     out = []
     for path in (p for root in roots if root.exists() for p in root.rglob('*.jsonl')):
         name = str(path)
