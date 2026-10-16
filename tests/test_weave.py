@@ -611,6 +611,10 @@ class Setup(Home):
         self.assertEqual(firefox['browser_specific_settings']['gecko']['id'], fw.GECKO_ID)
         self.assertEqual(firefox['background'], {'scripts': ['src/background.js'], 'type': 'module'})
         self.assertNotIn('key', firefox)
+        import zipfile
+        with zipfile.ZipFile(home / 'japanese-weave.xpi') as xpi:  # the permanent install, same files at the root
+            self.assertEqual(json.loads(xpi.read('manifest.json')), firefox)
+            self.assertIn('src/background.js', xpi.namelist())
         mozilla = self.home / ('Library/Application Support/Mozilla/NativeMessagingHosts' if sys.platform == 'darwin'
                                else '.mozilla/native-messaging-hosts')
         self.assertEqual(json.loads((mozilla / f'{fw.HOST_NAME}.json').read_text())['allowed_extensions'], [fw.GECKO_ID])

@@ -53,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
@@ -229,6 +230,9 @@ def write_launcher(home, remote=None, remote_home=None):
     return launcher
 
 
+XPI_NAME = 'japanese-weave.xpi'
+
+
 def install_app(root, home):
     """Stable copies of the scripts and word lists: launchers and services need fixed paths."""
     for name, ignore in (('scripts', shutil.ignore_patterns('__pycache__')), ('data', None)):
@@ -252,6 +256,10 @@ def install_extensions(root, home):
     shutil.copytree(home / 'extension', firefox)
     manifest = fwlib.read_json(firefox / 'manifest.json')
     fwlib.write_json(firefox / 'manifest.json', firefox_manifest(manifest))
+    # A permanent install for Firefox builds that allow unsigned add-ons (Floorp, Developer Edition, Nightly, ESR).
+    with zipfile.ZipFile(home / XPI_NAME, 'w', zipfile.ZIP_DEFLATED) as xpi:
+        for path in sorted(p for p in firefox.rglob('*') if p.is_file()):
+            xpi.write(path, path.relative_to(firefox).as_posix())
 
 
 def setup(args):
@@ -327,8 +335,11 @@ def human_steps(home, browsers, sites, has_key):
         n += 1
         print(f'  {n}. Firefox: open about:debugging#/runtime/this-firefox, click "Load Temporary Add-on..." and pick')
         print(f'     {home / "extension-firefox" / "manifest.json"}')
-        print('     (temporary: gone when Firefox quits. To keep it, sign it once with tools/sign-firefox.sh and install')
-        print('     the .xpi from about:addons > gear > "Install Add-on From File".)')
+        print('     (temporary: gone when Firefox quits). To keep it in a build that allows unsigned add-ons (Floorp,')
+        print('     Developer Edition, Nightly, ESR): set xpinstall.signatures.required to false in about:config, then')
+        print('     about:addons > gear > "Install Add-on From File" and pick')
+        print(f'     {home / XPI_NAME}')
+        print('     (release Firefox needs it signed first: tools/sign-firefox.sh).')
     if 'chrome' in browsers:
         n += 1
         print(f'  {n}. Chrome/Chromium: chrome://extensions, switch on Developer mode, "Load unpacked", pick:')
