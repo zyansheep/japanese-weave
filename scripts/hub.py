@@ -337,8 +337,10 @@ def pull(url=None, timeout=TIMEOUT, force=False):
     """Refreshes the cache from the collector. Returns (ok, error); on failure the cache stays as it was."""
     url = url or fwlib.collector_url()
     home = fwlib.home()
-    have = (home / 'state.json').exists()
-    rev = '' if force or not have else (fwlib.read_json(home / SYNCED, {}) or {}).get('rev', '')
+    synced = fwlib.read_json(home / SYNCED, {}) or {}
+    # The cache changed since the last pull with nothing queued (something else wrote it): fetch it whole.
+    edited = synced.get('sha') != fingerprint(home / 'state.json') and not pending()
+    rev = '' if force or edited else synced.get('rev', '')
     reply = feedback.request(f'{url.rstrip("/")}/v1/state?rev={quote(str(rev))}', timeout=timeout)
     if not isinstance(reply, dict) or not reply.get('ok'):
         return False, (reply.get('error') if isinstance(reply, dict) else None) or 'collector did not answer'
@@ -361,8 +363,16 @@ def pull(url=None, timeout=TIMEOUT, force=False):
             fwlib.save_state(state)
             fwlib.write_json(home / 'knowledge.json', reply.get('knowledge') or {})
             fwlib.write_json(home / 'exposure.json', reply.get('exposure') or {})
-        fwlib.write_json(home / SYNCED, {'pulled': time.time(), 'rev': reply.get('rev'), 'collector': url})
+        sha = fingerprint(home / 'state.json') if changed or not edited else synced.get('sha')
+        fwlib.write_json(home / SYNCED, {'pulled': time.time(), 'rev': reply.get('rev'), 'collector': url, 'sha': sha})
     return True, None
+
+
+def fingerprint(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
 
 
 def keep_own_state(home):

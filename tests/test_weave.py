@@ -819,6 +819,15 @@ class Hub(Home):
         self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.SCAN), {'offsets': {'/chat.jsonl': 42}})
         self.assertEqual(fwlib.load_state(), self.served())
 
+    def test_a_cache_edited_behind_its_back_is_fetched_whole(self):
+        fwlib.load_state()
+        fwlib.write_json(fwlib.home() / 'state.json', dict(fwlib.load_state(), paused=True))  # e.g. an old copy's code
+        self.assertEqual(hub.pull(), (True, None))
+        self.assertEqual(fwlib.load_state(), self.served())
+        hub.submit({'kind': 'set', 'stage': 2}, wait=False)  # a queued change is not an outside edit
+        hub.pull()
+        self.assertEqual(fwlib.load_state()['stage'], 2)
+
     def test_one_failing_op_never_holds_up_the_rest(self):
         fwlib.load_state()
         self.assertIn('day', hub.validate(hub.stamp({'kind': 'noticed', 'day': '2025-02-30'})))
