@@ -61,6 +61,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
           if (msg.type === 'state') return { ok: true, ...structuredClone(hostState), geminiKey: 'synthetic-host' };
           if (msg.type === 'events') { hostEvents.push(...msg.events); return { ok: true, applied: msg.events.length }; }
           if (msg.type === 'log') { hostLog.push(...msg.items); return { ok: true, stored: msg.items.length }; }
+          if (msg.type === 'stats') return { ok: true, counts: { 'browser:peek': [hostLog.filter((i) => i.kind === 'peek').length, 0] }, shownWords: [8, 8], since: msg.since };
           if (msg.type === 'prefs') { hostState = { ...hostState, challenge: msg.challenge, budget: msg.challenge * dialScale }; return { ok: true, challenge: msg.challenge }; }
           return { ok: false };
         },
@@ -116,7 +117,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     expect(el.querySelector('.fw-word')?.textContent).toBe('et');
     expect(win.document.querySelectorAll('.fw-word').length).toBe(1);
     expect(local.pendingEvents || []).toHaveLength(0); // prefetch is not exposure
-    const visibility = io.findLast((o) => !o.options.rootMargin);
+    const visibility = io.findLast((o) => !o.options.rootMargin && o.options.threshold.length === 2);
     const span = el.querySelector('.fw-word');
     visibility.cb([{ target: span, isIntersecting: true, intersectionRatio: 1 }]);
     await wait(20);
@@ -178,14 +179,52 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     expect(span.textContent).toBe('and');
     expect(local.pendingEvents.map((e) => e.kind)).toEqual(['seen', 'peek', 'flip']);
     fake.remove(); await wait();
+    // Clicks and selections in a passage with glossed words are logged by position only, once each; a page's synthetic
+    // clicks count for nothing.
+    el.dispatchEvent(user(new win.MouseEvent('click', { bubbles: true, clientX: 30, clientY: 8 })));
+    el.dispatchEvent(new win.MouseEvent('click', { bubbles: true, clientX: 40, clientY: 8 }));
+    await wait(20);
+    const range = win.document.createRange();
+    range.selectNodeContents(el);
+    win.document.getSelection().removeAllRanges();
+    win.document.getSelection().addRange(range);
+    el.dispatchEvent(user(new win.MouseEvent('mousedown', { bubbles: true })));
+    el.dispatchEvent(user(new win.MouseEvent('mouseup', { bubbles: true })));
+    await wait(20);
+    el.dispatchEvent(user(new win.MouseEvent('mouseup', { bubbles: true }))); // the same selection: logged once
+    el.dispatchEvent(new win.KeyboardEvent('keyup', { key: 'ArrowRight', shiftKey: true, bubbles: true })); // synthetic
+    await wait(20);
+    win.document.getSelection().removeAllRanges();
+    const reading = local.pendingLog.slice(4);
+    expect(reading.map((e) => e.kind)).toEqual(['click', 'select']);
+    expect(reading[0]).toMatchObject({ x: 30, y: 8, target: 'text', annotations: [['et', 0, 0]] });
+    expect(reading[1]).toMatchObject({ chars: el.textContent.length, covered: [0] });
+    expect(JSON.stringify(reading)).not.toContain('cats');
+    // On-screen time: a stay is sent when the passage leaves the screen, with its reading time; a scroll past is not.
+    const onscreen = io.findLast((o) => o.options.threshold?.length === 11);
+    const sight = (on) => onscreen.cb([{ target: el, isIntersecting: on, intersectionRatio: on ? 1 : 0,
+      intersectionRect: { height: on ? 20 : 0 }, rootBounds: { height: 800 } }]);
+    win.document.dispatchEvent(user(new win.MouseEvent('pointermove', { bubbles: true })));
+    sight(true); await wait(1300); sight(false);
+    sight(true); await wait(200); sight(false);
+    await wait(20);
+    const stays = local.pendingLog.slice(6);
+    expect(stays.map((e) => e.kind)).toEqual(['visible']);
+    expect(stays[0]).toMatchObject({ y: 0, away: 0, media: 0, idle: 0, annotations: [['et', 0, 0]] });
+    expect(stays[0].ms).toBeGreaterThanOrEqual(1000);
+    expect(stays[0].wall).toBeGreaterThanOrEqual(stays[0].ms);
 
     // Syncing flushes the queue to the host first; only words and kinds leave, never page text.
     await call({ type: 'syncWords' });
     expect(hostEvents.map((e) => `${e.word}:${e.kind}`)).toEqual(['et:seen', 'et:peek', 'et:flip']);
     expect(JSON.stringify(hostEvents)).not.toContain('cats');
-    expect(hostLog.map((e) => e.kind)).toEqual(['shown', 'peek', 'peek', 'flip']);
+    expect(hostLog.map((e) => e.kind)).toEqual(['shown', 'peek', 'peek', 'flip', 'click', 'select', 'visible']);
     expect(JSON.stringify(hostLog)).not.toContain('cats');
     expect(local.pendingLog).toHaveLength(0);
+    // The popup can ask how much the log holds; pages can't.
+    expect(await call({ type: 'stats' })).toMatchObject({ ok: true, counts: { 'browser:peek': [2, 0] }, queued: [] });
+    expect((await call({ type: 'stats' })).since).toBe(new Date(new Date().setHours(0, 0, 0, 0)).getTime());
+    expect(await dispatch({ type: 'stats' }, page())).toBeUndefined();
     expect(local.pendingEvents).toHaveLength(0);
 
     const beforeClear = modelCalls;

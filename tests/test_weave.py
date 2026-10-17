@@ -576,6 +576,80 @@ class FeedbackStore(Home):
         self.assertEqual(len(rows), 3)
         self.assertEqual((contexts[('browser', 'v1', 'c1')]['words'], bool(contexts[('browser', 'v1', 'c1')]['shown_at'])), (48, True))
 
+    def test_clicks_and_selections_are_kept_by_position_and_counted(self):
+        where = {'at': int(time.time() * 1000) - 1000, 'view': 'v1', 'context': 'c2', 'box': [0, 0, 500, 40],
+                 'annotations': [['問題', 4, 0], ['今', 90, 0]]}
+        click = dict(where, kind='click', x=30.4, y=8, target='link', uid='v1-1')
+        select = dict(where, kind='select', x=0, y=0, width=120, height=18, chars=31, covered=[1, 0, 1], ms=640,
+                      uid='v1-2', text='page text')
+        bad = [dict(click, target='image'), dict(select, covered=[2]), dict(select, chars=0), dict(click, uid='a b'),
+               dict(select, ms=-1), dict(click, x=float('nan'))]
+        self.assertEqual(feedback.record([click, select, click] + bad, 'browser'),
+                         {'stored': 2, 'duplicates': 1, 'rejected': 6})
+        feedback.record([self.item(uid='u1'), self.item(kind='flip', dwellMs=0, uid='u2')], 'browser')
+        rows, _ = feedback.load()
+        self.assertEqual([r['kind'] for r in rows], ['peek', 'flip'])  # the knowledge model reads gloss opens only
+        recent = feedback.recent()
+        detail = {r['kind']: r.get('detail') for r in recent}
+        self.assertEqual((detail['click'], detail['select']), ({'target': 'link'}, {'chars': 31, 'covered': [0, 1]}))
+        self.assertEqual({r['kind']: r.get('ms') for r in recent}['select'], 640)
+        self.assertNotIn('page text', json.dumps(recent, ensure_ascii=False))
+        stats = feedback.stats(since=int(time.time() * 1000) + 60_000)
+        self.assertEqual(stats['counts'], {'browser:peek': [1, 0], 'browser:flip': [1, 0], 'browser:click': [1, 0],
+                                           'browser:select': [1, 0]})
+        self.assertEqual(feedback.stats()['counts']['browser:select'], [1, 1])
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['log'])
+        self.assertIn('Collected: 1 peek (1 today), 1 flip (1 today), 1 click (1 today), 1 selection (1 today), '
+                      '0 mouse paths (0 today); 0 words shown on pages (0 today); 0 min reading on screen (0 today).',
+                      out.getvalue())
+        self.assertIn('select 31 characters, 2 of the passage\'s 2 glossed words', out.getvalue())
+        self.assertIn('click  on link at 30,8 in a passage with 2 glossed words', out.getvalue())
+
+    def test_on_screen_time_and_mouse_paths_are_kept(self):
+        where = {'at': int(time.time() * 1000) - 60_000, 'view': 'v1', 'context': 'c3', 'box': [0, 0, 500, 400],
+                 'annotations': [['問題', 4, 0], ['今', 90, 200]]}
+        stay = dict(where, kind='visible', y=180, height=60, ms=42_000, wall=50_000, away=5000, media=0, idle=3000)
+        trace = dict(where, kind='trace', points=[[0, 10, 4], [120, 60.4, 5], [480, 120, 30]])
+        bad = [dict(stay, ms=60_000), dict(stay, idle=-1), dict(stay, wall=4_000_000), dict(trace, points=[]),
+               dict(trace, points=[[100, 1, 1], [50, 2, 2]]), dict(trace, points=[[0, 1, 1]] * 201), dict(trace, points=[[0, 1]])]
+        self.assertEqual(feedback.record([stay, trace] + bad, 't3'), {'stored': 2, 'duplicates': 0, 'rejected': 7})
+        rows = {r['kind']: r for r in feedback.recent()}
+        self.assertEqual((rows['visible']['ms'], rows['visible']['detail']),
+                         (42_000, {'wall': 50_000, 'away': 5000, 'media': 0, 'idle': 3000}))
+        self.assertEqual((rows['trace']['ms'], rows['trace']['detail']['points'][1]), (480, [120, 60, 5]))
+        totals = feedback.stats(since=int(time.time() * 1000) - 3_600_000)
+        self.assertEqual((totals['readingMs'], totals['counts']['t3:trace']), ([42_000, 42_000], [1, 1]))
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['log'])
+        self.assertIn('on screen 42s of 50s (5s away, 3s idle), a paragraph with 2 glossed words', out.getvalue())
+        self.assertIn('mouse path 3 points over 0.5s, a message with 2 glossed words', out.getvalue())
+        self.assertIn('1 min reading on screen (1 today)', out.getvalue())
+
+    def test_schema_3_reading_rows_move_to_schema_4(self):
+        import sqlite3
+        path = self.home / 'v3.sqlite'
+        feedback.connect(path).close()
+        con = sqlite3.connect(str(path))
+        con.executescript("""DROP TABLE reading;
+            CREATE TABLE reading (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, surface TEXT NOT NULL, kind TEXT NOT NULL,
+              view TEXT NOT NULL, context TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL, width REAL, height REAL,
+              detail TEXT NOT NULL, uid TEXT);
+            CREATE UNIQUE INDEX reading_uid ON reading (uid);
+            INSERT INTO contexts (surface, view, context, annotations) VALUES ('browser', 'v0', 'c0', '[]');
+            INSERT INTO reading VALUES (1, 5, 'browser', 'select', 'v0', 'c0', 1, 2, 30, 18,
+              '{"chars": 31, "covered": [0], "ms": 640}', 'v0-1');
+            PRAGMA user_version = 3;""")
+        con.close()
+        row = feedback.recent(path=path)[0]
+        self.assertEqual((row['kind'], row['ms'], row['detail']), ('select', 640, {'chars': 31, 'covered': [0]}))
+        stay = dict(self.item(), kind='visible', y=0, height=40, ms=1500, wall=1500, away=0, media=0, idle=0, uid='v0-1')
+        self.assertEqual(feedback.record([stay], 'browser', path)['duplicates'], 1)  # the uid index came along
+        con = sqlite3.connect(str(path))
+        self.assertEqual(con.execute('PRAGMA user_version').fetchone()[0], 4)
+        self.assertEqual(con.execute("SELECT count(*) FROM sqlite_master WHERE name = 'reading_3'").fetchone()[0], 0)
+        con.close()
+
     def test_schema_1_databases_are_migrated_in_place(self):
         import sqlite3
         path = self.home / 'old.sqlite'
@@ -592,6 +666,8 @@ class FeedbackStore(Home):
         rows, contexts = feedback.load(path)
         self.assertEqual([r['uid'] for r in rows], [None, 'u9'])
         self.assertEqual(sorted(c['seq'] for c in contexts.values()), [1, 2])
+        click = dict(self.item(), kind='click', x=1, y=2, target='text')
+        self.assertEqual(feedback.record([click], 'browser', path)['stored'], 1)  # the reading table came with it
 
 
 class Collector(Home):
@@ -648,6 +724,24 @@ class Collector(Home):
         self.assertEqual(feedback.sync_mirror(self.url, mirror)[0], True)
         self.assertEqual([r['kind'] for r in feedback.load(mirror)[0]], ['peek'])
         self.assertFalse(feedback.sync_mirror('http://127.0.0.1:9', mirror)[0])  # down: the mirror stays as it was
+
+    def test_the_popup_counts_come_from_the_collector(self):
+        state_dir = fwlib.home()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(fw_host.handle({'type': 'stats', 'since': 0}),  # no log here yet, and none created
+                         {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'readingMs': [0, 0], 'last': None, 'since': 0})
+        self.assertFalse(feedback.default_path().exists())
+        (state_dir / 'collector').write_text(self.url + '\n')
+        feedback.forward(self.url, [self.item(), self.item('pin')], 't3')
+        shown = dict(self.item(), kind='shown', words=48)
+        fw_host.handle({'type': 'log', 'items': [self.item(), shown]})
+        reply = fw_host.handle({'type': 'stats', 'since': int(time.time() * 1000) - 60_000})
+        self.assertEqual((reply['ok'], reply['counts'], reply['shownWords']),
+                         (True, {'t3:peek': [1, 1], 't3:pin': [1, 1], 'browser:peek': [1, 1]}, [48, 48]))
+        self.assertFalse(fw_host.handle({'type': 'stats', 'since': 'today'})['ok'])
+        self.assertEqual(feedback.request(self.url + '/v1/stats')['counts']['t3:peek'], [1, 1])  # since: today there
+        (state_dir / 'collector').write_text('http://127.0.0.1:9\n')
+        self.assertIn('unreachable', fw_host.handle({'type': 'stats', 'since': 0})['error'])
 
     def test_requests_for_another_host_name_are_refused(self):
         import urllib.request
@@ -713,6 +807,19 @@ class Hub(Home):
 
     def learning(self, state):
         return [w['ja'] for w in state['words'] if w['status'] == 'active']
+
+    def test_a_damaged_state_on_the_collector_goes_back_one_change_not_to_nothing(self):
+        word = self.learning(fwlib.load_state())[0]
+        with mock.patch('sys.stdout', new=io.StringIO()):
+            fw.main(['known', word])
+        self.assertEqual(fwlib.find(self.served(), word)['status'], 'known')
+        (self.server_home / 'state.json').write_text('{"words": [', encoding='utf-8')  # cut short
+        with mock.patch('sys.stderr', new=io.StringIO()) as err:
+            served = self.served()
+        self.assertIn('kept it as state.json.bad-', err.getvalue())
+        self.assertEqual(fwlib.find(served, word)['status'], 'active')  # the state from before that change
+        self.assertEqual(len(served['words']), len(fwlib.load_state()['words']))  # not a new, empty state
+        self.assertEqual([p.read_text() for p in self.server_home.glob('state.json.bad-*')], ['{"words": ['])
 
     def test_changes_go_to_the_collector_and_the_cache_follows(self):
         cache = fwlib.load_state()  # no copy yet: fetched
@@ -1336,6 +1443,44 @@ class Knowledge(Home):
         know = {'offset': {'t3': 0.0}, 'words': {'多分': {'k': 1.1, 'sd': 0.5}, '一緒に': {'k': 4, 'sd': 0.5}}}
         line = weave.brief(state, {}, know=know).split('\n')[1]
         self.assertTrue(line.endswith(': 多分 = meaning, "hint"; 結局 = meaning, "hint"; 一緒に = meaning, "hint"'), line)
+
+
+class DamagedState(Home):
+    """A state.json cut short or edited by hand is kept aside and the copy from before the last save comes back."""
+
+    def path(self):
+        return fwlib.home() / 'state.json'
+
+    def test_it_goes_back_to_the_copy_from_before_the_last_save(self):
+        before = fwlib.load_state()
+        fwlib.save_state(dict(before, paused=True))
+        self.assertTrue(fwlib.load_state()['paused'])
+        self.path().write_text('{"words": [', encoding='utf-8')
+        with mock.patch('sys.stderr', new=io.StringIO()) as err:
+            self.assertEqual(fwlib.load_state(), before)
+        self.assertIn('went back to the copy from before the last change', err.getvalue())
+        self.assertEqual([p.read_text() for p in fwlib.home().glob('state.json.bad-*')], ['{"words": ['])
+
+    def test_without_a_good_copy_it_starts_over_and_keeps_the_damaged_file(self):
+        self.path().parent.mkdir(parents=True)
+        self.path().write_text('[]', encoding='utf-8')  # valid JSON, but not a word state
+        with mock.patch('sys.stderr', new=io.StringIO()):
+            self.assertIsNone(fwlib.load_state(create=False))
+        self.assertTrue(fwlib.usable(fwlib.load_state()))
+        self.assertEqual([p.read_text() for p in fwlib.home().glob('state.json.bad-*')], ['[]'])
+
+    def test_a_file_it_cannot_open_is_left_alone(self):
+        self.path().mkdir(parents=True)  # opening it fails with an OSError: nothing to say it is damaged
+        self.assertIsNone(fwlib.load_state(create=False))
+        self.assertTrue(self.path().is_dir())
+        self.assertEqual(list(fwlib.home().glob('state.json.bad-*')), [])
+
+    def test_a_damaged_file_never_becomes_the_copy_to_go_back_to(self):
+        before = fwlib.load_state()
+        fwlib.save_state(before)
+        self.path().write_text('nope', encoding='utf-8')
+        fwlib.save_state(dict(before, paused=True))  # a save over a damaged file keeps the older good copy
+        self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.PREVIOUS), before)
 
 
 if __name__ == '__main__':

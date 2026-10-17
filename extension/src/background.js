@@ -6,7 +6,7 @@ import { requestSwaps } from './engine.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
 import { hashKey } from './hash.js';
-import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, localDay } from './hostsource.js';
+import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -144,7 +144,7 @@ async function logInteraction(msg, sender) {
   const ctx = await context();
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
   const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
-  if (!item || (item.kind !== 'shown' && !(await listed(item.word)))) return { ok: false };
+  if (!item || (item.word !== undefined && !(await listed(item.word)))) return { ok: false };
   await locked(() => queueLog(chromeStorage, [item]));
   scheduleFlush();
   return { ok: true };
@@ -196,6 +196,18 @@ async function save(msg) {
   return { ok: true };
 }
 
+// How much the host's log holds (on the collector when one is set), for the popup; a missing or old host says so.
+async function stats() {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const queued = await queuedLog(chromeStorage);
+  try {
+    return { ...(await send({ type: 'stats', since: midnight.getTime() })), queued };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e), queued };
+  }
+}
+
 async function status() {
   const config = await context();
   const data = await store.get(['wordState', 'apiKey', 'hostKey', 'modelStatus']);
@@ -215,7 +227,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     swaps: () => swaps(msg, sender),
     event: () => record(msg, sender),
     interaction: () => logInteraction(msg, sender),
-    status, syncWords, clearCache,
+    status, stats, syncWords, clearCache,
     save: () => save(msg),
     setChallenge: () => setChallenge(msg),
   };

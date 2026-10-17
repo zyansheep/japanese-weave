@@ -1,8 +1,10 @@
 """Gloss interaction log (Python 3.9+, standard library only): every peek, pin or flip on a glossed word, with how long
 the gloss stayed open and where the other glossed words of the same passage sat. A peek shows the reader was reading
-that spot, so unpeeked words next to it are the evidence that they knew them. Words and positions only, never text.
+that spot, so unpeeked words next to it are the evidence that they knew them. Clicks, text selections, mouse paths and
+on-screen time in passages with glossed words are kept too, as more evidence of where the reader was and for how
+long. Words, positions, times and counts only, never text.
 
-Stored in <state dir>/interactions.sqlite (schema 2):
+Stored in <state dir>/interactions.sqlite (schema 4):
   contexts      one row per passage per page load (browser) or message render (T3): its box on the page, the
                 glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), and for browser
                 passages its word count and when its glossed words were first on screen ("shown"); seq orders changes
@@ -10,13 +12,23 @@ Stored in <state dir>/interactions.sqlite (schema 2):
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
+  reading       one row per reading signal in a passage (browser) or message (T3) with glossed words, positions
+                relative to it, and a client id (uid):
+                  click    x, y; detail {"target": "text" | "link" (a link or control)}
+                  select   x, y, width, height of the selection; ms: how long the drag took; detail {"chars": its
+                           length, "covered": indexes of the glossed words in it (into the context's annotations)}
+                  visible  one stay on screen of a paragraph: y, height (the paragraph's band; in the browser the whole
+                           passage); ms: the time a reader could have been reading it; detail {"wall": all its time on
+                           screen, and the rest by why it doesn't count: "away" (page hidden or window not focused),
+                           "media" (sound or video playing), "idle" (no input for 30 s)}
+                  trace    the mouse path over a message (T3): ms: its span; detail {"points": [[ms since at, x, y]]}
 
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
                 and the op as JSON
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
 the peek rate). With a collector configured (setup --collector), the native host forwards items to it instead (see
-collector.py), and knowledge.py reads a local mirror of the collector's database (sync_mirror).
+collector.py), and knowledge.py runs there.
 """
 import gzip
 import http.client
@@ -32,9 +44,10 @@ import fwlib
 
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 SURFACES = ('browser', 't3')
-KINDS = ('peek', 'pin', 'flip')
+KINDS = ('peek', 'pin', 'flip')  # the gloss was opened, or the word turned back to English
+READING = ('click', 'select', 'visible', 'trace')  # only where the reader was; knowledge.py doesn't read these yet
 SHOWN = 'shown'
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
@@ -74,11 +87,30 @@ CREATE TABLE IF NOT EXISTS interactions (
   uid TEXT
 );
 """
+READING_TABLE = """
+CREATE TABLE IF NOT EXISTS reading (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  surface TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  view TEXT NOT NULL,
+  context TEXT NOT NULL,
+  x REAL,
+  y REAL,
+  width REAL,
+  height REAL,
+  ms INTEGER,
+  detail TEXT NOT NULL,
+  uid TEXT
+);
+"""
 INDEXES = """
 CREATE INDEX IF NOT EXISTS interactions_word ON interactions (word, at);
 CREATE INDEX IF NOT EXISTS interactions_context ON interactions (surface, view, context);
 CREATE UNIQUE INDEX IF NOT EXISTS interactions_uid ON interactions (uid);
 CREATE INDEX IF NOT EXISTS contexts_seq ON contexts (seq);
+CREATE INDEX IF NOT EXISTS reading_context ON reading (surface, view, context);
+CREATE UNIQUE INDEX IF NOT EXISTS reading_uid ON reading (uid);
 """
 
 
@@ -92,7 +124,11 @@ def connect(path=None):
     con = sqlite3.connect(str(path), timeout=10)
     con.execute('PRAGMA journal_mode=WAL')
     con.executescript(TABLES)
-    if con.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+    version = con.execute('PRAGMA user_version').fetchone()[0]
+    if version == 3:  # its reading table needs x and y and has no ms column
+        _migrate_reading(con)
+    con.executescript(READING_TABLE)
+    if version < SCHEMA_VERSION:
         _migrate(con)
     con.executescript(INDEXES)
     con.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
@@ -100,7 +136,8 @@ def connect(path=None):
 
 
 def _migrate(con):
-    """Schema 1 -> 2: word counts, shown times and a change sequence on contexts; client ids on interactions."""
+    """Schema 1 -> 2: word counts, shown times and a change sequence on contexts; client ids on interactions.
+    Schemas 3 and 4 only added the reading table, which READING_TABLE creates."""
     columns = lambda table: {row[1] for row in con.execute(f'PRAGMA table_info({table})')}
     with con:
         have = columns('contexts')
@@ -112,12 +149,29 @@ def _migrate(con):
             con.execute('ALTER TABLE interactions ADD COLUMN uid TEXT')
 
 
+def _migrate_reading(con):
+    """Schema 3 -> 4: the reading table, then only clicks and selections, gets nullable positions and an ms column."""
+    have = {row[1] for row in con.execute('PRAGMA table_info(reading)')}
+    if not have or 'ms' in have:
+        return
+    con.executescript(f"""BEGIN;
+        ALTER TABLE reading RENAME TO reading_3;
+        DROP INDEX IF EXISTS reading_context;
+        DROP INDEX IF EXISTS reading_uid;
+        {READING_TABLE}
+        INSERT INTO reading (id, at, surface, kind, view, context, x, y, width, height, ms, detail, uid)
+          SELECT id, at, surface, kind, view, context, x, y, width, height, json_extract(detail, '$.ms'),
+                 json_remove(detail, '$.ms'), uid FROM reading_3;
+        DROP TABLE reading_3;
+        COMMIT;""")
+
+
 def _clean(item, now):
     """The item as stored, or None when anything is malformed (the host checks again what the extension checked)."""
     num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
     ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
-    if not isinstance(item, dict) or item.get('kind') not in KINDS + (SHOWN,):
+    if not isinstance(item, dict) or item.get('kind') not in KINDS + READING + (SHOWN,):
         return None
     if not ident(item.get('view')) or not ident(item.get('context')):
         return None
@@ -137,12 +191,64 @@ def _clean(item, now):
         if not isinstance(words, int) or isinstance(words, bool) or not 0 < words <= 10_000:
             return None
         return dict(clean, words=words)
-    dwell, uid = item.get('dwellMs'), item.get('uid')
+    uid = item.get('uid')
+    if uid is not None and not ident(uid):
+        return None
+    if item['kind'] in READING:
+        return _clean_reading(item, dict(clean, uid=uid), num)
+    dwell = item.get('dwellMs')
     if not word(item.get('word')) or not isinstance(item.get('position'), int) or isinstance(item.get('position'), bool):
         return None
-    if not num(dwell) or not 0 <= dwell <= 600_000 or (uid is not None and not ident(uid)):
+    if not num(dwell) or not 0 <= dwell <= 600_000:
         return None
     return dict(clean, word=item['word'], position=item['position'], dwellMs=int(dwell), uid=uid)
+
+
+MAX_TRACE_POINTS = 200
+MAX_VISIT_MS = 3_600_000
+
+
+def _clean_reading(item, clean, num):
+    """A reading signal as stored: the row's columns (x, y, width, height, ms; None where they don't apply) and its
+    detail. None when anything is malformed."""
+    coord = lambda x: num(x) and abs(x) <= 100_000
+    count = lambda x: isinstance(x, int) and not isinstance(x, bool)
+    span = lambda x, top=600_000: num(x) and 0 <= x <= top
+    kind = item['kind']
+    row = dict(clean, x=None, y=None, width=None, height=None, ms=None)
+    if kind == 'trace':
+        points = item.get('points')
+        if not isinstance(points, list) or not 0 < len(points) <= MAX_TRACE_POINTS:
+            return None
+        if not all(isinstance(p, list) and len(p) == 3 and span(p[0]) and coord(p[1]) and coord(p[2]) for p in points):
+            return None
+        if any(b[0] < a[0] for a, b in zip(points, points[1:])):
+            return None
+        points = [[round(t), round(x), round(y)] for t, x, y in points]
+        return dict(row, ms=points[-1][0], detail={'points': points})
+    if kind == 'visible':
+        times = [item.get(k) for k in ('ms', 'wall', 'away', 'media', 'idle')]
+        if not coord(item.get('y')) or not coord(item.get('height')) or item['height'] < 0:
+            return None
+        if not all(span(t, MAX_VISIT_MS) for t in times) or times[0] > times[1]:
+            return None
+        ms, wall, away, media, idle = (round(t) for t in times)
+        return dict(row, y=round(item['y']), height=round(item['height']), ms=ms,
+                    detail={'wall': wall, 'away': away, 'media': media, 'idle': idle})
+    if not coord(item.get('x')) or not coord(item.get('y')):
+        return None
+    row = dict(row, x=round(item['x']), y=round(item['y']))
+    if kind == 'click':
+        return dict(row, detail={'target': item['target']}) if item.get('target') in ('text', 'link') else None
+    width, height, chars, covered, ms = (item.get(k) for k in ('width', 'height', 'chars', 'covered', 'ms'))
+    if not coord(width) or not coord(height) or width < 0 or height < 0 or not count(chars) or not 0 < chars <= 1_000_000:
+        return None
+    if not isinstance(covered, list) or not all(count(i) and 0 <= i < len(clean['annotations']) for i in covered):
+        return None
+    if not span(ms):
+        return None
+    return dict(row, width=round(width), height=round(height), ms=round(ms),
+                detail={'chars': chars, 'covered': sorted(set(covered))})
 
 
 CONTEXT_UPSERT = (
@@ -175,6 +281,15 @@ def record(items, surface, path=None, now=None):
                     if shown:
                         stored += 1
                         continue
+                    if c['kind'] in READING:
+                        added = con.execute(
+                            'INSERT OR IGNORE INTO reading (at, surface, kind, view, context, x, y, width, height, ms, '
+                            'detail, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                            (c['at'], surface, c['kind'], c['view'], c['context'], c['x'], c['y'], c['width'],
+                             c['height'], c['ms'], json.dumps(c['detail']), c['uid'])).rowcount
+                        stored += added
+                        duplicates += 1 - added
+                        continue
                     added = con.execute(
                         'INSERT OR IGNORE INTO interactions (at, surface, kind, word, dwell_ms, view, context, position, '
                         'uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -188,16 +303,45 @@ def record(items, surface, path=None, now=None):
 
 
 def recent(limit=20, path=None):
-    """The latest interactions, newest first, each with the glossed words of its passage."""
+    """The latest interactions, clicks and selections, newest first, each with the glossed words of its passage."""
     con = connect(path)
     try:
         rows = con.execute(
             'SELECT i.at, i.surface, i.kind, i.word, i.dwell_ms, i.position, c.annotations FROM interactions i '
             'JOIN contexts c USING (surface, view, context) ORDER BY i.at DESC, i.id DESC LIMIT ?', (limit,)).fetchall()
+        reading = con.execute(
+            'SELECT r.at, r.surface, r.kind, r.x, r.y, r.ms, r.detail, c.annotations FROM reading r '
+            'JOIN contexts c USING (surface, view, context) ORDER BY r.at DESC, r.id DESC LIMIT ?', (limit,)).fetchall()
     finally:
         con.close()
-    return [{'at': at, 'surface': surface, 'kind': kind, 'word': word, 'dwellMs': dwell, 'position': position,
-             'annotations': json.loads(notes)} for at, surface, kind, word, dwell, position, notes in rows]
+    items = [{'at': at, 'surface': surface, 'kind': kind, 'word': word, 'dwellMs': dwell, 'position': position,
+              'annotations': json.loads(notes)} for at, surface, kind, word, dwell, position, notes in rows]
+    items += [{'at': at, 'surface': surface, 'kind': kind, 'x': x, 'y': y, 'ms': ms, 'detail': json.loads(detail),
+               'annotations': json.loads(notes)} for at, surface, kind, x, y, ms, detail, notes in reading]
+    return sorted(items, key=lambda i: i['at'], reverse=True)[:limit]
+
+
+def stats(since=0, path=None):
+    """What has been collected, for the extension's popup and `fw.py log`: per "surface:kind", [all, since `since`
+    (ms)] for gloss opens and reading signals; the same for browser words shown and for on-screen reading time (the
+    ms of visible rows); and the newest item's time."""
+    con = connect(path)
+    try:
+        counts, last = {}, 0
+        for table in ('interactions', 'reading'):
+            for surface, kind, total, recent_, newest in con.execute(
+                    f'SELECT surface, kind, count(*), coalesce(sum(at >= ?), 0), max(at) FROM {table} '
+                    'GROUP BY surface, kind', (since,)):
+                counts[f'{surface}:{kind}'] = [total, recent_]
+                last = max(last, newest)
+        shown = con.execute('SELECT coalesce(sum(words), 0), coalesce(sum(CASE WHEN shown_at >= ? THEN words END), 0) '
+                            'FROM contexts WHERE shown_at IS NOT NULL', (since,)).fetchone()
+        onscreen = con.execute("SELECT coalesce(sum(ms), 0), coalesce(sum(CASE WHEN at >= ? THEN ms END), 0) "
+                               "FROM reading WHERE kind = 'visible'", (since,)).fetchone()
+    finally:
+        con.close()
+    return {'counts': counts, 'shownWords': list(shown), 'readingMs': list(onscreen), 'last': last or None,
+            'since': since}
 
 
 def count(path=None):
@@ -307,6 +451,11 @@ def remote_recent(collector, limit=20):
     if not isinstance(reply, dict) or not reply.get('ok'):
         raise OSError((reply or {}).get('error', 'collector did not answer'))
     return reply['items']
+
+
+def remote_stats(collector, since=0):
+    reply = request(f'{collector.rstrip("/")}/v1/stats?since={int(since)}', timeout=3)
+    return reply if isinstance(reply, dict) else {'ok': False, 'error': 'collector reply is not an object'}
 
 
 def remote_health(collector):

@@ -556,18 +556,60 @@ def stage(args):
 
 def log_cmd(args):
     collector = fwlib.collector_url()
+    since = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))) * 1000
     try:
         rows = feedback.remote_recent(collector, args.limit) if collector else feedback.recent(args.limit)
+        totals = feedback.remote_stats(collector, since) if collector else feedback.stats(since)
     except OSError as error:
         sys.exit(f'Collector {collector}: {error}')
     if not rows:
         print('No gloss peeks or flips logged yet.')
         return
+    print(collected(totals) + '\n')
     for row in rows:
         when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row['at'] / 1000))
-        around = len(row['annotations']) - 1
-        print(f'{when}  {row["surface"]:<7} {row["kind"]:<4} {row["word"]}  open {row["dwellMs"] / 1000:.1f}s, '
-              f'{around} other glossed word{"" if around == 1 else "s"} in the passage')
+        glossed = len(row['annotations'])
+        if row['kind'] == 'click':
+            print(f'{when}  {row["surface"]:<7} click  on {row["detail"]["target"]} at {row["x"]:.0f},{row["y"]:.0f} in a '
+                  f'passage with {plural(glossed, "glossed word")}')
+        elif row['kind'] == 'select':
+            d = row['detail']
+            print(f'{when}  {row["surface"]:<7} select {plural(d["chars"], "character")}, '
+                  f'{len(d["covered"])} of the passage\'s {plural(glossed, "glossed word")}')
+        elif row['kind'] == 'visible':
+            d = row['detail']
+            left_out = ', '.join(f'{d[k] / 1000:.0f}s {k}' for k in ('away', 'media', 'idle') if d[k] >= 1000)
+            print(f'{when}  {row["surface"]:<7} on screen {row["ms"] / 1000:.0f}s of {d["wall"] / 1000:.0f}s'
+                  f'{f" ({left_out})" if left_out else ""}, a paragraph with {plural(glossed, "glossed word")}')
+        elif row['kind'] == 'trace':
+            print(f'{when}  {row["surface"]:<7} mouse path {plural(len(row["detail"]["points"]), "point")} over '
+                  f'{row["ms"] / 1000:.1f}s, a message with {plural(glossed, "glossed word")}')
+        else:
+            print(f'{when}  {row["surface"]:<7} {row["kind"]:<4} {row["word"]}  open {row["dwellMs"] / 1000:.1f}s, '
+                  f'{plural(glossed - 1, "other glossed word")} in the passage')
+
+
+def plural(n, noun):
+    return f'{n} {noun}{"" if n == 1 else "s"}'
+
+
+def collected(totals):
+    """One line of totals from feedback.stats, with today's share."""
+    if not totals.get('ok', True):
+        return f'Totals unavailable: {totals.get("error")}'
+    counts = totals.get('counts') or {}
+    def kind(*names):
+        pairs = [v for k, v in counts.items() if k.split(':')[1] in names]
+        return sum(p[0] for p in pairs), sum(p[1] for p in pairs)
+    parts = []
+    for names, noun in ((('peek', 'pin'), 'peek'), (('flip',), 'flip'), (('click',), 'click'), (('select',), 'selection'),
+                        (('trace',), 'mouse path')):
+        total, today = kind(*names)
+        parts.append(f'{plural(total, noun)} ({today} today)')
+    shown = totals.get('shownWords') or [0, 0]
+    reading = [round(ms / 60000) for ms in totals.get('readingMs') or [0, 0]]
+    return (f'Collected: {", ".join(parts)}; {plural(shown[0], "word")} shown on pages ({shown[1]} today); '
+            f'{reading[0]} min reading on screen ({reading[1]} today).')
 
 
 def collector_arg(value):

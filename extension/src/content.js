@@ -1,10 +1,12 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
-// handle the delayed gloss, click/Enter flip and seen/peek/flip events. Every async reply belongs to one config generation.
+// handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks, selections and on-screen time
+// for passages with glossed words. Every async reply belongs to one config generation.
 import { flatten, applySwaps, revert, toggle, isSwap, swapWord, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
 import { selector, readable } from './page.js';
 import { wordCount } from './levels.js';
+import { readingState, account, newStay, paused } from './attention.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -31,8 +33,47 @@ let openTip = null; // { span, at }: a gloss opened by a hover dwell, logged wit
 // One page load, so the host's log can tell repeat visits apart. getRandomValues also works on plain-http pages.
 const VIEW = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 let logged = 0; // numbers interactions within the view, so a resent one is stored once
-const send = (msg) => chrome.runtime.sendMessage(msg);
-const on = () => config?.hasKey && !config.paused && siteEnabled(config.settings, location.href) && hasSiteAccess(location.href, config.origins);
+let lastClick = 0;
+let pressedAt = 0; // when the mouse button went down, so a drag selection has a duration
+let lastRange = null; // the last selection logged, so the same one is logged once
+const READING_MAX = 500; // clicks and selections per page load
+let readingLogged = 0;
+// On-screen time: one record per stay of a glossed passage on screen. Only time a reader could have spent reading it
+// counts (ms); the rest is split by why not (attention.js). Stays with under STAY_MIN_MS of reading were a scroll past
+// and aren't sent; longer ones than STAY_MAX_MS are sent in parts, and a stay with no reading for PAUSE_MS ends there.
+const STAY_MIN_MS = 1000;
+const STAY_MAX_MS = 600000;
+const STAYS_MAX = 2000; // per page load
+let lastInput = Date.now();
+let onscreen = null;
+const inView = new Set(); // passages on screen enough to be read
+const stays = new Map(); // passage -> { at, last, wall, ms, away, media, idle, desc }
+let stayTimer = null;
+let staysLogged = 0;
+// After the extension is updated or reloaded, a copy still running in an open tab is cut off from the background
+// (Chrome keeps it running; Firefox mostly unloads it). It then goes quiet: no more requests or errors, woven words
+// stay as they are, and reloading the page brings in the new copy.
+let orphaned = false;
+const alive = () => { try { return !orphaned && !!chrome.runtime?.id; } catch { return false; } };
+function orphan() {
+  if (orphaned) return;
+  orphaned = true;
+  generation++;
+  observer?.disconnect(); observer = null;
+  near?.disconnect(); visible?.disconnect(); onscreen?.disconnect();
+  clearTimeout(timer); timer = null; clearInterval(navTimer); clearInterval(stayTimer); stayTimer = null;
+  pending.clear(); inflight.clear(); stays.clear(); inView.clear(); hideTip();
+}
+const send = (msg) => {
+  if (!alive()) { orphan(); return Promise.reject(new Error('Japanese Weave was reloaded')); }
+  try {
+    return chrome.runtime.sendMessage(msg).catch((e) => { if (!alive()) orphan(); throw e; });
+  } catch (e) {
+    orphan();
+    return Promise.reject(e);
+  }
+};
+const on = () => !orphaned && config?.hasKey && !config.paused && siteEnabled(config.settings, location.href) && hasSiteAccess(location.href, config.origins);
 const targets = () => selector(location.href);
 // Only real user input on spans this extension made; pages can't forge flips, peeks or seen events.
 const swapFor = (e) => {
@@ -83,6 +124,123 @@ function logShown(span) {
   void send({ type: 'interaction', kind: 'shown', at: Date.now(), view: VIEW, context, words: sizes.get(passage), box,
     annotations }).catch(() => {});
 }
+// Clicks and selections in a passage with glossed words say where the reader was. Positions and counts only: the
+// selected text never leaves the page. extra(passageRect, spans) adds the kind's own fields.
+function logReading(passage, kind, at, extra) {
+  const key = keys.get(passage);
+  if (!key || !on() || readingLogged >= READING_MAX) return;
+  const { spans, annotations, box } = describe(passage);
+  if (!spans.length) return;
+  readingLogged++;
+  void send({ type: 'interaction', kind, at, view: VIEW, uid: `${VIEW}-${++logged}`, context: key.slice(key.indexOf(':') + 1),
+    box, annotations, ...extra(passage.getBoundingClientRect(), spans) }).catch(() => {});
+}
+// A click on a glossed word is a flip and is logged as one; the end of a drag that selected text is a selection.
+function clicked(e) {
+  if (!e.isTrusted || e.button !== 0 || swapFor(e) || !on()) return;
+  const passage = e.target?.closest?.(targets());
+  const now = Date.now();
+  if (!passage || !tracked.has(passage) || !document.getSelection()?.isCollapsed || now - lastClick < 300) return;
+  lastClick = now;
+  const link = e.target.closest('a[href], button, input, select, textarea, summary, label, [role="button"], [role="link"]');
+  logReading(passage, 'click', now, (r) => ({ x: e.clientX - r.left, y: e.clientY - r.top, target: link ? 'link' : 'text' }));
+}
+function sameRange(a, b) {
+  try {
+    return !!b && a.compareBoundaryPoints(0, b) === 0 && a.compareBoundaryPoints(2, b) === 0; // START_TO_START, END_TO_END
+  } catch {
+    return false; // b's nodes left the document
+  }
+}
+function pressed(e) {
+  if (e.isTrusted && e.button === 0) pressedAt = Date.now();
+}
+// After a mouse drag, a double or triple click, or Shift with the arrow keys. A selection over more than three
+// passages is a select-all, not reading.
+function selected(e) {
+  if (!e.isTrusted || !on() || (e.type === 'keyup' && !e.shiftKey && e.key !== 'Shift')) return;
+  const startedAt = e.type === 'mouseup' ? pressedAt : 0;
+  setTimeout(() => {
+    const selection = document.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (sameRange(range, lastRange)) return;
+    const chars = selection.toString().length; // a count only
+    const passages = [...tracked].filter((p) => p.isConnected && range.intersectsNode(p));
+    if (!chars || !passages.length || passages.length > 3) return;
+    lastRange = range.cloneRange();
+    const now = Date.now();
+    const rect = range.getBoundingClientRect();
+    for (const passage of passages) {
+      logReading(passage, 'select', now, (r, spans) => ({ x: rect.left - r.left, y: rect.top - r.top, width: rect.width,
+        height: rect.height, chars, covered: spans.flatMap((s, i) => (range.intersectsNode(s) ? [i] : [])),
+        ms: startedAt ? Math.max(0, now - startedAt) : 0 }));
+    }
+  }, 0);
+}
+function noteInput(e) {
+  if (!e.isTrusted) return;
+  lastInput = Date.now();
+  if (stays.size < inView.size) for (const passage of inView) startStay(passage); // back after a pause ended them
+}
+// Half of it on screen, or for a passage taller than that, enough of it to fill 40% of the window.
+function enoughOnScreen(e) {
+  return e.isIntersecting && (e.intersectionRatio >= 0.5 || e.intersectionRect.height >= 0.4 * (e.rootBounds?.height || window.innerHeight));
+}
+function audible() {
+  for (const m of document.querySelectorAll('video, audio')) if (!m.paused && !m.ended && !m.muted && m.volume > 0) return true;
+  return false;
+}
+function readingNow(now) {
+  const hidden = document.visibilityState === 'hidden';
+  const focused = document.hasFocus();
+  return readingState({ hidden, focused, playing: !hidden && focused && audible(), lastInput }, now);
+}
+function tickStays() {
+  const now = Date.now();
+  const state = readingNow(now);
+  const full = [], left = [];
+  for (const [passage, stay] of stays) {
+    account(stay, now, state);
+    if (stay.wall >= STAY_MAX_MS) full.push(passage);
+    else if (paused(stay, now)) left.push(passage);
+  }
+  for (const passage of full) { endStay(passage); startStay(passage); }
+  for (const passage of left) endStay(passage);
+}
+function startStay(passage) {
+  if (stays.has(passage) || document.visibilityState === 'hidden' || !keys.has(passage)) return;
+  const now = Date.now();
+  stays.set(passage, { ...newStay(now), desc: describe(passage) });
+  if (!stayTimer) stayTimer = setInterval(tickStays, 1000);
+}
+// Before a passage is reverted or forgotten: its glossed words are still in it, or in the stay's first description
+// when it has left the page (a detached passage would describe every word at 0, 0).
+function endStay(passage) {
+  const stay = stays.get(passage);
+  if (!stay) return;
+  const now = Date.now();
+  account(stay, now, readingNow(now));
+  stays.delete(passage);
+  if (!stays.size) { clearInterval(stayTimer); stayTimer = null; }
+  const key = keys.get(passage);
+  if (stay.ms < STAY_MIN_MS || staysLogged >= STAYS_MAX || !key || !on()) return;
+  const { spans, annotations, box } = passage.isConnected ? describe(passage) : stay.desc;
+  if (!spans.length) return;
+  staysLogged++;
+  void send({ type: 'interaction', kind: 'visible', at: stay.at, view: VIEW, uid: `${VIEW}-${++logged}`,
+    context: key.slice(key.indexOf(':') + 1), box, annotations, y: 0, height: box[3], ms: stay.ms, wall: stay.wall,
+    away: stay.away, media: stay.media, idle: stay.idle }).catch(() => {});
+}
+function forget(passage) {
+  endStay(passage);
+  inView.delete(passage);
+  onscreen?.unobserve(passage);
+}
+function staysOnVisibility() {
+  if (document.visibilityState === 'hidden') for (const passage of [...stays.keys()]) endStay(passage);
+  else for (const passage of inView) startStay(passage);
+}
 // The gloss appears only after a short dwell; reaching it counts as a peek (the reader needed the meaning).
 function hideTip() {
   clearTimeout(tipTimer); tipTimer = null;
@@ -121,10 +279,12 @@ function paint(el, key) {
   if (!swaps?.length) return;
   applySwaps(el, swaps);
   for (const span of el.querySelectorAll(`.${SWAP_CLASS}`)) if (isSwap(span)) visible.observe(span);
+  onscreen?.observe(el);
   observer?.takeRecords();
 }
 function consider(el) {
   if (!on() || !el.isConnected) return;
+  forget(el);
   if (el.querySelector(`.${SWAP_CLASS}`)) revert(el);
   observer?.takeRecords();
   if (!readable(el, location.href)) { keys.delete(el); return; }
@@ -168,7 +328,7 @@ async function flush() {
     memo.set(i.key, swaps);
     if (p) for (const el of p.els) paint(el, i.key);
   }
-  if (result?.stale) { update(await send({ type: 'config' })); return; }
+  if (result?.stale) { try { update(await send({ type: 'config' })); } catch { /* reloaded or gone */ } return; }
   if ([...pending.keys()].some((k) => !inflight.has(k))) timer = setTimeout(flush, 50);
 }
 function track(root) {
@@ -190,12 +350,13 @@ function mutations(records) {
     else if (el) track(el);
   }
   for (const el of changed) {
+    forget(el);
     if (el.querySelector(`.${SWAP_CLASS}`)) revert(el);
     keys.delete(el);
     if (readable(el, location.href)) { near.unobserve(el); near.observe(el); }
   }
   observer?.takeRecords();
-  for (const el of tracked) if (!el.isConnected) { tracked.delete(el); near.unobserve(el); }
+  for (const el of tracked) if (!el.isConnected) { forget(el); tracked.delete(el); near.unobserve(el); }
   for (const span of visibleWords) if (!span.isConnected) { visibleWords.delete(span); visible.unobserve(span); }
 }
 function start() {
@@ -207,6 +368,11 @@ function start() {
     }
     seenVisible();
   }, { threshold: [0, 0.5] });
+  onscreen = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (enoughOnScreen(e)) { inView.add(e.target); startStay(e.target); } else { inView.delete(e.target); endStay(e.target); }
+    }
+  }, { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] });
   near = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting && !keys.has(e.target)) consider(e.target);
   }, { rootMargin: '600px' });
@@ -220,6 +386,8 @@ function stop() {
   near?.disconnect(); visible?.disconnect();
   clearTimeout(timer); timer = null;
   pending.clear(); inflight.clear(); memo.clear(); failures.clear(); hideTip();
+  for (const passage of [...stays.keys()]) endStay(passage);
+  onscreen?.disconnect(); inView.clear();
   for (const el of tracked) { revert(el); keys.delete(el); }
   tracked.clear(); visibleWords.clear();
 }
@@ -244,6 +412,10 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (['config', 'retry'].includes(msg?.type)) update(msg.config, msg.type === 'retry');
 });
 document.addEventListener('click', reveal, true);
+document.addEventListener('click', clicked, { capture: true, passive: true });
+document.addEventListener('mousedown', pressed, { capture: true, passive: true });
+document.addEventListener('mouseup', selected, { capture: true, passive: true });
+document.addEventListener('keyup', selected, { capture: true, passive: true });
 document.addEventListener('keydown', reveal, true);
 document.addEventListener('mouseover', armTip, true);
 document.addEventListener('focusin', armTip, true);
@@ -251,10 +423,15 @@ document.addEventListener('mouseout', disarmTip, true);
 document.addEventListener('focusout', disarmTip, true);
 window.addEventListener('scroll', hideTip, { passive: true, capture: true });
 document.addEventListener('visibilitychange', seenVisible);
+document.addEventListener('visibilitychange', staysOnVisibility);
+window.addEventListener('pagehide', () => { for (const passage of [...stays.keys()]) endStay(passage); });
+for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchstart']) {
+  document.addEventListener(type, noteInput, { capture: true, passive: true });
+}
 window.addEventListener('online', () => { void send({ type: 'config' }).then((c) => update(c, true)).catch(() => {}); });
 // SPA navigation can reuse DOM nodes without changing their text.
 let page = location.href;
-setInterval(() => {
+const navTimer = setInterval(() => {
   if (page !== location.href) { page = location.href; if (config) update(config, true); }
 }, 1000);
 void send({ type: 'config' }).then(update).catch(() => {});

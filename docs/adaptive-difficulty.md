@@ -30,6 +30,10 @@ The log (collector.py, feedback.py) holds, without page text:
   every glossed word in it as [word, x, y] relative to the context, and, for the browser, its word count and when
   its Japanese was first on screen ("shown"). The words of shown paragraphs are the denominator of the peek rate
   (paragraphs that got no Japanese don't count).
+- reading: evidence of where the reader was, in contexts with glossed words (browser paragraphs, T3 messages): clicks
+  (point, link or text), text selections (box, length, the indexes of the glossed words covered, drag time), mouse
+  paths over T3 messages ([ms, x, y] points), and stays on screen of each paragraph (its band in the context; ms of
+  possible reading, plus the time away, with media playing, or idle for 30 s). The model below doesn't use it yet.
 
 Commands (`known`, `learn`) are kept with their time in `commands.jsonl` so a replay can place them.
 

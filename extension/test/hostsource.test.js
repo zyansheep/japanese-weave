@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
+import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, describeStats, STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
 import { memoryStorage } from '../src/cache.js';
 import { validateSwaps } from '../src/levels.js';
 import { buildSystemPrompt } from '../src/prompt.js';
@@ -130,6 +130,29 @@ describe('interaction log', () => {
     const shown = { kind: 'shown', at: now, view: 'a1b2', context: 'c0ffee', words: 48, box: [0, 0, 600, 80], annotations: [['de', 1, 0]] };
     expect(cleanInteraction(shown, now)).toEqual(shown);
     for (const words of [0, 1.5, 10001, '48']) expect(cleanInteraction({ ...shown, words }, now)).toBeNull();
+  });
+  it('clicks keep a point and what was hit; selections a box, a length and the glossed words inside, never text', () => {
+    const where = { at: now, view: 'a1b2', context: 'c0ffee', box: [0, 0, 600, 80], annotations: [['de', 1, 0], ['et', 90, 0], ['ou', 200, 20]] };
+    const click = { ...where, kind: 'click', x: 40.4, y: 12.6, target: 'text', uid: 'a1b2-3' };
+    expect(cleanInteraction({ ...click, text: 'page text' }, now)).toEqual({ ...click, x: 40, y: 13 });
+    const select = { ...where, kind: 'select', x: 0, y: 0, width: 120.2, height: 18, chars: 31, covered: [1, 0, 1], ms: 640, text: 'page text' };
+    expect(cleanInteraction(select, now)).toEqual({ ...where, kind: 'select', x: 0, y: 0, width: 120, height: 18, chars: 31, covered: [0, 1], ms: 640 });
+    const stay = { ...where, kind: 'visible', y: 0, height: 80, ms: 4200.4, wall: 9000, away: 0, media: 3000, idle: 1800, uid: 'a1b2-4' };
+    expect(cleanInteraction(stay, now)).toEqual({ ...stay, ms: 4200 });
+    for (const bad of [{ ...stay, ms: 9500 }, { ...stay, idle: -1 }, { ...stay, wall: 4e6 }, { ...stay, height: 'tall' }]) {
+      expect(cleanInteraction(bad, now)).toBeNull();
+    }
+    for (const bad of [{ ...click, target: 'image' }, { ...click, x: 'left' }, { ...click, y: 1e6 }, { ...select, covered: [3] },
+      { ...select, chars: 0 }, { ...select, width: -1 }, { ...select, ms: -5 }, { ...select, covered: 'all' }]) {
+      expect(cleanInteraction(bad, now)).toBeNull();
+    }
+  });
+  it('describes what the log holds and what is still queued', () => {
+    const reply = { ok: true, counts: { 'browser:peek': [40, 5], 't3:peek': [3, 1], 't3:pin': [1, 0], 'browser:flip': [2, 0],
+      'browser:click': [1, 1] }, shownWords: [12345, 300], readingMs: [2_430_000, 60_000] };
+    expect(describeStats(reply, [{ kind: 'peek' }, { kind: 'shown' }])).toEqual({ peeks: '44 (6 today) · 4 in chat',
+      more: '2 flips · 1 click · 0 selections · 12,345 words shown · 41 min reading on screen · 1 waiting to send' });
+    expect(describeStats({ ok: true, counts: {}, shownWords: [0, 0] }).peeks).toBe('0 (0 today)');
   });
   it('rejects anything malformed', () => {
     for (const bad of [{ ...peek, kind: 'seen' }, { ...peek, word: '' }, { ...peek, view: 'has spaces' },

@@ -7,8 +7,10 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "geminiKey"?: stored key if setup saved one}
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
-  {"type": "log", "items": [{"kind": "peek"|"flip"|"shown", ...}]}  -> {"ok": true, "stored", "duplicates", "rejected"}
-                                                                     (see feedback.py)
+  {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
+                                        -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
+  {"type": "stats", "since": ms}        -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
+                                            "readingMs", "last"}: what the log holds, on the collector when one is set
   {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
 
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
@@ -85,6 +87,16 @@ def handle(message):
         if collector:  # one database for every machine; a failure keeps the items queued in the extension
             return feedback.forward(collector, items, 'browser')
         return dict(feedback.record(items, 'browser'), ok=True)
+    if kind == 'stats':
+        since = message.get('since', 0)
+        if not isinstance(since, int) or isinstance(since, bool) or since < 0:
+            return {'ok': False, 'error': 'since must be a time in ms'}
+        collector = fwlib.collector_url()
+        if collector:
+            return feedback.remote_stats(collector, since)
+        if not feedback.default_path().exists():
+            return {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'readingMs': [0, 0], 'last': None, 'since': since}
+        return dict(feedback.stats(since), ok=True)
     if kind == 'prefs':
         challenge = message.get('challenge')
         if not knowledge.valid_challenge(challenge):

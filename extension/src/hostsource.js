@@ -115,12 +115,16 @@ export async function flushEvents({ storage, send }) {
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every
 // glossed word in the same passage sat relative to the passage. Words and positions only, never page text. uid makes
 // a resend harmless. kind 'shown' instead marks when a passage's Japanese first came on screen, with its word count:
-// the denominator of the peek rate. Returns null for anything malformed.
+// the denominator of the peek rate. 'click' and 'select' mark where the reader was: a click's point (x, y from the
+// passage's corner) and whether it hit a link or control; a selection's box, its length in characters and the glossed
+// words it covered (indexes into annotations), never its text. 'visible' is one stay of the passage on screen: ms is
+// the time a reader could have been reading it, wall all of it, and away, media and idle the rest by why it doesn't
+// count. Returns null for anything malformed.
 export function cleanInteraction(msg, now = Date.now()) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const word = (x) => typeof x === 'string' && x.length > 0 && x.length <= 40;
   const id = (x) => typeof x === 'string' && /^[\w:-]{1,64}$/.test(x);
-  if (!msg || !['peek', 'flip', 'shown'].includes(msg.kind) || !id(msg.view) || !id(msg.context)) return null;
+  if (!msg || !['peek', 'flip', 'shown', 'click', 'select', 'visible'].includes(msg.kind) || !id(msg.view) || !id(msg.context)) return null;
   if (!num(msg.at) || msg.at < now - 86400000 || msg.at > now + 60000) return null;
   if (!Array.isArray(msg.box) || msg.box.length !== 4 || !msg.box.every(num)) return null;
   if (!Array.isArray(msg.annotations) || msg.annotations.length > ANNOTATIONS_MAX) return null;
@@ -129,9 +133,51 @@ export function cleanInteraction(msg, now = Date.now()) {
   const common = { kind: msg.kind, at: round(msg.at), view: msg.view, context: msg.context, box: msg.box.map(round),
     annotations: msg.annotations.map(([w, x, y]) => [w, round(x), round(y)]) };
   if (msg.kind === 'shown') return Number.isInteger(msg.words) && msg.words > 0 && msg.words <= 10000 ? { ...common, words: msg.words } : null;
-  if (!word(msg.word) || !num(msg.dwellMs) || msg.dwellMs < 0 || msg.dwellMs > 600000 || !Number.isInteger(msg.position)) return null;
   if (msg.uid !== undefined && !id(msg.uid)) return null;
-  return { ...common, word: msg.word, dwellMs: round(msg.dwellMs), position: msg.position, ...(msg.uid ? { uid: msg.uid } : {}) };
+  const uid = msg.uid ? { uid: msg.uid } : {};
+  const coord = (x) => num(x) && Math.abs(x) <= 100000;
+  if (msg.kind === 'visible') {
+    const times = ['ms', 'wall', 'away', 'media', 'idle'];
+    if (!coord(msg.y) || !coord(msg.height) || msg.height < 0 || msg.ms > msg.wall) return null;
+    if (!times.every((k) => num(msg[k]) && msg[k] >= 0 && msg[k] <= 3600000)) return null;
+    return { ...common, y: round(msg.y), height: round(msg.height), ...Object.fromEntries(times.map((k) => [k, round(msg[k])])), ...uid };
+  }
+  if (msg.kind === 'click' || msg.kind === 'select') {
+    if (!coord(msg.x) || !coord(msg.y)) return null;
+    const at = { ...common, x: round(msg.x), y: round(msg.y) };
+    if (msg.kind === 'click') return ['text', 'link'].includes(msg.target) ? { ...at, target: msg.target, ...uid } : null;
+    if (!coord(msg.width) || !coord(msg.height) || msg.width < 0 || msg.height < 0) return null;
+    if (!Number.isInteger(msg.chars) || msg.chars < 1 || msg.chars > 1000000 || !num(msg.ms) || msg.ms < 0 || msg.ms > 600000) return null;
+    if (!Array.isArray(msg.covered) || !msg.covered.every((i) => Number.isInteger(i) && i >= 0 && i < msg.annotations.length)) return null;
+    return { ...at, width: round(msg.width), height: round(msg.height), chars: msg.chars, covered: [...new Set(msg.covered)].sort((a, b) => a - b),
+      ms: round(msg.ms), ...uid };
+  }
+  if (!word(msg.word) || !num(msg.dwellMs) || msg.dwellMs < 0 || msg.dwellMs > 600000 || !Number.isInteger(msg.position)) return null;
+  return { ...common, word: msg.word, dwellMs: round(msg.dwellMs), position: msg.position, ...uid };
+}
+
+// What the host's log holds (fw_host stats) plus what is still queued here, as two lines for the popup:
+// { peeks: '42 (7 today) · 5 in chat', more: '3 flips · 2 clicks · … · 40 min reading on screen' }.
+export function describeStats(reply, queued = []) {
+  const counts = reply?.counts || {};
+  const sum = (kinds, surface) => Object.entries(counts)
+    .filter(([key]) => kinds.includes(key.split(':')[1]) && (!surface || key.split(':')[0] === surface))
+    .reduce((acc, [, v]) => [acc[0] + v[0], acc[1] + v[1]], [0, 0]);
+  const plural = (n, noun) => `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`;
+  const [peeks, today] = sum(['peek', 'pin']);
+  const chat = sum(['peek', 'pin'], 't3')[0];
+  const shown = reply?.shownWords?.[0] || 0;
+  const waiting = queued.filter((i) => i?.kind !== 'shown').length;
+  const minutes = Math.round((reply?.readingMs?.[0] || 0) / 60000);
+  const more = [plural(sum(['flip'])[0], 'flip'), plural(sum(['click'])[0], 'click'), plural(sum(['select'])[0], 'selection'),
+    `${plural(shown, 'word')} shown`, `${minutes} min reading on screen`];
+  if (waiting) more.push(`${waiting} waiting to send`);
+  return { peeks: `${peeks.toLocaleString('en-US')} (${today} today)${chat ? ` · ${chat} in chat` : ''}`, more: more.join(' · ') };
+}
+
+export async function queuedLog(storage) {
+  const obj = await storage.get([LOG_KEY]);
+  return Array.isArray(obj[LOG_KEY]) ? obj[LOG_KEY] : [];
 }
 
 export async function queueLog(storage, items) {

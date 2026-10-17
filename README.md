@@ -125,7 +125,15 @@ Every time you open a gloss (hover a word in the browser, or hover or click an `
 every time you flip a word back to English, Japanese Weave records which word it was, when, how long the gloss
 stayed open, and where the other glossed words of the same paragraph or message sat, by position only. A peek shows
 you were reading that spot, so the words around it that you didn't open are the evidence that you knew them; this
-log is the data for estimating that. `fw.py log` shows the latest entries.
+log is the data for estimating that.
+
+It also keeps evidence of where you were reading, in paragraphs (browser) and messages (T3 Code) that have glossed
+words: clicks (and whether one hit a link), text selections (how many characters and which glossed words, never the
+text), mouse paths over T3 messages, and how long each paragraph stayed on screen. On-screen time only counts while
+you could have been reading: the page visible and its window focused, no sound or video playing on it, and some input
+(mouse, keys, scrolling) in the last 30 seconds. The rest of a paragraph's time on screen is kept apart as away, media
+or idle, so a page left open or a video doesn't look like reading. `fw.py log` shows totals and the latest entries, and
+the extension's popup shows how many peeks have been collected.
 
 By default it goes to `interactions.sqlite` in the state folder.
 
@@ -172,8 +180,10 @@ one word's estimate and every observation behind it. The design, with its source
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your
 local Claude Code and Codex transcripts to count exposure and never sends them anywhere. The extension sends
 readable page text from sites you allow to Google's Gemini API with your key (free-tier keys allow Google to train
-on prompts); webmail, AI chat sites and local addresses start off. It talks to the plugin through a native
-messaging host that only this extension may call.
+on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
+managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;
+the popup can turn any of them on). It talks to the plugin through a native messaging host that only this extension
+may call.
 
 ## Develop
 

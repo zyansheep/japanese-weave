@@ -1,6 +1,6 @@
 {
   "name": "japanese-weave",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Japanese Weave browser extension (Chrome and Firefox): swaps a few English words for Japanese on any website.",

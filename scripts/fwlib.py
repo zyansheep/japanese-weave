@@ -15,6 +15,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -243,13 +245,52 @@ class NoState(RuntimeError):
     """A collector is set but this machine has no copy of its state, and the collector can't be reached."""
 
 
+PREVIOUS = 'state.json.prev'  # the state as it was before the last save: what a damaged state.json goes back to
+
+
+def usable(state):
+    return isinstance(state, dict) and isinstance(state.get('words'), list)
+
+
+def damaged(path):
+    """The file is there and readable but isn't a word state: cut short, edited by hand, or something else."""
+    try:
+        with open(path, encoding='utf-8') as file:
+            return not usable(json.load(file))
+    except ValueError:  # includes text that isn't UTF-8
+        return True
+    except OSError:  # missing, or unreadable for now: nothing to set aside
+        return False
+
+
+def recover_state(path):
+    """Under the lock: a damaged state.json is kept as state.json.bad-<time>, never deleted, and the copy from before
+    the last save takes its place when it is good. Returns whether state.json is good now."""
+    if not damaged(path):
+        return usable(read_json(path))
+    bad = path.with_name(time.strftime('state.json.bad-%Y%m%d-%H%M%S'))
+    os.replace(path, bad)
+    previous = read_json(path.with_name(PREVIOUS))
+    if usable(previous):
+        write_json(path, previous)
+    print(f'Japanese Weave: {path} was damaged; kept it as {bad.name}'
+          + (' and went back to the copy from before the last change' if usable(previous) else ''), file=sys.stderr)
+    return usable(previous)
+
+
 def load_state(create=True, lock=True):
     """The saved state; creates it on first use. lock=False when the caller already holds state.lock. With a collector
-    set this is the cached copy; without one yet, it is fetched (never created here)."""
+    set this is the cached copy; without one yet, it is fetched (never created here). A damaged state.json goes back
+    to the copy from before the last save (recover_state); without a good one, a cache is fetched again and anywhere
+    else the state starts over."""
     path = home() / 'state.json'
     state = read_json(path)
-    if isinstance(state, dict) and isinstance(state.get('words'), list):
+    if usable(state):
         return state
+    if damaged(path):
+        with locked() if lock else contextlib.nullcontext():
+            if recover_state(path):
+                return read_json(path)
     if not create:
         return None
     if collector_url():
@@ -266,7 +307,19 @@ def load_state(create=True, lock=True):
 
 
 def save_state(state):
-    write_json(home() / 'state.json', state)
+    """Writes the state, keeping the one it replaces as state.json.prev (a second name for the same file, no copy)."""
+    path = home() / 'state.json'
+    if usable(read_json(path)):
+        previous = path.with_name(PREVIOUS)
+        staged = path.with_name(f'{PREVIOUS}.{os.getpid()}')
+        with contextlib.suppress(OSError):
+            staged.unlink(missing_ok=True)
+            try:
+                os.link(path, staged)
+            except OSError:  # a filesystem without hard links
+                shutil.copy2(path, staged)
+            os.replace(staged, previous)
+    write_json(path, state)
 
 
 class RemoteState(RuntimeError):

@@ -12,6 +12,9 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           -> {"ok": true, "results": [...], "rev"}
   POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
                           -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py)
+  GET  /v1/stats?since=MS how much has been collected, in all and since MS (default: the start of today here)
+                          -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords", "readingMs",
+                              "last"}
   GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (feedback.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
@@ -93,6 +96,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/v1/health':
             return self.reply(200, {'ok': True, 'interactions': feedback.count(self.db), 'host': socket.gethostname(),
                                     'home': str(fwlib.home()), 'state': (fwlib.home() / 'state.json').exists()})
+        if url.path == '/v1/stats':
+            try:
+                since = number('since', int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))) * 1000)
+            except ValueError:
+                return self.reply(400, {'ok': False, 'error': 'since must be a number'})
+            return self.reply(200, dict(feedback.stats(since, self.db), ok=True))
         if url.path == '/v1/recent':
             try:
                 limit = max(1, min(500, number('limit', 20)))

@@ -1,6 +1,7 @@
 import { resolveLevel } from './levels.js';
 import { MODELS } from './gemini.js';
 import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
+import { describeStats } from './hostsource.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -83,6 +84,16 @@ async function refresh() {
   if (!list.childNodes.length) list.textContent = 'None';
 }
 
+// Asked separately so the popup shows at once; the count can take a round trip to the collector.
+async function showStats() {
+  const res = await chrome.runtime.sendMessage({ type: 'stats' }).catch(() => null);
+  const { peeks, more } = describeStats(res, res?.queued);
+  $('peekCount').textContent = res?.ok ? peeks : res?.error?.includes('unknown message') ? 'needs a newer native host'
+    : res?.error?.includes('unreachable') ? 'collector unreachable' : 'needs the native host';
+  $('peekCount').title = res?.ok ? '' : res?.error || '';
+  $('collectedInfo').textContent = res?.ok ? more : (res?.queued?.length ? `${res.queued.length} waiting to send` : '');
+}
+
 async function save(msg) {
   await send({ type: 'save', ...msg });
   await refresh();
@@ -163,4 +174,5 @@ void run(async () => {
   [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   try { const u = new URL(tab?.url); if (/^https?:$/.test(u.protocol)) host = u.hostname; } catch { /* internal tab */ }
   await refresh();
+  await showStats();
 });
