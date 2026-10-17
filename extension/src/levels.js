@@ -61,18 +61,23 @@ export function matchCase(ja) {
 export const PARTICLES = ['は', 'が', 'を', 'に', 'で', 'と', 'も', 'の', 'へ', 'から', 'まで', 'より', 'や', 'か', 'ね', 'よ', 'な'];
 const GRAMMAR = new Set([...PARTICLES, 'です', 'でした', 'ではない', 'じゃない', 'ではありません', 'じゃありません', 'だ', 'だった',
   'ます', 'ました', 'ません', 'ませんでした', 'ましょう', 'ない', 'なかった', 'たい', 'て', 'た', 'ている', 'ています', 'ていた',
-  'ていました', 'でしょう', 'こと', 'ん', 'んです', 'のです', '。', '、', '？', '！', '?', '!',
+  'ていました', 'でしょう', 'こと', 'ん', 'んです', 'んだ', 'のです', '。', '、', '？', '！', '?', '!',
   // いる after a て form, when the answer splits it off (行って|いました)
   'いる', 'います', 'いた', 'いました', 'いない', 'いません']);
 const NOT_GRAMMAR = new Set(['とても', 'もの', 'なか', 'かな', 'とか', 'なに', 'なん', 'はな', 'もも', 'かた']);
+// Particles that never follow each other, because together they spell a word (な+に is なに "what", も+の is もの "thing").
+const NOT_AFTER = new Set(['な|に', 'も|の', 'も|のです', 'も|のに', 'か|な', 'と|か', 'も|も', 'は|な', 'か|た', 'な|か', 'な|ん', 'と|て']);
 export function isGrammar(t) {
   if (!t || NOT_GRAMMAR.has(t)) return false;
-  const ok = [true];
+  const reach = [new Set([''])]; // position -> the last piece of each way to read t up to there
   for (let i = 1; i <= t.length; i++) {
-    ok[i] = false;
-    for (let j = Math.max(0, i - 6); j < i && !ok[i]; j++) ok[i] = ok[j] && GRAMMAR.has(t.slice(j, i));
+    reach[i] = new Set();
+    for (let j = Math.max(0, i - 6); j < i; j++) {
+      const piece = t.slice(j, i);
+      if (GRAMMAR.has(piece) && [...reach[j]].some((last) => !NOT_AFTER.has(`${last}|${piece}`))) reach[i].add(piece);
+    }
   }
-  return ok[t.length];
+  return reach[t.length].size > 0;
 }
 
 // The forms a listed word may take in a phrase or sentence: itself and, for a verb or an i-adjective, the endings the
@@ -155,23 +160,47 @@ const SENTENCE_END = /[。？！?!]$/;
 
 // A phrase or sentence swap: every piece a listed word (or a form of one) or grammar, the pieces spelling f, at least one
 // listed word. Each word piece gets its gloss, romaji and kana from the list. null if anything is off.
+const wordPart = (t, hit) => ({ t, word: hit.word, g: hit.en, h: hit.hint, ...(hit.kana && hit.kana !== hit.canon ? { k: hit.kana } : {}),
+  ...(hit.status ? { status: hit.status } : {}) });
+
+// The compact answer's pieces, regrouped where the model split a word or an ending ("行き|まし|た" is 行きました): of the
+// groupings in which every group is a listed word (or a form of one, perhaps with grammar after it) or grammar, the one
+// with the most groups, so the model's own split is kept wherever it holds. null if there is none.
+const MAX_GROUP = 4;
+function regroup(pieces, idx) {
+  const best = [[]];
+  for (let j = 1; j <= pieces.length; j++) {
+    for (let i = Math.max(0, j - MAX_GROUP); i < j; i++) {
+      if (!best[i] || (best[j] && best[j].length >= best[i].length + 1)) continue;
+      const t = pieces.slice(i, j).join('');
+      const hit = isGrammar(t) ? null : pieceWord(t, idx);
+      if (hit || isGrammar(t)) best[j] = [...best[i], hit ? wordPart(t, hit) : { t }];
+    }
+  }
+  return best[pieces.length] || null;
+}
+
 function validateGroup(kind, s, o, idx) {
   if (!Array.isArray(s.parts) || !s.parts.length || s.parts.length > MAX_PARTS) return null;
-  const parts = [];
-  for (const p of s.parts) {
-    const t = typeof p?.t === 'string' ? p.t.trim() : '';
-    if (!t) return null;
-    // w: the listed word the answer says the piece is, '' for grammar, null when it didn't say (the compact answer)
-    const named = typeof p.w === 'string' && p.w.trim();
-    const hit = named ? idx.exact.get(exactJa(p.w)) || idx.folded.get(normalizeJa(p.w))
-      : p.w === null && !isGrammar(t) ? pieceWord(t, idx) : null;
-    if (named || hit) {
-      if (!hit || !formOf(t, hit)) return null;
-      parts.push({ t, word: hit.word, g: hit.en, h: hit.hint, ...(hit.kana && hit.kana !== hit.canon ? { k: hit.kana } : {}),
-        ...(hit.status ? { status: hit.status } : {}) });
-    } else if (isGrammar(t)) {
-      parts.push({ t });
-    } else return null;
+  const pieces = s.parts.map((p) => (typeof p?.t === 'string' ? p.t.trim() : ''));
+  if (pieces.some((t) => !t)) return null;
+  let parts = [];
+  if (s.parts.every((p) => p.w === null)) { // the compact answer: no piece says which word it is
+    parts = regroup(pieces, idx);
+    if (!parts) return null;
+  } else {
+    for (const [i, p] of s.parts.entries()) {
+      const t = pieces[i];
+      // w: the listed word the answer says the piece is, '' for grammar
+      const named = typeof p.w === 'string' && p.w.trim();
+      const hit = named ? idx.exact.get(exactJa(p.w)) || idx.folded.get(normalizeJa(p.w)) : null;
+      if (named) {
+        if (!hit || !formOf(t, hit)) return null;
+        parts.push(wordPart(t, hit));
+      } else if (isGrammar(t)) {
+        parts.push({ t });
+      } else return null;
+    }
   }
   const f = parts.map((p) => p.t).join('');
   if (exactJa(f) !== exactJa(s.f)) return null;
@@ -270,6 +299,13 @@ const UNITS = new Set(['day', 'days', 'week', 'weeks', 'month', 'months', 'year'
   'woman', 'women', 'kid', 'kids', 'child', 'children', 'friend', 'friends', 'dollar', 'dollars', 'buck', 'bucks', 'cent',
   'cents', 'yen', 'euro', 'euros', 'pound', 'pounds', 'mile', 'miles', 'km', 'meter', 'meters', 'feet', 'foot', 'inch',
   'inches', 'percent', 'player', 'players', 'member', 'members', 'student', 'students']);
+// people a counter never counts, also as "two of the founders"
+const PEOPLE = new Set(['people', 'persons', 'friends', 'kids', 'children', 'guys', 'men', 'women', 'boys', 'girls', 'babies',
+  'adults', 'members', 'students', 'teachers', 'parents', 'brothers', 'sisters', 'sons', 'daughters', 'colleagues', 'coworkers',
+  'teammates', 'founders', 'users', 'players', 'customers', 'employees', 'engineers', 'developers', 'doctors', 'nurses',
+  'artists', 'writers', 'authors', 'fans', 'followers', 'readers', 'viewers', 'workers', 'neighbors', 'neighbours', 'guests',
+  'speakers', 'winners', 'leaders', 'managers', 'investors', 'candidates', 'voters', 'citizens', 'soldiers', 'officers',
+  'singers', 'actors', 'us', 'you', 'dogs', 'cats', 'animals']);
 const NUMERAL_JA = /^[一二三四五六七八九十百千万]+(つ)?$/;
 const TOKEN = /[a-z0-9]+(?:'[a-z]+)?/g;
 
@@ -299,7 +335,8 @@ export function numberTrap(swap, text) {
       if (ORDINAL.test(t.w) || LABELS.has(prev)) return true;
       const pronoun = DETERMINERS.has(prev) || (ADJECTIVES.has(prev) && DETERMINERS.has(tokens[i - 2]?.w || ''));
       if (t.w === 'one' && (pronoun || AFTER_ONE.has(next))) return true;
-      if (counter && UNITS.has(next)) return true;
+      if (counter && (UNITS.has(next) || PEOPLE.has(next))) return true;
+      if (counter && next === 'of' && PEOPLE.has(DETERMINERS.has(tokens[i + 2]?.w) ? tokens[i + 3]?.w : tokens[i + 2]?.w)) return true;
     }
   }
   return false;

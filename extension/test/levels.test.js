@@ -190,6 +190,9 @@ describe('phrase and sentence swaps', () => {
     expect(s.f).toBe('店ですか？');
     expect(isGrammar('ですか？')).toBe(true);
     expect(isGrammar('とても')).toBe(false);
+    expect(isGrammar('なにが')).toBe(false); // なに "what", not な + に
+    expect(isGrammar('ものです')).toBe(false);
+    for (const g of ['ではない', 'なかった', 'なんです', 'なんだ', 'には', 'のに']) expect(isGrammar(g)).toBe(true);
   });
   test('a word used in a phrase or sentence is not used again on its own in the passage', () => {
     const swaps = validateSwaps(2, [
@@ -230,6 +233,12 @@ describe('the compact answer', () => {
     expect(pieces('大きく|なりました|。')).toBe('大きく=大きい なりました=なる 。');
     expect(pieces('よかった|です|。')).toBe('よかった=いい です 。');
     expect(pieces('店|に|行って|いました|。')).toBe('店=店 に 行って=行く いました 。');
+  });
+  test('pieces split inside a word or an ending are put back together', () => {
+    expect(pieces('母|と|店|に|行き|まし|た|。')).toBe('母=母 と 店=店 に 行きました=行く 。');
+    expect(pieces('店|に|行って|い|まし|た|。')).toBe('店=店 に 行って=行く いました 。');
+    expect(pieces('大き|かった|です|。')).toBe('大きかった=大きい です 。');
+    expect(group('母|と|友|達|に|会いました|。')).toEqual([]); // still no unlisted words
   });
   test('fails closed: an unlisted word, a look-alike verb, a kana word that reads as grammar, no pieces', () => {
     expect(group('母|と|友達|に|会いました|。')).toEqual([]);
@@ -291,6 +300,9 @@ describe('number words that are labels, ranks or pronouns', () => {
     expect(kept('I waited two hours for the bus', 'two', '二')).toBe(true);
     expect(kept('I have two ideas for the name', 'two', '二つ')).toBe(true);
     expect(kept('Only one of the ideas worked out', 'one', '一つ')).toBe(true);
+    expect(kept('I met two of the founders today', 'two', '二つ')).toBe(false);
+    expect(kept('I met two founders today', 'two', '二つ')).toBe(false);
+    expect(kept('I met two of the founders today', 'two', '二')).toBe(true);
     expect(kept('It was a long day at work', 'day', '日')).toBe(true);
     expect(kept('We went there together, one by one', 'together', '一緒に')).toBe(true);
   });
