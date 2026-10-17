@@ -12,6 +12,9 @@ const spanGroups = new WeakMap();
 // Spans this extension made -> their learning word ('' if none). Kept out of the DOM, so a page can neither read the
 // word list from attributes nor pass off its own span as a swap.
 const owned = new WeakMap();
+// A phrase or sentence swap is one group span (flipped as a whole) holding a span per listed word, each with its own
+// gloss, and for a sentence an end span on its 。 with the translation. group span -> its swap, to redraw after a flip.
+const groups = new WeakMap();
 export const isSwap = (span) => owned.has(span);
 export const swapWord = (span) => owned.get(span) || '';
 
@@ -127,28 +130,45 @@ export function tipFor(swap) {
   return [swap.g, swap.h, swap.k].filter(Boolean).join(' · ');
 }
 
+function fill(span, swap) {
+  const doc = span.ownerDocument;
+  span.textContent = '';
+  swap.parts.forEach((part, i) => {
+    const end = swap.kind === 'sentence' && i === swap.parts.length - 1 && !part.word;
+    if (!part.word && !end) { span.appendChild(doc.createTextNode(part.t)); return; }
+    const piece = doc.createElement('span');
+    piece.className = `${SWAP_CLASS} fw-part${end ? ' fw-end' : ''}`;
+    piece.setAttribute('data-tip', end ? swap.g : tipFor(part));
+    if (part.status) piece.dataset.fwStatus = part.status;
+    piece.textContent = part.t;
+    owned.set(piece, part.word || '');
+    span.appendChild(piece);
+  });
+}
+
 function wrap(place, swap) {
   const { node, offset, length } = place;
   const doc = node.ownerDocument;
   const mid = node.splitText(offset);
   const suffix = mid.splitText(length);
   const span = doc.createElement('span');
-  span.className = SWAP_CLASS;
+  const group = Array.isArray(swap.parts) && (swap.kind === 'phrase' || swap.kind === 'sentence');
+  span.className = group ? `${SWAP_CLASS} fw-group` : SWAP_CLASS;
   span.setAttribute('data-en', mid.data);
   span.setAttribute('data-ja', swap.f);
-  span.setAttribute('data-tip', tipFor(swap));
+  span.setAttribute('data-tip', group ? swap.g : tipFor(swap));
   span.setAttribute('data-fw-split', '1');
-  if (swap.status) span.dataset.fwStatus = swap.status;
+  if (swap.status && !group) span.dataset.fwStatus = swap.status;
   span.tabIndex = 0;
   span.setAttribute('role', 'button');
   span.setAttribute('aria-label', `${swap.f}: ${swap.g}. Show English`);
-  span.textContent = swap.f;
+  if (group) { groups.set(span, swap); fill(span, swap); } else span.textContent = swap.f;
   mid.parentNode.replaceChild(span, mid);
-  owned.set(span, swap.word || '');
-  const group = splitGroups.get(node) || { node, pieces: new Set() };
-  group.prefix = node.data;
-  group.pieces.add(span); group.pieces.add(suffix);
-  splitGroups.set(node, group); spanGroups.set(span, group);
+  owned.set(span, group ? '' : swap.word || '');
+  const split = splitGroups.get(node) || { node, pieces: new Set() };
+  split.prefix = node.data;
+  split.pieces.add(span); split.pieces.add(suffix);
+  splitGroups.set(node, split); spanGroups.set(span, split);
   return span;
 }
 
@@ -172,9 +192,10 @@ export function applySwaps(root, swaps) {
   return placed.length;
 }
 
-// Removes every swap under root and merges the split text nodes back, restoring the original node.
+// Removes every swap under root and merges the split text nodes back, restoring the original node. The word spans inside
+// a phrase or sentence go with it.
 export function revert(root) {
-  const spans = Array.from(root.querySelectorAll(`span.${SWAP_CLASS}`)).filter(isSwap);
+  const spans = Array.from(root.querySelectorAll(`span.${SWAP_CLASS}`)).filter((s) => isSwap(s) && !s.classList.contains('fw-part'));
   const groups = new Set(spans.map((span) => spanGroups.get(span)).filter(Boolean));
   for (const group of groups) {
     if (group.node.data !== group.prefix && group.node.parentNode) {
@@ -203,11 +224,21 @@ export function revert(root) {
   return spans.length;
 }
 
-// Click: flip one swap between Japanese and English.
+// The swap a span belongs to: itself, or for a word in a phrase or sentence, the whole group.
+export function swapOf(span) {
+  const parent = span.classList.contains('fw-part') ? span.parentElement : null;
+  return parent && groups.has(parent) ? parent : span;
+}
+export const showsEnglish = (span) => swapOf(span).classList.contains('fw-en');
+
+// Click: flip one swap between Japanese and English; a phrase or sentence flips whole.
 export function toggle(span) {
-  const showEn = !span.classList.contains('fw-en');
-  span.classList.toggle('fw-en', showEn);
-  span.textContent = showEn ? span.getAttribute('data-en') : span.getAttribute('data-ja');
-  span.setAttribute('aria-label', `${span.textContent}. Show ${showEn ? 'Japanese' : 'English'}`);
+  const swap = swapOf(span);
+  const showEn = !swap.classList.contains('fw-en');
+  swap.classList.toggle('fw-en', showEn);
+  if (showEn) swap.textContent = swap.getAttribute('data-en');
+  else if (groups.has(swap)) fill(swap, groups.get(swap));
+  else swap.textContent = swap.getAttribute('data-ja');
+  swap.setAttribute('aria-label', `${showEn ? swap.getAttribute('data-en') : swap.getAttribute('data-ja')}. Show ${showEn ? 'Japanese' : 'English'}`);
   return showEn;
 }

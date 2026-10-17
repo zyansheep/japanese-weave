@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { Window } from 'happy-dom';
-import { flatten, locate, applySwaps, revert, toggle, tipFor } from '../src/text.js';
+import { flatten, locate, applySwaps, revert, toggle, tipFor, isSwap, swapWord, swapOf, showsEnglish } from '../src/text.js';
 
 const win = new Window();
 const document = win.document;
@@ -187,5 +187,58 @@ describe('revert and toggle', () => {
     expect(toggle(span)).toBe(false);
     expect(span.textContent).toBe('et');
     expect(el.querySelectorAll('.fw-word').length).toBe(1);
+  });
+});
+
+describe('phrase and sentence swaps', () => {
+  const sentence = {
+    kind: 'sentence', o: 'It was a fun day.', f: '楽しい日でした。', g: 'It was a fun day.', ctx: 'It was a fun day.',
+    parts: [{ t: '楽しい', word: '楽しい', g: 'fun', h: 'tanoshii', status: 'known' }, { t: '日', word: '日', g: 'day', h: 'hi', status: 'active' },
+      { t: 'でした。' }],
+  };
+  const phrase = { kind: 'phrase', o: 'before bed', f: '寝る前', g: 'before sleeping', ctx: 'minutes before bed',
+    parts: [{ t: '寝る', word: '寝る', g: 'sleep', h: 'neru' }, { t: '前', word: '前', g: 'before', h: 'mae' }] };
+  const page = () => {
+    const el = document.createElement('p');
+    el.innerHTML = 'We went out. It was a fun day. Even ten minutes before bed helps.';
+    return el;
+  };
+  test('a sentence is one group: a span per listed word with its gloss, grammar as text, the 。 holding the translation', () => {
+    const el = page();
+    expect(applySwaps(el, [sentence, phrase])).toBe(2);
+    expect(el.textContent).toBe('We went out. 楽しい日でした。 Even ten minutes 寝る前 helps.');
+    const group = el.querySelector('.fw-group');
+    expect(isSwap(group)).toBe(true);
+    expect(swapWord(group)).toBe('');
+    expect(group.getAttribute('data-tip')).toBe('It was a fun day.');
+    const pieces = [...group.querySelectorAll('.fw-part')];
+    expect(pieces.map((p) => [p.textContent, swapWord(p), p.getAttribute('data-tip')])).toEqual([
+      ['楽しい', '楽しい', 'fun · tanoshii'], ['日', '日', 'day · hi'], ['でした。', '', 'It was a fun day.']]);
+    expect(pieces[1].dataset.fwStatus).toBe('active');
+    expect(pieces[2].classList.contains('fw-end')).toBe(true);
+    expect(flatten(el).text).toBe('We went out. It was a fun day. Even ten minutes before bed helps.'); // reads as the English
+  });
+  test('clicking any word in it flips the whole group, and back', () => {
+    const el = page();
+    applySwaps(el, [sentence]);
+    const word = el.querySelector('.fw-part');
+    expect(showsEnglish(word)).toBe(false);
+    expect(swapOf(word)).toBe(el.querySelector('.fw-group'));
+    expect(toggle(word)).toBe(true);
+    const group = el.querySelector('.fw-group');
+    expect(group.textContent).toBe('It was a fun day.');
+    expect(group.querySelectorAll('.fw-part')).toHaveLength(0);
+    expect(toggle(group)).toBe(false);
+    expect(group.textContent).toBe('楽しい日でした。');
+    expect(group.querySelectorAll('.fw-part')).toHaveLength(3);
+  });
+  test('revert restores the original text node', () => {
+    const el = page();
+    const original = el.firstChild;
+    applySwaps(el, [sentence, phrase]);
+    expect(revert(el)).toBe(2);
+    expect(el.childNodes).toHaveLength(1);
+    expect(el.firstChild).toBe(original);
+    expect(el.textContent).toBe('We went out. It was a fun day. Even ten minutes before bed helps.');
   });
 });

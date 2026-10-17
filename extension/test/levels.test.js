@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
+  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -135,5 +135,65 @@ describe('guards', () => {
     expect(isZeroJapanese('call 911 in an emergency')).toBe(true);
     expect(isZeroJapanese('shipped the new onboarding flow today')).toBe(false);
     expect(isZeroJapanese('the taxi was late again')).toBe(false);
+  });
+});
+
+describe('phrase and sentence swaps', () => {
+  const words = [
+    { ja: '楽しい', en: 'fun / enjoyable', hint: 'tanoshii', kana: 'たのしい', status: 'known' },
+    { ja: '日', en: 'day', hint: 'hi', kana: 'ひ', status: 'known' },
+    { ja: '母', en: 'mother', hint: 'haha', kana: 'はは', status: 'known' },
+    { ja: '一緒に', en: 'together', hint: 'issho ni', kana: 'いっしょに', status: 'known' },
+    { ja: '店', en: 'shop / store', hint: 'mise', kana: 'みせ', status: 'known' },
+    { ja: '行く', en: 'go', hint: 'iku', kana: 'いく', status: 'active' },
+    { ja: '寝る', en: 'sleep', hint: 'neru', kana: 'ねる', status: 'known' },
+    { ja: '前', en: 'before / front', hint: 'mae', kana: 'まえ', status: 'shaky' },
+    { ja: 'する', en: 'do / make', hint: 'suru', kana: 'する', status: 'known' },
+  ];
+  const sentence = (parts, extra = {}) => ({ kind: 'sentence', o: 'It was a fun day.', f: parts.map((p) => p.t).join(''), parts,
+    g: 'It was a fun day.', ctx: 'It was a fun day.', ...extra });
+  test('a sentence of listed words and grammar is kept, each word glossed from the list', () => {
+    const [s] = validateSwaps(2, [sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }])], words);
+    expect(s).toMatchObject({ kind: 'sentence', f: '楽しい日でした。', g: 'It was a fun day.', words: ['楽しい', '日'], word: '楽しい' });
+    expect(s.parts[0]).toEqual({ t: '楽しい', word: '楽しい', g: 'fun / enjoyable', h: 'tanoshii', k: 'たのしい', status: 'known' });
+    expect(s.parts[2]).toEqual({ t: 'でした。' });
+  });
+  test('conjugated forms of listed verbs count; the lead word is the first learning word', () => {
+    const [s] = validateSwaps(2, [{ kind: 'sentence', o: 'Yesterday I went to the store with my mom.', f: '母と一緒に店に行きました。',
+      parts: [{ t: '母', w: '母' }, { t: 'と', w: '' }, { t: '一緒に', w: '一緒に' }, { t: '店', w: '店' }, { t: 'に', w: '' },
+        { t: '行きました', w: '行く' }, { t: '。', w: '' }], g: 'I went to the store with my mother.', ctx: 'with my mom' }], words);
+    expect(s.word).toBe('行く');
+    expect(s.status).toBe('active');
+    const [p] = validateSwaps(2, [{ kind: 'phrase', o: 'before bed', f: '寝る前', parts: [{ t: '寝る', w: '寝る' }, { t: '前', w: '前' }],
+      g: 'before sleeping', ctx: 'minutes before bed' }], words);
+    expect(p.f).toBe('寝る前');
+    expect(validateSwaps(2, [{ kind: 'phrase', o: 'did it', f: 'しました', parts: [{ t: 'しました', w: 'する' }], g: 'did', ctx: 'x' }], words))
+      .toHaveLength(1);
+  });
+  test('fails closed: an unlisted word, a piece that is not grammar, pieces that do not spell f, or no listed word', () => {
+    const drop = (s) => expect(validateSwaps(2, [s], words)).toEqual([]);
+    drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '一日', w: '一日' }, { t: 'でした。', w: '' }]));
+    drop(sentence([{ t: 'とても', w: '' }, { t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }])); // とても is a word
+    drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'です。', w: '' }], { f: '楽しい日でした。' }));
+    drop(sentence([{ t: 'でした。', w: '' }]));
+    drop(sentence([{ t: '楽しく', w: '日' }, { t: 'でした。', w: '' }])); // not a form of the word it names
+    drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }], { f: '楽しい日' })); // a sentence ends like one
+    drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }], { g: '' }));
+  });
+  test('grammar pieces may run together; full-width and half-width punctuation match', () => {
+    const [s] = validateSwaps(2, [{ kind: 'sentence', o: 'Is it the store?', f: '店ですか？', parts: [{ t: '店', w: '店' }, { t: 'ですか', w: '' },
+      { t: '？', w: '' }], g: 'Is it the store?', ctx: 'Is it the store?' }], words);
+    expect(s.f).toBe('店ですか？');
+    expect(isGrammar('ですか？')).toBe(true);
+    expect(isGrammar('とても')).toBe(false);
+  });
+  test('a word used in a phrase or sentence is not used again on its own in the passage', () => {
+    const swaps = validateSwaps(2, [
+      sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }]),
+      { o: 'day', f: '日', ctx: 'a long day' },
+      { o: 'store', f: '店', ctx: 'the store' },
+    ], words);
+    expect(capSwaps(2, swaps, 'It was a fun day. The store was busy all day long today.', words).map((s) => s.f))
+      .toEqual(['楽しい日でした。', '店']);
   });
 });

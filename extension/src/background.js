@@ -3,6 +3,7 @@
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
+import { PROMPT_VERSION } from './prompt.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
 import { hashKey } from './hash.js';
@@ -48,7 +49,7 @@ async function context() {
   const hasKey = !!(data.apiKey || data.hostKey);
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
-  const cacheRevision = hashKey(JSON.stringify(['candidates', data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
+  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
   const challenge = state?.challenge || 0;
   const revision = hashKey(JSON.stringify([cacheRevision, challenge]));
   return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0 };
@@ -81,7 +82,7 @@ async function swaps(msg, sender) {
       if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
       const { wordState, apiKey, hostKey } = await store.get(['wordState', 'apiKey', 'hostKey']);
       const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
-      return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, words: wordState?.words, fetchImpl,
+      return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, stage: wordState?.stage, words: wordState?.words, fetchImpl,
         shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: cacheKey(i), text: i.text })),
         density: ctx.settings.density });
     });

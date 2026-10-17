@@ -56,8 +56,12 @@ level from [blocks/](blocks/level-01.md).
   romaji, and every third reply opens with a recall cue. Never in code, files, commits or anything meant to be
   shared, and never in scripted runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK
   sessions too, so the hook checks for a `t3 serve` parent and weaves there.
-- **Any website** (extension): a few English words on the page become Japanese. Hover for the meaning, romaji and
-  kana; click to flip back. Swaps are chosen by Gemini on your own key.
+- **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
+  word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
+  only from your words plus particles and endings. Hover a word for its meaning, romaji and kana, or a sentence's 。
+  for its translation; click to flip back to English. Swaps are chosen by Gemini on your own key: Gemini 3.8 Flash by
+  default, or Gemini 4 Argon (popup, Model) for Japanese close to Claude's, at about three times the cost and paid keys
+  only ([docs/swap-prompt.md](docs/swap-prompt.md)).
 
 All of it shares one word list on your machine, so words you see on the web count toward the chat and the other
 way round.

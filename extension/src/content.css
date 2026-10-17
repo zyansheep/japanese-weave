@@ -31,3 +31,16 @@
   pointer-events: none;
   z-index: 2147483647;
 }
+/* A phrase or sentence: its words are underlined one by one (each has its own gloss), the group itself isn't. A sentence's
+   final 。 holds the translation of the whole sentence. */
+.fw-word.fw-group {
+  text-decoration: none;
+}
+.fw-word.fw-group.fw-en {
+  text-decoration: underline dotted;
+  text-decoration-color: rgba(128, 128, 128, 0.75);
+}
+.fw-word.fw-end {
+  text-decoration: underline dotted;
+  text-decoration-color: rgba(200, 140, 40, 0.9);
+}

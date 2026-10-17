@@ -56,8 +56,69 @@ export function matchCase(ja) {
   return ja;
 }
 
+// Grammar a phrase or sentence swap may put around listed words. Pieces may run together (ですか？, では), but a word that
+// happens to be spelled with grammar kana is not grammar.
+export const PARTICLES = ['は', 'が', 'を', 'に', 'で', 'と', 'も', 'の', 'へ', 'から', 'まで', 'より', 'や', 'か', 'ね', 'よ', 'な'];
+const GRAMMAR = new Set([...PARTICLES, 'です', 'でした', 'ではない', 'じゃない', 'ではありません', 'じゃありません', 'だ', 'だった',
+  'ます', 'ました', 'ません', 'ませんでした', 'ましょう', 'ない', 'なかった', 'たい', 'て', 'た', 'ている', 'ています', 'ていた',
+  'ていました', 'でしょう', 'こと', 'ん', 'んです', 'のです', '。', '、', '？', '！', '?', '!']);
+const NOT_GRAMMAR = new Set(['とても', 'もの', 'なか', 'かな', 'とか']);
+export function isGrammar(t) {
+  if (!t || NOT_GRAMMAR.has(t)) return false;
+  const ok = [true];
+  for (let i = 1; i <= t.length; i++) {
+    ok[i] = false;
+    for (let j = Math.max(0, i - 6); j < i && !ok[i]; j++) ok[i] = ok[j] && GRAMMAR.has(t.slice(j, i));
+  }
+  return ok[t.length];
+}
+
+// t is the listed word as written, or a conjugated form of it: same stem, in kanji or in kana.
+function formOf(t, entry) {
+  const forms = [entry.canon, entry.kana].filter(Boolean);
+  return forms.some((w) => {
+    if (t === w || normalizeJa(t) === normalizeJa(w)) return true;
+    if (w === 'する') return /^(し|す|さ|せ)/.test(t);
+    if (w === '来る' || w === 'くる') return /^(来|こ|き|く)/.test(t);
+    return /[うくぐすつぬぶむるい]$/.test(w) && w.length >= 2 && t.startsWith(w.slice(0, -1));
+  });
+}
+
+const MAX_PARTS = 40;
+const SENTENCE_END = /[。？！?!]$/;
+
+// A phrase or sentence swap: every piece a listed word (or a form of one) or grammar, the pieces spelling f, at least one
+// listed word. Each word piece gets its gloss, romaji and kana from the list. null if anything is off.
+function validateGroup(kind, s, o, idx) {
+  if (!Array.isArray(s.parts) || !s.parts.length || s.parts.length > MAX_PARTS) return null;
+  const parts = [];
+  for (const p of s.parts) {
+    const t = typeof p?.t === 'string' ? p.t.trim() : '';
+    if (!t) return null;
+    if (typeof p.w === 'string' && p.w.trim()) {
+      const hit = idx.exact.get(exactJa(p.w)) || idx.folded.get(normalizeJa(p.w));
+      if (!hit || !formOf(t, hit)) return null;
+      parts.push({ t, word: hit.word, g: hit.en, h: hit.hint, ...(hit.kana && hit.kana !== hit.canon ? { k: hit.kana } : {}),
+        ...(hit.status ? { status: hit.status } : {}) });
+    } else if (isGrammar(t)) {
+      parts.push({ t });
+    } else return null;
+  }
+  const f = parts.map((p) => p.t).join('');
+  if (exactJa(f) !== exactJa(s.f)) return null;
+  const words = parts.filter((p) => p.word).map((p) => p.word);
+  if (!words.length || (kind === 'sentence' && !SENTENCE_END.test(f))) return null;
+  const g = typeof s.g === 'string' ? s.g.trim().slice(0, 300) : '';
+  if (!g) return null;
+  // word: the one the passage's picking ranks it by, its first learning word if it has one
+  const lead = parts.find((p) => p.word && p.status && p.status !== 'known') || parts.find((p) => p.word);
+  return { kind, o, f, g, parts, words, word: lead.word, ...(lead.status ? { status: lead.status } : {}),
+    ctx: typeof s.ctx === 'string' ? s.ctx.trim() : '' };
+}
+
 // Fail closed: keep only swaps whose Japanese is on the list (the plugin's word state, else the level's bundled list).
-// Canonicalizes the written form (kanji as listed), fills gloss, romaji and kana from the list.
+// A word swap is one listed word: its written form canonicalized (kanji as listed), gloss, romaji and kana from the list.
+// A phrase or sentence swap is listed words and grammar only (validateGroup). Swaps without a kind are word swaps.
 export function validateSwaps(level, swaps, sharedWords) {
   if (!Array.isArray(swaps)) return [];
   const idx = indexFor(level, sharedWords);
@@ -66,6 +127,11 @@ export function validateSwaps(level, swaps, sharedWords) {
     if (!s || typeof s.o !== 'string' || typeof s.f !== 'string') continue;
     const o = s.o.trim();
     if (!o || !s.f.trim()) continue;
+    if (s.kind === 'phrase' || s.kind === 'sentence') {
+      const group = validateGroup(s.kind, s, o, idx);
+      if (group) out.push(group);
+      continue;
+    }
     const hit = idx.exact.get(exactJa(s.f)) || idx.folded.get(normalizeJa(s.f));
     if (!hit) continue;
     out.push({
@@ -92,9 +158,15 @@ export function swapTarget(text, density) {
 
 // Swaps a passage may have: the level's per-sentence rule, or the density target.
 const swapLimit = (level, text, density) => (density > 0 ? swapTarget(text, density) : (level <= 1 ? 1 : 2) * sentenceCount(text));
+// One use per Japanese word: a phrase or sentence uses every listed word in it.
 const oncePerWord = (swaps) => {
   const used = new Set();
-  return swaps.filter((s) => { const k = exactJa(s.word || s.f); if (used.has(k)) return false; used.add(k); return true; });
+  return swaps.filter((s) => {
+    const keys = (s.words || [s.word || s.f]).map(exactJa);
+    if (keys.some((k) => used.has(k))) return false;
+    for (const k of keys) used.add(k);
+    return true;
+  });
 };
 
 // Density ceiling per passage, one use per Japanese word, learning words (active/shaky) kept before known ones.

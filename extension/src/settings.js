@@ -17,7 +17,7 @@ export function cleanSettings(s = {}) {
   const d = { ...DEFAULT_SETTINGS, siteOverrides: {} };
   if (typeof s.enabled === 'boolean') d.enabled = s.enabled;
   if (typeof s.newSitesEnabled === 'boolean') d.newSitesEnabled = s.newSitesEnabled;
-  if (['gemini-3.8-flash', 'gemini-3.5-flash-lite'].includes(s.model)) d.model = s.model;
+  if (['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.5-flash-lite'].includes(s.model)) d.model = s.model;
   if (Number.isInteger(s.levelOverride) && s.levelOverride >= 0 && s.levelOverride <= 4) d.levelOverride = s.levelOverride;
   if (DENSITIES.includes(s.density)) d.density = s.density;
   for (const [host, enabled] of Object.entries(s.siteOverrides || {})) {

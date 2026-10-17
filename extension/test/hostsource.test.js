@@ -74,7 +74,7 @@ describe('refresh', () => {
     expect(validateSwaps(1, [{ o: 'already', f: 'もう', ctx: 'x' }], s.words)).toEqual([]);
     const prompt = buildSystemPrompt(1, s.words);
     expect(prompt).toContain('だから = so / therefore; 多分 = maybe');
-    expect(prompt).toContain('KNOWN words (filler only):\nでも');
+    expect(prompt).toContain('KNOWN words:\nでも = ');
   });
 });
 

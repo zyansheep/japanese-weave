@@ -1,9 +1,13 @@
 // Gemini generateContent call. No chrome APIs; fetch is injectable for tests.
 export const MODELS = {
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'gemini-4-argon': 'Gemini 4 Argon (best Japanese; paid keys only)',
   'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite',
 };
-export const FALLBACK_MODEL = { 'gemini-3.8-flash': 'gemini-3.5-flash-lite' };
+export const FALLBACK_MODEL = { 'gemini-4-argon': 'gemini-3.8-flash', 'gemini-3.8-flash': 'gemini-3.5-flash-lite' };
+// How long one call of 8 passages may take: Argon writes whole sentences more slowly (12-15 s in testing).
+export const TIMEOUT_MS = { 'gemini-4-argon': 35000 };
+export const DEFAULT_TIMEOUT_MS = 20000;
 export const THINKING_LEVEL = 'low';
 export const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
 

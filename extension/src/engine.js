@@ -1,6 +1,6 @@
 // One batch, one model call (fallback model once on failure), validated swaps out.
 import { buildSystemPrompt, buildUserContent, RESPONSE_SCHEMA } from './prompt.js';
-import { buildRequest, callGemini, FALLBACK_MODEL } from './gemini.js';
+import { buildRequest, callGemini, FALLBACK_MODEL, TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from './gemini.js';
 import { validateSwaps } from './levels.js';
 
 // cooldown: Map<model, until ms>. Rate-limited or overloaded models are skipped until then, so the
@@ -10,8 +10,8 @@ export const COOLDOWN_MS = { 429: 60000, 503: 30000, timeout: 30000 };
 // density: percent of words to swap (0: the level's per-sentence rules). Returns { results, model, errors, usage }:
 // results are every validated swap, uncapped (selectSwaps picks from them when they're read from the cache); usage
 // lists every billed attempt ({ model, input, output } tokens); a thrown error carries the same `usage`.
-export async function requestSwaps({ apiKey, model, level, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0 }) {
-  const body = buildRequest({ system: buildSystemPrompt(level, words, shownToday, density), user: buildUserContent(batch, density), schema: RESPONSE_SCHEMA });
+export async function requestSwaps({ apiKey, model, level, stage = 0, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0 }) {
+  const body = buildRequest({ system: buildSystemPrompt(level, words, shownToday, density, stage), user: buildUserContent(batch, density), schema: RESPONSE_SCHEMA });
   const candidates = [model];
   if (FALLBACK_MODEL[model]) candidates.push(FALLBACK_MODEL[model]);
   const models = candidates.filter((m) => !(cooldown.get(m) > now()));
@@ -24,7 +24,7 @@ export async function requestSwaps({ apiKey, model, level, batch, words, shownTo
   }
   for (const m of models) {
     try {
-      const { byId, usage } = await callGemini({ fetchImpl, apiKey, model: m, body, timeoutMs });
+      const { byId, usage } = await callGemini({ fetchImpl, apiKey, model: m, body, timeoutMs: timeoutMs ?? TIMEOUT_MS[m] ?? DEFAULT_TIMEOUT_MS });
       spent.push({ model: m, ...usage });
       const results = {};
       for (const { id } of batch) {

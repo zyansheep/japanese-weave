@@ -1,7 +1,7 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
 // handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks, selections and on-screen time
 // for passages with glossed words. Every async reply belongs to one config generation.
-import { flatten, applySwaps, revert, toggle, isSwap, swapWord, SWAP_CLASS } from './text.js';
+import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEnglish, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
 import { selector, readable } from './page.js';
@@ -402,10 +402,13 @@ function reveal(e) {
   if (e.type === 'keydown' && !['Enter', ' '].includes(e.key)) return;
   e.preventDefault(); e.stopPropagation();
   hideTip();
-  if (toggle(span)) {
-    record(span, 'flip');
+  // Logged before the flip, while the word is still on the page. Flipping a phrase or sentence asks for its English as a
+  // whole, so it is logged (with the word clicked) but is no evidence about one word for the word state.
+  if (!showsEnglish(span)) {
+    if (swapOf(span) === span) record(span, 'flip');
     logInteraction(span, 'flip', Date.now(), 0);
   }
+  toggle(span);
   observer?.takeRecords();
 }
 chrome.runtime.onMessage.addListener((msg) => {

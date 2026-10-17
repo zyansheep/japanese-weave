@@ -1,10 +1,12 @@
 // Gemini token usage and its estimated cost, per day and in total. Prices are Google's paid-tier list prices in USD
-// per 1M tokens (https://ai.google.dev/gemini-api/docs/pricing, checked 2026-10-15); thinking tokens bill as output.
+// per 1M tokens (https://ai.google.dev/gemini-api/docs/pricing, checked 2026-10-15, Argon 2026-10-16); thinking tokens
+// bill as output.
 // Free-tier keys are not charged, so for them this is what the same use would cost on a paid key.
 import { localDay } from './hostsource.js';
 
 export const PRICES = {
   'gemini-3.8-flash': [{ from: '0000-00-00', input: 0.75, output: 3.75 }, { from: '2027-01-01', input: 1.5, output: 7.5 }],
+  'gemini-4-argon': [{ from: '0000-00-00', input: 2, output: 10 }, { from: '2026-12-01', input: 4, output: 20 }],
   'gemini-3.5-flash-lite': [{ from: '0000-00-00', input: 0.3, output: 2.5 }],
 };
 const KEY = 'geminiUsage';
