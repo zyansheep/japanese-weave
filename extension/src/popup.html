@@ -56,15 +56,16 @@
     <p class="small" id="collectedInfo"></p>
     <label class="row"><span>Model</span><select id="model"></select></label>
     <label class="row"><span>Gemini key</span><input type="password" id="apiKey" placeholder="AIza…" autocomplete="off"></label>
+    <label class="row"><span>Anthropic key</span><input type="password" id="anthropicKey" placeholder="sk-ant-…" autocomplete="off"></label>
     <div class="row"><span>Words</span><span id="wordInfo" class="small"></span></div>
     <div class="row"><button id="syncWords">Sync words</button><button id="clearCache">Clear cache</button></div>
   </section>
   <section>
-    <div class="row"><span>Gemini today</span><span id="usageToday" class="small"></span></div>
-    <div class="row"><span>Gemini total</span><span id="usageTotal" class="small"></span></div>
-    <p class="small" id="usageNote">Estimated at paid-tier prices; free-tier keys are not charged.</p>
+    <div class="row"><span>Model use today</span><span id="usageToday" class="small"></span></div>
+    <div class="row"><span>Model use total</span><span id="usageTotal" class="small"></span></div>
+    <p class="small" id="usageNote">Estimated at list prices; free-tier Gemini keys are not charged.</p>
   </section>
-  <p class="small">Sites where it's on send readable page text to Gemini with your key. Forms, links, code and editable text are skipped.</p>
+  <p class="small">Sites where it's on send readable page text to the chosen model (Google or Anthropic) with your key. Forms, links, code and editable text are skipped.</p>
   <div id="notice" class="small error" role="alert"></div>
   <script type="module" src="popup.js"></script>
 </body>

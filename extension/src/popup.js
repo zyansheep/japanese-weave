@@ -1,5 +1,5 @@
 import { resolveLevel } from './levels.js';
-import { MODELS } from './gemini.js';
+import { MODELS, providerOf } from './models.js';
 import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
 import { describeStats } from './hostsource.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -59,15 +59,19 @@ async function refresh() {
   $('model').value = s.model;
   $('apiKey').value = '';
   $('apiKey').placeholder = status.pastedKey ? 'saved (paste to replace)' : status.hostKey ? 'from setup (paste to override)' : 'AIza…';
+  $('anthropicKey').value = '';
+  $('anthropicKey').placeholder = status.pastedAnthropicKey ? 'saved (paste to replace)'
+    : status.hostAnthropicKey ? 'from ~/.japanese-weave (paste to override)' : 'sk-ant-…';
   $('wordInfo').textContent = status.words
     ? `${status.words} from Claude Code · ${ago(status.fetchedAt)}${c.paused ? ' · paused' : ''}`
     : 'built-in list';
   $('operation').textContent = !s.enabled ? 'Off'
-    : !c.hasKey ? 'Add a Gemini key to start'
+    : !c.hasKey ? `Add ${providerOf(s.model) === 'anthropic' ? 'an Anthropic' : 'a Gemini'} key to start`
     : c.paused ? 'Paused from Claude Code'
     : host && !siteEnabled(s, tab.url) ? 'Off on this site'
     : host && !hasSiteAccess(tab.url, c.origins) ? 'This site needs your OK'
-    : status.modelStatus?.error || 'On';
+    : status.modelStatus?.error || (status.modelStatus?.model && status.modelStatus.model !== s.model
+      ? `On · last answer from ${MODELS[status.modelStatus.model] || status.modelStatus.model}` : 'On');
   const list = $('siteList');
   list.replaceChildren();
   for (const [name, enabled] of Object.entries(s.siteOverrides)) {
@@ -145,6 +149,7 @@ $('challenge').addEventListener('change', (e) => run(async () => {
   if (!res?.ok) $('notice').textContent = `Could not set the challenge (${res?.error || 'no native host'})`;
 }));
 $('apiKey').addEventListener('change', (e) => run(() => save({ apiKey: e.target.value })));
+$('anthropicKey').addEventListener('change', (e) => run(() => save({ anthropicKey: e.target.value })));
 $('siteEnabled').addEventListener('change', (e) => run(async () => {
   const enabled = e.target.checked;
   if (enabled && !hasSiteAccess(tab.url, status.config.origins)) {

@@ -6,6 +6,7 @@ import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
 import { selector, readable } from './page.js';
 import { wordCount } from './levels.js';
+import { MAX_BATCH } from './models.js';
 import { readingState, account, newStay, paused } from './attention.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
@@ -302,7 +303,7 @@ async function flush() {
   timer = null;
   if (!on()) return;
   const gen = generation;
-  const items = [...pending].filter(([key]) => !inflight.has(key)).slice(0, 8).map(([key, p]) => ({ key, text: p.text }));
+  const items = [...pending].filter(([key]) => !inflight.has(key)).slice(0, MAX_BATCH).map(([key, p]) => ({ key, text: p.text }));
   if (!items.length) return;
   for (const i of items) inflight.add(i.key);
   let result;

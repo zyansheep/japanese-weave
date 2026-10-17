@@ -38,7 +38,8 @@ Human steps (browsers don't let scripts do these):
    **Chrome/Chromium**: `chrome://extensions` → Developer mode → **Load unpacked** → `~/.japanese-weave/extension`.
 2. Click the Japanese Weave toolbar icon → **Allow all websites** (or tick **This site** on each site you want).
 3. Paste a free Gemini API key ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)) in the popup, or
-   pass `--gemini-key-file` to setup.
+   pass `--gemini-key-file` to setup. For Claude Haiku (popup, Model), paste an Anthropic API key instead, or save it
+   to `~/.japanese-weave/anthropic_key` (`chmod 600`).
 
 **Browser on another machine.** The word state lives where Claude Code runs. On the machine with the browser, clone
 this repo and run `python3 scripts/fw.py setup --remote <ssh-host>`: the native host there forwards the extension's
@@ -59,9 +60,10 @@ level from [blocks/](blocks/level-01.md).
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
   word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
   only from your words plus particles and endings. Hover a word for its meaning, romaji and kana, or a sentence's 。
-  for its translation; click to flip back to English. Swaps are chosen by Gemini on your own key: Gemini 3.8 Flash by
-  default, or Gemini 4 Argon (popup, Model) for Japanese close to Claude's, at about three times the cost and paid keys
-  only ([docs/swap-prompt.md](docs/swap-prompt.md)).
+  for its translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by
+  default, Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys
+  only), or Claude Haiku 5.5 with an Anthropic key, the cheapest. Passages from every tab share calls, up to 16 a call
+  ([docs/swap-prompt.md](docs/swap-prompt.md)).
 
 All of it shares one word list on your machine, so words you see on the web count toward the chat and the other
 way round.
@@ -183,8 +185,8 @@ one word's estimate and every observation behind it. The design, with its source
 
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your
 local Claude Code and Codex transcripts to count exposure and never sends them anywhere. The extension sends
-readable page text from sites you allow to Google's Gemini API with your key (free-tier keys allow Google to train
-on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
+readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
+(free-tier Gemini keys allow Google to train on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
 managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;
 the popup can turn any of them on). It talks to the plugin through a native messaging host that only this extension
 may call.

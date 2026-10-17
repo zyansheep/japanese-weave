@@ -5,7 +5,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
   {"type": "ping"}                      -> {"ok": true, "host": 1}
   {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status}],
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
-                                            "geminiKey"?: stored key if setup saved one}
+                                            "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
+                                            (gemini_key by setup, anthropic_key by hand)}
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
   {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
                                         -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
@@ -59,9 +60,10 @@ def handle(message):
     if kind == 'state':
         state, _ = hub.current(STATE_MAX_AGE, wait=False)  # here: applies today's promotion; else the cache
         reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {})
-        key = fwlib.home() / 'gemini_key'
-        if key.exists():
-            reply['geminiKey'] = key.read_text().strip()
+        for name, field in (('gemini_key', 'geminiKey'), ('anthropic_key', 'anthropicKey')):
+            key = fwlib.home() / name
+            if key.exists():
+                reply[field] = key.read_text().strip()
         return dict(reply, **adaptive(state, reply['words']))
     if kind == 'events':
         events = message.get('events')

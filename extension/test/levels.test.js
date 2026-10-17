@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
+  numberTrap,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -178,7 +179,10 @@ describe('phrase and sentence swaps', () => {
     drop(sentence([{ t: 'でした。', w: '' }]));
     drop(sentence([{ t: '楽しく', w: '日' }, { t: 'でした。', w: '' }])); // not a form of the word it names
     drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }], { f: '楽しい日' })); // a sentence ends like one
-    drop(sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }], { g: '' }));
+  });
+  test('without a gloss, the English it replaces is the gloss', () => {
+    const [s] = validateSwaps(2, [sentence([{ t: '楽しい', w: '楽しい' }, { t: '日', w: '日' }, { t: 'でした。', w: '' }], { g: '' })], words);
+    expect(s.g).toBe('It was a fun day.');
   });
   test('grammar pieces may run together; full-width and half-width punctuation match', () => {
     const [s] = validateSwaps(2, [{ kind: 'sentence', o: 'Is it the store?', f: '店ですか？', parts: [{ t: '店', w: '店' }, { t: 'ですか', w: '' },
@@ -195,5 +199,104 @@ describe('phrase and sentence swaps', () => {
     ], words);
     expect(capSwaps(2, swaps, 'It was a fun day. The store was busy all day long today.', words).map((s) => s.f))
       .toEqual(['楽しい日でした。', '店']);
+  });
+});
+
+describe('the compact answer', () => {
+  const words = [
+    { ja: '母', en: 'mother', hint: 'haha', kana: 'はは', status: 'known' },
+    { ja: '一緒に', en: 'together', hint: 'issho ni', kana: 'いっしょに', status: 'known' },
+    { ja: '店', en: 'shop / store', hint: 'mise', kana: 'みせ', status: 'known' },
+    { ja: '行く', en: 'go', hint: 'iku', kana: 'いく', status: 'active' },
+    { ja: '見る', en: 'see / watch', hint: 'miru', kana: 'みる', status: 'known' },
+    { ja: '知る', en: 'know', hint: 'shiru', kana: 'しる', status: 'known' },
+    { ja: 'する', en: 'do / make', hint: 'suru', kana: 'する', status: 'known' },
+    { ja: '勉強', en: 'study', hint: 'benkyō', kana: 'べんきょう', status: 'known' },
+    { ja: 'いい', en: 'good', hint: 'ii', kana: 'いい', status: 'shaky' },
+    { ja: 'なる', en: 'become', hint: 'naru', kana: 'なる', status: 'known' },
+    { ja: '大きい', en: 'big', hint: 'ōkii', kana: 'おおきい', status: 'known' },
+    { ja: 'でも', en: 'but', hint: 'demo', kana: 'でも', status: 'known' },
+  ];
+  const group = (p, k = 's') => validateSwaps(2, [{ k, o: 'Some English.', f: p.replace(/\|/g, ''), p, g: 'Some English.', c: 'Some' }], words);
+  const pieces = (p) => group(p)[0]?.parts.map((x) => (x.word ? `${x.t}=${x.word}` : x.t)).join(' ');
+  test('a word swap: k, o, f and c only, glossed from the list', () => {
+    expect(validateSwaps(2, [{ k: 'w', o: 'but', f: 'でも', p: '', g: '', c: 'x but y' }], words))
+      .toEqual([{ o: 'but', f: 'でも', g: 'but', h: 'demo', ctx: 'x but y', word: 'でも', status: 'known' }]);
+  });
+  test('pieces are looked up: listed words, forms of listed verbs and adjectives, grammar', () => {
+    expect(pieces('母|と|一緒に|店|に|行きました|。')).toBe('母=母 と 一緒に=一緒に 店=店 に 行きました=行く 。');
+    expect(group('母|と|一緒に|店|に|行きました|。')[0]).toMatchObject({ kind: 'sentence', word: '行く', status: 'active', g: 'Some English.' });
+    expect(pieces('勉強|しました|。')).toBe('勉強=勉強 しました=する 。'); // する, not 知る read しる
+    expect(pieces('大きく|なりました|。')).toBe('大きく=大きい なりました=なる 。');
+    expect(pieces('よかった|です|。')).toBe('よかった=いい です 。');
+    expect(pieces('店|に|行って|いました|。')).toBe('店=店 に 行って=行く いました 。');
+  });
+  test('fails closed: an unlisted word, a look-alike verb, a kana word that reads as grammar, no pieces', () => {
+    expect(group('母|と|友達|に|会いました|。')).toEqual([]);
+    expect(group('母|に|見せました|。')).toEqual([]); // 見せる is not a form of 見る
+    expect(group('なに|が|いい|ですか|？')).toEqual([]);
+    expect(group('店で見る', 'p')).toEqual([]); // a piece is one word, perhaps with grammar after it
+    expect(validateSwaps(2, [{ k: 'p', o: 'with my mom', f: '母と', p: '', g: 'with mother', c: 'x' }], words)).toEqual([]);
+  });
+  test('a phrase sent as a word swap is a phrase', () => {
+    const [s] = validateSwaps(2, [{ k: 'w', o: 'go to the store', f: '店に行く', p: '店|に|行く', g: '', c: 'x' }], words);
+    expect(s).toMatchObject({ kind: 'phrase', f: '店に行く', g: 'go to the store', words: ['店', '行く'] });
+  });
+  test('a phrase ending in a verb ends its clause: no English hanging after it', () => {
+    const swap = [{ k: 'p', o: 'went to the store', f: '店に行きました', p: '店|に|行きました', g: 'went to the store', c: 'x' }];
+    const kept = (text) => validateSwaps(2, swap, words, text).length === 1;
+    expect(kept('Yesterday I went to the store with my mom.')).toBe(false);
+    expect(kept('Yesterday I went to the store.')).toBe(true);
+    expect(kept('Yesterday I went to the store and bought fish.')).toBe(true);
+    expect(kept('I went to the store, then home.')).toBe(true);
+    const noun = [{ k: 'p', o: 'going to the store', f: '店に行くこと', p: '店|に|行く|こと', g: 'going to the store', c: 'x' }];
+    expect(validateSwaps(2, noun, words, 'I like going to the store with her.').length).toBe(1);
+  });
+  test('conjugations follow the verb: 行く is 行って, not 行いて', () => {
+    const named = (t, w) => validateSwaps(2, [{ kind: 'phrase', o: 'x', f: t, parts: [{ t, w }], g: 'x', ctx: 'x' }], words).length;
+    expect(named('行って', '行く')).toBe(1);
+    expect(named('行いて', '行く')).toBe(0);
+    expect(named('見ませんでした', '見る')).toBe(1);
+    expect(named('見せた', '見る')).toBe(0);
+    expect(named('しています', 'する')).toBe(1);
+  });
+});
+
+describe('number words that are labels, ranks or pronouns', () => {
+  const words = [
+    { ja: '一つ', en: 'one', hint: 'hitotsu', kana: 'ひとつ', status: 'active' },
+    { ja: '一', en: 'one', hint: 'ichi', kana: 'いち', status: 'known' },
+    { ja: '二つ', en: 'two', hint: 'futatsu', kana: 'ふたつ', status: 'known' },
+    { ja: '二', en: 'two', hint: 'ni', kana: 'に', status: 'known' },
+    { ja: '日', en: 'day', hint: 'hi', kana: 'ひ', status: 'known' },
+    { ja: '一緒に', en: 'together', hint: 'issho ni', kana: 'いっしょに', status: 'known' },
+  ];
+  const kept = (text, o, f) => validateSwaps(2, [{ k: 'w', o, f, p: '', g: '', c: '' }], words, text).length === 1;
+  test('labels and ranks: "Day one", "number one", "chapter two", "the first"', () => {
+    expect(kept('Day one of flying a Tesla Roadster in London', 'one', '一つ')).toBe(false);
+    expect(kept('Day one of flying a Tesla Roadster in London', 'Day', '日')).toBe(false);
+    expect(kept('We are number one again this year', 'one', '一')).toBe(false);
+    expect(kept('Chapter two was the best part', 'two', '二')).toBe(false);
+    expect(kept('The first time I saw it', 'first', '一')).toBe(false);
+  });
+  test('pronouns and idioms: "the one", "no one", "the only one", "one day", "one-on-one"', () => {
+    expect(kept('This is the one I wanted', 'one', '一つ')).toBe(false);
+    expect(kept('No one came to the party', 'one', '一')).toBe(false);
+    expect(kept('She was the only one there', 'one', '一')).toBe(false);
+    expect(kept('One day I will visit Japan', 'One', '一')).toBe(false);
+    expect(kept('I had a one-on-one with my manager', 'one', '一')).toBe(false);
+  });
+  test('counters count things, not hours or people; plain counts stay', () => {
+    expect(kept('I waited two hours for the bus', 'two', '二つ')).toBe(false);
+    expect(kept('I waited two hours for the bus', 'two', '二')).toBe(true);
+    expect(kept('I have two ideas for the name', 'two', '二つ')).toBe(true);
+    expect(kept('Only one of the ideas worked out', 'one', '一つ')).toBe(true);
+    expect(kept('It was a long day at work', 'day', '日')).toBe(true);
+    expect(kept('We went there together, one by one', 'together', '一緒に')).toBe(true);
+  });
+  test('phrases with a numeral are checked the same way; no passage, no check', () => {
+    const phrase = { kind: 'phrase', o: 'Day one', f: '一日', parts: [{ t: '一', word: '一' }, { t: '日', word: '日' }] };
+    expect(numberTrap(phrase, 'Day one of the trip')).toBe(true);
+    expect(numberTrap({ o: 'one', f: '一つ' }, '')).toBe(false);
   });
 });

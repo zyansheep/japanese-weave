@@ -1,9 +1,11 @@
-// Background (service worker in Chrome, event page in Firefox): word state and the Gemini key from the Claude Code plugin (native host), site access,
-// one model call at a time, results back to pages, seen/flip/peek events back to the plugin.
+// Background (service worker in Chrome, event page in Firefox): word state and the model keys from the Claude Code plugin
+// (native host), site access, one model call at a time for every tab's passages together, results back to pages,
+// seen/flip/peek events back to the plugin.
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
+import { candidatesFor, MAX_BATCH } from './models.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
 import { hashKey } from './hash.js';
@@ -20,12 +22,14 @@ const ALARM = 'sync';
 const SYNC_MINUTES = 30; // word statuses change at most a few times a day
 const FLUSH_DELAY_MS = 10000;
 const cooldown = new Map(); // model -> rate-limit cooldown end; worker memory is enough
+const KEY_NAMES = ['apiKey', 'hostKey', 'anthropicKey', 'hostAnthropicKey'];
+// Pasted keys win over the ones setup stored.
+const keysOf = (data) => ({ gemini: data.apiKey || data.hostKey || '', anthropic: data.anthropicKey || data.hostAnthropicKey || '' });
 
 const serial = () => {
   let chain = Promise.resolve();
   return (fn) => { const p = chain.then(fn); chain = p.catch(() => {}); return p; };
 };
-const modelCall = serial(); // one model call at a time
 const locked = serial(); // storage read-modify-writes one at a time, or concurrent ones drop data
 
 const ready = (async () => {
@@ -41,12 +45,12 @@ const ready = (async () => {
 // candidate and the dial only changes which of them selectSwaps picks, so turning it never costs a model call.
 async function context() {
   await ready;
-  const data = await store.get(['settings', 'wordState', 'apiKey', 'hostKey', 'epoch']);
+  const data = await store.get(['settings', 'wordState', 'epoch', ...KEY_NAMES]);
   const state = data.wordState?.words?.length ? data.wordState : null;
   const saved = cleanSettings(data.settings);
   const settings = { ...saved, newSitesEnabled: newSitesDefault(saved, state?.sites) };
   const level = resolveLevel(saved, state?.stage).effective;
-  const hasKey = !!(data.apiKey || data.hostKey);
+  const hasKey = candidatesFor(settings.model, keysOf(data)).length > 0;
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
   const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
@@ -66,7 +70,7 @@ async function broadcast(type = 'config') {
 async function swaps(msg, sender) {
   const ctx = await context();
   if (msg.revision !== ctx.revision || !activeOn(ctx, sender.url)) return { results: {}, stale: true };
-  if (!Array.isArray(msg.items) || msg.items.length > 8) throw new Error('Invalid text batch');
+  if (!Array.isArray(msg.items) || msg.items.length > MAX_BATCH) throw new Error('Invalid text batch');
   const items = msg.items.filter((i) => i && typeof i.text === 'string' && i.text.length <= 2000 &&
     wordCount(i.text) >= 6 && !isZeroJapanese(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
   const cacheKey = (i) => `${ctx.cacheRevision}:${hashKey(i.text)}`;
@@ -77,29 +81,82 @@ async function swaps(msg, sender) {
   const misses = items.filter((i) => !(cacheKey(i) in cached));
   if (!misses.length) return { results: picked(cached) };
   try {
-    const fresh = await modelCall(async () => {
-      if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
-      if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
-      const { wordState, apiKey, hostKey } = await store.get(['wordState', 'apiKey', 'hostKey']);
-      const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
-      return requestSwaps({ apiKey: apiKey || hostKey, model: ctx.settings.model, level: ctx.level, stage: wordState?.stage, words: wordState?.words, fetchImpl,
-        shownToday: await shownToday(chromeStorage), cooldown, batch: misses.map((i) => ({ id: cacheKey(i), text: i.text })),
-        density: ctx.settings.density });
-    });
-    return await locked(async () => {
-      await recordSpent(fresh?.usage);
-      const now = await context();
-      if (!fresh || now.cacheRevision !== ctx.cacheRevision) return { results: {}, stale: true };
-      await cache.setMany(fresh.results); // still good candidates if only the dial moved meanwhile
-      await store.set({ modelStatus: { at: Date.now(), error: '', model: fresh.model } });
-      return now.revision === ctx.revision ? { results: picked({ ...cached, ...fresh.results }) } : { results: {}, stale: true };
-    });
+    const fresh = await gather(ctx, misses.map((i) => ({ id: cacheKey(i), text: i.text })));
+    const now = await context();
+    if (!fresh || now.revision !== ctx.revision) return { results: {}, stale: true };
+    return { results: picked({ ...cached, ...fresh }) };
   } catch (e) {
-    await locked(() => recordSpent(e?.usage));
-    const error = e?.message || 'Model request failed';
-    await store.set({ modelStatus: { at: Date.now(), error } });
-    return { results: picked(cached), error, retryAfterMs: e?.retryAfterMs };
+    return { results: picked(cached), error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
   }
+}
+
+// Cache misses from every tab wait here and go to the model together, up to MAX_BATCH passages a call and one call at a
+// time, so the passages that turn up while a call runs (scrolling, other tabs) share the next call and its prompt.
+// Resolves with { cacheKey: swaps } for the batch, or null when the word state or settings changed meanwhile.
+const waiting = []; // { ctx, batch: [{ id, text }], resolve, reject }
+let calling = false;
+function gather(ctx, batch) {
+  return new Promise((resolve, reject) => {
+    waiting.push({ ctx, batch, resolve, reject });
+    void drain();
+  });
+}
+async function drain() {
+  if (calling) return;
+  calling = true;
+  try {
+    while (waiting.length) {
+      const { ctx } = waiting[0];
+      const jobs = [];
+      const passages = new Map();
+      for (let i = 0; i < waiting.length;) {
+        const job = waiting[i];
+        const more = job.batch.filter((p) => !passages.has(p.id));
+        if (job.ctx.cacheRevision !== ctx.cacheRevision || (jobs.length && passages.size + more.length > MAX_BATCH)) { i++; continue; }
+        waiting.splice(i, 1);
+        jobs.push(job);
+        for (const p of more) passages.set(p.id, p);
+      }
+      try {
+        // A passage another tab asked for may have come back in the call before this one.
+        const done = await cache.getMany([...passages.keys()]);
+        const todo = [...passages.values()].filter((p) => !(p.id in done));
+        const fresh = todo.length ? await callModel(ctx, todo) : {};
+        const results = fresh && { ...done, ...fresh };
+        for (const job of jobs) job.resolve(results);
+      } catch (e) {
+        for (const job of jobs) job.reject(e);
+      }
+    }
+  } finally {
+    calling = false;
+  }
+}
+
+// One model call for a batch; the swaps go into the cache and the tokens into usage.
+async function callModel(ctx, batch) {
+  if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
+  let fresh;
+  try {
+    if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
+    const data = await store.get(['wordState', ...KEY_NAMES]);
+    const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
+    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, stage: data.wordState?.stage,
+      words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density });
+  } catch (e) {
+    await locked(async () => {
+      await recordSpent(e?.usage);
+      await store.set({ modelStatus: { at: Date.now(), error: e?.message || 'Model request failed' } });
+    });
+    throw e;
+  }
+  return locked(async () => {
+    await recordSpent(fresh.usage);
+    if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
+    await cache.setMany(fresh.results); // still good candidates if only the dial moved meanwhile
+    await store.set({ modelStatus: { at: Date.now(), error: '', model: fresh.model } });
+    return fresh.results;
+  });
 }
 
 // Picks each passage's swaps from its cached candidates (selectSwaps): the dial's budget and the host's per-word
@@ -176,7 +233,8 @@ async function clearCache() {
   return { ok: true, removed };
 }
 
-// msg.settings: a partial patch; msg.siteOverride: { host, enabled: true | false | null (reset) }; msg.apiKey.
+// msg.settings: a partial patch; msg.siteOverride: { host, enabled: true | false | null (reset) }; msg.apiKey (Gemini),
+// msg.anthropicKey.
 async function save(msg) {
   await locked(async () => {
     const saved = await store.get('settings');
@@ -187,9 +245,10 @@ async function save(msg) {
       else merged.siteOverrides[msg.siteOverride.host] = msg.siteOverride.enabled;
     }
     const patch = { settings: cleanSettings(merged) };
-    if (typeof msg.apiKey === 'string') {
-      if (msg.apiKey.length > 500) throw new Error('Key is too long');
-      patch.apiKey = msg.apiKey.trim();
+    for (const name of ['apiKey', 'anthropicKey']) {
+      if (typeof msg[name] !== 'string') continue;
+      if (msg[name].length > 500) throw new Error('Key is too long');
+      patch[name] = msg[name].trim();
     }
     await store.set(patch);
   });
@@ -211,10 +270,11 @@ async function stats() {
 
 async function status() {
   const config = await context();
-  const data = await store.get(['wordState', 'apiKey', 'hostKey', 'modelStatus']);
+  const data = await store.get(['wordState', 'modelStatus', ...KEY_NAMES]);
   return { config, words: data.wordState?.words?.length || 0, fetchedAt: data.wordState?.fetchedAt || 0,
     budget: data.wordState?.budget || 0, rate: data.wordState?.rate || null,
-    pastedKey: !!data.apiKey, hostKey: !!data.hostKey, modelStatus: data.modelStatus || null,
+    pastedKey: !!data.apiKey, hostKey: !!data.hostKey, pastedAnthropicKey: !!data.anthropicKey,
+    hostAnthropicKey: !!data.hostAnthropicKey, modelStatus: data.modelStatus || null,
     usage: await readUsage(chromeStorage) };
 }
 
@@ -244,7 +304,7 @@ function registerSites() {
   const p = registrations.then(async () => {
     const { origins = [] } = await chrome.permissions.getAll();
     const matches = [...new Set(origins.flatMap((o) => o === '<all_urls>' ? ['http://*/*', 'https://*/*'] : [o]))]
-      .filter((o) => /^(https?|\*):\/\//.test(o) && !o.includes('googleapis.com'));
+      .filter((o) => /^(https?|\*):\/\//.test(o) && !o.includes('googleapis.com') && !o.includes('api.anthropic.com'));
     const existing = await chrome.scripting.getRegisteredContentScripts({ ids: ['weave-sites'] });
     if (!matches.length) {
       if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: ['weave-sites'] });

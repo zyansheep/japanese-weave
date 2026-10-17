@@ -504,6 +504,14 @@ class Host(Home):
             out = out[4 + size:]
         return replies
 
+    def test_state_carries_the_key_files(self):
+        home = self.home / 'fw'
+        home.mkdir(parents=True, exist_ok=True)
+        (home / 'gemini_key').write_text('g-key\n')
+        (home / 'anthropic_key').write_text(' a-key \n')
+        state, = self.converse({'type': 'state'})
+        self.assertEqual((state['geminiKey'], state['anthropicKey']), ('g-key', 'a-key'))
+
     def test_protocol(self):
         ping, state, events, after, bad = self.converse(
             {'type': 'ping'}, {'type': 'state'},
@@ -514,6 +522,7 @@ class Host(Home):
         self.assertEqual(state['stage'], 1)
         self.assertEqual(len(state['words']), fwlib.NEW_PER_DAY)
         self.assertNotIn('geminiKey', state)
+        self.assertNotIn('anthropicKey', state)
         self.assertEqual(state['prefs'], {})
         self.assertEqual(events, {'ok': True, 'applied': 2})
         mou = next(w for w in after['words'] if w['ja'] == 'もう')  # a flip restarts a learning word's count

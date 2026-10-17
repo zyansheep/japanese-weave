@@ -1,19 +1,26 @@
 // One batch, one model call (fallback model once on failure), validated swaps out.
-import { buildSystemPrompt, buildUserContent, RESPONSE_SCHEMA } from './prompt.js';
-import { buildRequest, callGemini, FALLBACK_MODEL, TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from './gemini.js';
+import { buildSystemParts, buildUserContent, RESPONSE_SCHEMA } from './prompt.js';
+import { askGemini } from './gemini.js';
+import { askClaude } from './anthropic.js';
+import { candidatesFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from './models.js';
 import { validateSwaps } from './levels.js';
+
+const ASK = { gemini: askGemini, anthropic: askClaude };
 
 // cooldown: Map<model, until ms>. Rate-limited or overloaded models are skipped until then, so the
 // free tier's per-minute limit does not cost every batch a failed request before the fallback.
-export const COOLDOWN_MS = { 429: 60000, 503: 30000, timeout: 30000 };
+export const COOLDOWN_MS = { 429: 60000, 503: 30000, 529: 30000, timeout: 30000 };
 
-// density: percent of words to swap (0: the level's per-sentence rules). Returns { results, model, errors, usage }:
-// results are every validated swap, uncapped (selectSwaps picks from them when they're read from the cache); usage
-// lists every billed attempt ({ model, input, output } tokens); a thrown error carries the same `usage`.
-export async function requestSwaps({ apiKey, model, level, stage = 0, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0 }) {
-  const body = buildRequest({ system: buildSystemPrompt(level, words, shownToday, density, stage), user: buildUserContent(batch, density), schema: RESPONSE_SCHEMA });
-  const candidates = [model];
-  if (FALLBACK_MODEL[model]) candidates.push(FALLBACK_MODEL[model]);
+// keys: { gemini, anthropic } (apiKey alone is the Gemini key). density: percent of words to swap (0: the level's
+// per-sentence rules). Returns { results, model, errors, usage }: results are every validated swap, uncapped
+// (selectSwaps picks from them when they're read from the cache); usage lists every billed attempt
+// ({ model, input, output, cached?, written? } tokens); a thrown error carries the same `usage`.
+export async function requestSwaps({ keys, apiKey, model, level, stage = 0, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0 }) {
+  const keyFor = { gemini: apiKey, ...keys };
+  const system = buildSystemParts(level, words, shownToday, density, stage);
+  const user = buildUserContent(batch, density);
+  const candidates = candidatesFor(model, keyFor);
+  if (!candidates.length) throw new Error(`No key for ${model}`);
   const models = candidates.filter((m) => !(cooldown.get(m) > now()));
   const errors = [];
   const spent = [];
@@ -22,14 +29,17 @@ export async function requestSwaps({ apiKey, model, level, stage = 0, batch, wor
     error.retryAfterMs = Math.max(1000, Math.min(...candidates.map((m) => cooldown.get(m))) - now());
     throw error;
   }
+  const texts = new Map(batch.map(({ id, text }) => [id, text]));
   for (const m of models) {
     try {
-      const { byId, usage } = await callGemini({ fetchImpl, apiKey, model: m, body, timeoutMs: timeoutMs ?? TIMEOUT_MS[m] ?? DEFAULT_TIMEOUT_MS });
+      const provider = providerOf(m);
+      const limit = timeoutMs ?? (TIMEOUT_MS[m] ?? DEFAULT_TIMEOUT_MS) * Math.max(1, batch.length / 8);
+      const { byId, usage } = await ASK[provider]({ fetchImpl, apiKey: keyFor[provider], model: m, system, user, schema: RESPONSE_SCHEMA, timeoutMs: limit });
       spent.push({ model: m, ...usage });
       const results = {};
       for (const { id } of batch) {
         if (!byId.has(id)) throw new Error('Incomplete model response');
-        results[id] = validateSwaps(level, byId.get(id), words);
+        results[id] = validateSwaps(level, byId.get(id), words, texts.get(id));
       }
       return { results, model: m, errors, usage: spent };
     } catch (e) {

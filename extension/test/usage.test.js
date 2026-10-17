@@ -10,6 +10,13 @@ describe('usage', () => {
     expect(costUsd('some-new-model', 1e6, 1e6)).toBe(0);
   });
 
+  it('cached prompt tokens bill at the cached rate, tokens written to the cache at the write rate', () => {
+    // Haiku: 1M in, of which 600k read from the cache and 100k written; 1M out
+    expect(costUsd('claude-haiku-5-5', 1e6, 1e6, '2026-10-17', 6e5, 1e5)).toBeCloseTo(0.3 * 0.1 + 0.6 * 0.01 + 0.1 * 0.125 + 0.5);
+    expect(costUsd('gemini-3.8-flash', 1e6, 0, '2026-10-17', 1e6)).toBeCloseTo(0.075);
+    expect(costUsd('gemini-4-argon', 1e6, 0, '2026-12-01', 1e6)).toBeCloseTo(0.2);
+  });
+
   it('adds up per day and in total, and keeps a month of days', async () => {
     const storage = memoryStorage();
     expect(await readUsage(storage)).toBeNull();

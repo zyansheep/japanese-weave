@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildSystemPrompt, buildUserContent, RESPONSE_SCHEMA } from '../src/prompt.js';
+import { buildSystemPrompt, buildSystemParts, buildUserContent, RESPONSE_SCHEMA } from '../src/prompt.js';
 import { L1_WORDS, L2_WORDS } from '../src/levels.js';
 
 const katakana = (ja) => /^[゠-ヿ〜]+$/.test(ja);
@@ -35,9 +35,8 @@ describe('prompt', () => {
     expect(buildSystemPrompt(2)).not.toContain('"target"');
     expect(RESPONSE_SCHEMA.properties.passages.items.required).toEqual(['id', 'swaps']);
     const swap = RESPONSE_SCHEMA.properties.passages.items.properties.swaps.items;
-    expect(swap.required).toEqual(['kind', 'o', 'f', 'parts', 'g', 'ctx']);
-    expect(swap.properties.kind.enum).toEqual(['word', 'phrase', 'sentence']);
-    expect(swap.properties.parts.items.required).toEqual(['t', 'w']);
+    expect(swap.required).toEqual(['k', 'o', 'f', 'p', 'g', 'c']);
+    expect(swap.properties.k.enum).toEqual(['w', 'p', 's']);
   });
   test('shared state: learning words first (unshown today ahead), known words with glosses, no katakana loanwords', () => {
     const words = [
@@ -52,6 +51,15 @@ describe('prompt', () => {
     expect(p).toContain('小さい = small; 本当 = true; 大きい = big');
     expect(p).toContain('KNOWN words:\nでも = but\n');
     expect(p).not.toContain('バス');
+  });
+  test('two parts: everything through the known words, then the learning words that change during the day', () => {
+    const words = [{ ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' }, { ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
+    const [stable, learning] = buildSystemParts(2, words, [], 0, 3);
+    expect(stable).toContain('THREE KINDS OF SWAP');
+    expect(stable.endsWith('KNOWN words:\nでも = but\n')).toBe(true);
+    expect(learning).toBe('LEARNING words (the reason this extension exists; most needed first):\n大きい = big');
+    expect(buildSystemPrompt(2, words, [], 0, 3)).toBe(stable + learning);
+    expect(buildSystemParts(2, words, ['大きい'], 0, 3)[0]).toBe(stable);
   });
   test('the stage sets how many sentences go fully into Japanese', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];

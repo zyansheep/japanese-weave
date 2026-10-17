@@ -1,0 +1,66 @@
+[
+ {
+  "id": "tweet-day-one",
+  "text": "Day one of flying a Tesla Roadster in London"
+ },
+ {
+  "id": "tweet-best",
+  "text": "Honestly I think this is the best thing that happened to me this year. Still can't believe it."
+ },
+ {
+  "id": "blog-language",
+  "text": "If you want to learn a new language, the most important thing is to read a little every day. You don't need a lot of time. Even ten minutes before bed makes a big difference over a year."
+ },
+ {
+  "id": "numbers",
+  "text": "We're number one in the region for the third year in a row. One day we'll open a second store. Yesterday I had a one-on-one meeting with two of the founders, and one of them gave me three good ideas."
+ },
+ {
+  "id": "story-mother",
+  "text": "My mother came home late that night. She looked tired, but she smiled and asked if I had eaten dinner. I said yes, even though I hadn't."
+ },
+ {
+  "id": "docs-config",
+  "text": "Before you run the script, make sure the config file is in the same folder. Otherwise the program will stop with an error."
+ },
+ {
+  "id": "tweet-movie",
+  "text": "Just watched it again. I really love this movie. The ending gets me every time."
+ },
+ {
+  "id": "diary-store",
+  "text": "Yesterday I went to the store with my mom. We bought fish and some tea. It was a fun day."
+ },
+ {
+  "id": "forum-japanese",
+  "text": "I've been studying Japanese for a year now. Reading is still difficult, but I understand a lot more than before. My teacher says I should read every day."
+ },
+ {
+  "id": "recipe",
+  "text": "Cut the fish into small pieces and leave it in the fridge for one hour. Then cook it slowly over low heat until it turns white."
+ },
+ {
+  "id": "game-review",
+  "text": "The world is huge and beautiful, but the story is weak. I played for twenty hours and I still don't know why the hero wants to save anyone."
+ },
+ {
+  "id": "travel",
+  "text": "We arrived in Kyoto late at night and the station was almost empty. The next morning it was raining, so we stayed in the hotel and read books."
+ },
+ {
+  "id": "slack",
+  "text": "Hey, can you look at my changes before lunch? I think the tests are failing because of the new config. No rush though."
+ },
+ {
+  "id": "kids-story",
+  "text": "The little boy opened the window and looked at the mountain. Snow was falling. He wanted to go outside, but his mother said no."
+ },
+ {
+  "id": "trap-similar",
+  "text": "The two phones look similar, but the new one is much faster. I have not decided yet which one to buy, but I will soon."
+ },
+ {
+  "id": "trap-chapter",
+  "text": "Chapter one starts slowly, but by part two the story is really fun. It is one of the best books I read this year."
+ }
+]

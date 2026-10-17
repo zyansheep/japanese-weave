@@ -1,13 +1,4 @@
 // Gemini generateContent call. No chrome APIs; fetch is injectable for tests.
-export const MODELS = {
-  'gemini-3.8-flash': 'Gemini 3.8 Flash',
-  'gemini-4-argon': 'Gemini 4 Argon (best Japanese; paid keys only)',
-  'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite',
-};
-export const FALLBACK_MODEL = { 'gemini-4-argon': 'gemini-3.8-flash', 'gemini-3.8-flash': 'gemini-3.5-flash-lite' };
-// How long one call of 8 passages may take: Argon writes whole sentences more slowly (12-15 s in testing).
-export const TIMEOUT_MS = { 'gemini-4-argon': 35000 };
-export const DEFAULT_TIMEOUT_MS = 20000;
 export const THINKING_LEVEL = 'low';
 export const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
@@ -44,7 +35,9 @@ export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, 
   }
   const data = await res.json();
   const meta = data?.usageMetadata || {};
-  const usage = { input: meta.promptTokenCount || 0, output: (meta.candidatesTokenCount || 0) + (meta.thoughtsTokenCount || 0) };
+  // promptTokenCount includes any implicitly cached tokens (cachedContentTokenCount), which bill at the cached rate
+  const usage = { input: meta.promptTokenCount || 0, output: (meta.candidatesTokenCount || 0) + (meta.thoughtsTokenCount || 0),
+    ...(meta.cachedContentTokenCount ? { cached: meta.cachedContentTokenCount } : {}) };
   const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
   try {
     return { byId: parseSwapsResponse(text), usage };
@@ -52,6 +45,11 @@ export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, 
     e.usage = usage; // an unusable answer is still billed
     throw e;
   }
+}
+
+// The engine's provider call: system is the prompt in parts (sent joined), user the passages.
+export function askGemini({ fetchImpl, apiKey, model, system, user, schema, timeoutMs }) {
+  return callGemini({ fetchImpl, apiKey, model, timeoutMs, body: buildRequest({ system: [].concat(system).join(''), user, schema }) });
 }
 
 export function parseSwapsResponse(text) {

@@ -1,8 +1,10 @@
-// Preferences, stored under chrome.storage.local["settings"]. The Gemini key is stored apart from these, so
-// the config pages get never carries it.
+// Preferences, stored under chrome.storage.local["settings"]. The model keys are stored apart from these, so
+// the config pages get never carries them.
+import { MODELS, DEFAULT_MODEL } from './models.js';
+
 export const DEFAULT_SETTINGS = {
   enabled: true,
-  model: 'gemini-3.8-flash',
+  model: DEFAULT_MODEL,
   levelOverride: 0, // 0 = follow the Claude Code stage (Level 1 without the plugin)
   density: 0, // percent of a passage's words to swap; 0 = the level's per-sentence rule
   newSitesEnabled: null, // null = what setup chose (prefs.extension_sites), else on
@@ -17,7 +19,7 @@ export function cleanSettings(s = {}) {
   const d = { ...DEFAULT_SETTINGS, siteOverrides: {} };
   if (typeof s.enabled === 'boolean') d.enabled = s.enabled;
   if (typeof s.newSitesEnabled === 'boolean') d.newSitesEnabled = s.newSitesEnabled;
-  if (['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.5-flash-lite'].includes(s.model)) d.model = s.model;
+  if (Object.hasOwn(MODELS, s.model)) d.model = s.model;
   if (Number.isInteger(s.levelOverride) && s.levelOverride >= 0 && s.levelOverride <= 4) d.levelOverride = s.levelOverride;
   if (DENSITIES.includes(s.density)) d.density = s.density;
   for (const [host, enabled] of Object.entries(s.siteOverrides || {})) {

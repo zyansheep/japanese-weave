@@ -49,7 +49,7 @@ export async function readCached(storage) {
 }
 
 // Asks the host for the word state and stores it. Never throws: a missing host leaves the cached (or bundled)
-// list in place and reports the reason. The Gemini key the plugin's setup stored comes along, kept separately.
+// list in place and reports the reason. The model keys the plugin's setup stored come along, kept separately.
 export async function refresh({ storage, send, now = () => Date.now() }) {
   const cached = await readCached(storage);
   try {
@@ -58,7 +58,8 @@ export async function refresh({ storage, send, now = () => Date.now() }) {
     const state = parseState(reply);
     const changed = !cached || cached.version !== state.version;
     const stored = { ...state, fetchedAt: now() };
-    await storage.set({ [STATE_KEY]: stored, hostKey: typeof reply.geminiKey === 'string' ? reply.geminiKey : '' });
+    const key = (k) => (typeof reply[k] === 'string' ? reply[k] : '');
+    await storage.set({ [STATE_KEY]: stored, hostKey: key('geminiKey'), hostAnthropicKey: key('anthropicKey') });
     return { state: stored, changed, error: null };
   } catch (e) {
     return { state: cached, changed: false, error: String(e?.message || e) };
