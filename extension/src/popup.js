@@ -1,5 +1,5 @@
 import { resolveLevel } from './levels.js';
-import { MODELS, providerOf } from './models.js';
+import { MODELS, MODEL_NAMES, providerOf } from './models.js';
 import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
 import { describeStats } from './hostsource.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -71,7 +71,7 @@ async function refresh() {
     : host && !siteEnabled(s, tab.url) ? 'Off on this site'
     : host && !hasSiteAccess(tab.url, c.origins) ? 'This site needs your OK'
     : status.modelStatus?.error || (status.modelStatus?.model && status.modelStatus.model !== s.model
-      ? `On · last answer from ${MODELS[status.modelStatus.model] || status.modelStatus.model}` : 'On');
+      ? `On · last answer from ${MODEL_NAMES[status.modelStatus.model] || status.modelStatus.model}` : 'On');
   const list = $('siteList');
   list.replaceChildren();
   for (const [name, enabled] of Object.entries(s.siteOverrides)) {

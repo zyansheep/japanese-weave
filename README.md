@@ -62,7 +62,8 @@ level from [blocks/](blocks/level-01.md).
   only from your words plus particles and endings. Hover a word for its meaning, romaji and kana, or a sentence's 。
   for its translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by
   default, Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys
-  only), or Claude Haiku 5.5 with an Anthropic key, the cheapest. Passages from every tab share calls, up to 16 a call
+  only), or Claude Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s
+  for a page's first passages. Passages from every tab share calls, up to 16 a call
   ([docs/swap-prompt.md](docs/swap-prompt.md)).
 
 All of it shares one word list on your machine, so words you see on the web count toward the chat and the other

@@ -1,6 +1,6 @@
 // Anthropic Messages API call (Claude Haiku). No chrome APIs; fetch is injectable for tests.
-// https://platform.claude.com/docs/en/api/messages: JSON output via output_config.format, thinking off (Haiku 5.5 thinks
-// by default; off is allowed at effort high or below), and the system prompt in two cached blocks.
+// https://platform.claude.com/docs/en/api/messages: JSON output via output_config.format, light thinking (adaptive at low
+// effort), and the system prompt in two cached blocks.
 import { parseSwapsResponse } from './gemini.js';
 
 export const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -26,7 +26,9 @@ export function buildClaudeRequest({ model, system, user, schema }) {
     max_tokens: MAX_TOKENS,
     system: parts.map((text) => ({ type: 'text', text, cache_control: { type: 'ephemeral' } })),
     messages: [{ role: 'user', content: user }],
-    thinking: { type: 'disabled' },
+    // With thinking off, Haiku broke the rules: 15-21 dropped swaps in 16 test passages, unlisted words, almost no
+    // phrases. A little thinking brought it close to Argon (docs/swap-prompt.md) at about 4x the cost.
+    thinking: { type: 'adaptive' },
     output_config: { effort: 'low', format: { type: 'json_schema', schema: closed(schema) } },
   };
 }

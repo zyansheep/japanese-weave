@@ -9,12 +9,12 @@ const claudeReply = (passages, usage = { input_tokens: 100, cache_read_input_tok
 });
 
 describe('anthropic', () => {
-  test('request: thinking off, low effort, a closed JSON schema, the system prompt in cached parts', () => {
+  test('request: light thinking, low effort, a closed JSON schema, the system prompt in cached parts', () => {
     const body = buildClaudeRequest({ model: 'claude-haiku-5-5', system: ['rules', 'learning'], user: 'U', schema: RESPONSE_SCHEMA });
     expect(body.system).toEqual([{ type: 'text', text: 'rules', cache_control: { type: 'ephemeral' } },
       { type: 'text', text: 'learning', cache_control: { type: 'ephemeral' } }]);
     expect(body.messages).toEqual([{ role: 'user', content: 'U' }]);
-    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.thinking).toEqual({ type: 'adaptive' });
     expect(body.output_config.effort).toBe('low');
     const schema = body.output_config.format.schema;
     expect(schema.additionalProperties).toBe(false);

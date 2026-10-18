@@ -1,11 +1,11 @@
 // Background (service worker in Chrome, event page in Firefox): word state and the model keys from the Claude Code plugin
-// (native host), site access, one model call at a time for every tab's passages together, results back to pages,
+// (native host), site access, shared model calls for every tab's passages together, results back to pages,
 // seen/flip/peek events back to the plugin.
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
-import { candidatesFor, MAX_BATCH } from './models.js';
+import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
 import { hashKey } from './hash.js';
@@ -90,46 +90,55 @@ async function swaps(msg, sender) {
   }
 }
 
-// Cache misses from every tab wait here and go to the model together, up to MAX_BATCH passages a call and one call at a
-// time, so the passages that turn up while a call runs (scrolling, other tabs) share the next call and its prompt.
-// Resolves with { cacheKey: swaps } for the batch, or null when the word state or settings changed meanwhile.
-const waiting = []; // { ctx, batch: [{ id, text }], resolve, reject }
-let calling = false;
+// Cache misses from every tab wait here and go to the model together, up to the model's batch size a call (models.js:
+// BATCH, else MAX_BATCH) and one call at a time (PARALLEL for Haiku), so the passages that turn up while a call runs
+// (scrolling, other tabs) share the next call and its prompt. A passage already waiting or in a call isn't asked for
+// twice. Resolves with { cacheKey: swaps } for the batch, or null when the word state or settings changed meanwhile.
+// Passage ids are cache keys, which start with the cacheRevision, so one id never mixes two revisions.
+const pending = new Map(); // passage id -> { ctx, p: { id, text }, promise, resolve, reject }
+const queue = []; // ids of pending passages not in a call yet
+let active = 0;
 function gather(ctx, batch) {
-  return new Promise((resolve, reject) => {
-    waiting.push({ ctx, batch, resolve, reject });
-    void drain();
-  });
+  for (const p of batch) {
+    if (pending.has(p.id)) continue;
+    const entry = { ctx, p };
+    entry.promise = new Promise((resolve, reject) => Object.assign(entry, { resolve, reject }));
+    pending.set(p.id, entry);
+    queue.push(p.id);
+  }
+  const answers = batch.map((p) => pending.get(p.id).promise);
+  drain();
+  return Promise.all(answers).then((all) => (all.includes(null) ? null : Object.fromEntries(batch.map((p, i) => [p.id, all[i]]))));
 }
-async function drain() {
-  if (calling) return;
-  calling = true;
-  try {
-    while (waiting.length) {
-      const { ctx } = waiting[0];
-      const jobs = [];
-      const passages = new Map();
-      for (let i = 0; i < waiting.length;) {
-        const job = waiting[i];
-        const more = job.batch.filter((p) => !passages.has(p.id));
-        if (job.ctx.cacheRevision !== ctx.cacheRevision || (jobs.length && passages.size + more.length > MAX_BATCH)) { i++; continue; }
-        waiting.splice(i, 1);
-        jobs.push(job);
-        for (const p of more) passages.set(p.id, p);
-      }
-      try {
-        // A passage another tab asked for may have come back in the call before this one.
-        const done = await cache.getMany([...passages.keys()]);
-        const todo = [...passages.values()].filter((p) => !(p.id in done));
-        const fresh = todo.length ? await callModel(ctx, todo) : {};
-        const results = fresh && { ...done, ...fresh };
-        for (const job of jobs) job.resolve(results);
-      } catch (e) {
-        for (const job of jobs) job.reject(e);
-      }
+function drain() {
+  while (queue.length) {
+    const { ctx } = pending.get(queue[0]);
+    const model = ctx.settings.model;
+    if (active >= (PARALLEL[model] || 1)) return;
+    const size = BATCH[model] || MAX_BATCH;
+    const group = [];
+    for (let i = 0; i < queue.length && group.length < size;) {
+      const entry = pending.get(queue[i]);
+      if (entry.ctx.cacheRevision !== ctx.cacheRevision) { i++; continue; }
+      queue.splice(i, 1);
+      group.push(entry);
     }
+    active++;
+    void answer(ctx, group).finally(() => { active--; drain(); });
+  }
+}
+// Each passage's promise gets its swaps, or null if the call's answer is stale.
+async function answer(ctx, group) {
+  try {
+    // A passage may have come back in an earlier call (another tab, the same text twice).
+    const done = await cache.getMany(group.map((e) => e.p.id));
+    const todo = group.filter((e) => !(e.p.id in done)).map((e) => e.p);
+    const fresh = todo.length ? await callModel(ctx, todo) : {};
+    for (const e of group) e.resolve(fresh && (done[e.p.id] ?? fresh[e.p.id]));
+  } catch (err) {
+    for (const e of group) e.reject(err);
   } finally {
-    calling = false;
+    for (const e of group) pending.delete(e.p.id);
   }
 }
 

@@ -58,14 +58,17 @@ number traps), low thinking, the real Stage 3 word list, measured 2026-10-17 thr
 |---|---|---|---|
 | Gemini 4 Argon | 16 s | $0.025 | No sense errors seen; the most phrases and sentences ("昨日、母と一緒に店に行きました。") |
 | Gemini 3.8 Flash | 8-12 s | $0.006-0.008 | Mostly right; fewer sentences, and some slips the code checks above now drop |
-| Claude Haiku 5.5, no thinking | not measured yet | about $0.001 at list price | Close to Argon with thinking on (55 s for 8 passages through `claude -p`, which can't turn it off) |
+| Claude Haiku 5.5, light thinking (adaptive, low effort) | 45 s; 24 s as three calls of 6, 6 and 4 at once | $0.006-0.008 | Close to Argon: 4-11 phrases and 3-6 sentences a run, about one dropped swap |
+| Claude Haiku 5.5, no thinking | 8-12 s | $0.0015 | Ignores the rules: 15-21 dropped swaps a run, unlisted words, empty answers, almost no phrases |
+| Claude Sonnet 5.5, no thinking | 10 s | $0.020-0.032 | Cautious (1-2 phrases), and one sense error ("a new language" as 新しい日本語) |
 | Gemini 3.1 / 3.5 Flash-Lite, GPT-6 Luna | | | Too many sense errors and unlisted words |
 
 Argon is not on Google's free tier and doubles its price on 2026-12-01 ($2/$10 to $4/$20 per million tokens in/out);
-3.8 Flash doubles on 2027-01-01. Haiku 5.5 is $0.10/$0.50, cache reads $0.01. It needs an Anthropic API key (paste it
-in the popup, or save it to `~/.japanese-weave/anthropic_key` and the native host passes it on); the request turns
-thinking off, asks for low effort and a JSON schema, and marks the prompt in two parts for Anthropic's cache. When a
-call fails, Haiku falls back to Gemini 3.8 Flash if there is a Gemini key.
+3.8 Flash doubles on 2027-01-01. Haiku 5.5 is $0.10/$0.50, cache reads $0.01; thinking tokens are billed as output.
+It needs an Anthropic API key (paste it in the popup, or save it to `~/.japanese-weave/anthropic_key` and the native
+host passes it on); the request asks for adaptive thinking at low effort and a JSON schema, and marks the prompt in two
+parts for Anthropic's cache. When a call fails, Haiku falls back to Gemini 3.8 Flash if there is a Gemini key.
+The popup offers Flash, Argon and Haiku; Flash-Lite is only Flash's fallback.
 
 The prompt keeps the rules first and the word lists last, learning words at the very end (their order changes as words
 are shown), so consecutive calls share a prefix. Gemini caches it implicitly: Google lists 4,096 tokens as the
@@ -76,8 +79,9 @@ minimum, but repeated calls of this ~3,950-token prompt had about 2,100 tokens s
 The prompt is about 3,300 tokens before any passage, and calls used to carry about 2 passages each, so most of the bill
 was the same prompt sent again. Since 0.5.0 the background puts the cache misses of every tab in one queue and sends
 them together, up to 16 passages a call (`MAX_BATCH` in `models.js`), one call at a time: passages that turn up while a
-call runs (scrolling, other tabs) all go in the next one, and a passage another tab already got back is not asked for
-again. The 16 test passages:
+call runs (scrolling, other tabs) all go in the next one, and a passage another tab already got back or is waiting for
+is not asked for again. Haiku thinks first, so it gets calls of 6 passages, three at once (`BATCH` and `PARALLEL`):
+the 16 test passages came back in 24 s instead of 45 s, at about the same cost ($0.0081). The 16 test passages:
 
 | | Flash | Argon |
 |---|---|---|

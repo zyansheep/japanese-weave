@@ -3,13 +3,15 @@ import { hashKey } from '../src/hash.js';
 import { costUsd } from '../src/usage.js';
 
 // The worker on its own: passages that arrive while a model call runs share the next call, a passage that came back
-// meanwhile isn't asked for again, and Claude Haiku is called with the key the native host passed along.
-test('background: misses from every tab share one call; Haiku with the host key', async () => {
+// meanwhile isn't asked for again, and Claude Haiku is called with the key the native host passed along, in smaller
+// calls that run at the same time.
+test('background: misses from every tab share one call; Haiku with the host key, three calls at once', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
   const listeners = [];
   const calls = []; // { url, init, ids }
-  let hold = null; // resolves the held model call
+  const opened = () => { let open; const promise = new Promise((r) => { open = r; }); return { promise, open }; };
+  let gate = null; // while set, model calls wait until it opens
   const listener = (arr) => ({ addListener: (fn) => arr.push(fn) });
   const area = {
     async setAccessLevel() {},
@@ -38,7 +40,8 @@ test('background: misses from every tab share one call; Haiku with the host key'
       const user = url.includes('anthropic') ? body.messages[0].content : body.contents[0].parts[0].text;
       const ids = JSON.parse(user.replace(/^Passages:\n/, '')).map((p) => p.id);
       calls.push({ url, init, body, ids });
-      if (calls.length === 1) await new Promise((done) => { hold = done; });
+      const held = gate;
+      if (held) await held.promise;
       const text = JSON.stringify({ passages: answer(ids) });
       if (url.includes('anthropic')) {
         return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn',
@@ -63,20 +66,22 @@ test('background: misses from every tab share one call; Haiku with the host key'
     const item = (n) => { const text = `Passage ${n} is long enough, but it says very little at all.`; return { key: `${revision}:${hashKey(text)}`, text }; };
     const ask = (id, ns) => dispatch({ type: 'swaps', revision, items: ns.map(item) }, tab(id));
 
+    gate = opened();
     const first = ask(1, [1]);
-    await until(() => hold);
+    await until(() => calls.length === 1);
     const second = ask(2, [2, 3]);
     const third = ask(3, [1, 4, 5]); // 1 is in the call that is running
     await new Promise((r) => setTimeout(r, 30));
     expect(calls).toHaveLength(1);
-    hold();
+    gate.open();
+    gate = null;
     const results = await Promise.all([first, second, third]);
     expect(calls).toHaveLength(2);
     expect(calls[1].ids).toHaveLength(4); // 2, 3, 4, 5 together; 1 came from the first call's answer
     for (const r of results) for (const swaps of Object.values(r.results)) expect(swaps.map((s) => s.f)).toEqual(['でも']);
     expect(Object.keys(results[2].results)).toHaveLength(3);
 
-    // Haiku, with the key from ~/.japanese-weave/anthropic_key: thinking off, JSON schema, the prompt in two cached parts.
+    // Haiku, with the key from ~/.japanese-weave/anthropic_key: light thinking, JSON schema, the prompt in two cached parts.
     await dispatch({ type: 'save', settings: { model: 'claude-haiku-5-5' } }, popup);
     const status = await dispatch({ type: 'status' }, popup);
     expect(status.hostAnthropicKey).toBe(true);
@@ -88,7 +93,7 @@ test('background: misses from every tab share one call; Haiku with the host key'
     const claude = calls.at(-1);
     expect(claude.url).toBe('https://api.anthropic.com/v1/messages');
     expect(claude.init.headers['x-api-key']).toBe('synthetic-anthropic');
-    expect(claude.body).toMatchObject({ model: 'claude-haiku-5-5', thinking: { type: 'disabled' }, output_config: { effort: 'low', format: { type: 'json_schema' } } });
+    expect(claude.body).toMatchObject({ model: 'claude-haiku-5-5', thinking: { type: 'adaptive' }, output_config: { effort: 'low', format: { type: 'json_schema' } } });
     expect(claude.body.system).toHaveLength(2);
     expect(claude.body.system.every((b) => b.cache_control?.type === 'ephemeral')).toBe(true);
     expect(claude.body.output_config.format.schema.properties.passages.items.additionalProperties).toBe(false);
@@ -97,6 +102,18 @@ test('background: misses from every tab share one call; Haiku with the host key'
     // Haiku: 3500 in, of which 3000 read from the cache and 200 written to it
     expect(usage.input).toBe(3 * 3500);
     expect(usage.usd).toBeCloseTo(costUsd('claude-haiku-5-5', 3500, 400, undefined, 3000, 200) + 2 * costUsd('gemini-3.8-flash', 3500, 500), 9);
+
+    // 14 passages from one tab go to Haiku as calls of 6, 6 and 2, all three out before any answer comes back.
+    gate = opened();
+    const before = calls.length;
+    const texts = Array.from({ length: 14 }, (_, n) => `Passage ${n} for Haiku is long enough, but it says very little.`);
+    const many = dispatch({ type: 'swaps', revision: fresh.revision, items: texts.map((t) => ({ key: `${fresh.revision}:${hashKey(t)}`, text: t })) }, tab(2));
+    await until(() => calls.length === before + 3);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.slice(before).map((c) => c.ids.length)).toEqual([6, 6, 2]);
+    gate.open();
+    gate = null;
+    expect(Object.keys((await many).results)).toHaveLength(14);
   } finally {
     Object.assign(globalThis, saved);
   }

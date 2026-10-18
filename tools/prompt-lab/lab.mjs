@@ -5,8 +5,8 @@
 //   ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key ... lab.mjs claude-haiku-5-5
 //
 // WORDS: the word state as the extension gets it (python tools/prompt-lab/words.py > /tmp/words.json); without it, the
-// bundled Level 2 list. BATCH: passages per call (16, as in the extension). Keys are read from files so they never
-// appear in a command line or the shell history.
+// bundled Level 2 list. BATCH: passages per call, PARALLEL: calls at once (both as in the extension: 16 and 1, Haiku 6
+// and 3). Keys are read from files so they never appear in a command line or the shell history.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Window } from 'happy-dom';
@@ -14,23 +14,36 @@ import { requestSwaps } from '../../extension/src/engine.js';
 import { selectSwaps } from '../../extension/src/levels.js';
 import { applySwaps } from '../../extension/src/text.js';
 import { costUsd } from '../../extension/src/usage.js';
-import { MAX_BATCH } from '../../extension/src/models.js';
+import { MAX_BATCH, BATCH as BATCHES, PARALLEL as PARALLELS } from '../../extension/src/models.js';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const [model = 'gemini-3.8-flash', passagesPath = here('corpus.json')] = process.argv.slice(2);
 const keyFile = (name) => (process.env[name] ? readFileSync(process.env[name], 'utf8').trim() : '');
 const keys = { gemini: keyFile('GEMINI_KEY_FILE'), anthropic: keyFile('ANTHROPIC_KEY_FILE') };
 if (!keys.gemini && !keys.anthropic) throw new Error('set GEMINI_KEY_FILE or ANTHROPIC_KEY_FILE to a file holding the key');
-const BATCH = Number(process.env.BATCH || MAX_BATCH);
+const BATCH = Number(process.env.BATCH || BATCHES[model] || MAX_BATCH);
+const PARALLEL = Number(process.env.PARALLEL || PARALLELS[model] || 1);
 const state = process.env.WORDS ? JSON.parse(readFileSync(process.env.WORDS, 'utf8')) : { stage: 2, words: undefined };
 const passages = JSON.parse(readFileSync(passagesPath, 'utf8'));
 const doc = new Window().document;
 let usd = 0;
 const started = Date.now();
-for (let i = 0; i < passages.length; i += BATCH) {
-  const batch = passages.slice(i, i + BATCH);
-  const r = await requestSwaps({ keys, model, level: 2, stage: state.stage, words: state.words, shownToday: [], batch });
+const batches = [];
+for (let i = 0; i < passages.length; i += BATCH) batches.push(passages.slice(i, i + BATCH));
+const answers = [];
+let next = 0;
+await Promise.all(Array.from({ length: PARALLEL }, async () => {
+  while (next < batches.length) {
+    const n = next++;
+    const t = Date.now();
+    answers[n] = await requestSwaps({ keys, model, level: 2, stage: state.stage, words: state.words, shownToday: [], batch: batches[n] });
+    answers[n].seconds = (Date.now() - t) / 1000;
+  }
+}));
+for (const [n, batch] of batches.entries()) {
+  const r = answers[n];
   for (const u of r.usage) usd += costUsd(u.model, u.input, u.output, undefined, u.cached, u.written);
+  console.log(`\n# call ${n + 1}: ${batch.length} passages, ${r.seconds.toFixed(1)} s`);
   if (r.errors.length) console.log('errors:', r.errors.join('; '));
   for (const p of batch) {
     const el = doc.createElement('p');
