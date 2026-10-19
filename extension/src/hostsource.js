@@ -34,11 +34,19 @@ export function parseState(data) {
     paused: data?.paused === true,
     sites: data?.prefs?.extension_sites === 'ask' ? 'ask' : 'all', // setup's default for sites not set in the popup
     challenge: num(data?.challenge) && data.challenge > 0 ? data.challenge : 0,
+    intensity: cleanIntensity(data?.prefs?.intensity_browser), // the web pages' level, as last saved by any machine
     budget: num(data?.budget) && data.budget > 0 ? data.budget : 0,
     rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
       shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
     words,
   };
+}
+
+// A saved intensity ({level -2..2, until, at} in ms; ../scripts/intensity.py), or null.
+export function cleanIntensity(value) {
+  const ms = (x) => Number.isInteger(x) && x >= 0 && x <= 1e14;
+  if (!value || ![-2, -1, 0, 1, 2].includes(value.level) || !ms(value.until) || !ms(value.at)) return null;
+  return { level: value.level, until: value.until, at: value.at };
 }
 
 export async function readCached(storage) {
@@ -113,12 +121,22 @@ export async function flushEvents({ storage, send }) {
   }
 }
 
+// How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed.
+function cleanPlan(plan) {
+  if (plan == null) return null;
+  const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
+  const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
+  if (![-2, -1, 0, 1, 2].includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)) return undefined;
+  return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates };
+}
+
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every
 // glossed word in the same passage sat relative to the passage. Words and positions only, never page text. uid makes
-// a resend harmless. kind 'shown' instead marks when a passage's Japanese first came on screen, with its word count:
-// the denominator of the peek rate. 'click' and 'select' mark where the reader was: a click's point (x, y from the
-// passage's corner) and whether it hit a link or control; a selection's box, its length in characters and the glossed
-// words it covered (indexes into annotations), never its text. 'visible' is one stay of the passage on screen: ms is
+// a resend harmless. kind 'shown' instead marks when a passage's Japanese first came on screen, with its word count
+// (the denominator of the peek rate) and its plan (how many swaps it was allowed and why). 'click' and 'select' mark
+// where the reader was: a click's point (x, y from the passage's corner) and whether it hit a link or control; a
+// selection's box, its length in characters and the glossed words it covered (indexes into annotations), never its
+// text. 'visible' is one stay of the passage on screen: ms is
 // the time a reader could have been reading it, wall all of it, and away, media and idle the rest by why it doesn't
 // count. Returns null for anything malformed.
 export function cleanInteraction(msg, now = Date.now()) {
@@ -133,7 +151,11 @@ export function cleanInteraction(msg, now = Date.now()) {
   const round = (x) => Math.round(x);
   const common = { kind: msg.kind, at: round(msg.at), view: msg.view, context: msg.context, box: msg.box.map(round),
     annotations: msg.annotations.map(([w, x, y]) => [w, round(x), round(y)]) };
-  if (msg.kind === 'shown') return Number.isInteger(msg.words) && msg.words > 0 && msg.words <= 10000 ? { ...common, words: msg.words } : null;
+  if (msg.kind === 'shown') {
+    if (!Number.isInteger(msg.words) || msg.words <= 0 || msg.words > 10000) return null;
+    const plan = cleanPlan(msg.plan);
+    return plan === undefined ? null : { ...common, words: msg.words, ...(plan ? { plan } : {}) };
+  }
   if (msg.uid !== undefined && !id(msg.uid)) return null;
   const uid = msg.uid ? { uid: msg.uid } : {};
   const coord = (x) => num(x) && Math.abs(x) <= 100000;

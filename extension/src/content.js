@@ -18,9 +18,10 @@ let visible = null;
 let timer = null;
 let generation = 0;
 const memo = new Map();
+const plans = new Map(); // text key -> how its amount was chosen (levels.js planSwaps), for its shown record
 const keys = new WeakMap(); // element -> revision:text hash, kept off the DOM so pages can't read it
 const sizes = new WeakMap(); // element -> its word count, for shown records
-const shownContexts = new Set(); // passages already logged as shown in this page load
+const shownContexts = new Set(); // passages already logged as shown in this view
 const pending = new Map();
 const inflight = new Set();
 const tracked = new Set();
@@ -31,8 +32,10 @@ const MAX_RETRIES = 3;
 const TIP_DELAY_MS = 700; // a beat to recall the word before the meaning appears
 let tipTimer = null;
 let openTip = null; // { span, at }: a gloss opened by a hover dwell, logged with its dwell when it closes
-// One page load, so the host's log can tell repeat visits apart. getRandomValues also works on plain-http pages.
-const VIEW = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
+// One page load, or the part of it at one config (an intensity change repaints the page), so the host's log can tell
+// repeat visits apart and each passage's record has one plan. getRandomValues also works on plain-http pages.
+const newView = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
+let VIEW = newView();
 let logged = 0; // numbers interactions within the view, so a resent one is stored once
 let lastClick = 0;
 let pressedAt = 0; // when the mouse button went down, so a drag selection has a duration
@@ -122,8 +125,9 @@ function logShown(span) {
   if (!key || !on() || !sizes.get(passage) || document.visibilityState === 'hidden' || shownContexts.has(context)) return;
   shownContexts.add(context);
   const { annotations, box } = describe(passage);
+  const plan = plans.get(key);
   void send({ type: 'interaction', kind: 'shown', at: Date.now(), view: VIEW, context, words: sizes.get(passage), box,
-    annotations }).catch(() => {});
+    annotations, ...(plan ? { plan } : {}) }).catch(() => {});
 }
 // Clicks and selections in a passage with glossed words say where the reader was. Positions and counts only: the
 // selected text never leaves the page. extra(passageRect, spans) adds the kind's own fields.
@@ -327,6 +331,7 @@ async function flush() {
     }
     failures.delete(i.key);
     memo.set(i.key, swaps);
+    if (result?.plans?.[i.key]) plans.set(i.key, result.plans[i.key]);
     if (p) for (const el of p.els) paint(el, i.key);
   }
   if (result?.stale) { try { update(await send({ type: 'config' })); } catch { /* reloaded or gone */ } return; }
@@ -386,7 +391,7 @@ function stop() {
   observer?.disconnect(); observer = null;
   near?.disconnect(); visible?.disconnect();
   clearTimeout(timer); timer = null;
-  pending.clear(); inflight.clear(); memo.clear(); failures.clear(); hideTip();
+  pending.clear(); inflight.clear(); memo.clear(); plans.clear(); failures.clear(); hideTip();
   for (const passage of [...stays.keys()]) endStay(passage);
   onscreen?.disconnect(); inView.clear();
   for (const el of tracked) { revert(el); keys.delete(el); }
@@ -395,7 +400,49 @@ function stop() {
 function update(next, retry = false) {
   if (!next?.settings || !next.revision) return;
   if (!retry && next.revision === config?.revision) return;
-  stop(); config = next; start();
+  const renew = config && next.revision !== config.revision;
+  stop();
+  if (renew) { VIEW = newView(); logged = 0; shownContexts.clear(); }
+  config = next; start();
+}
+
+// Feedback for the heavier/lighter shortcut: a small panel in the corner with the level, a five-step meter and when it
+// ends. In a shadow root, so the page's styles neither reach it nor are touched.
+const LEVEL_NAMES = { '-2': 'Much lighter', '-1': 'Lighter', 0: 'Normal', 1: 'Heavier', 2: 'Much heavier' };
+let toastHost = null;
+let toastTimer = null;
+function showIntensity({ level, until }) {
+  if (!toastHost || !toastHost.isConnected) {
+    toastHost = document.createElement('div');
+    toastHost.setAttribute('data-japanese-weave', 'intensity');
+    const root = toastHost.attachShadow({ mode: 'closed' });
+    root.innerHTML = `<style>
+      .box { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; padding: 10px 14px; border-radius: 10px;
+        font: 13px/1.35 system-ui, sans-serif; color: #f8fafc; background: rgba(15, 23, 42, 0.92);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); opacity: 0; transform: translateY(6px);
+        transition: opacity 0.15s, transform 0.15s; pointer-events: none; }
+      .box.on { opacity: 1; transform: none; }
+      .title { font-weight: 600; }
+      .meter { display: flex; gap: 3px; margin: 6px 0 4px; }
+      .meter i { width: 18px; height: 6px; border-radius: 3px; background: rgba(248, 250, 252, 0.2); }
+      .meter i.lit { background: #f8fafc; } .meter i.mid { outline: 1px solid rgba(248, 250, 252, 0.6); }
+      .note { color: rgba(248, 250, 252, 0.7); font-size: 12px; }
+    </style><div class="box"><div class="title"></div><div class="meter">${'<i></i>'.repeat(5)}</div><div class="note"></div></div>`;
+    toastHost.box = root.querySelector('.box');
+    document.documentElement.append(toastHost);
+  }
+  const box = toastHost.box;
+  const ends = level ? new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  box.querySelector('.title').textContent = `Japanese on pages: ${LEVEL_NAMES[level]}${level ? ` (${level > 0 ? '+' : '−'}${Math.abs(level)})` : ''}`;
+  box.querySelectorAll('.meter i').forEach((cell, i) => {
+    const step = i - 2;
+    cell.className = (level > 0 ? step > 0 && step <= level : level < 0 ? step < 0 && step >= level : false) || step === 0 ? 'lit' : '';
+    if (step === 0) cell.classList.add('mid');
+  });
+  box.querySelector('.note').textContent = `${level ? `Until ${ends} · ` : ''}Alt+Shift+. more, Alt+Shift+, less`;
+  box.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove('on'), 2500);
 }
 function reveal(e) {
   const span = swapFor(e);
@@ -414,6 +461,7 @@ function reveal(e) {
 }
 chrome.runtime.onMessage.addListener((msg) => {
   if (['config', 'retry'].includes(msg?.type)) update(msg.config, msg.type === 'retry');
+  if (msg?.type === 'intensity' && msg.intensity) showIntensity(msg.intensity);
 });
 document.addEventListener('click', reveal, true);
 document.addEventListener('click', clicked, { capture: true, passive: true });

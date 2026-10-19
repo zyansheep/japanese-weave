@@ -10,7 +10,8 @@ the cache and starts a background sync (`fw.py refresh`) when the cache is a few
 Ops (each also carries uid, day, at and machine; see stamp):
   events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser (fwlib.apply_event)
   mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands
-  set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?}}
+  set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
+             "intensity_chat"?, "intensity_browser"?: {level, until, at, source}}}   (intensity.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja]}]}   chat replies scanned on some machine
@@ -37,6 +38,7 @@ import anki
 import export
 import feedback
 import fwlib
+import intensity
 import knowledge
 
 OUTBOX = 'outbox.jsonl'
@@ -68,7 +70,9 @@ def is_day(value):
         return False
     return True
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'challenge': knowledge.valid_challenge,
-         'extension_sites': lambda v: v in ('all', 'ask')}
+         'extension_sites': lambda v: v in ('all', 'ask'), 'intensity_chat': intensity.valid,
+         'intensity_browser': intensity.valid}
+LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 
 # ---- ops ----
@@ -435,6 +439,47 @@ def current(max_age=0, wait=True):
         else:
             knowledge.start_refresh()
     return fwlib.load_state(), error
+
+
+# ---- intensity (intensity.py) ----
+
+def change_intensity_here(surface, delta, source, db=None):
+    """One press where the state lives (this machine, or the collector for everyone): the new pref, recorded as a set
+    op. The caller keeps presses one at a time (the collector's lock), so two quick presses make two steps."""
+    value = intensity.step(fwlib.load_state().get('prefs'), surface, delta, source)
+    result = run(stamp({'kind': 'set', 'prefs': {intensity.pref(surface): value}}), db)
+    if not result.get('ok'):
+        raise ValueError(result.get('error') or 'intensity not saved')
+    return intensity.current({intensity.pref(surface): value}, surface)
+
+
+def change_intensity(surface, delta, source):
+    """One press from this machine: on the collector when there is one (it has the level other machines set), else
+    here. With the collector out of reach, the step is taken from the cache and queued like any other op.
+    Returns ({level, until, at}, error or None)."""
+    url = fwlib.collector_url()
+    if not url:
+        return change_intensity_here(surface, delta, source), None
+    reply = feedback.request(url.rstrip('/') + '/v1/intensity', {'surface': surface, 'step': delta, 'source': source},
+                             timeout=TIMEOUT)
+    if isinstance(reply, dict) and reply.get('ok') and intensity.is_current(reply.get('intensity')):
+        knowledge.start_refresh()  # the cache catches up in the background
+        return reply['intensity'], None
+    value = intensity.step(fwlib.load_state().get('prefs'), surface, delta, source)
+    submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}, wait=False)
+    error = (reply or {}).get('error') if isinstance(reply, dict) else None
+    return intensity.current({intensity.pref(surface): value}, surface), error or 'collector unreachable; queued'
+
+
+def live_intensity(surface, timeout=LIVE_TIMEOUT):
+    """The level in effect now. With a collector, asked of it first (a press in T3 Code reaches the collector, not this
+    machine's cache), briefly, so a prompt never waits long; else, or when it doesn't answer, the cache."""
+    url = fwlib.collector_url()
+    if url:
+        reply = feedback.request(f'{url.rstrip("/")}/v1/intensity?surface={surface}', timeout=timeout)
+        if isinstance(reply, dict) and reply.get('ok') and intensity.is_current(reply.get('intensity')):
+            return reply['intensity']
+    return intensity.current(fwlib.load_state().get('prefs'), surface)
 
 
 # ---- the collector ----

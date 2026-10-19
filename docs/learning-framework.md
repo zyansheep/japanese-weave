@@ -45,7 +45,9 @@ What exists today:
 - **Chat peeks and pins**, but no shown records: a message is logged only if you opened something in it. Row 4 does
   not exist today, and chat data leans toward opens. Leave chat out of the fit until it sends shown records.
 
-Not logged: time on screen, the candidate list, pick chances, and the chooser's inputs at the time (each word's status
+Since extension 0.3.1 time on screen is logged too (visible stays), and since 0.6.0 each shown passage's plan (the
+swaps allowed, the candidates offered, the reader's intensity and a random thinning factor). Not logged: the candidate
+list itself, pick chances, and the chooser's inputs at the time (each word's status
 and estimate, the dial, the budget).
 
 **Second stream: Anki.** One row per review: card, time, rating, kind, interval. 51,465 rows for 3,702 cards, July
@@ -61,7 +63,8 @@ not reviews. Anki stopped four months before the reading log began.
 | (b) opening | the word, its features, your history with it, context | chance you open it, if read | shown rows, plus Anki | replay log loss of (a) × (b) |
 | (c) change | a word's history plus one new event | chance of opening it later | history weights inside (b) | weakly by log loss; properly by randomized exposure |
 
-**(a) Did you read it?** "Not opened" may mean you knew it, skipped the line, or didn't care. Reading is never logged;
+**(a) Did you read it?** "Not opened" may mean you knew it, skipped the line, or didn't care. Reading itself is never
+logged, only time on screen (knowledge.py read_chance turns it into a chance per line, as a first version of (a));
 the only firm evidence is an open at or below that line (line 2 in the toy, so line 4 is a guess). Opening glosses
 takes time, so time before the first open is a cleaner input than total time. (a) can never be checked on its own.
 

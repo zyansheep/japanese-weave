@@ -4,12 +4,13 @@ import { costUsd } from '../src/usage.js';
 
 // The worker on its own: passages that arrive while a model call runs share the next call, a passage that came back
 // meanwhile isn't asked for again, and Claude Haiku is called with the key the native host passed along, in smaller
-// calls that run at the same time.
-test('background: misses from every tab share one call; Haiku with the host key, three calls at once', async () => {
+// calls that run at the same time. Then the intensity: lighter picks from the cache, heavier asks the model for more.
+test('background: misses from every tab share one call; Haiku with the host key, three calls at once; intensity', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
   const listeners = [];
   const calls = []; // { url, init, ids }
+  const natives = []; // messages to the native host
   const opened = () => { let open; const promise = new Promise((r) => { open = r; }); return { promise, open }; };
   let gate = null; // while set, model calls wait until it opens
   const listener = (arr) => ({ addListener: (fn) => arr.push(fn) });
@@ -27,11 +28,12 @@ test('background: misses from every tab share one call; Haiku with the host key,
       runtime: {
         id: 'fw-test', getURL: (path) => `chrome-extension://fw-test/${path}`,
         onMessage: listener(listeners), onInstalled: listener([]), onStartup: listener([]),
-        sendNativeMessage: async (_host, msg) => (msg.type === 'state'
+        sendNativeMessage: async (_host, msg) => (natives.push(msg), msg.type === 'state'
           ? { ok: true, version: 'b.1', stage: 3, paused: false, prefs: {}, words, anthropicKey: 'synthetic-anthropic' } : { ok: true }),
       },
       tabs: { query: async () => [], sendMessage: async () => {} },
-      alarms: { create: async () => {}, onAlarm: listener([]) },
+      alarms: { create: async () => {}, clear: async () => {}, onAlarm: listener([]) },
+      action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
       permissions: { getAll: async () => ({ origins: ['<all_urls>'] }), onAdded: listener([]), onRemoved: listener([]) },
       scripting: { getRegisteredContentScripts: async () => [], updateContentScripts: async () => {}, unregisterContentScripts: async () => {}, registerContentScripts: async () => {} },
     },
@@ -78,7 +80,10 @@ test('background: misses from every tab share one call; Haiku with the host key,
     const results = await Promise.all([first, second, third]);
     expect(calls).toHaveLength(2);
     expect(calls[1].ids).toHaveLength(4); // 2, 3, 4, 5 together; 1 came from the first call's answer
-    for (const r of results) for (const swaps of Object.values(r.results)) expect(swaps.map((s) => s.f)).toEqual(['でも']);
+    // each passage has one candidate; about a quarter are randomly thinned to none (levels.js jitterFor)
+    const shownAsPlanned = (r) => Object.entries(r.results).every(([key, swaps]) => r.plans[key].candidates === 1
+      && swaps.length === r.plans[key].limit && swaps.every((s) => s.f === 'でも'));
+    for (const r of results) expect(shownAsPlanned(r)).toBe(true);
     expect(Object.keys(results[2].results)).toHaveLength(3);
 
     // Haiku, with the key from ~/.japanese-weave/anthropic_key: light thinking, JSON schema, the prompt in two cached parts.
@@ -89,7 +94,7 @@ test('background: misses from every tab share one call; Haiku with the host key,
     const fresh = await dispatch({ type: 'config' }, tab(1));
     const text = 'Another passage, but this one is for Claude to read today.';
     const r = await dispatch({ type: 'swaps', revision: fresh.revision, items: [{ key: `${fresh.revision}:${hashKey(text)}`, text }] }, tab(1));
-    expect(Object.values(r.results)[0].map((s) => s.f)).toEqual(['でも']);
+    expect(shownAsPlanned(r)).toBe(true);
     const claude = calls.at(-1);
     expect(claude.url).toBe('https://api.anthropic.com/v1/messages');
     expect(claude.init.headers['x-api-key']).toBe('synthetic-anthropic');
@@ -114,6 +119,32 @@ test('background: misses from every tab share one call; Haiku with the host key,
     gate.open();
     gate = null;
     expect(Object.keys((await many).results)).toHaveLength(14);
+
+    // Lighter: picked from the cached candidates, no model call; the press goes to the host for the log.
+    const t = 'A passage for the intensity test, but it has enough words to be woven.';
+    const one = (cfg) => ({ key: `${cfg.revision}:${hashKey(t)}`, text: t });
+    const normal = await dispatch({ type: 'config' }, tab(1));
+    await dispatch({ type: 'swaps', revision: normal.revision, items: [one(normal)] }, tab(1));
+    const made = calls.length;
+    expect((await dispatch({ type: 'intensity', step: -1 }, popup)).intensity.level).toBe(-1);
+    expect(natives.at(-1)).toMatchObject({ type: 'intensity', surface: 'browser', set: { level: -1, source: 'popup' } });
+    const light = await dispatch({ type: 'config' }, tab(1));
+    expect(light.revision).not.toBe(normal.revision);
+    expect(light.intensity.level).toBe(-1);
+    const lighter = await dispatch({ type: 'swaps', revision: light.revision, items: [one(light)] }, tab(1));
+    expect(calls.length).toBe(made);
+    expect(Object.values(lighter.plans)[0]).toMatchObject({ level: -1, intensity: 0.7, candidates: 1 });
+    expect(await dispatch({ type: 'intensity', step: 2 }, popup)).toEqual({ error: 'step is 1, -1 or 0' });
+    expect(await dispatch({ type: 'intensity', step: 1 }, tab(1))).toBe(undefined); // pages can't change it
+    // Heavier: its own cache, and the model is asked for more.
+    await dispatch({ type: 'intensity', step: 1 }, popup);
+    expect((await dispatch({ type: 'intensity', step: 1 }, popup)).intensity.level).toBe(1);
+    const heavy = await dispatch({ type: 'config' }, tab(1));
+    await dispatch({ type: 'swaps', revision: heavy.revision, items: [one(heavy)] }, tab(1));
+    expect(calls.length).toBe(made + 1);
+    expect(JSON.stringify(calls.at(-1).body.system)).toContain('two or three word or phrase swaps');
+    expect(JSON.stringify(calls[0].body)).not.toContain('two or three');
+    expect((await dispatch({ type: 'status' }, popup)).intensity.level).toBe(1);
   } finally {
     Object.assign(globalThis, saved);
   }

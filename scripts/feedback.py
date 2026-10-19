@@ -4,11 +4,13 @@ that spot, so unpeeked words next to it are the evidence that they knew them. Cl
 on-screen time in passages with glossed words are kept too, as more evidence of where the reader was and for how
 long. Words, positions, times and counts only, never text.
 
-Stored in <state dir>/interactions.sqlite (schema 4):
+Stored in <state dir>/interactions.sqlite (schema 5):
   contexts      one row per passage per page load (browser) or message render (T3): its box on the page, the
                 glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), and for browser
-                passages its word count and when its glossed words were first on screen ("shown"); seq orders changes
-                for export
+                passages its word count, when its glossed words were first on screen ("shown") and how the amount
+                was chosen ("plan", JSON {level: the reader's intensity -2..2, intensity: its factor, jitter: the
+                passage's random factor (1: none), limit: swaps allowed, candidates: swaps the model offered}); seq
+                orders changes for export
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -44,10 +46,10 @@ import fwlib
 
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SURFACES = ('browser', 't3')
 KINDS = ('peek', 'pin', 'flip')  # the gloss was opened, or the word turned back to English
-READING = ('click', 'select', 'visible', 'trace')  # only where the reader was; knowledge.py doesn't read these yet
+READING = ('click', 'select', 'visible', 'trace')  # where the reader was; knowledge.py reads the visible stays
 SHOWN = 'shown'
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS contexts (
   words INTEGER,
   shown_at INTEGER,
   seq INTEGER NOT NULL DEFAULT 0,
+  plan TEXT,
   PRIMARY KEY (surface, view, context)
 );
 CREATE TABLE IF NOT EXISTS ops (
@@ -137,11 +140,12 @@ def connect(path=None):
 
 def _migrate(con):
     """Schema 1 -> 2: word counts, shown times and a change sequence on contexts; client ids on interactions.
-    Schemas 3 and 4 only added the reading table, which READING_TABLE creates."""
+    Schemas 3 and 4 only added the reading table, which READING_TABLE creates. Schema 5: the plan of a shown passage."""
     columns = lambda table: {row[1] for row in con.execute(f'PRAGMA table_info({table})')}
     with con:
         have = columns('contexts')
-        for name, kind in (('words', 'INTEGER'), ('shown_at', 'INTEGER'), ('seq', 'INTEGER NOT NULL DEFAULT 0')):
+        for name, kind in (('words', 'INTEGER'), ('shown_at', 'INTEGER'), ('seq', 'INTEGER NOT NULL DEFAULT 0'),
+                           ('plan', 'TEXT')):
             if name not in have:
                 con.execute(f'ALTER TABLE contexts ADD COLUMN {name} {kind}')
         con.execute('UPDATE contexts SET seq = rowid WHERE seq = 0')
@@ -190,7 +194,10 @@ def _clean(item, now):
         words = item.get('words')
         if not isinstance(words, int) or isinstance(words, bool) or not 0 < words <= 10_000:
             return None
-        return dict(clean, words=words)
+        plan = item.get('plan')
+        if plan is not None and not _plan_ok(plan, num):
+            return None
+        return dict(clean, words=words, plan=plan)
     uid = item.get('uid')
     if uid is not None and not ident(uid):
         return None
@@ -202,6 +209,14 @@ def _clean(item, now):
     if not num(dwell) or not 0 <= dwell <= 600_000:
         return None
     return dict(clean, word=item['word'], position=item['position'], dwellMs=int(dwell), uid=uid)
+
+
+def _plan_ok(plan, num):
+    integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
+    return (isinstance(plan, dict) and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates'}
+            and plan.get('level') in (-2, -1, 0, 1, 2) and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
+            and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
+            and integer(plan.get('candidates'), 1000))
 
 
 MAX_TRACE_POINTS = 200
@@ -252,12 +267,12 @@ def _clean_reading(item, clean, num):
 
 
 CONTEXT_UPSERT = (
-    'INSERT INTO contexts (surface, view, context, left, top, width, height, annotations, words, shown_at, seq) '
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM contexts)) '
+    'INSERT INTO contexts (surface, view, context, left, top, width, height, annotations, words, shown_at, plan, seq) '
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM contexts)) '
     'ON CONFLICT (surface, view, context) DO UPDATE SET left = excluded.left, top = excluded.top, '
     'width = excluded.width, height = excluded.height, annotations = excluded.annotations, '
     'words = coalesce(excluded.words, contexts.words), shown_at = coalesce(contexts.shown_at, excluded.shown_at), '
-    'seq = excluded.seq')
+    'plan = coalesce(contexts.plan, excluded.plan), seq = excluded.seq')
 
 
 def record(items, surface, path=None, now=None):
@@ -275,9 +290,11 @@ def record(items, surface, path=None, now=None):
             with con:
                 for c in cleaned:
                     shown = c['kind'] == SHOWN
+                    plan = c.get('plan') if shown else None
                     con.execute(CONTEXT_UPSERT, (surface, c['view'], c['context'], *c['box'],
                                                  json.dumps(c['annotations'], ensure_ascii=False),
-                                                 c['words'] if shown else None, c['at'] if shown else None))
+                                                 c['words'] if shown else None, c['at'] if shown else None,
+                                                 json.dumps(plan) if plan else None))
                     if shown:
                         stored += 1
                         continue
@@ -354,7 +371,7 @@ def count(path=None):
 
 INTERACTION_COLUMNS = ('id', 'at', 'surface', 'kind', 'word', 'dwell_ms', 'view', 'context', 'position', 'uid')
 CONTEXT_COLUMNS = ('surface', 'view', 'context', 'left', 'top', 'width', 'height', 'annotations', 'words', 'shown_at',
-                   'seq')
+                   'seq', 'plan')
 
 
 def export(after_id=0, after_seq=0, limit=EXPORT_PAGE, path=None):
@@ -405,7 +422,9 @@ def sync_mirror(collector, path, timeout=4, pages=20):
 
 
 def load(path=None):
-    """Everything knowledge.py replays: interactions oldest first, and contexts keyed by (surface, view, context)."""
+    """Everything knowledge.py replays: interactions oldest first, and contexts keyed by (surface, view, context),
+    each with its plan (None when not recorded), its time on screen when a reader could have been reading it
+    ("active", the ms of its visible stays, 0 without any) and when its last stay began ("seen_until")."""
     con = connect(path)
     try:
         rows = [dict(zip(INTERACTION_COLUMNS, r)) for r in con.execute(
@@ -414,10 +433,41 @@ def load(path=None):
         for r in con.execute(f'SELECT {", ".join(CONTEXT_COLUMNS)} FROM contexts'):
             c = dict(zip(CONTEXT_COLUMNS, r))
             c['annotations'] = json.loads(c['annotations'])
+            c['plan'] = json.loads(c['plan']) if c['plan'] else None
+            c['active'], c['seen_until'] = 0, None
             contexts[(c['surface'], c['view'], c['context'])] = c
+        for surface, view, context, ms, last in con.execute(
+                "SELECT surface, view, context, coalesce(sum(ms), 0), max(at) FROM reading WHERE kind = 'visible' "
+                'GROUP BY surface, view, context'):
+            c = contexts.get((surface, view, context))
+            if c is not None:
+                c['active'], c['seen_until'] = ms, last
     finally:
         con.close()
     return rows, contexts
+
+
+def intensity_changes(path=None):
+    """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface, level, until,
+    source}, from the ops applied here."""
+    con = connect(path)
+    try:
+        ops = con.execute("SELECT at, machine, body FROM ops WHERE kind = 'set' AND body LIKE '%intensity_%' "
+                          'ORDER BY at').fetchall()
+    finally:
+        con.close()
+    out = []
+    for at, machine, body in ops:
+        try:
+            prefs = json.loads(body).get('prefs') or {}
+        except ValueError:
+            continue
+        for surface in ('chat', 'browser'):
+            value = prefs.get(f'intensity_{surface}')
+            if isinstance(value, dict) and value.get('level') in (-2, -1, 0, 1, 2):
+                out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],
+                            'until': value.get('until') or 0, 'source': value.get('source') or ''})
+    return out
 
 
 def request(url, body=None, timeout=5):

@@ -22,7 +22,10 @@ const host = (reply) => async () => reply;
 describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
-    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, rate: null, words: REPLY.words });
+    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, rate: null, intensity: null, words: REPLY.words });
+    const intensity = { level: -1, until: 1800000000000, at: 1799999000000 };
+    expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, source: 'shortcut' } } }).intensity).toEqual(intensity);
+    expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, level: 3 } } }).intensity).toBe(null);
   });
   it('carries per-word estimates and the dial', () => {
     const words = [{ ...REPLY.words[0], k: 0.4, sd: 0.8 }, { ...REPLY.words[1], k: 'high', sd: 1 }];
@@ -130,6 +133,11 @@ describe('interaction log', () => {
     const shown = { kind: 'shown', at: now, view: 'a1b2', context: 'c0ffee', words: 48, box: [0, 0, 600, 80], annotations: [['de', 1, 0]] };
     expect(cleanInteraction(shown, now)).toEqual(shown);
     for (const words of [0, 1.5, 10001, '48']) expect(cleanInteraction({ ...shown, words }, now)).toBeNull();
+    const plan = { level: -1, intensity: 0.7, jitter: 0.62, limit: 2, candidates: 4 };
+    expect(cleanInteraction({ ...shown, plan: { ...plan, text: 'x' } }, now)).toEqual({ ...shown, plan });
+    for (const bad of [{ ...plan, level: 3 }, { ...plan, jitter: 1.2 }, { ...plan, limit: -1 }]) {
+      expect(cleanInteraction({ ...shown, plan: bad }, now)).toBeNull();
+    }
   });
   it('clicks keep a point and what was hit; selections a box, a length and the glossed words inside, never text', () => {
     const where = { at: now, view: 'a1b2', context: 'c0ffee', box: [0, 0, 600, 80], annotations: [['de', 1, 0], ['et', 90, 0], ['ou', 200, 20]] };

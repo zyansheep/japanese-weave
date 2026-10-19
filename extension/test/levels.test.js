@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
-  numberTrap,
+  numberTrap, planSwaps, jitterFor, JITTER_MIN,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -82,6 +82,27 @@ describe('choosing swaps', () => {
     expect(capSwaps(2, swaps, text, words).map((s) => s.f)).toEqual(['でも', '大きい']);
     expect(capSwaps(2, swaps, text, words, 25).map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
     expect(selectSwaps(2, swaps, text, words)).toEqual(capSwaps(2, swaps, text, words)); // the dial off
+  });
+  test('planSwaps: a lighter intensity and random thinning keep a share of what fits; heavier raises the ceiling', () => {
+    const plain = planSwaps(2, swaps, text, words, { density: 25 });
+    expect(plain.swaps).toEqual(capSwaps(2, swaps, text, words, 25));
+    expect(plain.plan).toEqual({ level: 0, intensity: 1, jitter: 1, limit: 3, candidates: 4 });
+    const lighter = planSwaps(2, swaps, text, words, { density: 25, intensity: -2, seed: 1 });
+    expect(lighter.plan).toMatchObject({ level: -2, intensity: 0.5, candidates: 4 });
+    expect([1, 2]).toContain(lighter.swaps.length); // 3 * 0.5, rounded either way
+    expect(lighter.swaps[0].f).toBe('大きい'); // learning words first still
+    expect(planSwaps(2, swaps, text, words, { density: 25, intensity: 2 }).swaps).toHaveLength(4); // all 4 candidates
+    expect(planSwaps(2, swaps, text, words, { density: 25, intensity: 1, jitter: 0.5, seed: 1 }).plan.limit).toBeLessThan(3);
+    const seeds = Array.from({ length: 2000 }, (_, i) => jitterFor(i * 7919));
+    const thinned = seeds.filter((j) => j < 1);
+    expect(thinned.length / seeds.length).toBeGreaterThan(0.45);
+    expect(thinned.length / seeds.length).toBeLessThan(0.55);
+    expect(Math.min(...thinned)).toBeGreaterThanOrEqual(JITTER_MIN);
+    expect(jitterFor(42)).toBe(jitterFor(42)); // a passage repaints the same way
+    // stochastic rounding keeps the average: 1 candidate kept with chance 0.7
+    const kept = Array.from({ length: 1000 }, (_, i) => planSwaps(2, swaps.slice(0, 1), 'One sentence here.', words,
+      { intensity: -1, seed: i }).swaps.length);
+    expect(kept.reduce((a, b) => a + b, 0) / kept.length).toBeCloseTo(0.7, 1);
   });
 
   // 200 words, 10 learning candidates and 10 known ones, room for all of them.

@@ -15,12 +15,17 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import hub  # noqa: E402
+import intensity  # noqa: E402
 import knowledge  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
 SYNC_EVERY = 120  # with a collector: sync the cache in the background when it is older than this
 # Stage: (target % of words in Japanese, cap %, max Japanese words in one sentence).
 STAGES = {1: (6, 10, 2), 2: (12, 20, 4), 3: (25, 35, 4), 4: (40, 55, 4)}
+SENTENCES = {3: 2, 4: 4}  # fully Japanese sentences in a ten-sentence reply, from Stage 3
+MAX_TARGET, MAX_CAP = 55, 65
+IN_TEN = {1: 'one sentence in ten', 2: 'one sentence in five', 3: 'three sentences in ten', 4: 'two sentences in five',
+          5: 'half the sentences', 6: 'three sentences in five'}
 LOT, SOME = (6, 30), (3, 10)  # chat exposure (distinct days, replies) for the "seen a lot" and "sometimes" tiers
 TAIL = 2_000_000  # bytes at the end of a transcript searched for the last reply
 SHORT = 40  # replies with fewer prose words are too short to measure
@@ -50,6 +55,19 @@ def exposure():
     return data.get('words', {})
 
 
+def amounts(stage, level=0):
+    """(target %, cap %, most per sentence, fully Japanese sentences in ten) at a stage, scaled by the reader's
+    intensity (intensity.py: lighter or heavier for a while)."""
+    target, cap, per_sentence = STAGES[min(stage, 4)]
+    sentences = SENTENCES.get(min(stage, 4), 0)
+    f = intensity.factor(level)
+    if f != 1:
+        target = max(1, min(MAX_TARGET, round(target * f)))
+        cap = min(MAX_CAP, max(target + 5, round(cap * f)))
+        sentences = max(1, min(6, round(sentences * f))) if sentences else 0
+    return target, cap, per_sentence, sentences
+
+
 def tier(word, seen):
     """'learn' for active and shaky words; known words by chat exposure: 'lot', 'some' or 'rare' (uncountable: 'some')."""
     if word['status'] != 'known':
@@ -63,12 +81,12 @@ def tier(word, seen):
     return 'some' if days >= SOME[0] and replies >= SOME[1] else 'rare'
 
 
-def brief(state, seen, recall=None, markup=False, know=None):
+def brief(state, seen, recall=None, markup=False, know=None, level=0):
     """The per-turn instructions. markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each
     Japanese word carries its own gloss instead of a footer line. know: knowledge.json (adaptive difficulty), which
-    orders learning words by learning value, most useful first."""
+    orders learning words by learning value, most useful first. level: the chat intensity in effect (intensity.py)."""
     stage = fwlib.stage_for(state)
-    target, cap, per_sentence = STAGES[min(stage, 4)]
+    target, cap, per_sentence, sentences = amounts(stage, level)
     entry = lambda w: w['ja'] if w['status'] == 'known' else f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
     def usefulness(w):
         if not know or w['status'] == 'known':
@@ -91,13 +109,14 @@ def brief(state, seen, recall=None, markup=False, know=None):
                '確認 the logs"). No Japanese outside these lists and no katakana loanwords; if a sentence starts turning '
                'Japanese, rewrite it in English. '
                if stage < 3 else
-               f'About {"one sentence in five" if stage == 3 else "two sentences in five"} should be fully Japanese '
-               f'({"2" if stage == 3 else "4"} in a ten-sentence reply): short, plain です/ます sentences, guessable from the '
+               f'About {IN_TEN[sentences]} should be fully Japanese '
+               f'({sentences} in a ten-sentence reply): short, plain です/ます sentences, guessable from the '
                'English around them, like "問題は設定です。" or "これで大丈夫です。" Steps stay English, so put the Japanese '
                'sentences in the explanation, summary and advice around them. The other sentences stay English with listed '
                'words swapped in as written, without particles. In Japanese sentences use any common word the user would '
                'follow, not only the lists. ')
-    text = (f'Japanese Weave (Stage {stage}): the user is a native English speaker learning Japanese passively. Write your '
+    turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
+    text = (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese passively. Write your '
             f'chat reply in English and swap in Japanese words from the lists below: about {target}% of the words in a reply '
             f'(about {round(target * 1.5)} in a 150-word reply{", so most sentences carry one or two" if stage <= 2 else ""}), '
             f'never over {cap}%, at most {per_sentence} in one sentence. Under target is the usual miss, so count as you write. '
@@ -190,13 +209,13 @@ def share(text, words):
     return listed + off_list, english + listed + off_list, learning, off_list
 
 
-def calibration(text, state):
+def calibration(text, state, level=0):
     """One line on how much Japanese the last reply in this chat had, so the next one corrects toward the target."""
     japanese, total, learning, off_list = share(text, fwlib.introduced(state))
     if total < SHORT:
         return ''
     stage = fwlib.stage_for(state)
-    target, cap, _ = STAGES[min(stage, 4)]
+    target, cap, _, _ = amounts(stage, level)
     percent = 100 * japanese / total
     verdict = ('it slipped into Japanese sentences, so this time write English sentences with only list words in Japanese'
                if off_list >= DRIFT and stage < 3 else f'over the {cap}% cap, so use less Japanese this time' if percent > cap else
@@ -362,12 +381,16 @@ def main(argv):
     if state.get('paused'):
         return 0
     markup = hook and abbr_glosses(state)
+    try:
+        level = hub.live_intensity('chat')['level']
+    except Exception:
+        level = 0
     text = brief(state, exposure(), next_recall(state, data.get('session_id')) if hook and not markup else None,
-                 markup=markup, know=knowledge.load())
+                 markup=markup, know=knowledge.load(), level=level)
     if hook:
         try:
             reply = last_reply(data['transcript_path'])
-            text += calibration(reply, state) if reply else ''
+            text += calibration(reply, state, level) if reply else ''
         except Exception:
             pass  # no transcript yet or unreadable: the brief alone still helps
         out = {'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': text}}

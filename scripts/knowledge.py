@@ -2,10 +2,14 @@
 Python 3.9+, standard library only.
 
 Model: P(peek) = sigmoid(offset_s - k_w). k_w is the reader's knowledge of a word on a log-odds scale, learned by
-Elo-style updates from engaged reading episodes (a peek, pin or flip shows the reader was reading there, so unopened
-glossed words around it count as known). The update is conditioned on the episode having at least one peek, since
-only such episodes are logged. refresh() replays the whole log from scratch (deterministic, retunable), writes
-knowledge.json, steers the peek-rate dial, and makes a few guarded status moves.
+Elo-style updates. Browser: every passage shown counts (its "shown" record), opened or not. A word left unopened is
+evidence the reader knew it in proportion to the chance it was read: certain down to the lowest opened line of the
+passage (halving per line below it), else from the passage's time on screen against the time reading down to the word
+takes (read_chance). The update is the gradient of log P(what happened) with P(open) = P(read) * P(peek).
+T3 messages are logged only when something in them was opened, so there an update is conditioned on the episode having
+at least one open, and only the line rule applies. refresh() replays the whole log from scratch (deterministic,
+retunable), writes knowledge.json, steers the peek-rate dial, makes a few guarded status moves, and reports whether
+the default amount of Japanese looks right (calibration).
 """
 import json
 import math
@@ -43,6 +47,15 @@ RATE_MIN_WORDS = 300
 SCALE_RANGE = (0.25, 4.0)
 CHALLENGES = (0, 0.5, 1, 1.5, 2, 3)
 PUNCTUATION = set('。？！?!.')
+PACE_MS = 300              # ms per word a reader takes on a passage with Japanese in it (about 200 words a minute)
+READ_MAX = 0.7             # the most a passage's time on screen alone says about a word in it being read
+PACES = (150, 250, 400, 650)   # the reading model's grid, scored by how well it predicts opens (tune)
+READ_MAXES = (0.5, 0.7, 0.9)
+TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
+CALIBRATION_DAYS = 30
+SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese
+MIN_PASSAGE_WORDS = 15
+MIN_ACTIVE_MS = 1000
 
 
 def sigmoid(x):
@@ -101,15 +114,21 @@ def read_commands():
 
 # ---- episodes and observations ----
 
+def is_showing(context):
+    """A browser passage with a shown record: replayed whole, opened or not (showings)."""
+    return context['surface'] == 'browser' and context.get('shown_at') is not None
+
+
 def episodes(rows, contexts, now_ms):
-    """Interactions grouped by (surface, view, context) and split at gaps over GAP_MS; only settled ones."""
+    """Interactions grouped by (surface, view, context) and split at gaps over GAP_MS; only settled ones. Browser
+    passages with a shown record are left to showings()."""
     groups = {}
     for row in rows:
         groups.setdefault((row['surface'], row['view'], row['context']), []).append(row)
     out = []
     for key, items in groups.items():
         context = contexts.get(key)
-        if context is None:
+        if context is None or is_showing(context):
             continue
         current = []
         for row in sorted(items, key=lambda r: (r['at'], r['id'])):
@@ -121,17 +140,46 @@ def episodes(rows, contexts, now_ms):
     return sorted((e for e in out if e[2][-1]['at'] <= now_ms - SETTLE_MS), key=lambda e: e[2][-1]['at'])
 
 
+def showings(rows, contexts, now_ms):
+    """Every browser passage shown, with its interactions (maybe none), once settled: SETTLE_MS after the last thing
+    that happened in it. [(at, key, context, items)] oldest first."""
+    groups = {}
+    for row in rows:
+        groups.setdefault((row['surface'], row['view'], row['context']), []).append(row)
+    out = []
+    for key, context in contexts.items():
+        if not is_showing(context):
+            continue
+        items = sorted(groups.get(key, []), key=lambda r: (r['at'], r['id']))
+        last = max([context['shown_at'], context.get('seen_until') or 0] + [r['at'] for r in items])
+        if last <= now_ms - SETTLE_MS:
+            out.append((last, key, context, items))
+    return sorted(out, key=lambda e: e[0])
+
+
+def read_chance(context, y, line, pace=PACE_MS, top=READ_MAX):
+    """The chance a word at height y of a passage was read, from the passage's time on screen alone: the time reading
+    down to that line takes at `pace` against the time a reader could have been reading the passage."""
+    words, height, active = context.get('words') or 0, context.get('height') or 0, context.get('active') or 0
+    if not words or active <= 0:
+        return 0.0
+    share = min(1.0, max(0.1, (y + line) / height)) if height > 0 else 1.0
+    return top * (1 - math.exp(-active / (pace * words * share)))
+
+
 def _line_height(ys):
     gaps = [b - a for a, b in zip(sorted(set(ys)), sorted(set(ys))[1:]) if b - a > 2]
     return statistics.median(gaps) if gaps else 20.0
 
 
-def observations(surface, context, items, listed):
-    """[(word, y, weight)] for the listed words of one episode; [] when nothing was opened (not engaged).
+def observations(surface, context, items, listed, read=None):
+    """[(word, y, weight)] for the listed words of one passage or message.
 
     Opened: y 1 for a pin or flip or a peek open at least GLANCE_MS, GLANCE_Y for a shorter peek; T3 peeks under
-    T3_NOISE_MS don't count. Unopened: y 0, weight 1 down to the lowest opened line, halving per line below it.
-    Words of a sentence whose whole-sentence translation was opened get nothing (it was read in English)."""
+    T3_NOISE_MS don't count. Unopened: y 0, weighted by the chance it was read: 1 down to the lowest opened line,
+    halving per line below it, or read(y, line) when that is higher (a browser passage's time on screen). Without
+    read, nothing opened means [] (a T3 message is logged only when something was opened). Words of a sentence whose
+    whole-sentence translation was opened get nothing (it was read in English)."""
     notes = context['annotations']
     opened = {}
     for row in items:
@@ -143,7 +191,7 @@ def observations(surface, context, items, listed):
             continue
         y = GLANCE_Y if row['kind'] == 'peek' and row['dwell_ms'] < GLANCE_MS else 1.0
         opened[index] = max(opened.get(index, 0), y)
-    if not opened:
+    if not opened and read is None:
         return []
     excluded = set()
     for index in opened:
@@ -151,7 +199,7 @@ def observations(surface, context, items, listed):
             start = max((i for i in range(index) if notes[i][0] in PUNCTUATION), default=-1)
             excluded.update(range(start + 1, index))
     line = _line_height([n[2] for n in notes])
-    lowest = max(notes[i][2] for i in opened)
+    lowest = max(notes[i][2] for i in opened) if opened else None
     best = {}
     for index, (word, _x, y_pos) in enumerate(notes):
         if word not in listed or index in excluded:
@@ -159,8 +207,13 @@ def observations(surface, context, items, listed):
         if index in opened:
             y, weight = opened[index], 1.0
         else:
-            below = y_pos - lowest
-            y, weight = 0.0, 1.0 if below <= line / 2 else 0.5 ** math.ceil(below / line)
+            weight = 0.0
+            if lowest is not None:
+                below = y_pos - lowest
+                weight = 1.0 if below <= line / 2 else 0.5 ** math.ceil(below / line)
+            if read is not None:
+                weight = max(weight, read(y_pos, line))
+            y = 0.0
         if weight < 0.05:
             continue
         old = best.get(word)
@@ -192,8 +245,10 @@ class Word:
         return math.sqrt(2 / (1 + self.n))
 
 
-def replay(rows, contexts, listed, intervals, commands, now_ms):
-    """Every word's knowledge after the whole log; also the T3 offset."""
+def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, top=READ_MAX, losses=None):
+    """Every word's knowledge after the whole log; also the T3 offset. pace, top: the reading model (read_chance).
+    losses: a list to append, for every listed word of every browser passage shown, (opened, predicted chance of an
+    open) before the update, with the read chance from time on screen alone: how well the model predicts (tune)."""
     words = {}
     offset = {'browser': 0.0, 't3': 0.0}
 
@@ -203,6 +258,7 @@ def replay(rows, contexts, listed, intervals, commands, now_ms):
         return words[ja]
 
     timeline = [(e[2][-1]['at'], 0, e) for e in episodes(rows, contexts, now_ms)]
+    timeline += [(e[0], 2, e) for e in showings(rows, contexts, now_ms)]
     timeline += [(c['at'], 1, c) for c in commands if c['word'] in listed]
     for at, kind, item in sorted(timeline, key=lambda t: (t[0], t[1])):
         if kind == 1:
@@ -213,6 +269,31 @@ def replay(rows, contexts, listed, intervals, commands, now_ms):
                 word.k, word.n = max(word.k, KNOWN_COMMAND_K), word.n + 2
             else:
                 word.k = min(word.k, LEARN_COMMAND_K)
+            continue
+        if kind == 2:
+            _at, _key, context, items = item
+            read = lambda y, line, c=context: read_chance(c, y, line, pace, top)
+            obs = observations('browser', context, items, listed, read)
+            line = _line_height([n[2] for n in context['annotations']]) if losses is not None else 0
+            for ja, y, weight in obs:
+                word = get(ja)
+                word.age(at)
+                q = sigmoid(offset['browser'] - word.k)
+                if losses is not None:
+                    alone = max(0.05, read_chance(context, _y_of(context, ja), line, pace, top))
+                    losses.append((y > 0, min(1 - 1e-6, max(1e-6, alone * q))))
+                eta = max(ETA_MIN, ETA_MAX / (1 + ETA_SLOPE * word.n))
+                if y > 0:  # opened, so read: log P(open | read) = log q
+                    word.k += eta * (q - y)
+                    word.n += 1.0
+                    word.opened += 1
+                    word.recent.append(at)
+                else:  # not opened, read with chance r: log (1 - r q)
+                    word.k += eta * weight * q * (1 - q) / (1 - weight * q)
+                    word.n += weight
+                word.obs += 1
+                word.history.append({'at': at, 'surface': 'browser', 'y': y, 'w': round(weight, 2), 'k': round(word.k, 2)})
+                del word.history[:-30]
             continue
         (surface, _view, _context), context, items = item
         obs = observations(surface, context, items, listed)
@@ -246,6 +327,128 @@ def replay(rows, contexts, listed, intervals, commands, now_ms):
         word.age(now_ms)
         word.recent = [t for t in word.recent if t >= now_ms - RECENT_DAYS * DAY_MS]
     return words, offset
+
+
+def _y_of(context, ja):
+    return next((n[2] for n in context['annotations'] if n[0] == ja), 0)
+
+
+def tune(rows, contexts, listed, intervals, commands, now_ms):
+    """The reading model (pace, top) that best predicts browser opens: mean log loss of P(open) = P(read) * P(peek)
+    over every listed word of every passage shown, each predicted before its own update. Returns {pace, top, opens,
+    words, loss, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens to judge by."""
+    grid = []
+    opens = scored = 0
+    for pace in PACES:
+        for top in READ_MAXES:
+            losses = []
+            replay(rows, contexts, listed, intervals, commands, now_ms, pace, top, losses)
+            if not losses:
+                return {'pace': PACE_MS, 'top': READ_MAX, 'opens': 0, 'words': 0, 'loss': None, 'grid': []}
+            opens, scored = sum(o for o, _ in losses), len(losses)
+            loss = -sum(math.log(p if o else 1 - p) for o, p in losses) / len(losses)
+            grid.append({'pace': pace, 'top': top, 'loss': round(loss, 5)})
+    best = min(grid, key=lambda g: g['loss'])
+    ready = opens >= TUNE_MIN_OPENS
+    return {'pace': best['pace'] if ready else PACE_MS, 'top': best['top'] if ready else READ_MAX, 'tuned': ready,
+            'best': best, 'opens': opens, 'words': scored, 'grid': grid}
+
+
+# ---- calibration: is the default amount right? ----
+
+def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
+    """Evidence on the default amount of Japanese, over the last `days` days.
+
+    reading: browser passages shown with some time on screen, by the share of their words in Japanese: how many, the
+    median ms of screen time per word, and opens per 100 words. Screen time overstates reading (a passage stays on
+    screen while its neighbours are read), so compare bins with each other, not with a reading speed.
+    jitter: passages the extension randomly thinned (plan.jitter < 1) against untouched ones. The thinning is random,
+    so the difference between the two groups is caused by the amount alone; effect: change in log ms per word per
+    unit of share, which approximates how much one more point of Japanese slows reading.
+    presses: the reader's heavier/lighter presses per surface (intensity.py) and the share of the time spent at
+    each level, from the ops log.
+    """
+    since = now_ms - days * DAY_MS
+    opens = {}
+    for row in rows:
+        if row['surface'] == 'browser' and row['kind'] in ('peek', 'flip'):
+            key = (row['surface'], row['view'], row['context'])
+            opens[key] = opens.get(key, 0) + 1
+    passages = []
+    for key, c in contexts.items():
+        if not is_showing(c) or c['shown_at'] < since or (c.get('words') or 0) < MIN_PASSAGE_WORDS:
+            continue
+        if (c.get('active') or 0) < MIN_ACTIVE_MS:
+            continue
+        japanese = sum(1 for n in c['annotations'] if n[0] not in PUNCTUATION)
+        plan = c.get('plan') or {}
+        passages.append({'share': japanese / c['words'], 'msPerWord': c['active'] / c['words'], 'words': c['words'],
+                         'opens': opens.get(key, 0), 'jitter': plan.get('jitter'), 'level': plan.get('level', 0)})
+
+    def summary(group):
+        if not group:
+            return {'n': 0}
+        words = sum(p['words'] for p in group)
+        return {'n': len(group), 'share': round(sum(p['share'] for p in group) / len(group), 4),
+                'msPerWord': round(statistics.median(p['msPerWord'] for p in group)),
+                'opensPer100': round(100 * sum(p['opens'] for p in group) / words, 2)}
+
+    normal = [p for p in passages if not p['level']]
+    bins = []
+    for low, high in zip(SHARE_BINS, SHARE_BINS[1:]):
+        group = [p for p in normal if low <= p['share'] < high]
+        bins.append(dict(summary(group), low=low, high=min(1.0, high)))
+    jittered = [p for p in normal if p['jitter'] is not None and p['jitter'] < 1]
+    untouched = [p for p in normal if p['jitter'] == 1]
+    jitter = {'thinned': summary(jittered), 'untouched': summary(untouched), 'effect': None}
+    if len(jittered) >= 20 and len(untouched) >= 20:
+        mean = lambda xs: sum(xs) / len(xs)
+        gap = mean([p['share'] for p in untouched]) - mean([p['share'] for p in jittered])
+        if gap > 0.005:
+            slow = mean([math.log(p['msPerWord']) for p in untouched]) - mean([math.log(p['msPerWord']) for p in jittered])
+            jitter['effect'] = round(slow / gap, 3)
+    presses = {}
+    for surface in ('chat', 'browser'):
+        mine = [c for c in changes if c['surface'] == surface]
+        recent = [c for c in mine if c['at'] >= since]
+        time_at = {}
+        for i, c in enumerate(mine):
+            start = max(c['at'], since)
+            end = min(mine[i + 1]['at'] if i + 1 < len(mine) else now_ms, c['until'] if c['level'] else now_ms)
+            if end > start and c['level']:
+                time_at[c['level']] = time_at.get(c['level'], 0) + end - start
+        lighter = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b < a)
+        heavier = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b > a)
+        verdict = ('too heavy' if lighter >= 5 and lighter >= 3 * max(1, heavier) else
+                   'too light' if heavier >= 5 and heavier >= 3 * max(1, lighter) else None)
+        presses[surface] = {'lighter': lighter, 'heavier': heavier, 'hoursAt': {str(k): round(v / 3_600_000, 1)
+                                                                               for k, v in sorted(time_at.items())},
+                            'verdict': verdict}
+    return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'presses': presses}
+
+
+def calibration_text(report):
+    """fw.py calibrate: the report in plain lines."""
+    lines = [f'Last {report["days"]} days, {report["passages"]} web passages with time on screen (normal intensity):']
+    for b in report['bins']:
+        if b['n']:
+            lines.append(f'  {100 * b["low"]:4.0f}-{100 * b["high"]:3.0f}% Japanese: {b["n"]:4d} passages, '
+                         f'{b["msPerWord"]:4d} ms on screen per word, {b["opensPer100"]:.2f} opens per 100 words')
+    j = report['jitter']
+    if j['thinned']['n'] and j['untouched']['n']:
+        lines.append(f'Randomly thinned passages: {j["thinned"]["n"]} at {100 * j["thinned"]["share"]:.1f}% Japanese, '
+                     f'{j["thinned"]["msPerWord"]} ms/word; untouched: {j["untouched"]["n"]} at '
+                     f'{100 * j["untouched"]["share"]:.1f}%, {j["untouched"]["msPerWord"]} ms/word.')
+        lines.append(f'  Each extra point of Japanese changes screen time per word by about {j["effect"] / 100:+.1%}.'
+                     if j['effect'] is not None else '  Not enough of either yet to measure the effect (20 each).')
+    else:
+        lines.append('No randomly thinned passages yet (extension 0.6.0 and later).')
+    for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
+        p = report['presses'][surface]
+        hours = ', '.join(f'{h} h at {int(k):+d}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
+        verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''
+        lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){verdict}.')
+    return '\n'.join(lines)
 
 
 # ---- the dial ----
@@ -340,7 +543,11 @@ def refresh(now=None):
         state = fwlib.load_state()
         previous = load()
         listed = {w['ja'] for w in state['words'] if w['status'] != 'queue'}
-        words, offset = replay(rows, contexts, listed, anki_intervals(), read_commands(), now_ms)
+        intervals, commands = anki_intervals(), read_commands()
+        reading = previous.get('reading')
+        if not isinstance(reading, dict) or reading.get('day') != today:  # the reading model's grid, once a day
+            reading = dict(tune(rows, contexts, listed, intervals, commands, now_ms), day=today)
+        words, offset = replay(rows, contexts, listed, intervals, commands, now_ms, reading['pace'], reading['top'])
         rate, shown, peeks = peek_rate(rows, contexts, now_ms)
         challenge = challenge_of(state)
         controller = steer(previous.get('controller'), challenge, rate, shown, today)
@@ -367,7 +574,8 @@ def refresh(now=None):
             'budget': round(challenge * controller.get('scale', 1.0), 3) if challenge else 0,
             'rate': {'per100': round(rate, 2) if rate is not None else None, 'shownWords': shown, 'peeks': peeks,
                      'days': RATE_DAYS},
-            'veto': veto, 'moves': (history + applied)[-200:],
+            'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
+            'calibration': calibrate(rows, contexts, feedback.intensity_changes(feedback.default_path()), now_ms),
             'words': {ja: {'k': round(w.k, 3), 'n': round(w.n, 2), 'sd': round(w.sd, 3), 'mu': round(w.mu, 2),
                            'obs': w.obs, 'opened': w.opened, 'recent': len(w.recent), 'last': w.last,
                            'history': w.history} for ja, w in words.items()},

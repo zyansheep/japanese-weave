@@ -44,20 +44,23 @@ const entry = ({ ja, en }) => `${ja} = ${en}`;
 const KATAKANA_ONLY = /^[゠-ヿ〜]+$/;
 
 // How often a whole sentence goes into Japanese: from the plugin's stage, else from the level.
-function sentenceRate(level, stage) {
-  if (stage >= 3) return 'about one sentence in five';
-  if (stage === 2 || (!stage && level >= 2)) return 'about one sentence in ten';
+// heavy: the reader's heavier intensity (1 or 2), which asks for more, so a heavier page has enough to pick from.
+function sentenceRate(level, stage, heavy = 0) {
+  if (stage >= 3) return ['about one sentence in five', 'about one sentence in three', 'about two sentences in five'][heavy];
+  if (stage === 2 || (!stage && level >= 2)) return ['about one sentence in ten', 'about one sentence in six', 'about one sentence in four'][heavy];
   return '';
 }
+const PER_SENTENCE = ['one or two', 'two or three', 'two to four'];
 
 // The rules come first and the word lists last, known words before learning words (whose order changes as words are
 // shown during the day), so consecutive calls share a long prefix that Gemini caches. With the plugin's word state,
 // learning words (active, then shaky; unshown today first) are the target and known words fill in. Without it, the level's bundled list. Katakana loanwords are left out: on an English page they teach nothing.
 // percent: the share of words to swap, given per passage as "target" (buildUserContent); 0: the level's rule.
-// stage: the plugin's stage (1-4, 0 without it), which sets how many sentences go fully into Japanese.
+// stage: the plugin's stage (1-4, 0 without it), which sets how many sentences go fully into Japanese. heavy: 0, or the
+// reader's heavier intensity (1, 2), which asks for more of everything (the caller scales percent itself).
 // Two parts: everything up to the known words, which stays the same all day, and the learning words, so a provider with
 // explicit caching (Anthropic) can mark both.
-export function buildSystemParts(level, sharedWords, shownToday = [], percent = 0, stage = 0) {
+export function buildSystemParts(level, sharedWords, shownToday = [], percent = 0, stage = 0, heavy = 0) {
   const lvl = level <= 1 ? 1 : 2;
   let known = '';
   let learning;
@@ -71,14 +74,15 @@ export function buildSystemParts(level, sharedWords, shownToday = [], percent = 
   } else {
     learning = `LEARNING words (Level ${lvl}):\n${wordsForLevel(lvl).filter((w) => !KATAKANA_ONLY.test(w.ja)).map(entry).join('; ')}`;
   }
-  const sentences = sentenceRate(lvl, Number(stage) || 0);
+  heavy = [0, 1, 2].includes(heavy) ? heavy : 0;
+  const sentences = sentenceRate(lvl, Number(stage) || 0, heavy);
   const amount = percent > 0
     ? `Swap about ${percent}% of the words. Each passage comes with a "target": how many Japanese words it should get. Aim for that many, spread across its sentences; fewer only when nothing fits.${sentences ? ` Put ${sentences} fully into Japanese when one can be said completely.` : ''}`
     : sentences
-    ? `Aim for ${sentences} as a sentence swap: look for short ones in replies, captions, dialogue and diaries. Give the other sentences one or two word or phrase swaps each, and make it a phrase wherever one fits ("we bought fish" -> "we 魚を買いました", not 魚 alone). Give every passage this care, however many come at once.`
+    ? `Aim for ${sentences} as a sentence swap: look for short ones in replies, captions, dialogue and diaries. Give the other sentences ${PER_SENTENCE[heavy]} word or phrase swaps each, and make it a phrase wherever one fits ("we bought fish" -> "we 魚を買いました", not 魚 alone). Give every passage this care, however many come at once.`
     : lvl === 1
-    ? 'Aim for one word or phrase swap every sentence or two. No sentence swaps yet.'
-    : 'Aim for one or two word or phrase swaps in every sentence. No sentence swaps yet.';
+    ? `Aim for ${['one word or phrase swap every sentence or two', 'one word or phrase swap in every sentence', 'one or two word or phrase swaps in every sentence'][heavy]}. No sentence swaps yet.`
+    : `Aim for ${PER_SENTENCE[heavy]} word or phrase swaps in every sentence. No sentence swaps yet.`;
   return [`You are the Japanese Weave engine for a browser extension. The reader is a native English speaker learning Japanese by meeting it inside the English they already read. You choose which English to replace with Japanese; everything else stays exactly as written.
 
 THREE KINDS OF SWAP

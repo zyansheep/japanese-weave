@@ -18,6 +18,9 @@ private network such as Tailscale. Python 3.9+, standard library only.
   GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (feedback.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
+  GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
+  POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of the heavier/lighter shortcut (T3 Code,
+                          fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level, until, at}}
 
 Every few minutes it also applies the day's promotion rules and refreshes the knowledge estimates (hub.maintain).
 
@@ -41,10 +44,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feedback  # noqa: E402
 import fwlib  # noqa: E402
 import hub  # noqa: E402
+import intensity  # noqa: E402
 
 MAX_BODY = 1024 * 1024
 MAX_OPS_BODY = 8 * 1024 * 1024  # an Anki sync carries every review word
 MAINTAIN_EVERY = 600
+PRESSES = threading.Lock()  # intensity presses one at a time, so two quick ones make two steps
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -102,6 +107,12 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.reply(400, {'ok': False, 'error': 'since must be a number'})
             return self.reply(200, dict(feedback.stats(since, self.db), ok=True))
+        if url.path == '/v1/intensity':
+            surface = query.get('surface', [''])[0]
+            if surface not in intensity.SURFACES:
+                return self.reply(400, {'ok': False, 'error': 'surface is chat or browser'})
+            prefs = fwlib.load_state().get('prefs') if (fwlib.home() / 'state.json').exists() else {}
+            return self.reply(200, {'ok': True, 'intensity': intensity.current(prefs, surface)})
         if url.path == '/v1/recent':
             try:
                 limit = max(1, min(500, number('limit', 20)))
@@ -114,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_allowed():
             return
         path = urlsplit(self.path).path
-        if path not in ('/v1/interactions', '/v1/ops'):
+        if path not in ('/v1/interactions', '/v1/ops', '/v1/intensity'):
             return self.reply(404, {'ok': False, 'error': 'not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
             return self.reply(415, {'ok': False, 'error': 'send application/json'})
@@ -130,6 +141,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {'ok': False, 'error': 'body is not JSON'})
         if path == '/v1/ops':
             return self.reply(*hub.receive(body, self.db))
+        if path == '/v1/intensity':
+            source = body.get('source', 'unknown') if isinstance(body, dict) else None
+            if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \
+                    or isinstance(body.get('step'), bool) or not isinstance(source, str) or not 0 < len(source) <= 20:
+                return self.reply(400, {'ok': False, 'error': 'need {"surface": "chat"|"browser", "step": 1|-1|0, "source"}'})
+            if not (fwlib.home() / 'state.json').exists():
+                return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
+            with PRESSES:
+                try:
+                    value = hub.change_intensity_here(body['surface'], body['step'], source, self.db)
+                except ValueError as error:
+                    return self.reply(400, {'ok': False, 'error': str(error)})
+            return self.reply(200, {'ok': True, 'intensity': value})
         if not isinstance(body, dict) or body.get('surface') not in feedback.SURFACES or not isinstance(body.get('items'), list):
             return self.reply(400, {'ok': False, 'error': 'need {"surface": "browser"|"t3", "items": [...]}'})
         self.reply(200, dict(feedback.record(body['items'], body['surface'], self.db), ok=True))

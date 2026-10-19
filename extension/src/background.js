@@ -7,9 +7,9 @@ import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
 import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, selectSwaps } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor } from './levels.js';
 import { hashKey } from './hash.js';
-import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay } from './hostsource.js';
+import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -19,6 +19,8 @@ const store = chrome.storage.local;
 const cache = createCache(chromeStorage);
 const send = (message) => chrome.runtime.sendNativeMessage(HOST, message);
 const ALARM = 'sync';
+const INTENSITY_ALARM = 'intensity'; // when a heavier or lighter spell ends
+const INTENSITY_MS = 3 * 3600 * 1000; // as ../scripts/intensity.py DURATION_MS
 const SYNC_MINUTES = 30; // word statuses change at most a few times a day
 const FLUSH_DELAY_MS = 10000;
 const cooldown = new Map(); // model -> rate-limit cooldown end; worker memory is enough
@@ -40,12 +42,20 @@ const ready = (async () => {
   await store.set({ settings: cleanSettings(settings) });
 })();
 
+// Intensity (heavier or lighter for a while, ../scripts/intensity.py): the newer of what this browser set and what the
+// host last sent (set on another machine or with fw.py); an expired one is normal.
+function intensityOf(data, now = Date.now()) {
+  const latest = [cleanIntensity(data.intensity), data.wordState?.intensity].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+  return latest?.level && latest.until > now ? latest : { level: 0, until: 0, at: latest?.at || 0 };
+}
+
 // What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped. The
-// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial: the cache holds every validated
-// candidate and the dial only changes which of them selectSwaps picks, so turning it never costs a model call.
+// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial and a lighter intensity: the cache
+// holds every validated candidate and those only change which of them planSwaps picks, so they never cost a model
+// call. A heavier intensity asks the model for more, so it has its own cache.
 async function context() {
   await ready;
-  const data = await store.get(['settings', 'wordState', 'epoch', ...KEY_NAMES]);
+  const data = await store.get(['settings', 'wordState', 'epoch', 'intensity', ...KEY_NAMES]);
   const state = data.wordState?.words?.length ? data.wordState : null;
   const saved = cleanSettings(data.settings);
   const settings = { ...saved, newSitesEnabled: newSitesDefault(saved, state?.sites) };
@@ -53,10 +63,13 @@ async function context() {
   const hasKey = candidatesFor(settings.model, keysOf(data)).length > 0;
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
-  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins]));
+  const intensity = intensityOf(data);
+  const heavy = Math.max(0, intensity.level);
+  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins, ...(heavy ? [heavy] : [])]));
   const challenge = state?.challenge || 0;
-  const revision = hashKey(JSON.stringify([cacheRevision, challenge]));
-  return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0 };
+  const revision = hashKey(JSON.stringify([cacheRevision, challenge, intensity.level]));
+  return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0,
+    intensity: { level: intensity.level, until: intensity.until } };
 }
 
 const activeOn = (ctx, url) => ctx.hasKey && !ctx.paused && siteEnabled(ctx.settings, url) && hasSiteAccess(url, ctx.origins);
@@ -76,17 +89,25 @@ async function swaps(msg, sender) {
   const cacheKey = (i) => `${ctx.cacheRevision}:${hashKey(i.text)}`;
   const cached = await cache.getMany(items.map(cacheKey));
   const choose = await chooser(ctx);
-  const picked = (candidates) => Object.fromEntries(items.filter((i) => cacheKey(i) in candidates)
-    .map((i) => [i.key, choose(i.text, candidates[cacheKey(i)])]));
+  // { results: { key: swaps }, plans: { key: plan } } for the items with candidates
+  const picked = (candidates) => {
+    const out = { results: {}, plans: {} };
+    for (const i of items.filter((x) => cacheKey(x) in candidates)) {
+      const { swaps: chosen, plan } = choose(i.text, candidates[cacheKey(i)]);
+      out.results[i.key] = chosen;
+      out.plans[i.key] = plan;
+    }
+    return out;
+  };
   const misses = items.filter((i) => !(cacheKey(i) in cached));
-  if (!misses.length) return { results: picked(cached) };
+  if (!misses.length) return picked(cached);
   try {
     const fresh = await gather(ctx, misses.map((i) => ({ id: cacheKey(i), text: i.text })));
     const now = await context();
     if (!fresh || now.revision !== ctx.revision) return { results: {}, stale: true };
-    return { results: picked({ ...cached, ...fresh }) };
+    return picked({ ...cached, ...fresh });
   } catch (e) {
-    return { results: picked(cached), error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
+    return { ...picked(cached), error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
   }
 }
 
@@ -151,7 +172,8 @@ async function callModel(ctx, batch) {
     const data = await store.get(['wordState', ...KEY_NAMES]);
     const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
     fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, stage: data.wordState?.stage,
-      words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density });
+      words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
+      heavy: Math.max(0, ctx.intensity.level) });
   } catch (e) {
     await locked(async () => {
       await recordSpent(e?.usage);
@@ -168,15 +190,19 @@ async function callModel(ctx, batch) {
   });
 }
 
-// Picks each passage's swaps from its cached candidates (selectSwaps): the dial's budget and the host's per-word
-// estimates, seeded by the passage and the day so a passage repaints the same way.
+// Picks each passage's swaps from its cached candidates (planSwaps): the dial's budget, the host's per-word estimates,
+// the intensity and the passage's random thinning, seeded by the passage and the day so a passage repaints the same
+// way. Returns { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
   const shown = await shownToday(chromeStorage, day);
   const budgetPer100 = ctx.challenge ? wordState?.budget || ctx.challenge : 0;
-  return (text, swaps) => selectSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
-    shownToday: shown, seed: parseInt(hashKey(`${day}:${text}`).slice(-8), 16) });
+  return (text, swaps) => {
+    const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
+    return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
+      shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
+  };
 }
 
 // Every billed attempt counts toward usage, including an answer that was unusable before the fallback.
@@ -277,6 +303,47 @@ async function stats() {
   }
 }
 
+// One press of the heavier/lighter shortcut (or the popup): step 1 heavier, -1 lighter, 0 back to normal, for
+// INTENSITY_MS from now. Takes effect here at once (lighter: from the cached candidates; heavier: a model call per
+// passage), and goes to the host so the change is logged with the word state (calibration).
+async function stepIntensity(step, source) {
+  if (![-1, 0, 1].includes(step)) throw new Error('step is 1, -1 or 0');
+  const now = Date.now();
+  const current = intensityOf(await store.get(['intensity', 'wordState']), now);
+  const level = step ? Math.max(-2, Math.min(2, current.level + step)) : 0;
+  const value = { level, until: level ? now + INTENSITY_MS : 0, at: now };
+  await store.set({ intensity: value });
+  if (level) await chrome.alarms.create(INTENSITY_ALARM, { when: value.until });
+  else await chrome.alarms.clear(INTENSITY_ALARM);
+  void send({ type: 'intensity', surface: 'browser', set: { ...value, source } }).catch(() => {});
+  await showIntensity(value, true);
+  await broadcast();
+  return { ok: true, intensity: { level, until: value.until } };
+}
+async function intensityEnded() {
+  await showIntensity(intensityOf(await store.get(['intensity', 'wordState'])), false);
+  await broadcast();
+}
+// The toolbar badge says the level while it lasts (+1, -2...); a press also shows a toast on the page in front.
+async function showIntensity(value, toast) {
+  const level = value.until > Date.now() ? value.level : 0;
+  await chrome.action.setBadgeText({ text: level ? `${level > 0 ? '+' : '−'}${Math.abs(level)}` : '' });
+  if (level) await chrome.action.setBadgeBackgroundColor({ color: level > 0 ? '#b45309' : '#2563eb' });
+  if (!toast) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id != null) await chrome.tabs.sendMessage(tab.id, { type: 'intensity', intensity: { level, until: value.until } }).catch(() => {});
+}
+chrome.commands?.onCommand.addListener((command) => {
+  const step = { 'intensity-up': 1, 'intensity-down': -1 }[command];
+  if (step) void ready.then(() => stepIntensity(step, 'shortcut')).catch(() => {});
+});
+// After a restart the spell may still run: the badge and its end come back.
+void ready.then(async () => {
+  const value = intensityOf(await store.get(['intensity', 'wordState']));
+  await showIntensity(value, false);
+  if (value.level) await chrome.alarms.create(INTENSITY_ALARM, { when: value.until });
+}).catch(() => {});
+
 async function status() {
   const config = await context();
   const data = await store.get(['wordState', 'modelStatus', ...KEY_NAMES]);
@@ -284,7 +351,7 @@ async function status() {
     budget: data.wordState?.budget || 0, rate: data.wordState?.rate || null,
     pastedKey: !!data.apiKey, hostKey: !!data.hostKey, pastedAnthropicKey: !!data.anthropicKey,
     hostAnthropicKey: !!data.hostAnthropicKey, modelStatus: data.modelStatus || null,
-    usage: await readUsage(chromeStorage) };
+    usage: await readUsage(chromeStorage), intensity: config.intensity };
 }
 
 // Pages may only ask for config, swaps, events and interactions; everything else is popup-only.
@@ -300,6 +367,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     status, stats, syncWords, clearCache,
     save: () => save(msg),
     setChallenge: () => setChallenge(msg),
+    intensity: () => stepIntensity(msg.step, 'popup'),
   };
   if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));
@@ -339,5 +407,8 @@ function arm() {
 }
 chrome.runtime.onInstalled.addListener(arm);
 chrome.runtime.onStartup.addListener(arm);
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === ALARM) void syncWords().catch(() => {}); });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === ALARM) void syncWords().catch(() => {});
+  if (a.name === INTENSITY_ALARM) void intensityEnded().catch(() => {});
+});
 void ready.then(registerSites).catch(() => {});

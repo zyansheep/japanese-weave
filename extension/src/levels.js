@@ -394,21 +394,50 @@ export function seededRandom(seed) {
 }
 const normal = (random) => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 
-// A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates or a
-// new dial never cost a model call. budgetPer100: expected peeks per 100 words (0: the dial is off, capSwaps). Learning
-// words go by learning value, a predicted peek chance near TARGET_P, judged on k drawn from N(k, sd) so uncertain words
-// still get shown. One active word not shown today goes first, outside the budget, so new words gather evidence. Then
-// learning words while their peek chances fit the passage's budget; the first that doesn't fit gets in with probability
-// remaining / p, so short passages still get learning words on average. Known words fill the rest. Seeded by the
-// passage and day, so a passage repaints the same way.
-export function selectSwaps(level, swaps, text, sharedWords, { density = 0, budgetPer100 = 0, seed = 0, shownToday = [] } = {}) {
-  if (!(budgetPer100 > 0)) return capSwaps(level, swaps, text, sharedWords, density);
-  const max = swapLimit(level, text, density);
+// Intensity (the reader's heavier/lighter shortcut, ../scripts/intensity.py): times the usual amount, per level -2..2.
+export const INTENSITY_FACTORS = { '-2': 0.5, '-1': 0.7, 0: 1, 1: 1.4, 2: 1.8 };
+export const intensityFactor = (level) => INTENSITY_FACTORS[level] ?? 1;
+// Random thinning, so the effect of the amount of Japanese on reading can be measured (knowledge.py calibrate): half the
+// passages are left alone, the other half keep a random share of their swaps between JITTER_MIN and 1. Seeded by the
+// passage and day like everything else here, so a passage repaints the same way.
+export const JITTER_SHARE = 0.5;
+export const JITTER_MIN = 0.5;
+export function jitterFor(seed) {
+  const random = seededRandom((seed ^ 0x9e3779b9) >>> 0);
+  return random() < JITTER_SHARE ? 1 : Math.round((JITTER_MIN + (1 - JITTER_MIN) * random()) * 100) / 100;
+}
+// n swaps, rounded up or down at random in proportion (2.4: 3 four times in ten), so short passages keep their average.
+const roundRandom = (n, random) => Math.floor(n) + (random() < n - Math.floor(n) ? 1 : 0);
+
+// A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates, a
+// new dial or a lighter intensity never cost a model call. Returns { swaps, plan }: plan says how the amount was chosen
+// ({ level, intensity, jitter, limit, candidates }), logged with the passage's shown record.
+// The ceiling is the level's per-sentence rule or the density target, raised by a heavier intensity; a lighter one and
+// the passage's random thinning (jitter, the share kept: 1 for half the passages, see jitterFor) keep that share of
+// what fits.
+// budgetPer100: expected peeks per 100 words (0: the dial is off). Without it, learning words (active/shaky) go first,
+// then known ones. With it, learning words go by learning value, a predicted peek chance near TARGET_P, judged on k
+// drawn from N(k, sd) so uncertain words still get shown. One active word not shown today goes first, outside the
+// budget, so new words gather evidence. Then learning words while their peek chances fit the passage's budget; the
+// first that doesn't fit gets in with probability remaining / p, so short passages still get learning words on average.
+// Known words fill the rest. Seeded by the passage and day, so a passage repaints the same way.
+export function planSwaps(level, swaps, text, sharedWords, { density = 0, budgetPer100 = 0, seed = 0, shownToday = [],
+  intensity = 0, jitter = 1 } = {}) {
+  const scale = intensityFactor(intensity);
+  const unique = oncePerWord(swaps);
+  const random = seededRandom(seed);
+  let max = Math.min(unique.length, Math.round(swapLimit(level, text, density) * Math.max(1, scale)));
+  const thin = Math.min(1, scale) * jitter;
+  if (thin < 1) max = roundRandom(max * thin, random);
+  const plan = { level: intensity, intensity: scale, jitter, limit: max, candidates: unique.length };
   const words = new Map((sharedWords || []).map((w) => [w.ja, w]));
   const learning = (s) => words.get(s.word)?.status && words.get(s.word).status !== 'known';
+  if (!(budgetPer100 > 0)) {
+    const rank = (s) => (learning(s) ? 0 : 1);
+    const keep = new Set([...unique].sort((a, b) => rank(a) - rank(b)).slice(0, max));
+    return { swaps: unique.filter((s) => keep.has(s)), plan };
+  }
   const shown = new Set(shownToday);
-  const random = seededRandom(seed);
-  const unique = oncePerWord(swaps);
   const ranked = unique.filter(learning).map((s) => {
     const w = words.get(s.word);
     const k = Number.isFinite(w.k) ? w.k : PRIOR_K;
@@ -419,7 +448,7 @@ export function selectSwaps(level, swaps, text, sharedWords, { density = 0, budg
   const keep = new Set();
   const fresh = ranked.find((c) => c.fresh);
   if (fresh && max > 0) keep.add(fresh.s);
-  let remaining = (budgetPer100 * wordCount(text)) / 100;
+  let remaining = (budgetPer100 * scale * jitter * wordCount(text)) / 100;
   for (const c of ranked) {
     if (keep.size >= max) break;
     if (keep.has(c.s)) continue;
@@ -431,7 +460,12 @@ export function selectSwaps(level, swaps, text, sharedWords, { density = 0, budg
     if (keep.size >= max) break;
     if (!learning(s)) keep.add(s);
   }
-  return unique.filter((s) => keep.has(s));
+  return { swaps: unique.filter((s) => keep.has(s)), plan };
+}
+
+// planSwaps' swaps alone, at the usual intensity and without thinning.
+export function selectSwaps(level, swaps, text, sharedWords, options = {}) {
+  return planSwaps(level, swaps, text, sharedWords, { ...options, intensity: 0, jitter: 1 }).swaps;
 }
 
 export function wordCount(text) {

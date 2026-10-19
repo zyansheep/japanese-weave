@@ -13,6 +13,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
   {"type": "stats", "since": ms}        -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
                                             "readingMs", "last"}: what the log holds, on the collector when one is set
   {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
+  {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
+                                        -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither: read)
 
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
 evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
@@ -30,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fwlib  # noqa: E402
 import feedback  # noqa: E402
 import hub  # noqa: E402
+import intensity  # noqa: E402
 import knowledge  # noqa: E402
 
 MAX_EVENTS = 500
@@ -99,6 +102,22 @@ def handle(message):
         if not feedback.default_path().exists():
             return {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'readingMs': [0, 0], 'last': None, 'since': since}
         return dict(feedback.stats(since), ok=True)
+    if kind == 'intensity':  # the extension's shortcut or popup: {surface, set: value} or {surface, step}
+        surface = message.get('surface')
+        if surface not in intensity.SURFACES:
+            return {'ok': False, 'error': 'surface is chat or browser'}
+        if 'set' in message:
+            value = message['set']
+            if not intensity.valid(value):
+                return {'ok': False, 'error': 'set: {level -2..2, until, at, source}'}
+            hub.submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}, wait=False)
+            return {'ok': True, 'intensity': intensity.current({intensity.pref(surface): value}, surface)}
+        if 'step' in message:
+            if message['step'] not in (-1, 0, 1) or isinstance(message['step'], bool):
+                return {'ok': False, 'error': 'step is 1, -1 or 0'}
+            value, error = hub.change_intensity(surface, message['step'], str(message.get('source') or 'extension')[:20])
+            return {'ok': True, 'intensity': value, **({'warning': error} if error else {})}
+        return {'ok': True, 'intensity': hub.live_intensity(surface, timeout=2)}
     if kind == 'prefs':
         challenge = message.get('challenge')
         if not knowledge.valid_challenge(challenge):

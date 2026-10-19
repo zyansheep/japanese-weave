@@ -38,6 +38,10 @@
   fw.py glosses abbr|footer                          T3 Code chats: gloss each Japanese word in an <abbr> shown
                                                      on hover or click (needs a T3 build that renders them), or
                                                      in a footer line (default)
+  fw.py intensity [chat|browser] [up|down|normal]    Japanese heavier or lighter for 3 hours, in chat replies
+                                                     (default) or on web pages; no step: show the level
+  fw.py calibrate                                    is the default amount right? reading speed and opens by how
+                                                     much Japanese a passage had, and your heavier/lighter presses
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
                                                      (with a collector: send them and anything queued, and
                                                      refresh the cached state)
@@ -67,6 +71,7 @@ import export  # noqa: E402
 import anki  # noqa: E402
 import feedback  # noqa: E402
 import hub  # noqa: E402
+import intensity  # noqa: E402
 import knowledge  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
@@ -766,6 +771,30 @@ def challenge_cmd(args):
     print(f'Adaptive difficulty: {"off" if not value else f"aiming at {value} peeks per 100 words shown"}.')
 
 
+def intensity_cmd(args):
+    surfaces = [w for w in args.words if w in intensity.SURFACES]
+    steps = [w for w in args.words if w in ('up', 'down', 'normal')]
+    if len(surfaces) + len(steps) != len(args.words) or len(surfaces) > 1 or len(steps) > 1:
+        sys.exit('Usage: fw.py intensity [chat|browser] [up|down|normal]')
+    surface, step = (surfaces or ['chat'])[0], (steps or [None])[0]
+    names = {'chat': 'Chat replies', 'browser': 'Web pages'}
+    if step is None:
+        print(f'{names[surface]}: {intensity.describe(hub.live_intensity(surface, timeout=hub.TIMEOUT))}.')
+        return
+    value, error = hub.change_intensity(surface, {'up': 1, 'down': -1, 'normal': 0}[step], 'command')
+    if error:
+        print(f'Note: {error}.')
+    print(f'{names[surface]}: {intensity.describe(value)}.'
+          + (' The browser picks this up at its next sync (or use the shortcut there).' if surface == 'browser' else ''))
+
+
+def calibrate_cmd(args):
+    report = (knowledge.load() or {}).get('calibration')
+    if not report:
+        sys.exit('No calibration yet: it comes with the next knowledge refresh (every 10 minutes on the collector).')
+    print(knowledge.calibration_text(report))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Japanese Weave', formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog=__doc__)
@@ -813,6 +842,10 @@ def main(argv=None):
     p = sub.add_parser('challenge')
     p.add_argument('value', help='off, ' + ', '.join(str(c) for c in knowledge.CHALLENGES[1:]))
     p.set_defaults(run=challenge_cmd)
+    p = sub.add_parser('intensity')
+    p.add_argument('words', nargs='*', metavar='chat|browser up|down|normal')
+    p.set_defaults(run=intensity_cmd)
+    sub.add_parser('calibrate').set_defaults(run=calibrate_cmd)
     p = sub.add_parser('collector')
     p.add_argument('action', choices=['run', 'install'])
     p.add_argument('--listen', required=True, metavar='HOST:PORT')

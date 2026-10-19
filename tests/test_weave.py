@@ -28,6 +28,7 @@ import anki  # noqa: E402
 import feedback  # noqa: E402
 import collector  # noqa: E402
 import kana  # noqa: E402
+import intensity  # noqa: E402
 import knowledge  # noqa: E402
 
 
@@ -585,6 +586,23 @@ class FeedbackStore(Home):
         self.assertEqual(len(rows), 3)
         self.assertEqual((contexts[('browser', 'v1', 'c1')]['words'], bool(contexts[('browser', 'v1', 'c1')]['shown_at'])), (48, True))
 
+    def test_shown_records_keep_their_plan_and_contexts_their_time_on_screen(self):
+        shown = dict(self.item(), kind='shown', words=48, plan={'level': -1, 'intensity': 0.7, 'jitter': 0.62,
+                                                                  'limit': 3, 'candidates': 5})
+        del shown['word'], shown['position'], shown['dwellMs']
+        bad = [dict(shown, context='c2', plan={'level': 3, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1}),
+               dict(shown, context='c3', plan={'level': 0, 'intensity': 1, 'jitter': 1.5, 'limit': 1, 'candidates': 1}),
+               dict(shown, context='c4', plan={'level': 0, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1,
+                                               'text': 'page text'})]
+        self.assertEqual(feedback.record([shown] + bad, 'browser'), {'stored': 1, 'duplicates': 0, 'rejected': 3})
+        stays = [dict(self.item(), kind='visible', y=0, height=40, ms=ms, wall=ms + 500, away=500, media=0, idle=0,
+                      uid=f'v1-{ms}') for ms in (1500, 2500)]
+        feedback.record(stays, 'browser')
+        _, contexts = feedback.load()
+        c = contexts[('browser', 'v1', 'c1')]
+        self.assertEqual((c['plan']['jitter'], c['active']), (0.62, 4000))
+        self.assertEqual(c['seen_until'], stays[0]['at'])
+
     def test_clicks_and_selections_are_kept_by_position_and_counted(self):
         where = {'at': int(time.time() * 1000) - 1000, 'view': 'v1', 'context': 'c2', 'box': [0, 0, 500, 40],
                  'annotations': [['問題', 4, 0], ['今', 90, 0]]}
@@ -655,7 +673,7 @@ class FeedbackStore(Home):
         stay = dict(self.item(), kind='visible', y=0, height=40, ms=1500, wall=1500, away=0, media=0, idle=0, uid='v0-1')
         self.assertEqual(feedback.record([stay], 'browser', path)['duplicates'], 1)  # the uid index came along
         con = sqlite3.connect(str(path))
-        self.assertEqual(con.execute('PRAGMA user_version').fetchone()[0], 4)
+        self.assertEqual(con.execute('PRAGMA user_version').fetchone()[0], feedback.SCHEMA_VERSION)
         self.assertEqual(con.execute("SELECT count(*) FROM sqlite_master WHERE name = 'reading_3'").fetchone()[0], 0)
         con.close()
 
@@ -856,6 +874,36 @@ class Hub(Home):
         with self.assertRaises(fwlib.RemoteState):
             with fwlib.editing():
                 pass
+
+    def test_intensity_presses_go_to_the_collector_and_the_hook_asks_it(self):
+        self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 1)
+        value, error = hub.change_intensity('chat', 1, 't3')
+        self.assertEqual((value['level'], error), (2, None))
+        self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 2)  # at most 2
+        self.assertEqual(intensity.current(self.served()['prefs'], 'chat')['level'], 2)
+        self.assertEqual(hub.live_intensity('chat')['level'], 2)  # asked of the collector, not the cache
+        self.assertEqual(hub.live_intensity('browser'), dict(intensity.NORMAL))
+        reply = feedback.request(self.url + '/v1/intensity', {'surface': 'chat', 'step': 2, 'source': 't3'})
+        self.assertEqual(reply['ok'], False)
+        with mock.patch('sys.stdout', new=io.StringIO()) as out:
+            fw.main(['intensity', 'normal'])
+            fw.main(['intensity', 'browser', 'down'])
+        self.assertIn('Chat replies: normal.', out.getvalue())
+        self.assertIn('Web pages: lighter (-1) until', out.getvalue())
+        changes = feedback.intensity_changes(self.server_home / 'interactions.sqlite')
+        self.assertEqual([(c['surface'], c['level'], c['source']) for c in changes],
+                         [('chat', 1, 't3'), ('chat', 2, 't3'), ('chat', 2, 't3'), ('chat', 0, 'command'),
+                          ('browser', -1, 'command')])
+        brief = []
+        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+            with mock.patch('sys.stdout', new=io.StringIO()):
+                weave.main([])
+        self.assertEqual(brief, [0])
+        hub.change_intensity('chat', -1, 't3')
+        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+            with mock.patch('sys.stdout', new=io.StringIO()):
+                weave.main([])
+        self.assertEqual(brief, [0, -1])
 
     def test_changes_wait_here_while_the_collector_is_down(self):
         fwlib.load_state()
@@ -1305,6 +1353,52 @@ def simulated_reader(seed=1, count=600):
     return truth, rows, contexts, at + knowledge.SETTLE_MS + 1
 
 
+class Intensity(Home):
+    NOW = 1_800_000_000_000
+
+    def test_steps_clamp_expire_and_go_back_to_normal(self):
+        prefs = {}
+        for _ in range(3):
+            prefs['intensity_chat'] = intensity.step(prefs, 'chat', 1, 't3', self.NOW)
+        self.assertEqual(intensity.current(prefs, 'chat', self.NOW), {'level': 2, 'until': self.NOW + intensity.DURATION_MS,
+                                                                      'at': self.NOW})
+        self.assertEqual(intensity.current(prefs, 'browser', self.NOW)['level'], 0)
+        self.assertEqual(intensity.current(prefs, 'chat', self.NOW + intensity.DURATION_MS)['level'], 0)  # expired
+        later = self.NOW + intensity.DURATION_MS + 1
+        self.assertEqual(intensity.step(prefs, 'chat', -1, 't3', later)['level'], -1)  # from normal again
+        self.assertEqual(intensity.step(prefs, 'chat', 0, 't3', self.NOW), {'level': 0, 'until': 0, 'at': self.NOW,
+                                                                             'source': 't3'})
+        self.assertFalse(intensity.valid({'level': 3, 'until': 0, 'at': 0}))
+        self.assertFalse(intensity.valid({'level': 1, 'until': 0, 'at': 0, 'note': 'x'}))
+        self.assertEqual(intensity.describe({'level': 0}), 'normal')
+
+    def test_the_chat_brief_follows_the_level(self):
+        self.assertEqual(weave.amounts(3), (25, 35, 4, 2))
+        self.assertEqual(weave.amounts(3, -1), (18, 24, 4, 1))
+        self.assertEqual(weave.amounts(3, 2), (45, 63, 4, 4))
+        self.assertEqual(weave.amounts(4, 2), (55, 65, 4, 6))  # capped
+        self.assertEqual(weave.amounts(1, -2), (3, 8, 2, 0))
+        state = {'stage': 3, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
+        plain, light = weave.brief(state, {}), weave.brief(state, {}, level=-1)
+        self.assertIn('about 25%', plain)
+        self.assertIn('one sentence in five', plain)
+        self.assertIn('(Stage 3, turned lighter for now by the user)', light)
+        self.assertIn('about 18%', light)
+        self.assertIn('one sentence in ten', light)
+
+    def test_the_native_host_saves_and_reads_the_browser_level(self):
+        fwlib.save_state(fwlib.new_state(known_top=40))
+        value = {'level': 1, 'until': int(time.time() * 1000) + 60_000, 'at': int(time.time() * 1000), 'source': 'shortcut'}
+        reply = fw_host.handle({'type': 'intensity', 'surface': 'browser', 'set': value})
+        self.assertEqual(reply['intensity']['level'], 1)
+        self.assertEqual(fwlib.load_state()['prefs']['intensity_browser'], value)
+        self.assertEqual(fw_host.handle({'type': 'intensity', 'surface': 'browser'})['intensity']['level'], 1)
+        self.assertEqual(fw_host.handle({'type': 'intensity', 'surface': 'browser', 'step': -1})['intensity']['level'], 0)
+        self.assertFalse(fw_host.handle({'type': 'intensity', 'surface': 'page', 'step': 1})['ok'])
+        self.assertFalse(fw_host.handle({'type': 'intensity', 'surface': 'browser', 'set': dict(value, level=5)})['ok'])
+        self.assertEqual(fw_host.handle({'type': 'state'})['prefs']['intensity_browser']['level'], 0)
+
+
 class Knowledge(Home):
     NOW = 1_800_000_000_000
 
@@ -1408,6 +1502,77 @@ class Knowledge(Home):
         self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'known')
         self.assertLess(know['words'][target]['k'] - know['words'][target]['mu'], 3)
         self.assertGreater(know['words'][target]['k'], know['words'][others[0]]['k'])
+
+    def showing(self, contexts, rows, view, notes, at, active, words=60, opened=(), jitter=None, level=0):
+        contexts[('browser', view, 'c')] = {'surface': 'browser', 'view': view, 'context': 'c', 'annotations': notes,
+                                           'words': words, 'shown_at': at, 'height': 80, 'active': active,
+                                           'seen_until': at,
+                                           'plan': None if jitter is None else {'level': level, 'jitter': jitter}}
+        for i in opened:
+            rows.append({'id': len(rows) + 1, 'at': at + 1000 + i, 'surface': 'browser', 'kind': 'peek',
+                         'word': notes[i][0], 'dwell_ms': 1500, 'view': view, 'context': 'c', 'position': i, 'uid': None})
+
+    def test_read_chance_grows_with_time_on_screen_and_falls_further_down(self):
+        c = {'words': 60, 'height': 80, 'active': 0}
+        self.assertEqual(knowledge.read_chance(c, 0, 20), 0.0)  # never on screen while a reader could read
+        c['active'] = 9000
+        top, bottom = knowledge.read_chance(c, 0, 20), knowledge.read_chance(c, 60, 20)
+        self.assertGreater(top, bottom)
+        self.assertLessEqual(top, knowledge.READ_MAX)
+        self.assertGreater(knowledge.read_chance(dict(c, active=60_000), 60, 20), bottom)
+
+    def test_every_shown_passage_counts_by_the_chance_it_was_read(self):
+        rows, contexts = [], {}
+        for e in range(20):  # 今 shown and never opened, on screen long enough to read
+            self.showing(contexts, rows, f'r{e}', [['今', 0, 0]], self.NOW - 7_200_000 + e * 60_000, active=30_000)
+        for e in range(20):  # 中 shown just as often but never on screen while a reader could read
+            self.showing(contexts, rows, f'u{e}', [['中', 0, 0]], self.NOW - 7_200_000 + e * 60_000, active=0)
+        words, _ = knowledge.replay(rows, contexts, {'今', '中'}, {}, [], self.NOW)
+        self.assertGreater(words['今'].k, 2.0)  # from 1.0: read and not opened
+        self.assertNotIn('中', words)  # no chance it was read: no evidence
+        self.showing(contexts, rows, 'p', [['今', 0, 0]], self.NOW - 900_000, active=30_000, opened=[0])
+        before, _ = knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW - 400_000)  # not settled yet
+        after, _ = knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW)
+        self.assertEqual(before['今'].opened, 0)
+        self.assertEqual(after['今'].opened, 1)
+        self.assertLess(after['今'].k, before['今'].k)
+        losses = []
+        knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW, losses=losses)
+        self.assertEqual((len(losses), sum(o for o, _ in losses)), (21, 1))
+        tuned = knowledge.tune(rows, contexts, {'今'}, {}, [], self.NOW)
+        self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned']), (knowledge.PACE_MS, knowledge.READ_MAX, False))
+        self.assertEqual(len(tuned['grid']), len(knowledge.PACES) * len(knowledge.READ_MAXES))
+
+    def test_calibrate_compares_thinned_passages_and_counts_presses(self):
+        import random
+        rng = random.Random(3)
+        rows, contexts = [], {}
+        import math
+        for e in range(80):  # a reader who slows down 2% per point of Japanese
+            jitter = 1.0 if e % 2 else 0.5
+            count = 6 if jitter == 1 else 3
+            notes = [[f'w{i}', 0, 10 * i] for i in range(count)]
+            ms_per_word = 300 * math.exp(2 * count / 60) * rng.uniform(0.98, 1.02)
+            self.showing(contexts, rows, f'v{e}', notes, self.NOW - 3_600_000, active=ms_per_word * 60, jitter=jitter,
+                         opened=[0] if e % 10 == 0 else [])
+        hour = 3_600_000
+        changes = [{'at': self.NOW - 5 * hour, 'surface': 'browser', 'level': -1, 'until': self.NOW - 2 * hour,
+                    'source': 'shortcut', 'machine': 'm'},
+                   {'at': self.NOW - 4 * hour, 'surface': 'browser', 'level': -2, 'until': self.NOW - hour,
+                    'source': 'shortcut', 'machine': 'm'},
+                   {'at': self.NOW - 3 * hour, 'surface': 'chat', 'level': 1, 'until': self.NOW, 'source': 't3',
+                    'machine': 'm'}]
+        report = knowledge.calibrate(rows, contexts, changes, self.NOW)
+        self.assertEqual(report['passages'], 80)
+        self.assertEqual(report['jitter']['thinned']['n'], 40)
+        self.assertAlmostEqual(report['jitter']['effect'], 2.0, delta=0.4)
+        self.assertEqual(sum(b['n'] for b in report['bins']), 80)
+        self.assertEqual(report['presses']['browser'], {'lighter': 2, 'heavier': 0, 'hoursAt': {'-2': 3.0, '-1': 1.0},
+                                                        'verdict': None})
+        self.assertEqual(report['presses']['chat']['hoursAt'], {'1': 3.0})
+        text = knowledge.calibration_text(report)
+        self.assertIn('Randomly thinned passages: 40', text)
+        self.assertIn('Web pages: 2 lighter and 0 heavier presses', text)
 
     def test_commands_set_knowledge_and_immunity(self):
         rows, contexts = [], {}

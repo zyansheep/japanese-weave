@@ -78,6 +78,7 @@ way round.
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
 | `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
+| `/japanese-weave:intensity [chat\|browser] up\|down\|normal` | More or less Japanese for the next 3 hours |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
@@ -177,6 +178,16 @@ glosses you'd open per 100 words shown, and each page gets the learning words cl
 opened, as many as fit that budget, with known words filling the rest. A daily controller nudges the budget until
 your real rate matches the dial. Chat uses the same estimates to order its learning words. Strong evidence also moves
 words between learning and known, a few a day. It's off (0) by default.
+
+Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
+screen while you were reading.
+
+**For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours,
+in the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut
+(for chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each
+press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
+default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
+down or up.
 
 `fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
 one word's estimate and every observation behind it. The design, with its sources:

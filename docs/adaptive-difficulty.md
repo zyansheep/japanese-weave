@@ -39,7 +39,7 @@ Commands (`known`, `learn`) are kept with their time in `commands.jsonl` so a re
 
 ## The model
 
-For a glossed word w in an engaged reading episode on surface s:
+For a glossed word w shown on surface s (a browser passage, or a T3 message in which something was opened):
 
     P(peek) = sigmoid(s_offset - k_w(t))
 
@@ -54,20 +54,40 @@ For a glossed word w in an engaged reading episode on surface s:
 
 ### Episodes and observations
 
-An episode is the interactions in one (surface, view, context) with no gap over 10 minutes. It is engaged when it
-has a peek, pin or flip; only engaged episodes are scored, and only once their last interaction is 10 minutes old.
+Browser: every passage shown (its "shown" record, one per passage per page view) is scored, opened or not, once 10
+minutes have passed since the last thing that happened in it. T3: an episode is the interactions in one
+(surface, view, context) with no gap over 10 minutes; T3 logs a message only when something in it was opened, so only
+such engaged episodes exist, scored once their last interaction is 10 minutes old.
 
 Every listed word among the context's annotations becomes one observation per episode:
 
 - y = 1 if opened (a pin or flip, or a peek open at least 600 ms); y = 0.6 for a shorter peek (a soft label: a
   glance to confirm). T3 peeks under 300 ms are noise (the mouse passing over a word) and are dropped.
-- y = 0 if not opened. Weight 1 on the lines down to the lowest opened annotation; below it the weight halves per
-  line (line height estimated from the annotations' vertical spacing), since that part may not have been read.
+- y = 0 if not opened, weighted by the chance it was read. Weight 1 on the lines down to the lowest opened
+  annotation; below it the weight halves per line (line height estimated from the annotations' vertical spacing),
+  since that part may not have been read. In the browser the weight is at least the read chance from the passage's
+  time on screen: r = top * (1 - exp(-active / (pace * words * share))), where active is the ms the passage was on
+  screen while a reader could have been reading it (its visible stays: tab focused, no media playing, input in the
+  last 30 s), words its word count, and share how far down the word sits (at least 0.1). pace starts at 300 ms per
+  word and top at 0.7; a passage never on screen like that gives no evidence at all.
 - Words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in English.
 
-### Correcting for "only engaged episodes are seen"
+### Browser: the chance it was read
 
-Episodes are logged only because something was opened, so a naive update is biased toward "unknown" (a one-word
+With every browser passage in the log, there is no selection to correct for. The update is the gradient of the log
+likelihood with P(open) = r * p (an open means it was read):
+
+    opened:      k_w += eta_w * (p_w - y)
+    not opened:  k_w += eta_w * r * p_w * (1 - p_w) / (1 - r * p_w)          n_w += r
+
+The reading model (pace, top) can't be checked on its own, but it changes how well opens are predicted. Once a day
+the replay is scored on a grid (pace 150-650 ms, top 0.5-0.9) by the mean log loss of P(open) for every listed word
+of every passage, each predicted before its own update with the read chance from time on screen alone; the best pair
+replaces the defaults once there are 60 browser opens to judge by (knowledge.json "reading").
+
+### Correcting for "only engaged episodes are seen" (T3)
+
+T3 episodes are logged only because something was opened, so a naive update is biased toward "unknown" (a one-word
 paragraph exists in the log only when that word was peeked). The likelihood is conditioned on at least one peek.
 With Q the predicted chance of no peek at all in the episode, Q = product of (1 - p_j):
 
@@ -149,6 +169,24 @@ word; nothing at all if the log shrank since the last refresh. Every move is rec
   the network.
 - The native host's state reply carries, per word, k and its uncertainty, and the challenge and budget. They are
   not part of the word-state version, so the extension's cache isn't cleared when they change.
+
+## Intensity and calibration
+
+The reader can turn the Japanese heavier or lighter for a while, separately in chat and on web pages
+(scripts/intensity.py): levels -2..2, times 0.5, 0.7, 1, 1.4 or 1.8 the usual amount, for 3 hours after the last
+change. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma (lighter) in the browser and in T3 Code, the popup's
+Less/More buttons, or `fw.py intensity [chat|browser] up|down|normal`. In chat the hook scales the target, the cap and
+the share of fully Japanese sentences. On web pages a lighter level keeps that share of each passage's cached
+candidates (no model call); a heavier one raises the ceiling and asks the model for more (its own cache).
+
+On the web, half the passages are also thinned at random to between 50% and 100% of what fits (levels.js
+jitterFor), and every passage's shown record carries its plan: the level, the factors, the swaps allowed and the
+candidates offered. Because the thinning is random, comparing thinned and untouched passages measures what the amount
+of Japanese alone does to reading time and opens. Every press is a `set` op, so the ops log says how often and when
+the default felt wrong. `fw.py calibrate` reports both (knowledge.json "calibration"): screen time per word and opens
+per 100 words by the share of Japanese in a passage, the thinned-versus-untouched effect, and per surface the
+presses and hours spent away from normal. Many lighter presses mean the default is too heavy, and the slowdown curve
+says how much each extra point of Japanese costs.
 
 ## Inspecting
 

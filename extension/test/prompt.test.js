@@ -61,6 +61,14 @@ describe('prompt', () => {
     expect(buildSystemPrompt(2, words, [], 0, 3)).toBe(stable + learning);
     expect(buildSystemParts(2, words, ['大きい'], 0, 3)[0]).toBe(stable);
   });
+  test('a heavier intensity asks for more sentences and swaps; normal is unchanged', () => {
+    const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
+    expect(buildSystemPrompt(2, words, [], 0, 3, 0)).toBe(buildSystemPrompt(2, words, [], 0, 3));
+    expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('about one sentence in three');
+    expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('two or three word or phrase swaps each');
+    expect(buildSystemPrompt(2, words, [], 0, 3, 2)).toContain('about two sentences in five');
+    expect(buildSystemPrompt(1, words, [], 0, 1, 2)).toContain('one or two word or phrase swaps in every sentence');
+  });
   test('the stage sets how many sentences go fully into Japanese', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
     expect(buildSystemPrompt(2, words, [], 0, 3)).toContain('about one sentence in five');

@@ -48,6 +48,13 @@ async function refresh() {
   const amount = s.density ? `${s.density}% of words` : effective <= 1 ? '~1 word per 1–2 sentences' : '1–2 words per sentence';
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
   $('density').value = String(s.density || 0);
+  const level = c.intensity?.level || 0;
+  $('intensityInfo').textContent = level
+    ? `${INTENSITY_NAMES[level]} until ${new Date(c.intensity.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : 'normal';
+  $('intensityInfo').title = 'Alt+Shift+. for more, Alt+Shift+, for less; back to normal 3 hours after the last change';
+  $('lighter').disabled = level <= -2;
+  $('heavier').disabled = level >= 2;
   $('challenge').value = String(c.challenge || 0);
   $('challenge').disabled = !status.words; // the dial lives in the native host's word state
   const rate = status.rate;
@@ -98,6 +105,13 @@ async function showStats() {
   $('collectedInfo').textContent = res?.ok ? more : (res?.queued?.length ? `${res.queued.length} waiting to send` : '');
 }
 
+const INTENSITY_NAMES = { '-2': 'much lighter (−2)', '-1': 'lighter (−1)', 1: 'heavier (+1)', 2: 'much heavier (+2)' };
+async function stepIntensity(step) {
+  const reply = await send({ type: 'intensity', step });
+  if (reply?.error) throw new Error(reply.error);
+  await refresh();
+}
+
 async function save(msg) {
   await send({ type: 'save', ...msg });
   await refresh();
@@ -142,6 +156,8 @@ $('enabled').addEventListener('change', (e) => run(() => save({ settings: { enab
 $('newSitesEnabled').addEventListener('change', (e) => run(() => save({ settings: { newSitesEnabled: e.target.value === 'true' } })));
 $('levelOverride').addEventListener('change', (e) => run(() => save({ settings: { levelOverride: Number(e.target.value) || 0 } })));
 $('model').addEventListener('change', (e) => run(() => save({ settings: { model: e.target.value } })));
+$('lighter').addEventListener('click', () => run(() => stepIntensity(-1)));
+$('heavier').addEventListener('click', () => run(() => stepIntensity(1)));
 $('density').addEventListener('change', (e) => run(() => save({ settings: { density: Number(e.target.value) || 0 } })));
 $('challenge').addEventListener('change', (e) => run(async () => {
   const res = await send({ type: 'setChallenge', challenge: Number(e.target.value) });
