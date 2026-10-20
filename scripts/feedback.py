@@ -449,19 +449,25 @@ def load(path=None):
 
 def intensity_changes(path=None):
     """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface, level, until,
-    source}, from the ops applied here."""
+    source}, from the ops applied here; and every chat turned off or back on (threads.py) as {at, machine, surface:
+    "thread", session, off, source}."""
     con = connect(path)
     try:
-        ops = con.execute("SELECT at, machine, body FROM ops WHERE kind = 'set' AND body LIKE '%intensity_%' "
-                          'ORDER BY at').fetchall()
+        ops = con.execute("SELECT at, machine, body FROM ops WHERE (kind = 'set' AND body LIKE '%intensity_%') "
+                          "OR kind = 'thread' ORDER BY at").fetchall()
     finally:
         con.close()
     out = []
     for at, machine, body in ops:
         try:
-            prefs = json.loads(body).get('prefs') or {}
+            op = json.loads(body)
         except ValueError:
             continue
+        if op.get('kind') == 'thread':
+            out.append({'at': at, 'machine': machine, 'surface': 'thread', 'session': op.get('session'),
+                        'off': op.get('off') is True, 'source': op.get('source') or ''})
+            continue
+        prefs = op.get('prefs') or {}
         for surface in ('chat', 'browser'):
             value = prefs.get(f'intensity_{surface}')
             if isinstance(value, dict) and value.get('level') in (-2, -1, 0, 1, 2):

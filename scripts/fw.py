@@ -40,6 +40,8 @@
                                                      in a footer line (default)
   fw.py intensity [chat|browser] [up|down|normal]    Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; no step: show the level
+  fw.py intensity [off|normal] here [--session ID]   no Japanese in one chat until turned back on (normal); ID:
+                                                     its session id (default $CLAUDE_CODE_SESSION_ID)
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
                                                      much Japanese a passage had, your heavier/lighter presses,
                                                      and the words you opened that aren't in the word list
@@ -74,6 +76,7 @@ import feedback  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
+import threads  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -777,10 +780,12 @@ def challenge_cmd(args):
 
 
 def intensity_cmd(args):
+    if 'here' in args.words:
+        return thread_cmd(args)
     surfaces = [w for w in args.words if w in intensity.SURFACES]
     steps = [w for w in args.words if w in ('up', 'down', 'normal')]
     if len(surfaces) + len(steps) != len(args.words) or len(surfaces) > 1 or len(steps) > 1:
-        sys.exit('Usage: fw.py intensity [chat|browser] [up|down|normal]')
+        sys.exit('Usage: fw.py intensity [chat|browser] [up|down|normal], or one chat: fw.py intensity off|normal here')
     surface, step = (surfaces or ['chat'])[0], (steps or [None])[0]
     names = {'chat': 'Chat replies', 'browser': 'Web pages'}
     if step is None:
@@ -791,6 +796,24 @@ def intensity_cmd(args):
         print(f'Note: {error}.')
     print(f'{names[surface]}: {intensity.describe(value)}.'
           + (' The browser picks this up at its next sync (or use the shortcut there).' if surface == 'browser' else ''))
+
+
+def thread_cmd(args):
+    """intensity off|normal here: Japanese off (or back on) in one chat, until turned back on (threads.py)."""
+    steps = [w for w in args.words if w in ('off', 'normal', 'on')]
+    if len(steps) > 1 or any(w not in ('here', 'chat', 'off', 'normal', 'on') for w in args.words):
+        sys.exit('Usage: fw.py intensity [off|normal] here [--session ID]')
+    session = args.session or os.environ.get('CLAUDE_CODE_SESSION_ID')
+    if not threads.valid_session(session):
+        sys.exit('Which chat? Pass --session ID (its Claude Code session id), or say "no japanese here" in the chat.')
+    chat, thread = hub.live_chat(session, timeout=hub.TIMEOUT)
+    if steps and (steps[0] == 'off') != threads.is_off(thread):  # already so (the hook saw the command): nothing to log
+        thread, error = hub.change_thread(session, steps[0] == 'off', 'command')
+        if error:
+            print(f'Note: {error}.')
+    print('This chat: no Japanese until you turn it back on (/japanese-weave:intensity normal here, or say "japanese '
+          'back on").' if threads.is_off(thread) else
+          f'This chat: Japanese on, like other chats (chat replies: {intensity.describe(chat)}).')
 
 
 def calibrate_cmd(args):
@@ -851,7 +874,8 @@ def main(argv=None):
     p.add_argument('value', help='off, ' + ', '.join(str(c) for c in knowledge.CHALLENGES[1:]))
     p.set_defaults(run=challenge_cmd)
     p = sub.add_parser('intensity')
-    p.add_argument('words', nargs='*', metavar='chat|browser up|down|normal')
+    p.add_argument('words', nargs='*', metavar='chat|browser up|down|normal, or off|normal here')
+    p.add_argument('--session', help='the chat for "here": its Claude Code session id')
     p.set_defaults(run=intensity_cmd)
     sub.add_parser('calibrate').set_defaults(run=calibrate_cmd)
     p = sub.add_parser('collector')

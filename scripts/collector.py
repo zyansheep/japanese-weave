@@ -19,6 +19,7 @@ private network such as Tailscale. Python 3.9+, standard library only.
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
   GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
+                          &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null
   POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of the heavier/lighter shortcut (T3 Code,
                           fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level, until, at}}
 
@@ -45,6 +46,7 @@ import feedback  # noqa: E402
 import fwlib  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
+import threads  # noqa: E402
 
 MAX_BODY = 1024 * 1024
 MAX_OPS_BODY = 8 * 1024 * 1024  # an Anki sync carries every review word
@@ -111,8 +113,11 @@ class Handler(BaseHTTPRequestHandler):
             surface = query.get('surface', [''])[0]
             if surface not in intensity.SURFACES:
                 return self.reply(400, {'ok': False, 'error': 'surface is chat or browser'})
-            prefs = fwlib.load_state().get('prefs') if (fwlib.home() / 'state.json').exists() else {}
-            return self.reply(200, {'ok': True, 'intensity': intensity.current(prefs, surface)})
+            state = fwlib.load_state() if (fwlib.home() / 'state.json').exists() else {}
+            body = {'ok': True, 'intensity': intensity.current(state.get('prefs'), surface)}
+            if 'session' in query:  # the hook asks for its chat's switch in the same request
+                body['thread'] = threads.entry(state, query['session'][0])
+            return self.reply(200, body)
         if url.path == '/v1/recent':
             try:
                 limit = max(1, min(500, number('limit', 20)))
