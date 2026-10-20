@@ -14,6 +14,10 @@ export const MAX_BATCH = 16;
 // price, so the extra calls cost little. Every other model: one call of up to MAX_BATCH at a time.
 export const BATCH = { 'claude-haiku-5-5': 6 };
 export const PARALLEL = { 'claude-haiku-5-5': 3 };
+// The full answer (levels.js answerLevel), which the heavier levels pick from, is about twice as long: Haiku took 24-34 s
+// a call of 6, up to 45 s, against 15-19 s and at most 27 s a call of 3, at about the same cost and coverage
+// (docs/swap-prompt.md).
+export const FULL_BATCH = { 'claude-haiku-5-5': 3 };
 // Tried once when the chosen model fails, if its provider has a key.
 export const FALLBACK_MODEL = {
   'gemini-4-argon': 'gemini-3.8-flash',

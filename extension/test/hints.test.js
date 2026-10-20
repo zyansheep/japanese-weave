@@ -29,6 +29,11 @@ describe('word hints', () => {
     expect(found('We are different, and I was wrong about it.')).toEqual(['違う:different', 'について:about']);
     expect(found('There is a computer.')).toEqual(['ある:There is']); // no katakana loanwords
   });
+  test('every spelling found, first of each whatever the case, and how many places', () => {
+    const [stop] = wordHints('Stop it. They stopped, then stop again.', words);
+    expect(stop).toMatchObject({ ja: '止める', found: 'Stop', forms: ['Stop', 'stopped'], places: 3 });
+    expect(wordHints('I have been here, but I had a dog.', words)[0]).toMatchObject({ ja: 'ある', forms: ['had'], places: 1 }); // not the helper
+  });
   test('"have" as a helper verb is no lead for ある; vague English is no lead for a known word', () => {
     expect(found('I have been there and had to go.')).toEqual([]);
     expect(found('I have never seen it, but I had a dog.')).toEqual(['ある:had']);

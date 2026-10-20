@@ -32,7 +32,8 @@ did once each passage named the listed words in it (below):
   pronoun: "As soon as we ie ni hairimashita we could smell the smoke", in kanji and kana on the page).
 - a word swap that can't stand where it is (`misplaced`): mae or ato ("before / front", "after / later") for "before" or
   "after" ("mae you run the script"), and a verb that acts on something, like tomeru "stop (something)", with nothing
-  after it to act on ("the program will tomeru with an error").
+  after it to act on ("the program will tomeru with an error"); since prompt 5 also ageru "give (away)" for "gave me",
+  and a swap that would leave a contraction's tail on the page ("I've" as watashi've).
 
 On the page a phrase or sentence is one group: each of its words is underlined and glossed on its own (a peek is logged
 for that word), a sentence's 。 shows the translation of the whole sentence, and a click anywhere flips the group back
@@ -130,7 +131,8 @@ What it was:
 What changed (`PROMPT_VERSION` 4; the cache revision includes it, so every passage is asked once more):
 
 - Every passage carries a `target`: the most swaps `planSwaps` shows in it (two a sentence at Level 2, one at Level 1,
-  the density's share when one is set, raised 1.4 or 1.8 times when heavier), and the prompt says why: the extension
+  the density's share when one is set; at first raised 1.4 or 1.8 times when heavier, see below), and the prompt says
+  why: the extension
   picks from what comes back, learning words first, so one safe swap teaches little.
 - Every passage names the listed words whose English it says (`hints.js`): `"learning": ["aru = have / exist: has"]`
   for learning words, `"listed"` for known ones. The glosses are matched with their English forms (has, became, men,
@@ -188,14 +190,110 @@ both through the lab once before relying on them.
 ## Full intensity (+3)
 
 At the top of the reader's intensity scale the page gets all the Japanese the list allows. The amount paragraph is
-replaced: passages carry no target; the model is asked for a swap for every listed word, learning or known, whose
-listed meaning the passage says, in every place it says it (each with its own `c`), and for a sentence swap for every
-sentence listed words and the grammar list can say completely, at any stage, with phrases and words where only part of
-a sentence can. "Skip a passage if a swap would make it hard to follow" is left out; the meaning rules and the
-validation are unchanged. `planSwaps` shows everything that validates, with no ceiling or thinning, sentences first so
-`applySwaps` places a sentence before the word swaps inside it, and a word again where its English comes again. Full
-has its own cache (the cache revision includes the heavier level), and the other levels' prompts are unchanged, so
-`PROMPT_VERSION` stayed 4. Not measured on live models yet: `INTENSITY=3` runs the prompt lab at full.
+replaced: passages carry no target, and the model goes through each passage sentence by sentence, writing every
+sentence listed words and the grammar list can say completely as a sentence swap (at any stage), and elsewhere swapping
+every listed word, learning or known, whose listed meaning the passage says, in every place it says it (each with its
+own `c`), pronouns included. Each passage's hints come with every spelling found and how many places
+(`"watashi = i: I (3 places)"`, in Japanese script in the prompt), as places owed a swap unless a meaning rule forbids it. "Skip a
+passage if a swap would make it hard to follow" is left out; the meaning rules and the validation are the same.
+`planSwaps` shows everything that validates, with no ceiling or thinning, sentences first so `applySwaps` places a
+sentence before the word swaps inside it, and a word again where its English comes again. Since prompt 5 the heavier
+levels pick from this answer too (below), so it is asked once for +1, +2 and full, in calls of 3 passages for Haiku
+(`FULL_BATCH` in `models.js`), and has its own cache.
+
+## Intensity levels measured (2026-10-19)
+
+The lab now measures every level at once, as the extension picks them, without the random thinning and with it
+(averaged over 200 days of seeds), and judges coverage and sense against `tools/prompt-lab/oracle.json`: for each
+passage of `web.json`, `live.json`, `eval16.json` and `heldout.json`, read by hand starting from the hints `hints.js`
+gives, the places a listed word fits in its listed sense (`use`, 4-8 a passage), swaps that are fine but not owed
+(`ok`), English a listed word matches in another sense (`not`, a swap there is wrong), and the sentences listed words
+can say whole. Haiku 5.5 at low effort, the real Stage 3 list (319 words, 22 learning), each main set twice before
+and twice after, heldout once each.
+
+What it found, before prompt 5: the heavier levels barely differed from normal, and full barely from +2. Asked for 1.4
+or 1.8 times the swaps, Haiku returned about what it returns at normal (normal itself fills about 75% of its target),
+so +1 came to 1.05-1.21 times normal and +2 to 0.97-1.42; in one run +2 showed less than normal, in another full less
+than +2. Telling the heavier levels to reach their targets with known words got +2 to 1.29-1.55 but doubled its wrong
+swaps (to 8%). Full covered 58-76% of the places a listed word fits: it skipped the second "I" of a passage, "this"
+before a noun (kono), aru in five or six of its six places in `web.json`, and most sentences it could have said whole.
+
+What changed (prompt 5):
+
+- +1 and +2 pick from the full answer, as -1 and -2 pick from normal's (`answerLevel` in `levels.js`): the ceiling
+  stays the level's per-sentence rule times 1.4 or 1.8, and the candidates are full's, at full's accuracy. The heavier
+  targets, sentence rates and wording are gone from the prompt, and stepping between +1, +2 and full never waits for
+  a model.
+- The full prompt as above (sentences first, with examples not in the test sets; every place; pronouns; aru where
+  something exists or is owned, not "had a meeting"; leave the English when unsure), and the hints' spellings and
+  counts at full.
+- Validation: a phrase that is one conjugated verb alone ("said" as itta, "There was" as atta, "is becoming") with
+  English after it is kept as a word swap of the listed form instead of dropped as dangling (not where its English
+  has a subject); an empty piece from a bar at the end is ignored; the past of suru in a phrase ("studied", benkyou
+  shita) is suru, not the kanji for "below" read shita, which it had been glossed as; ageru "give away" never stands
+  for "gave me", and no swap may leave a contraction's tail ("I've" as watashi've).
+
+The amount, without the thinning, mean of the six runs of the three main sets (range of the ratio in brackets):
+
+| Level | Factor | Before: shown a passage, Japanese share | x normal | After: shown, share | x normal |
+|---|---|---|---|---|---|
+| -2 | 0.5 | 1.32, 9.7% | 0.50 | 1.32, 9.7% | 0.50 |
+| -1 | 0.7 | 1.84, 12.7% | 0.70 | 1.84, 12.7% | 0.70 |
+| 0 | 1 | 2.64, 17.9% | 1 | 2.64, 17.9% | 1 |
+| +1 | 1.4 | 2.96, 20.9% | 1.13 (1.05-1.21) | 3.24, 23.9% | 1.25 (1.08-1.34) |
+| +2 | 1.8 | 3.18, 21.6% | 1.25 (0.97-1.42) | 3.45, 25.3% | 1.34 (1.08-1.50) |
+| full | all | 3.41, 23.2% | 1.34 (1.05-1.72) | 3.93, 28.2% | 1.55 (1.21-1.81) |
+
+With the thinning, as pages look: before 1.15, 1.61, 2.31, 2.58, 2.78 and 3.41 swaps a passage at -2..full (8.5%,
+11.3%, 15.7%, 18.4%, 19.1%, 23.2% of the words); after 1.15, 1.61, 2.31, 2.83, 3.01, 3.93 (8.5%, 11.3%, 15.7%, 21.0%,
+22.2%, 28.2%). The ratios of -2..+2 are the same as without it (every level is thinned alike); full is not thinned, so
+it is 1.77 times a thinned normal page. In the Japanese share of the words +1 and +2 come to 1.34 and 1.42 times normal,
+full 1.60. On `heldout.json` (8 passages, once): +1, +2, full 1.50, 1.36, 1.43 before, 1.43, 1.46, 1.61 after.
+
+Coverage of the oracle's places, and wrong-sense swaps among the swaps judged, pooled over the same runs:
+
+| Level | Coverage before | after | Wrong before | after |
+|---|---|---|---|---|
+| 0 | 51% | 51% | 2.7% | 2.7% |
+| +1 | 59% | 66% | 1.8% | 2.4% |
+| +2 | 64% | 70% | 2.2% | 2.4% |
+| full | 68% | 80% | 2.3% | 2.5% |
+
+Full per set: web 71% and 76% before, 79% and 83% after; live 62% and 58%, 71% and 73%; eval16 69% and 74%, 80% and
+91%; heldout 83%, 86%. Sentences the list can say whole and full rendered whole: 8 of 24 before, 10 of 24 after.
+Places full missed, over seven runs: 256 before, 166 after, of which 128 not returned and 38 dropped in validation
+(nearly all a phrase in Japanese order ending in a verb with English after it, rightly). The most missed: "I" (watashi,
+mostly a second one) 10, nitsuite "about" 9, aru 7, yomu "read" 7, omou "think" 7, chigau 6, yameru "stop" 6, iu "say"
+6, miru "see" 6, shiru or wakaru "know" 6, mada "still" 6.
+
+The wrong-sense swaps are mostly the same ones at every level, normal included: chikara for electric "power" and
+"power users", zenbu for "all for a new phone", tsumori for "your plan", chiisai for "little sister", kaeru for "went
+back outside" and "go back". Full adds a few: motto for "one more player", "hard work" as muzukashii shigoto, shimau
+for "stopped talking", tetsudau for "helps me rest", and aku (the door opens) for "opened the window". The ageru and
+contraction cases are dropped in code now; the shita gloss was wrong on every such phrase before, at every level.
+
+Calls (Haiku, per call):
+
+| Answer | Passages a call | Seconds, mean and max | $ a call | $ per 1,000 passages |
+|---|---|---|---|---|
+| normal | 6 | 19.8, 29.2 | 0.0026 | 0.45 |
+| +1 of its own (before) | 6 | 23.1, 38.0 | 0.0027 | 0.50 |
+| +2 of its own (before) | 6 | 22.5, 35.0 | 0.0027 | 0.46 |
+| full before | 6 | 23.9, 33.8 | 0.0029 | 0.51 |
+| full after, calls of 6 | 6 | 29, 45.4 | 0.0031-0.0048 | 0.52-0.89 |
+| full after, calls of 3 | 3 | 16.6, 26.9 | 0.0021 | 0.71 |
+
+The full answer is about twice as long as normal's, so in calls of 6 its longer passages came within 15 s of the 60 s
+timeout; calls of 3 cost about the same per passage and halve the wait. +1 and +2 no longer cost a call of their own:
+a reader stepping from normal to full pays for one answer instead of three.
+
+Left open: +2 cannot come near 1.8 times normal on these passages, because full itself is only about 1.55 times
+(normal already shows about half the places the list fits, so all of them is roughly twice normal); +1 and +2 now sit
+at 1.25 and 1.34, in order, and below full in every run. Short passages make the ceilings coarse (a one-sentence
+passage goes 1, 1 or 2, 2, 3, 4 from -2 to +2), but the lighter levels round at random and land on 0.50 and 0.70
+exactly, and at +1 and +2 the full answer's size, not the ceiling, is what usually limits. No deterministic fallback
+was added for the places full still misses: the second "I" was the only common case safe enough, and the prompt now
+gets most of them. Flash and Argon were not measured on prompt 5.
 
 ## Tuning it again
 
@@ -208,9 +306,14 @@ GEMINI_KEY_FILE=~/path/to/key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs
 ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs claude-haiku-5-5
 ```
 
-`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live); `INTENSITY=1`, `2` or `3`
-asks and picks as at that level (without the random thinning). At the end it prints the
-counts: candidates a passage as returned and after validation, passages with none, swaps shown and how many have a
-learning word, and with `web.json` or `live.json`, how many of the `learn` words came back.
+`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live). It asks for normal's
+answer and full's, measures every level from -2 to full from them as `planSwaps` picks (`LEVELS=0,3` for fewer),
+without the random thinning and with it, and prints per call the time, tokens and cost, and per level the swaps shown
+a passage, the Japanese share of the words, swaps with a learning word, phrases and sentences, and the ratios to
+normal. With the oracle (`oracle.json`; `ORACLE=` another) it prints coverage, whole sentences, the places full missed
+and why, every wrong-sense swap and every shown word the oracle doesn't judge yet, to be added. `SAVE=run.json` keeps
+the answers and `REPLAY=run.json` measures them again for free (`REVALIDATE=1` checks them again by today's
+validation, `HEAVY_ANSWERS=1` picks +1 and +2 from answers of their own as before prompt 5); `SUMMARY=` writes the
+tables as JSON. The header of `lab.mjs` lists the rest.
 
 Bump `PROMPT_VERSION` in `prompt.js` whenever the prompt changes, so cached answers from the old one aren't reused.

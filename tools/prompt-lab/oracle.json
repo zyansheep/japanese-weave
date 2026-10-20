@@ -1,0 +1,389 @@
+{
+  "x-paper": {
+    "use": ["New=新しい", "paper=論文", "differ=違う", "small=小さい", "large=大きい|大きな"],
+    "ok": ["a lot=沢山|多い|いっぱい|多く", "below=下", "between=間"]
+  },
+  "x-cat": {
+    "use": ["now=今", "there are=ある", "cute=可愛い", "but=でも|だけど"],
+    "ok": ["and=そして", "fell asleep=寝る", "my=私|僕"],
+    "not": ["there=そこ"]
+  },
+  "hn-rest": {
+    "use": ["I=私|僕", "rest=休む"],
+    "ok": ["took a week off=休む", "did=やる|する", "honestly=本当に", "to rest=ため"],
+    "not": ["after=後", "thing=物", "all=全部|みんな"]
+  },
+  "reddit-train": {
+    "use": ["woman=女", "reading=読む", "same=同じ", "book=本", "we=私たち", "talked=話す", "about=について", "home=家"],
+    "ok": ["me=私|僕"],
+    "not": ["next=次|これから", "so=つまり", "about=くらい"]
+  },
+  "yt-title": {
+    "use": ["He=彼", "small=小さい", "house=家", "a lot=沢山|多い|いっぱい|多く", "time=時間"],
+    "ok": ["hand=手"],
+    "not": ["He=奴", "but=でも|だけど", "time=時"]
+  },
+  "hn-chips": {
+    "use": ["new=新しい"],
+    "ok": ["more=もっと"],
+    "not": ["power=力", "much=多く", "which=どちら|どれ"]
+  },
+  "x-wait": {
+    "use": ["She=彼女", "said=言う", "now=今", "I=私|僕", "still=まだ", "waiting=待つ"],
+    "ok": ["and=そして", "me=私|僕"],
+    "not": ["before=前"]
+  },
+  "reddit-code": {
+    "use": ["You=あなた|君"],
+    "ok": ["start over=始める", "ten=十"],
+    "not": ["enter=入る"]
+  },
+  "blog-self": {
+    "use": ["Writing=書く", "about=について", "myself=自分", "book=本", "later=後", "I=私|僕", "become=なる", "person=人|人間"],
+    "ok": ["more=もっと", "A year=一|年"],
+    "not": ["did=やる|する", "about=くらい"]
+  },
+  "story-man": {
+    "use": ["man=男", "this=これ", "I=私|僕"],
+    "ok": ["me=私|僕", "had no idea=知る|分かる"],
+    "not": ["asked=頼む", "if=もし", "right=右|ええ", "stop=止める|しまう", "had=ある|いる", "no=いいえ"],
+    "sentences": ["I had no idea."]
+  },
+  "x-models": {
+    "use": ["I=私|僕", "open=開ける", "this=この", "there is=ある", "new=新しい", "still=まだ"],
+    "ok": ["this=これ", "and=そして"],
+    "not": ["time=時間|時|回", "open=開く", "there=そこ"]
+  },
+  "yt-comment": {
+    "use": ["Good=いい", "I=私|僕", "watched=見る", "all=全部", "about=について", "favorite=好き"],
+    "ok": ["my=私|僕", "and=そして"],
+    "not": ["all=みんな", "about=くらい"]
+  },
+  "paper-appendix": {
+    "use": ["sake=ため", "we=私たち", "smaller=小さい"],
+    "not": ["rest=休む"]
+  },
+  "reddit-line": {
+    "use": ["There was=ある", "front=前", "store=店", "new=新しい"],
+    "ok": ["huge=大きい|大きな", "all=みんな"],
+    "not": ["all=全部", "There=そこ", "six=六つ"]
+  },
+  "yt-thanks": {
+    "use": ["I=私|僕", "this=この"],
+    "ok": ["this=これ", "watching=見る", "keeps=続ける", "you=あなた|君", "all=全部", "work=仕事", "better=いい"],
+    "not": ["hard=難しい", "years=年", "all=みんな", "and=そして"]
+  },
+  "hn-rust": {
+    "use": ["new=新しい", "but=でも|だけど"],
+    "ok": ["becoming=なる", "not going anywhere=行く|どこ"]
+  },
+  "x-ship": {
+    "use": ["I=私|僕", "this year=今年", "you=あなた|君"],
+    "ok": ["about=について", "your=あなた|君"],
+    "not": ["thing=物", "plan=つもり", "actually=実は", "about=くらい", "what=どれ"]
+  },
+  "reddit-sister": {
+    "use": ["little sister=妹", "she=彼女", "already=もう", "reads=読む", "books=本", "I=私|僕"],
+    "ok": ["more=もっと", "My=私|僕"],
+    "not": ["little=小さい", "do=やる|する", "six=六つ"],
+    "sentences": ["She already reads more books than I do."]
+  },
+  "hn-wrong": {
+    "use": ["I=私|僕", "think=思う|考える", "you=あなた|君", "are wrong=違う", "about=について", "this=これ", "had=ある", "same=同じ"],
+    "not": ["wrong=悪い", "had=いる", "about=くらい"],
+    "sentences": ["I think you are wrong about this."]
+  },
+  "x-song": {
+    "use": ["this=この", "good=いい", "I=私|僕", "yet=まだ"],
+    "ok": ["this=これ", "honestly=本当に"],
+    "not": ["had=ある|いる", "all=全部|みんな", "day=日", "so=つまり", "had it=ある"]
+  },
+  "abstract-time": {
+    "use": ["this=この", "paper=論文", "we=私たち", "time=時間", "place=場所", "simple=簡単"],
+    "ok": ["this=これ"],
+    "not": ["and=そして", "time=時"]
+  },
+  "survey": {
+    "use": ["Men=男", "women=女", "answered=答える", "different=違う"],
+    "not": ["which=どちら|どれ", "and=そして"]
+  },
+  "game-raid": {
+    "use": ["We=私たち"],
+    "ok": ["start=始める"],
+    "not": ["more=もっと", "one=一つ|一"]
+  },
+  "x-semester": {
+    "use": ["I=私|僕", "finally=やっと", "have=ある", "time=時間", "read=読む", "again=また"],
+    "ok": ["fun=楽しい", "is over=終わる", "again=もう一度"],
+    "not": ["Now=今", "time=時"]
+  },
+  "recipe-dough": {
+    "use": ["hour=時間", "hard=難しい"],
+    "ok": ["rest=休む", "you=あなた|君", "an hour=一|時間"],
+    "not": ["hour=〜時", "before=前", "work=仕事"]
+  },
+  "product-bag": {
+    "use": ["This=この", "little=小さい", "cute=可愛い", "has=ある", "book=本", "all=全部"],
+    "ok": ["This=これ", "my=私|僕"],
+    "not": ["all=みんな", "so=つまり", "and=そして"]
+  },
+  "github-pr": {
+    "use": ["all=全部"],
+    "ok": ["please=お願いします"],
+    "not": ["Before=前", "please=どうぞ", "make=する", "all=みんな"]
+  },
+  "reddit-room": {
+    "use": ["I=私|僕", "entered=入る", "everyone=みんな", "stopped=止める", "talking=話す", "looked at=見る", "home=家|帰る"],
+    "ok": ["me=私|僕", "go=行く|帰る", "then=その|時"],
+    "not": ["When=時|いつ", "stopped=しまう", "right=右|ええ", "then=じゃ|では"],
+    "sentences": ["I wanted to go home right then."]
+  },
+  "x-strength": {
+    "use": ["three times=三|回", "strength=力", "I=私|僕", "thought=思う|考える"],
+    "ok": ["more=もっと", "have=ある", "for a year=一|年"],
+    "not": ["times=時間|時", "gave=あげる"]
+  },
+  "forum-thing": {
+    "use": ["I=私|僕", "small=小さい", "thing=物", "grandfather=おじいさん", "house=家"],
+    "ok": ["on=上", "my=私|僕"],
+    "not": ["only=一つ"],
+    "bad": ["the only thing"]
+  },
+  "yt-title-drums": {
+    "use": ["Guy=男"],
+    "not": ["Who=誰", "Has=ある", "One=一つ|一", "Guy=あいつ|奴"]
+  },
+  "yt-comment-lol": {
+    "use": ["he=彼", "looks at=見る"],
+    "not": ["he=奴", "after=後", "way=方"]
+  },
+  "x-hot-take": {
+    "use": ["fine=大丈夫"],
+    "ok": ["most=多く", "nice=いい", "and=そして", "that=それ", "honestly=本当に"]
+  },
+  "x-reply-idk": {
+    "use": ["you=あなた|君", "but=でも|だけど", "I=私|僕", "stopped=止める", "reading=読む"],
+    "ok": ["about=について", "better=いい", "got=なる", "my=私|僕", "and=そして"],
+    "not": ["news=新しい", "much=多く", "so=つまり", "stopped=しまう", "about=くらい"]
+  },
+  "hn-comment-rewrite": {
+    "use": ["We=私たち", "last year=去年", "whole=全部", "about=くらい"],
+    "ok": ["two=二", "and=そして", "twenty=二|十"],
+    "not": ["Go=行く", "went=行く", "about=について"]
+  },
+  "reddit-title": {
+    "use": ["front=前", "I=私|僕", "know=知る|分かる", "anymore=もう"],
+    "ok": ["keeps=続ける", "do=する|やる", "and=そして", "My=私|僕"]
+  },
+  "yt-comment-teacher": {
+    "use": ["This=この", "man=男", "explained=説明", "explain=説明", "teacher=先生"],
+    "ok": ["ten=十", "my=私|僕"],
+    "not": ["whole=全部", "This=これ", "explained=下"]
+  },
+  "x-thread": {
+    "use": ["new=新しい", "but=でも|だけど", "still=まだ", "simple=簡単"],
+    "ok": ["wrong=違う", "week=一"],
+    "not": ["after=後", "wrong=悪い", "thoughts=思う|考える", "much=多く"]
+  },
+  "hn-ask": {
+    "use": ["you=あなた|君", "every day=毎日", "people=人|人間", "heard=聞く"],
+    "ok": ["most=多く"],
+    "not": ["Ask=頼む", "What=どれ", "have=ある"]
+  },
+  "reddit-comment-gym": {
+    "use": ["hardest=難しい", "you=あなた|君", "easy=簡単"],
+    "ok": ["in=中"],
+    "not": ["rest=休む"]
+  },
+  "x-cute-dog": {
+    "use": ["dog=犬", "sleeping=寝る", "night=夜", "cutest=可愛い"],
+    "ok": ["started=始める", "on=上", "my=私|僕", "every night=毎日"],
+    "not": ["her=彼女", "thing=物", "has=ある"]
+  },
+  "news-snippet": {
+    "use": ["said=言う", "all=全部|みんな", "next=次"],
+    "ok": ["next=これから", "all users=人"]
+  },
+  "yt-title-paper": {
+    "use": ["This=この", "Paper=論文", "Changed=変える", "I=私|僕", "Think=思う|考える", "About=について"],
+    "ok": ["Changed=変更", "This=これ"],
+    "not": ["How=いかが|方", "About=くらい"]
+  },
+  "x-reply-same": {
+    "use": ["same=同じ", "everything=全部", "I=私|僕"],
+    "ok": ["me=私|僕", "and=そして"],
+    "not": ["thing=物"]
+  },
+  "reddit-advice": {
+    "use": ["You=あなた|君", "everything=全部", "I=私|僕", "know=知る|分かる"],
+    "not": ["have=ある|いる"]
+  },
+  "hn-power": {
+    "use": ["real=本当", "power=力", "you=あなた|君", "everything=全部"],
+    "ok": ["can=出来る"],
+    "not": ["that=それ"]
+  },
+  "x-time": {
+    "use": ["I=私|僕", "time=時間", "this=これ", "but=でも|だけど", "think=思う|考える", "finally=やっと"],
+    "ok": ["too much=あまり"],
+    "not": ["works=仕事", "time=時", "much=多く"]
+  },
+  "yt-comment-woman": {
+    "use": ["woman=女", "she=彼女", "stop=止める"],
+    "not": ["had=ある|いる", "stop=しまう"]
+  },
+  "reddit-self": {
+    "use": ["I=私|僕", "people=人|人間", "thought=思う|考える", "Now=今", "own=自分"],
+    "ok": ["about=について", "do=する|やる", "me=私|僕"],
+    "not": ["thing=物", "much=多く", "so=つまり", "about=くらい"]
+  },
+  "x-launch": {
+    "use": ["we=私たち", "if=もし", "you=あなた|君", "hard=難しい", "small=小さい", "open=開く"],
+    "ok": ["work=仕事", "my=私|僕"],
+    "not": ["open=開ける"]
+  },
+  "hn-different": {
+    "use": ["I=私|僕", "differently=違う", "wrong=違う|悪い"],
+    "ok": ["none=どれ", "none of them=誰"],
+    "not": ["worked=仕事", "does=する|やる"]
+  },
+  "yt-title-become": {
+    "use": ["I=私|僕", "Became=なる", "Japanese=日本語", "Japan=日本", "Two Years=二|年"],
+    "not": ["How=いかが"]
+  },
+  "x-short-good": {
+    "use": ["this=これ", "good=いい", "I=私|僕", "thought=思う|考える", "about=について"],
+    "ok": ["genuinely=本当に", "and=そして"],
+    "not": ["like=好き|こう", "had=ある|いる", "about=くらい"]
+  },
+  "reddit-enter": {
+    "use": ["we=私たち", "entered=入る", "house=家", "outside=外"],
+    "ok": ["smell=匂い", "went=行く"],
+    "not": ["went back=帰る", "soon=そろそろ", "so=つまり"]
+  },
+  "x-now": {
+    "use": ["I=私|僕", "have=ある"],
+    "ok": ["feels=感じる", "better=いい", "My=私|僕", "I can't go back=出来る"],
+    "not": ["Now=今", "go back=帰る|行く", "much=多く", "so=つまり"],
+    "bad": ["I can't go back."]
+  },
+  "hn-sake": {
+    "use": ["sake=ため"],
+    "ok": ["simplicity=簡単", "wrong=違う|悪い", "feels=感じる"],
+    "not": ["power=力", "like=好き", "which=どちら|どれ"]
+  },
+  "yt-comment-rest": {
+    "use": ["I=私|僕", "watch=見る", "this=これ", "night=夜", "before bed=前|寝る", "rest=休む", "work=仕事"],
+    "ok": ["days=日", "me=私|僕", "every night=毎日"],
+    "not": ["helps=手伝う", "after=後"]
+  },
+  "x-meme": {
+    "use": ["I=私|僕", "go to bed=寝る", "also=また", "about=について", "watching=見る"],
+    "ok": ["me=私|僕"],
+    "not": ["go=行く", "about=くらい"]
+  },
+  "reddit-thing": {
+    "use": ["this=この", "thing=物", "grandmother=おばあさん", "small=小さい"],
+    "ok": ["this=これ", "my=私|僕"],
+    "not": ["side=方", "like=好き"]
+  },
+  "hn-short": {
+    "use": ["This#0=これ", "I=私|僕", "still=まだ", "read=読む", "this#1=この"],
+    "ok": ["kind of=こんな", "me=私|僕"]
+  },
+  "tweet-day-one": {
+    "not": ["Day=日", "one=一つ|一"]
+  },
+  "tweet-best": {
+    "use": ["I=私|僕", "think=思う|考える", "this#0=これ", "this year=今年", "Still=まだ"],
+    "ok": ["Honestly=本当に", "me=私|僕"],
+    "not": ["thing=物", "that=それ"]
+  },
+  "blog-language": {
+    "use": ["If=もし", "you=あなた|君", "new=新しい", "important=大切", "read=読む", "a little=少し|ちょっと", "every day=毎日", "a lot=沢山|多い|いっぱい|多く", "time=時間", "before bed=前|寝る", "big=大きい|大きな"],
+    "ok": ["ten=十", "a year=一|年", "most=一番"],
+    "not": ["thing=物", "little=小さい", "time=時", "day=日"]
+  },
+  "numbers": {
+    "use": ["open=開ける", "store=店", "Yesterday=昨日", "I=私|僕", "good=いい", "three=三つ"],
+    "ok": ["two=二"],
+    "not": ["open=開く", "one=一つ|一", "One=一つ|一", "gave=あげる", "had=ある|いる", "day=日", "number=一つ", "two=二つ"]
+  },
+  "story-mother": {
+    "use": ["mother=母", "home=家|帰る", "night=夜", "She=彼女", "but=でも|だけど", "I=私|僕", "said=言う", "yes=はい|ええ"],
+    "ok": ["came=来る", "that=その"],
+    "not": ["if=もし", "asked=頼む", "had=ある|いる"]
+  },
+  "docs-config": {
+    "use": ["same=同じ"],
+    "ok": ["you=あなた|君"],
+    "not": ["Before=前", "stop=止める|しまう", "make=する"]
+  },
+  "tweet-movie": {
+    "use": ["watched=見る", "again=また|もう一度", "I=私|僕", "really=本当に", "love=大好き", "this=この", "movie=映画"],
+    "ok": ["Just=さっき", "ending=終わる|終える", "this=これ", "it=それ"],
+    "not": ["time=時間|時|回"],
+    "sentences": ["Just watched it again.", "I really love this movie."]
+  },
+  "diary-store": {
+    "use": ["Yesterday=昨日", "I=私|僕", "went=行く", "store=店", "mom=母", "We=私たち", "bought=買う", "fish=魚", "tea=お茶", "fun=楽しい", "day=日"],
+    "ok": ["with=一緒に", "my=私|僕"],
+    "not": ["and=そして"],
+    "sentences": ["Yesterday I went to the store with my mom.", "We bought fish and some tea.", "It was a fun day."]
+  },
+  "forum-japanese": {
+    "use": ["I=私|僕", "studying=勉強", "Japanese=日本語", "Reading=読む", "still=まだ", "difficult=難しい", "but=でも|だけど", "understand=分かる", "before=前", "teacher=先生", "says=言う", "read=読む", "every day=毎日"],
+    "ok": ["a lot=沢山|多い|いっぱい|多く|ずっと", "more=もっと", "a year=一|年", "My=私|僕"],
+    "not": ["studying=研究", "now=今", "I've=私|僕"],
+    "sentences": ["Reading is still difficult, but I understand a lot more than before."]
+  },
+  "recipe": {
+    "use": ["fish=魚", "small=小さい", "one hour=一|時間", "slowly=ゆっくり"],
+    "ok": ["cook=料理", "turns=なる"],
+    "not": ["Then=じゃ|では", "hour=〜時", "and=そして"]
+  },
+  "game-review": {
+    "use": ["world=世界", "but=でも|だけど", "weak=弱い", "I=私|僕", "still=まだ", "know=知る|分かる", "why=なぜ|どうして"],
+    "ok": ["hours=時間", "huge=大きい|大きな", "twenty=二|十"],
+    "not": ["hours=〜時", "and=そして"]
+  },
+  "travel": {
+    "use": ["We=私たち", "night=夜", "station=駅", "next=次", "raining=雨", "read=読む", "books=本"],
+    "ok": ["and=そして", "late at night=夜"],
+    "not": ["next=これから", "so=つまり"]
+  },
+  "slack": {
+    "use": ["you=あなた|君", "look at=見る", "changes=変更", "I=私|僕", "think=思う|考える", "new=新しい"],
+    "ok": ["though=だけど", "my=私|僕", "look at my changes=ください"],
+    "not": ["before=前", "No=いいえ", "changes=変える"]
+  },
+  "kids-story": {
+    "use": ["little=小さい", "boy=少年", "opened=開ける", "window=窓", "looked at=見る", "mountain=山", "He=彼", "go=行く", "outside=外", "but=でも|だけど", "mother=母", "said=言う"],
+    "ok": ["no=いいえ", "his=彼", "and=そして"],
+    "not": ["opened=開く", "He=奴"],
+    "sentences": ["The little boy opened the window and looked at the mountain.", "He wanted to go outside, but his mother said no."]
+  },
+  "trap-similar": {
+    "use": ["two=二つ", "but=でも|だけど", "new=新しい", "which one=どれ|どの", "buy=買う", "I=私|僕", "soon=そろそろ", "yet=まだ"],
+    "ok": ["look=見える", "two=二", "I will soon=買う"],
+    "not": ["much=多く", "look=見る", "one=一つ|一"]
+  },
+  "trap-chapter": {
+    "use": ["starts=始まる", "slowly=ゆっくり", "but=でも|だけど", "really=本当に", "fun=楽しい", "books=本", "I=私|僕", "read=読む", "this year=今年"],
+    "not": ["one=一つ|一", "two=二つ|二", "starts=始める", "part=方"]
+  },
+  "reddit-move": {
+    "use": ["We=私たち", "small=小さい", "town=町", "last year=去年", "people=人|人間", "kids=子供|子", "school=学校"],
+    "ok": ["nice=いい", "honestly=本当に", "my=私|僕", "and=そして"],
+    "not": ["moved=動く", "right=右|ええ"]
+  },
+  "sports": {
+    "use": ["again=また|もう一度", "Sunday=日曜日", "said=言う"],
+    "not": ["home=家", "after=後", "fourth=四つ"]
+  },
+  "abstract": {
+    "use": ["We=私たち", "study=研究", "children=子供|子", "new=新しい", "words=単語", "heard=聞く"],
+    "ok": ["two=二つ", "more=もっと", "once=一", "two=二"],
+    "not": ["study=勉強", "who=誰", "how=いかが", "twice=二"]
+  }
+}

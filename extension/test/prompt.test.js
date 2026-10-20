@@ -62,36 +62,33 @@ describe('prompt', () => {
     expect(buildSystemPrompt(2, words, [], 0, 3)).toBe(stable + learning);
     expect(buildSystemParts(2, words, ['大きい'], 0, 3)[0]).toBe(stable);
   });
-  test('a heavier intensity asks for more sentences and swaps; normal is unchanged', () => {
-    const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
-    expect(buildSystemPrompt(2, words, [], 0, 3, 0)).toBe(buildSystemPrompt(2, words, [], 0, 3));
-    expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('about one sentence in three');
-    expect(buildSystemPrompt(2, words, [], 0, 3, 2)).toContain('about two sentences in five');
-  });
-  test('full asks for every swap the list allows, sentences at any stage, with no target; the other levels are unchanged', () => {
-    const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }, { ja: '犬', en: 'dog', hint: 'inu', status: 'active' }];
-    const full = buildSystemPrompt(1, words, [], 0, 1, 3);
+  test('the full answer asks for every swap the list allows, sentences at any stage, with no target; normal is unchanged', () => {
+    const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }, { ja: '犬', en: 'dog', hint: 'inu', status: 'active' },
+      { ja: '私', en: 'i', hint: 'watashi', status: 'known' }];
+    const full = buildSystemPrompt(1, words, [], 0, 1, true);
     expect(full).toContain('The reader asked for FULL Japanese');
     expect(full).toContain('LEARNING and KNOWN');
-    expect(full).toContain('as a sentence swap');
+    expect(full).toContain('becomes a sentence swap, however plain or short');
+    expect(full).toContain('every one of those places is owed a swap');
     for (const gone of ['No sentence swaps yet', 'Each passage comes with a "target"', 'Skip a passage entirely']) expect(full).not.toContain(gone);
-    expect(buildSystemPrompt(2, words, [], 15, 3, 3)).toBe(buildSystemPrompt(2, words, [], 0, 3, 3)); // no density at full
-    expect(buildSystemPrompt(2, words, [], 0, 3, 3)).toBe(full); // nor a stage
-    for (const heavy of [0, 1, 2]) {
-      expect(buildSystemPrompt(2, words, [], 0, 3, heavy)).not.toContain('FULL');
-      expect(buildSystemPrompt(2, words, [], 0, 3, heavy)).toContain('Skip a passage entirely if a swap would make it hard to follow.');
-    }
-    expect(buildSystemPrompt(2, words, [], 0, 3, 9)).toBe(buildSystemPrompt(2, words, [], 0, 3, 0)); // unknown: normal
-    const [p] = JSON.parse(buildUserContent([{ id: 'a', text: 'But the dog ran home.' }], 0, { words, heavy: 3 }).slice('Passages:\n'.length));
-    expect(p).toEqual({ id: 'a', text: 'But the dog ran home.', learning: ['犬 = dog: dog'], listed: ['でも = but: But'] });
+    expect(buildSystemPrompt(2, words, [], 15, 3, true)).toBe(buildSystemPrompt(2, words, [], 0, 3, true)); // no density at full
+    expect(buildSystemPrompt(2, words, [], 0, 3, true)).toBe(full); // nor a stage
+    expect(buildSystemPrompt(2, words, [], 0, 3, false)).toBe(buildSystemPrompt(2, words, [], 0, 3));
+    expect(buildSystemPrompt(2, words, [], 0, 3)).not.toContain('FULL');
+    expect(buildSystemPrompt(2, words, [], 0, 3)).toContain('Skip a passage entirely if a swap would make it hard to follow.');
+    expect(buildSystemPrompt(2, words, [], 0, 3, 3)).toBe(buildSystemPrompt(2, words, [], 0, 3)); // only true asks for full
+    // at full each hint names every spelling and how many places it is owed
+    const text = 'But I think the dog ran home, and I saw the dogs. I did.';
+    const [p] = JSON.parse(buildUserContent([{ id: 'a', text }], 0, { words, full: true }).slice('Passages:\n'.length));
+    expect(p).toEqual({ id: 'a', text, learning: ['犬 = dog: dog, dogs (2 places)'], listed: ['でも = but: But', '私 = i: I (3 places)'] });
+    const [plain] = JSON.parse(buildUserContent([{ id: 'a', text }], 0, { words }).slice('Passages:\n'.length));
+    expect(plain).toEqual({ id: 'a', text, target: 2, learning: ['犬 = dog: dog'], listed: ['でも = but: But', '私 = i: I'] });
   });
-  test('every passage gets a target: the most swaps planSwaps shows, by sentences or density, raised by a heavier intensity', () => {
+  test('every passage gets a target: the most swaps planSwaps shows at normal, by sentences or density', () => {
     const target = (text, ...args) => JSON.parse(buildUserContent([{ id: 'a', text }], ...args).slice('Passages:\n'.length))[0].target;
     const two = 'The first sentence is here today. The second one follows it now.';
     expect(target(two)).toBe(4); // Level 2: two per sentence
     expect(target(two, 0, { level: 1 })).toBe(2);
-    expect(target(two, 0, { heavy: 1 })).toBe(6); // 4 x 1.4
-    expect(target(two, 0, { heavy: 2 })).toBe(7); // 4 x 1.8
     expect(target(two, 25)).toBe(3); // a density: its share of the 12 words
   });
   test('each passage names the listed words its English says: learning words, then known ones as leads', () => {

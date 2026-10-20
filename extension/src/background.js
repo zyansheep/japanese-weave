@@ -5,9 +5,9 @@
 import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
-import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
+import { candidatesFor, MAX_BATCH, BATCH, FULL_BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
@@ -52,10 +52,11 @@ function intensityOf(data, now = Date.now()) {
 }
 
 // What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped. The
-// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial and a lighter intensity: the cache
-// holds every validated candidate and those only change which of them planSwaps picks, so they never cost a model
-// call. A heavier intensity, and full, ask the model for more, so each has its own cache. Off (-3) changes the revision
-// too, so pages go back to English at once (settings.js offReason).
+// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial and the intensity, all but which answer
+// it picks from: the cache holds every validated candidate and those only change which of them planSwaps picks, so they
+// never cost a model call. The heavier levels and full pick from the full answer (answerLevel), which has its own cache,
+// the lighter ones from normal's. Off (-3) changes the revision too, so pages go back to English at once (settings.js
+// offReason).
 async function context() {
   await ready;
   const data = await store.get(['settings', 'wordState', 'epoch', 'intensity', ...KEY_NAMES]);
@@ -67,8 +68,8 @@ async function context() {
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
   const intensity = intensityOf(data);
-  const heavy = Math.max(0, intensity.level);
-  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins, ...(heavy ? [heavy] : [])]));
+  const answer = answerLevel(intensity.level);
+  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins, ...(answer ? [answer] : [])]));
   const challenge = state?.challenge || 0;
   const revision = hashKey(JSON.stringify([cacheRevision, challenge, intensity.level]));
   return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0,
@@ -146,10 +147,11 @@ async function swaps(msg, sender) {
 }
 
 // Cache misses from every tab wait here and go to the model together, up to the model's batch size a call (models.js:
-// BATCH, else MAX_BATCH) and one call at a time (PARALLEL for Haiku), so the passages that turn up while a call runs
-// (scrolling, other tabs) share the next call and its prompt. A passage already waiting or in a call isn't asked for
-// twice. Resolves with { cacheKey: swaps } for the batch, or null when the word state or settings changed meanwhile.
-// Passage ids are cache keys, which start with the cacheRevision, so one id never mixes two revisions.
+// BATCH, FULL_BATCH for the full answer, else MAX_BATCH) and one call at a time (PARALLEL for Haiku), so the passages
+// that turn up while a call runs (scrolling, other tabs) share the next call and its prompt. A passage already waiting
+// or in a call isn't asked for twice. Resolves with { cacheKey: swaps } for the batch, or null when the word state or
+// settings changed meanwhile. Passage ids are cache keys, which start with the cacheRevision, so one id never mixes two
+// revisions.
 const pending = new Map(); // passage id -> { ctx, p: { id, text }, promise, resolve, reject }
 const queue = []; // ids of pending passages not in a call yet
 let active = 0;
@@ -170,7 +172,7 @@ function drain() {
     const { ctx } = pending.get(queue[0]);
     const model = ctx.settings.model;
     if (active >= (PARALLEL[model] || 1)) return;
-    const size = BATCH[model] || MAX_BATCH;
+    const size = (answerLevel(ctx.intensity.level) === INTENSITY_FULL && FULL_BATCH[model]) || BATCH[model] || MAX_BATCH;
     const group = [];
     for (let i = 0; i < queue.length && group.length < size;) {
       const entry = pending.get(queue[i]);
@@ -209,7 +211,7 @@ async function callModel(ctx, batch) {
     const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
     fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, stage: data.wordState?.stage,
       words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
-      heavy: Math.max(0, ctx.intensity.level) });
+      full: answerLevel(ctx.intensity.level) === INTENSITY_FULL });
   } catch (e) {
     await locked(async () => {
       await recordSpent(e?.usage);

@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
   numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced, intensityLabel, intensityFactor, INTENSITY_LEVELS, INTENSITY_NAMES,
+  answerLevel, INTENSITY_FULL,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -118,6 +119,9 @@ describe('choosing swaps', () => {
     expect(full.plan).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 6, candidates: 6 });
     expect(planSwaps(2, offered, passage, listed).swaps.length).toBeLessThan(6);
     expect(planSwaps(2, offered, passage, listed, { intensity: -3, seed: 3 }).swaps).toEqual([]);
+  });
+  test('the lighter levels pick from the answer at normal, the heavier ones from the full answer', () => {
+    expect(INTENSITY_LEVELS.map(answerLevel)).toEqual([0, 0, 0, 0, INTENSITY_FULL, INTENSITY_FULL, INTENSITY_FULL]);
   });
   test('intensity levels -3..3: names, labels and factors', () => {
     expect(INTENSITY_LEVELS.map((l) => INTENSITY_NAMES[l])).toEqual(['off', 'much lighter', 'lighter', 'normal', 'heavier', 'much heavier', 'full']);
@@ -261,6 +265,8 @@ describe('the compact answer', () => {
     { ja: 'なる', en: 'become', hint: 'naru', kana: 'なる', status: 'known' },
     { ja: '大きい', en: 'big', hint: 'ōkii', kana: 'おおきい', status: 'known' },
     { ja: 'でも', en: 'but', hint: 'demo', kana: 'でも', status: 'known' },
+    { ja: '下', en: 'below / under', hint: 'shita', kana: 'した', status: 'known' },
+    { ja: 'ひらがな', en: 'hiragana', hint: 'hiragana', kana: 'ひらがな', status: 'known' },
   ];
   const group = (p, k = 's') => validateSwaps(2, [{ k, o: 'Some English.', f: p.replace(/\|/g, ''), p, g: 'Some English.', c: 'Some' }], words);
   const pieces = (p) => group(p)[0]?.parts.map((x) => (x.word ? `${x.t}=${x.word}` : x.t)).join(' ');
@@ -272,6 +278,9 @@ describe('the compact answer', () => {
     expect(pieces('母|と|一緒に|店|に|行きました|。')).toBe('母=母 と 一緒に=一緒に 店=店 に 行きました=行く 。');
     expect(group('母|と|一緒に|店|に|行きました|。')[0]).toMatchObject({ kind: 'sentence', word: '行く', status: 'active', g: 'Some English.' });
     expect(pieces('勉強|しました|。')).toBe('勉強=勉強 しました=する 。'); // する, not 知る read しる
+    expect(pieces('勉強|した|。')).toBe('勉強=勉強 した=する 。'); // nor shita "below"
+    expect(pieces('下|に|行きました|。')).toBe('下=下 に 行きました=行く 。');
+    expect(pieces('ヒラガナ|です|。')).toBe('ヒラガナ=ひらがな です 。'); // a listed word in another script
     expect(pieces('大きく|なりました|。')).toBe('大きく=大きい なりました=なる 。');
     expect(pieces('よかった|です|。')).toBe('よかった=いい です 。');
     expect(pieces('店|に|行って|いました|。')).toBe('店=店 に 行って=行く いました 。');
@@ -304,6 +313,19 @@ describe('the compact answer', () => {
     expect(validateSwaps(2, noun, words, 'I like going to the store with her.').length).toBe(1);
     expect(kept('As soon as I went to the store we saw it.')).toBe(true); // a subject pronoun starts a new clause
   });
+  test('one conjugated word alone that would leave English hanging after it is a word swap of the word as listed', () => {
+    const swap = (o, p) => validateSwaps(2, [{ k: 'p', o, f: p.replace(/\|/g, ''), p, g: o, c: o }], words, `They ${o} the store again.`);
+    expect(swap('went to', '行きました')).toEqual([{ o: 'went to', f: '行く', g: 'go', h: 'iku', k: 'いく', ctx: 'went to', word: '行く',
+      status: 'active' }]);
+    expect(swap('saw', '見て|いました')).toMatchObject([{ f: '見る', word: '見る' }]); // an ending split off
+    expect(swap('went to', '店|に|行きました')).toEqual([]); // a phrase in Japanese order still may not
+    expect(swap('I went to', '行きました')).toEqual([]); // the word swap would lose the subject
+    expect(validateSwaps(2, [{ k: 'p', o: 'went', f: '行きました', p: '行きました', g: 'went', c: 'went' }], words, 'Then they went.'))
+      .toMatchObject([{ kind: 'phrase', f: '行きました' }]); // nothing after it: the phrase stands
+  });
+  test('an empty piece, as from a bar at the end, is left out', () => {
+    expect(validateSwaps(2, [{ k: 'p', o: 'x', f: '母と店に行く', p: '母|と|店|に|行く|', g: 'x', c: 'x' }], words)[0]?.f).toBe('母と店に行く');
+  });
   test('f only has to say what the pieces say: bars and punctuation in f are let through', () => {
     const kept = (f, p, k = 'p') => validateSwaps(2, [{ k, o: 'x', f, p, g: 'x', c: 'x' }], words)[0]?.f;
     expect(kept('母|と|店|に|行く', '母|と|店|に|行く')).toBe('母と店に行く'); // f written with the bars
@@ -334,6 +356,16 @@ describe('word swaps where the word cannot go', () => {
     const words = [{ ja: '前', en: 'before / front', hint: 'mae', status: 'shaky' }, { ja: '止める', en: 'stop', hint: 'tomeru', status: 'known' }];
     expect(validateSwaps(2, [{ k: 'w', o: 'Before', f: '前', p: '', g: '', c: 'Before you run' },
       { k: 'w', o: 'stop', f: '止める', p: '', g: '', c: 'will stop' }], words, 'Before you run it, the program will stop.')).toEqual([]);
+  });
+  test('"give (away)" never stands in for "gave me"; no swap leaves a contraction\'s tail behind', () => {
+    expect(misplaced({ o: 'gave', f: 'あげる', ctx: 'gave me more' }, 'Lifting gave me more strength.')).toBe(true);
+    expect(misplaced({ o: 'gave', f: 'あげる', ctx: 'gave her a book' }, 'I gave her a book.')).toBe(false);
+    const text = "I've been studying Japanese. I understand more, and I'm glad.";
+    expect(misplaced({ o: 'I', f: '私', ctx: "I've been studying" }, text)).toBe(true);
+    expect(misplaced({ o: 'I', f: '私', ctx: 'I understand more' }, text)).toBe(false);
+    expect(misplaced({ o: 'I', f: '私', ctx: '' }, text)).toBe(false); // one place it fits
+    expect(misplaced({ o: 'I', f: '私', ctx: '' }, "I've seen it. I'm sure.")).toBe(true);
+    expect(misplaced({ o: 'grandfather', f: 'おじいさん', ctx: '' }, "It was my grandfather's house.")).toBe(false);
   });
 });
 

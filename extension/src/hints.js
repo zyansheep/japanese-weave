@@ -70,9 +70,10 @@ const patterns = new Map(); // gloss -> RegExp of every phrase it stands for
 const HELPER = /^(have|has|had|having)$/i;
 const AFTER_HELPER = /^\s+(to|been|got|gotten|never|already|just|not|ever|always|also|still|had|become|come|n't|[a-z]+(ed|en|wn|ne|ught))\b/i;
 
-// The passage's listed words: [{ ja, en, found, learning }], found being the English as it is written in the passage
-// (its first occurrence), learning true for an active or shaky word. words: the plugin's word state (words without a
-// status are skipped); never number words or katakana loanwords.
+// The passage's listed words: [{ ja, en, found, forms, places, learning }], found being the English as it is written in
+// the passage (its first occurrence), forms every spelling of it there (first occurrence of each, whatever the case),
+// places how often it occurs, learning true for an active or shaky word. words: the plugin's word state (words without
+// a status are skipped); never number words or katakana loanwords.
 export function wordHints(text, words) {
   const out = [];
   for (const w of words || []) {
@@ -86,9 +87,11 @@ export function wordHints(text, words) {
     if (!re) continue;
     const all = new RegExp(re.source, 'giu');
     const learning = w.status !== 'known';
-    const found = [...text.matchAll(all)].find((m) => !(HELPER.test(m[0]) && AFTER_HELPER.test(text.slice(m.index + m[0].length))) &&
-      (learning || !VAGUE.has(m[0].toLowerCase())))?.[0];
-    if (found) out.push({ ja: w.ja, en: w.en, found, learning });
+    const found = [...text.matchAll(all)].filter((m) => !(HELPER.test(m[0]) && AFTER_HELPER.test(text.slice(m.index + m[0].length))) &&
+      (learning || !VAGUE.has(m[0].toLowerCase()))).map((m) => m[0]);
+    const seen = new Set();
+    const forms = found.filter((f) => !seen.has(f.toLowerCase()) && seen.add(f.toLowerCase()));
+    if (found.length) out.push({ ja: w.ja, en: w.en, found: found[0], forms, places: found.length, learning });
   }
   return out;
 }
