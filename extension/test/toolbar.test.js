@@ -64,7 +64,7 @@ describe('appearance', () => {
   });
   test('a page with nothing to weave is faded and says which, under off and the wait, with the level kept', () => {
     expect(appearance({ nothing: 'none' })).toEqual({ icon: 'faded', text: '', color: COLORS.lighter,
-      title: 'Japanese Weave: nothing on this page to weave (no English paragraphs found)' });
+      title: 'Japanese Weave: nothing on this page to weave (no English paragraphs, or only topics kept in English)' });
     expect(appearance({ nothing: 'unfit', level: 1, until })).toEqual({ icon: 'faded', text: '+1', color: COLORS.heavier,
       title: `Japanese Weave: no Japanese fit the text on this page · heavier (+1) until ${clock(until)}` });
     expect(appearance({ nothing: 'unfit', level: 3, until }).text).toBe('full');
@@ -172,7 +172,7 @@ describe('createToolbar', () => {
     await bar.show({ level: 1, until }, [[1, ''], [2, ''], [3, 'site-off']]);
     await bar.nothing(1, 'none');
     await bar.nothing(3, 'unfit');
-    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '+1', title: expect.stringContaining('no English paragraphs found') });
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '+1', title: expect.stringContaining('no English paragraphs') });
     expect(shown(2)).toMatchObject({ icon: ICONS.on, text: '+1' });
     expect(shown(3)).toMatchObject({ icon: ICONS.off, title: expect.stringContaining('turned off on this site') });
     // It outlasts a redraw of every tab (settings or the level changed), and the off reason still wins while it lasts.

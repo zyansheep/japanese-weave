@@ -111,7 +111,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     // A page with nothing to weave (its content script says so once the page settles) is faded and says which. Only a
     // tab's top frame is heard, and only the known states.
     expect(await dispatch({ type: 'nothing', why: 'none' }, tab(1))).toEqual({ ok: true });
-    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '', title: 'Japanese Weave: nothing on this page to weave (no English paragraphs found)' });
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '', title: 'Japanese Weave: nothing on this page to weave (no English paragraphs, or only topics kept in English)' });
     expect(await dispatch({ type: 'nothing', why: 'none' }, { ...tab(3), frameId: 4 })).toEqual({ ok: false });
     expect(await dispatch({ type: 'nothing', why: 'blank' }, tab(1))).toEqual({ ok: false });
     expect(await dispatch({ type: 'nothing', why: 'unfit' }, tab(1))).toEqual({ ok: true });

@@ -35,7 +35,7 @@ export function reasonText(reason, until = 0) {
 
 // Why a page has nothing to weave (content.js settled), as its title says it.
 export function nothingText(why) {
-  return { none: 'nothing on this page to weave (no English paragraphs found)',
+  return { none: 'nothing on this page to weave (no English paragraphs, or only topics kept in English)',
     unfit: 'no Japanese fit the text on this page' }[why] || '';
 }
 
