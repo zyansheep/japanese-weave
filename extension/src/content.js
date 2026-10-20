@@ -1,6 +1,7 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
-// handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks, selections and on-screen time
-// for passages with glossed words. Every async reply belongs to one config generation.
+// handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks and selections in passages with
+// glossed words, and when passages are shown and their on-screen time, also for planned passages left without Japanese
+// (blank). Every async reply belongs to one config generation.
 import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEnglish, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
 import { siteEnabled, hasSiteAccess } from './settings.js';
@@ -42,16 +43,17 @@ let pressedAt = 0; // when the mouse button went down, so a drag selection has a
 let lastRange = null; // the last selection logged, so the same one is logged once
 const READING_MAX = 500; // clicks and selections per page load
 let readingLogged = 0;
-// On-screen time: one record per stay of a glossed passage on screen. Only time a reader could have spent reading it
-// counts (ms); the rest is split by why not (attention.js). Stays with under STAY_MIN_MS of reading were a scroll past
-// and aren't sent; longer ones than STAY_MAX_MS are sent in parts, and a stay with no reading for PAUSE_MS ends there.
+// On-screen time: one record per stay of a glossed or blank passage on screen. Only time a reader could have spent
+// reading it counts (ms); the rest is split by why not (attention.js). Stays with under STAY_MIN_MS of reading were a
+// scroll past and aren't sent; longer ones than STAY_MAX_MS are sent in parts, and a stay with no reading for PAUSE_MS
+// ends there.
 const STAY_MIN_MS = 1000;
 const STAY_MAX_MS = 600000;
 const STAYS_MAX = 2000; // per page load
 let lastInput = Date.now();
 let onscreen = null;
 const inView = new Set(); // passages on screen enough to be read
-const stays = new Map(); // passage -> { at, last, wall, ms, away, media, idle, desc }
+const stays = new Map(); // passage -> { at, last, wall, ms, away, media, idle, desc, blank }
 let stayTimer = null;
 let staysLogged = 0;
 // After the extension is updated or reloaded, a copy still running in an open tab is cut off from the background
@@ -117,14 +119,19 @@ function logInteraction(span, kind, at, dwellMs) {
   void send({ type: 'interaction', kind, word: swapWord(span), at, dwellMs, view: VIEW, uid: `${VIEW}-${++logged}`,
     context: key.slice(key.indexOf(':') + 1), position: spans.indexOf(span), box, annotations }).catch(() => {});
 }
-// The first time a passage's Japanese is on screen in this page load: its word count is the peek rate's denominator.
-function logShown(span) {
-  const passage = span.closest(targets());
+// A passage the background planned (it has a plan) that shows no Japanese: none of its candidates fit, its random
+// thinning left none, or none could be placed. Its shown record and stays are logged like a glossed passage's, as the
+// baseline without Japanese for calibration (knowledge.py); its clicks and selections are not.
+const blank = (passage) => plans.has(keys.get(passage)) && ![...passage.querySelectorAll(`span.${SWAP_CLASS}`)].some(isSwap);
+// The first time a passage's Japanese is on screen in this page load, or for a blank passage enough of the passage to
+// read (startStay): its word count is the peek rate's denominator when it has Japanese.
+function logShown(passage) {
   const key = passage && keys.get(passage);
   const context = key && key.slice(key.indexOf(':') + 1);
   if (!key || !on() || !sizes.get(passage) || document.visibilityState === 'hidden' || shownContexts.has(context)) return;
   shownContexts.add(context);
   const { annotations, box } = describe(passage);
+  if (!annotations.length && !blank(passage)) return; // Japanese, but no listed word in it (the bundled lists)
   const plan = plans.get(key);
   void send({ type: 'interaction', kind: 'shown', at: Date.now(), view: VIEW, context, words: sizes.get(passage), box,
     annotations, ...(plan ? { plan } : {}) }).catch(() => {});
@@ -216,7 +223,10 @@ function tickStays() {
 function startStay(passage) {
   if (stays.has(passage) || document.visibilityState === 'hidden' || !keys.has(passage)) return;
   const now = Date.now();
-  stays.set(passage, { ...newStay(now), desc: describe(passage) });
+  const desc = describe(passage);
+  const empty = blank(passage); // kept with the stay: stop() forgets the plans before it ends stays
+  stays.set(passage, { ...newStay(now), desc, blank: empty });
+  if (empty) logShown(passage); // no Japanese word to wait for
   if (!stayTimer) stayTimer = setInterval(tickStays, 1000);
 }
 // Before a passage is reverted or forgotten: its glossed words are still in it, or in the stay's first description
@@ -231,7 +241,7 @@ function endStay(passage) {
   const key = keys.get(passage);
   if (stay.ms < STAY_MIN_MS || staysLogged >= STAYS_MAX || !key || !on()) return;
   const { spans, annotations, box } = passage.isConnected ? describe(passage) : stay.desc;
-  if (!spans.length) return;
+  if (!spans.length && !stay.blank) return;
   staysLogged++;
   void send({ type: 'interaction', kind: 'visible', at: stay.at, view: VIEW, uid: `${VIEW}-${++logged}`,
     context: key.slice(key.indexOf(':') + 1), box, annotations, y: 0, height: box[3], ms: stay.ms, wall: stay.wall,
@@ -276,12 +286,12 @@ function disarmTip(e) {
 }
 function seenVisible() {
   if (document.visibilityState === 'hidden') return;
-  for (const span of visibleWords) if (span.isConnected) { record(span, 'seen'); logShown(span); }
+  for (const span of visibleWords) if (span.isConnected) { record(span, 'seen'); logShown(span.closest(targets())); }
 }
 function paint(el, key) {
   if (!on() || keys.get(el) !== key || !readable(el, location.href)) return;
   const swaps = memo.get(key);
-  if (!swaps?.length) return;
+  if (!swaps || (!swaps.length && !plans.has(key))) return; // a blank passage is still watched on screen
   applySwaps(el, swaps);
   for (const span of el.querySelectorAll(`.${SWAP_CLASS}`)) if (isSwap(span)) visible.observe(span);
   onscreen?.observe(el);

@@ -48,8 +48,9 @@ What exists today:
   (scripts/inflection.py), and every lexicon word counts, not only the ones introduced so far.
 
 Since extension 0.3.1 time on screen is logged too (visible stays), and since 0.6.0 each shown passage's plan (the
-swaps allowed, the candidates offered, the reader's intensity and a random thinning factor). Not logged: the candidate
-list itself, pick chances, and the chooser's inputs at the time (each word's status
+swaps allowed, the candidates offered, the reader's intensity and a random thinning factor). Paragraphs planned that
+got no Japanese (no candidates, or thinned to none) are logged as shown and on screen too, with no glossed words. Not
+logged: the candidate list itself, pick chances, and the chooser's inputs at the time (each word's status
 and estimate, the dial, the budget).
 
 **Second stream: Anki.** One row per review: card, time, rating, kind, interval. 51,465 rows for 3,702 cards, July

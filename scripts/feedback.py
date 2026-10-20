@@ -2,20 +2,21 @@
 the gloss stayed open and where the other glossed words of the same passage sat. A peek shows the reader was reading
 that spot, so unpeeked words next to it are the evidence that they knew them. Clicks, text selections, mouse paths and
 on-screen time in passages with glossed words are kept too, as more evidence of where the reader was and for how
-long. Words, positions, times and counts only, never text.
+long, and browser passages planned to get Japanese that got none (blank) are kept as shown and on screen, the baseline
+for calibration (knowledge.py). Words, positions, times and counts only, never text.
 
 Stored in <state dir>/interactions.sqlite (schema 5):
   contexts      one row per passage per page load (browser) or message render (T3): its box on the page, the
                 glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), and for browser
-                passages its word count, when its glossed words were first on screen ("shown") and how the amount
-                was chosen ("plan", JSON {level: the reader's intensity -2..2, intensity: its factor, jitter: the
-                passage's random factor (1: none), limit: swaps allowed, candidates: swaps the model offered}); seq
-                orders changes for export
+                passages its word count, when its glossed words were first on screen ("shown"; for a blank passage,
+                with annotations [], when enough of it was) and how the amount was chosen ("plan", JSON {level: the
+                reader's intensity -2..2, intensity: its factor, jitter: the passage's random factor (1: none), limit:
+                swaps allowed, candidates: swaps the model offered}); seq orders changes for export
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
   reading       one row per reading signal in a passage (browser) or message (T3) with glossed words, positions
-                relative to it, and a client id (uid):
+                relative to it, and a client id (uid); blank browser passages have visible rows only:
                   click    x, y; detail {"target": "text" | "link" (a link or control)}
                   select   x, y, width, height of the selection; ms: how long the drag took; detail {"chars": its
                            length, "covered": indexes of the glossed words in it (into the context's annotations)}
@@ -51,6 +52,7 @@ SURFACES = ('browser', 't3')
 KINDS = ('peek', 'pin', 'flip')  # the gloss was opened, or the word turned back to English
 READING = ('click', 'select', 'visible', 'trace')  # where the reader was; knowledge.py reads the visible stays
 SHOWN = 'shown'
+BLANK = '[]'  # the annotations of a passage shown without Japanese
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
 DAY_MS = 86_400_000
@@ -341,7 +343,8 @@ def recent(limit=20, path=None):
 def stats(since=0, path=None):
     """What has been collected, for the extension's popup and `fw.py log`: per "surface:kind", [all, since `since`
     (ms)] for gloss opens and reading signals; the same for browser words shown and for on-screen reading time (the
-    ms of visible rows); and the newest item's time."""
+    ms of visible rows), both in passages with Japanese, and for blank passages shown (a count); and the newest
+    item's time."""
     con = connect(path)
     try:
         counts, last = {}, 0
@@ -352,13 +355,16 @@ def stats(since=0, path=None):
                 counts[f'{surface}:{kind}'] = [total, recent_]
                 last = max(last, newest)
         shown = con.execute('SELECT coalesce(sum(words), 0), coalesce(sum(CASE WHEN shown_at >= ? THEN words END), 0) '
-                            'FROM contexts WHERE shown_at IS NOT NULL', (since,)).fetchone()
-        onscreen = con.execute("SELECT coalesce(sum(ms), 0), coalesce(sum(CASE WHEN at >= ? THEN ms END), 0) "
-                               "FROM reading WHERE kind = 'visible'", (since,)).fetchone()
+                            'FROM contexts WHERE shown_at IS NOT NULL AND annotations != ?', (since, BLANK)).fetchone()
+        blank = con.execute('SELECT count(*), coalesce(sum(shown_at >= ?), 0) FROM contexts '
+                            'WHERE shown_at IS NOT NULL AND annotations = ?', (since, BLANK)).fetchone()
+        onscreen = con.execute('SELECT coalesce(sum(r.ms), 0), coalesce(sum(CASE WHEN r.at >= ? THEN r.ms END), 0) '
+                               'FROM reading r JOIN contexts c USING (surface, view, context) '
+                               "WHERE r.kind = 'visible' AND c.annotations != ?", (since, BLANK)).fetchone()
     finally:
         con.close()
-    return {'counts': counts, 'shownWords': list(shown), 'readingMs': list(onscreen), 'last': last or None,
-            'since': since}
+    return {'counts': counts, 'shownWords': list(shown), 'blankPassages': list(blank), 'readingMs': list(onscreen),
+            'last': last or None, 'since': since}
 
 
 def count(path=None):

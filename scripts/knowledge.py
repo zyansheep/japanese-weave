@@ -56,7 +56,9 @@ PACES = (150, 250, 400, 650)   # the reading model's grid, scored by how well it
 READ_MAXES = (0.5, 0.7, 0.9)
 TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
 CALIBRATION_DAYS = 30
-SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese
+SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese, after a bin for none
+THIN_MIN_PASSAGES = 20     # thinned and untouched passages each before the thinning's effect is measured
+THIN_MIN_GAP = 0.005       # and how much less Japanese the thinned ones must have on average
 MIN_PASSAGE_WORDS = 15
 MIN_ACTIVE_MS = 1000
 UNLISTED_DAYS = 30         # opened words with no lexicon entry, counted over this many days
@@ -375,12 +377,15 @@ def tune(rows, contexts, listed, intervals, commands, now_ms):
 def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
     """Evidence on the default amount of Japanese, over the last `days` days.
 
-    reading: browser passages shown with some time on screen, by the share of their words in Japanese: how many, the
-    median ms of screen time per word, and opens per 100 words. Screen time overstates reading (a passage stays on
-    screen while its neighbours are read), so compare bins with each other, not with a reading speed.
-    jitter: passages the extension randomly thinned (plan.jitter < 1) against untouched ones. The thinning is random,
-    so the difference between the two groups is caused by the amount alone; effect: change in log ms per word per
-    unit of share, which approximates how much one more point of Japanese slows reading.
+    reading: browser passages shown with some time on screen, by the share of their words in Japanese (the first bin,
+    low = high = 0, is passages planned that got none): how many, the median ms of screen time per word, and opens
+    per 100 words. Screen time overstates reading (a passage stays on screen while its neighbours are read), so
+    compare bins with each other, not with a reading speed.
+    jitter: passages the extension randomly thinned (plan.jitter < 1, also to none) against untouched ones, among those
+    with candidates (thinning can't change a passage without any). The thinning is random, so the difference between
+    the two groups is caused by the amount alone; gap: how much less Japanese the thinned ones have (share), once both
+    groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how much
+    one more point of Japanese slows reading, once the gap is over THIN_MIN_GAP.
     presses: the reader's heavier/lighter presses per surface (intensity.py) and the share of the time spent at
     each level, from the ops log. A chat with Japanese turned off (threads.py, the "thread" changes) counts as one
     more chat lighter press (threadsOff: how many chats).
@@ -400,7 +405,8 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
         japanese = sum(1 for n in c['annotations'] if n[0] not in PUNCTUATION)
         plan = c.get('plan') or {}
         passages.append({'share': japanese / c['words'], 'msPerWord': c['active'] / c['words'], 'words': c['words'],
-                         'opens': opens.get(key, 0), 'jitter': plan.get('jitter'), 'level': plan.get('level', 0)})
+                         'opens': opens.get(key, 0), 'jitter': plan.get('jitter'), 'level': plan.get('level', 0),
+                         'candidates': plan.get('candidates') or 0})
 
     def summary(group):
         if not group:
@@ -411,17 +417,19 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
                 'opensPer100': round(100 * sum(p['opens'] for p in group) / words, 2)}
 
     normal = [p for p in passages if not p['level']]
-    bins = []
+    bins = [dict(summary([p for p in normal if not p['share']]), low=0.0, high=0.0)]
     for low, high in zip(SHARE_BINS, SHARE_BINS[1:]):
-        group = [p for p in normal if low <= p['share'] < high]
+        group = [p for p in normal if low <= p['share'] < high and p['share']]
         bins.append(dict(summary(group), low=low, high=min(1.0, high)))
-    jittered = [p for p in normal if p['jitter'] is not None and p['jitter'] < 1]
-    untouched = [p for p in normal if p['jitter'] == 1]
-    jitter = {'thinned': summary(jittered), 'untouched': summary(untouched), 'effect': None}
-    if len(jittered) >= 20 and len(untouched) >= 20:
+    offered = [p for p in normal if p['candidates'] > 0]
+    jittered = [p for p in offered if p['jitter'] is not None and p['jitter'] < 1]
+    untouched = [p for p in offered if p['jitter'] == 1]
+    jitter = {'thinned': summary(jittered), 'untouched': summary(untouched), 'gap': None, 'effect': None}
+    if len(jittered) >= THIN_MIN_PASSAGES and len(untouched) >= THIN_MIN_PASSAGES:
         mean = lambda xs: sum(xs) / len(xs)
         gap = mean([p['share'] for p in untouched]) - mean([p['share'] for p in jittered])
-        if gap > 0.005:
+        jitter['gap'] = round(gap, 4)
+        if gap > THIN_MIN_GAP:
             slow = mean([math.log(p['msPerWord']) for p in untouched]) - mean([math.log(p['msPerWord']) for p in jittered])
             jitter['effect'] = round(slow / gap, 3)
     presses = {}
@@ -452,15 +460,24 @@ def calibration_text(report):
     lines = [f'Last {report["days"]} days, {report["passages"]} web passages with time on screen (normal intensity):']
     for b in report['bins']:
         if b['n']:
-            lines.append(f'  {100 * b["low"]:4.0f}-{100 * b["high"]:3.0f}% Japanese: {b["n"]:4d} passages, '
+            share = f'{100 * b["low"]:4.0f}-{100 * b["high"]:3.0f}% Japanese' if b['high'] else 'no Japanese'.rjust(18)
+            lines.append(f'  {share}: {b["n"]:4d} passages, '
                          f'{b["msPerWord"]:4d} ms on screen per word, {b["opensPer100"]:.2f} opens per 100 words')
     j = report['jitter']
     if j['thinned']['n'] and j['untouched']['n']:
         lines.append(f'Randomly thinned passages: {j["thinned"]["n"]} at {100 * j["thinned"]["share"]:.1f}% Japanese, '
                      f'{j["thinned"]["msPerWord"]} ms/word; untouched: {j["untouched"]["n"]} at '
                      f'{100 * j["untouched"]["share"]:.1f}%, {j["untouched"]["msPerWord"]} ms/word.')
-        lines.append(f'  Each extra point of Japanese changes screen time per word by about {j["effect"] / 100:+.1%}.'
-                     if j['effect'] is not None else '  Not enough of either yet to measure the effect (20 each).')
+        if j['effect'] is not None:
+            lines.append(f'  Each extra point of Japanese changes screen time per word by about '
+                         f'{j["effect"] / 100:+.1%}.')
+        elif j.get('gap') is not None:  # enough of both, but the thinning took too little Japanese off
+            lines.append(f'  Thinned passages have only {100 * j["gap"]:.1f} points less Japanese than untouched ones: '
+                         f'too close to measure the effect ({100 * THIN_MIN_GAP:.1f} needed).' if j['gap'] > 0 else
+                         f'  Thinned passages have no less Japanese than untouched ones ({-100 * j["gap"]:.1f} points '
+                         "more): the effect can't be measured yet.")
+        else:
+            lines.append(f'  Not enough of either yet to measure the effect ({THIN_MIN_PASSAGES} each).')
     else:
         lines.append('No randomly thinned passages yet (extension 0.6.0 and later).')
     for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
@@ -501,10 +518,11 @@ def unlisted_text(summary):
 # ---- the dial ----
 
 def peek_rate(rows, contexts, now_ms):
-    """Browser peeks per 100 words shown over the last RATE_DAYS days: (rate or None, words shown, peeks)."""
+    """Browser peeks per 100 words shown over the last RATE_DAYS days: (rate or None, words shown, peeks). Passages
+    shown without Japanese (blank) have nothing to peek at and don't count."""
     since = now_ms - RATE_DAYS * DAY_MS
     shown = sum(c['words'] or 0 for c in contexts.values()
-                if c['surface'] == 'browser' and c['shown_at'] and c['shown_at'] >= since)
+                if c['surface'] == 'browser' and c['shown_at'] and c['shown_at'] >= since and c['annotations'])
     peeks = sum(1 for r in rows if r['surface'] == 'browser' and r['kind'] in ('peek', 'flip') and r['at'] >= since)
     return (100 * peeks / shown if shown else None), shown, peeks
 
