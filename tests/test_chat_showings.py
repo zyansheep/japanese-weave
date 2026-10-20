@@ -77,11 +77,18 @@ class StayChance(unittest.TestCase):
                                knowledge.read_chance({'words': 30, 'height': 72, 'active': 3000}, 3, LINE, 250, 0.9))
 
     def test_without_paragraph_words_the_message_words_are_shared_out_by_height(self):
-        counted = {'words': 120, 'stays': [stay(A, 3000, 72), stay(B, 1000, 48), stay(B, 1000, 48)]}
-        shared = {'words': 120, 'stays': [stay(A, 3000), stay(B, 1000), stay(B, 1000)]}  # 72 and 48 of 120 px
-        for y in (3, 51, 91, 115):
-            self.assertAlmostEqual(knowledge.stay_chance(shared, y, LINE), knowledge.stay_chance(counted, y, LINE))
-        self.assertGreater(knowledge.stay_chance(shared, 3, LINE), 0)
+        # 120 words in a 300 px message, of which A (72 px) and B (48 px) had stays: the rest has no Japanese
+        shared = {'words': 120, 'height': 300, 'stays': [stay(A, 3000), stay(B, 1000), stay(B, 1000)]}
+        passage = lambda band, ms, words: {'words': words, 'height': band[1], 'active': ms}
+        for y, band, ms in ((3, A, 3000), (51, A, 3000), (91, B, 2000), (115, B, 2000)):
+            self.assertAlmostEqual(knowledge.stay_chance(shared, y, LINE),
+                                   knowledge.read_chance(passage(band, ms, 120 * band[1] / 300), y - band[0], LINE))
+        unboxed = dict(shared, height=None)  # no message height: the bands on record, 72 and 48 of 120 px
+        self.assertAlmostEqual(knowledge.stay_chance(unboxed, 3, LINE),
+                               knowledge.read_chance(passage(A, 3000, 72), 3, LINE))
+        tiny = {'words': 10, 'height': 3000, 'stays': [stay(A, 3000)]}  # 0.24 words: at least 1
+        self.assertAlmostEqual(knowledge.stay_chance(tiny, 3, LINE), knowledge.read_chance(passage(A, 3000, 1), 3, LINE))
+        self.assertEqual(knowledge.stay_chance(dict(shared, words=0), 3, LINE), 0.0)  # no words to share out
 
 
 class Replay(unittest.TestCase):

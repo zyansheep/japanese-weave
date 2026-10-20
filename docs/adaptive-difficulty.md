@@ -86,9 +86,10 @@ candidate the fewest steps back, then the earliest entry; a form is matched only
   word and top at 0.7; a passage never on screen like that gives no evidence at all.
 - In a T3 message the same formula runs on the paragraph the word is in: the stays whose band holds the word's top
   (from half a line, at most 10 px, above the band down to its bottom), their ms added; words is the paragraph's
-  count when T3 sent it, else the message's words times the band's height over the summed height of the distinct
-  bands with stays (as if all its words were in those paragraphs: the read chance errs low); share is how far
-  down the band the word sits. A word whose paragraph has no stay gets 0 from this, so only the line rule from the
+  count when T3 sent it, else the message's words per pixel of its height times the band's height, at least 1 (the
+  message's words include paragraphs without Japanese, which T3 doesn't watch, so dividing by the watched bands
+  alone would overstate each; without a message height, the summed height of the distinct bands is used); share is
+  how far down the band the word sits. A word whose paragraph has no stay gets 0 from this, so only the line rule from the
   words opened can weigh it.
 - Unopened words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in
   English. Words opened in that sentence still count as opened.

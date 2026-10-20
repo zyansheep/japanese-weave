@@ -194,7 +194,9 @@ def stay_chance(context, y, line, pace=PACE_MS, top=READ_MAX):
     """The chance a word at height y of a T3 message was read, from the stays on screen of the paragraph it is in (the
     stays whose band holds the word's top, from half a line above the band, at most SLACK_PX, down to its bottom; their
     ms added), as read_chance does for a passage. The paragraph's words are the stays' count when sent, else the
-    message's words shared out by the band's height over the distinct bands on record. No stay holds the word: 0."""
+    message's words per pixel of its height (of the distinct bands on record when the height is missing) times the
+    band's height, at least 1: the message's words include paragraphs without Japanese, which have no stays. No stay
+    holds the word: 0."""
     stays = context.get('stays') or []
     slack = min(line / 2, SLACK_PX)
     mine = [s for s in stays if s['height'] > 0 and s['y'] - slack <= y < s['y'] + s['height']]
@@ -205,8 +207,9 @@ def stay_chance(context, y, line, pace=PACE_MS, top=READ_MAX):
     if counted:
         words = max(counted)
     else:
-        bands = sum(h for _y, h in {(s['y'], s['height']) for s in stays}) or context.get('height') or 0
-        words = (context.get('words') or 0) * band['height'] / bands if bands > 0 else 0
+        height = context.get('height') or sum(h for _y, h in {(s['y'], s['height']) for s in stays})
+        total = context.get('words') or 0
+        words = max(1.0, total * band['height'] / height) if total and height > 0 else 0
     return _chance(sum(s['ms'] for s in mine), words, (y - band['y'] + line) / band['height'], pace, top)
 
 
