@@ -18,6 +18,7 @@ Ops (each also carries uid, day, at and machine; see stamp):
   chat_day  {}                                         log-chat-day: today counts as assumed exposure
   exported  {"target": "claude-ai"|"chatgpt", "log_day": bool}
   noticed   {}                                         the stale-export notice was shown
+  thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
 log of everything that changed the word state sit side by side.
 """
@@ -40,6 +41,7 @@ import feedback
 import fwlib
 import intensity
 import knowledge
+import threads
 
 OUTBOX = 'outbox.jsonl'
 SYNCED = 'hub.json'        # {pulled: unix seconds of the last good pull, rev, collector}
@@ -53,7 +55,8 @@ BATCH = 20                 # queued ops per request
 REPLIES_PER_OP = 500
 MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
-PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed')  # applied to the cache while queued
+PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed',  # applied to the cache while queued
+               'thread')
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
 MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')  # a machine's own state
 BEFORE = 'before-collector'  # where a machine's own state is kept when it first takes the collector's
@@ -134,6 +137,10 @@ def validate(op):
     elif kind == 'exported':
         if op.get('target') not in ('claude-ai', 'chatgpt') or not isinstance(op.get('log_day', False), bool):
             return 'exported: {"target": "claude-ai"|"chatgpt", "log_day"?: bool}'
+    elif kind == 'thread':
+        if not threads.valid_session(op.get('session')) or not isinstance(op.get('off'), bool) \
+                or not text(op.get('source'), 20):
+            return 'thread: {"session", "off": true|false, "source"}'
     elif kind not in ('chat_day', 'noticed'):
         return f'unknown op {kind!r}'
     return None
@@ -186,6 +193,8 @@ def apply(state, op):
     if kind == 'noticed':
         state.setdefault('exported', {})['noticed'] = True
         return {}
+    if kind == 'thread':  # merged per chat: a later change from another machine is kept
+        return {'off': threads.merge(state, op['session'], {'off': op['off'], 'at': op['at'], 'source': op['source']})}
     return {}  # exposure: run folds it into exposure.json
 
 
@@ -480,6 +489,32 @@ def live_intensity(surface, timeout=LIVE_TIMEOUT):
         if isinstance(reply, dict) and reply.get('ok') and intensity.is_current(reply.get('intensity')):
             return reply['intensity']
     return intensity.current(fwlib.load_state().get('prefs'), surface)
+
+
+# ---- one chat without Japanese (threads.py) ----
+
+def change_thread(session, off, source, wait=True):
+    """Turns Japanese off (or back on) in one chat: a thread op, applied where the state lives or sent to the
+    collector; when that can't happen now (or wait is False: the hook never waits) it is queued and shows in the cache
+    at once, so the next prompt here honors it. Returns ({off, at, source}, error or None)."""
+    value = {'off': bool(off), 'at': intensity.now_ms(), 'source': str(source or 'unknown')[:20]}
+    result = submit(dict(value, kind='thread', session=session), wait=wait)
+    return value, 'collector unreachable; queued' if wait and result.get('queued') else None
+
+
+def live_chat(session=None, state=None, timeout=LIVE_TIMEOUT):
+    """(chat intensity in effect, this chat's switch or None) for the hook: one brief question to the collector, as in
+    live_intensity, else the cache. A change made here that the collector doesn't have yet is the later one, so it
+    wins."""
+    state = state if state is not None else fwlib.load_state()
+    mine = threads.entry(state, session)
+    url = fwlib.collector_url()
+    if url:
+        query = 'surface=chat' + (f'&session={quote(session)}' if threads.valid_session(session) else '')
+        reply = feedback.request(f'{url.rstrip("/")}/v1/intensity?{query}', timeout=timeout)
+        if isinstance(reply, dict) and reply.get('ok') and intensity.is_current(reply.get('intensity')):
+            return reply['intensity'], threads.later(mine, reply.get('thread'))
+    return intensity.current(state.get('prefs'), 'chat'), mine
 
 
 # ---- the collector ----

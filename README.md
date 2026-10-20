@@ -79,6 +79,7 @@ way round.
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
 | `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
 | `/japanese-weave:intensity [chat\|browser] up\|down\|normal` | More or less Japanese for the next 3 hours |
+| `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
@@ -188,6 +189,15 @@ in the browser (a toast on the page and the toolbar badge show the level) and in
 press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
 default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
 down or up.
+
+**Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
+Japanese in what you say to me") or run `/japanese-weave:intensity off here`, and that chat gets no Japanese from
+that reply on, with no time limit, while other chats carry on as usual; "japanese back on" or `... normal here` brings
+it back. Only a short request at the start or end of a prompt counts, never one about files, code, commits or the
+plugin itself ("no Japanese in commit messages" leaves the chat alone). This works in Codex too, by asking. The
+switch is kept per session id, recorded as a `thread` op (so the collector has it, and a change made while it is out
+of reach still holds here at once), and forgotten 60 days after its last change. `fw.py calibrate` counts each chat
+turned off as a lighter press.
 
 `fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
 one word's estimate and every observation behind it. The design, with its sources:

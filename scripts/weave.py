@@ -17,6 +17,7 @@ import fwlib  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
+import threads  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
 SYNC_EVERY = 120  # with a collector: sync the cache in the background when it is older than this
@@ -219,7 +220,8 @@ def calibration(text, state, level=0):
     percent = 100 * japanese / total
     verdict = ('it slipped into Japanese sentences, so this time write English sentences with only list words in Japanese'
                if off_list >= DRIFT and stage < 3 else f'over the {cap}% cap, so use less Japanese this time' if percent > cap else
-               f'under the {target}% target, so use more this time unless the topic needs zero Japanese'
+               f'under the {target}% target, so use more this time unless the topic needs zero Japanese or the user '
+               'asked for none'
                if percent < 0.7 * target else 'on target')
     return (f'\nYour last reply in this chat was {percent:.0f}% Japanese ({japanese} of {total} words, {learning} '
             f'learning word{"" if learning == 1 else "s"}): {verdict}.')
@@ -345,6 +347,18 @@ def interactive(env=None, data=None, exec_check=codex_exec, args_check=claude_ar
     return not one_shot(args_check())
 
 
+def switch(session, prompt, thread):
+    """This chat's switch after the user's prompt: a plain request to stop Japanese here, or to bring it back, or
+    `/japanese-weave:intensity off here`, takes effect on this very turn and goes to the ops log (threads.py)."""
+    asked = threads.request(prompt)
+    if asked is None or asked[0] == threads.is_off(thread):
+        return thread
+    try:
+        return hub.change_thread(session, asked[0], asked[1], wait=False)[0]
+    except Exception:  # not recorded, but this turn still does what was asked
+        return {'off': asked[0], 'at': intensity.now_ms(), 'source': asked[1]}
+
+
 STALE_EXPORT_DAYS = 7
 
 
@@ -380,11 +394,20 @@ def main(argv):
         return 0
     if state.get('paused'):
         return 0
-    markup = hook and abbr_glosses(state)
+    session = data.get('session_id') if threads.valid_session(data.get('session_id')) else None
     try:
-        level = hub.live_intensity('chat')['level']
+        live, thread = hub.live_chat(session, state)
+        level = live['level']
     except Exception:
-        level = 0
+        level, thread = 0, None
+    if session:
+        thread = switch(session, data.get('prompt'), thread)
+    if threads.is_off(thread):  # Japanese off in this chat: one line instead of the brief and its extras
+        note = threads.note(codex='turn_id' in data)
+        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': note}},
+                         ensure_ascii=False))
+        return 0
+    markup = hook and abbr_glosses(state)
     text = brief(state, exposure(), next_recall(state, data.get('session_id')) if hook and not markup else None,
                  markup=markup, know=knowledge.load(), level=level)
     if hook:

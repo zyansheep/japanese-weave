@@ -366,7 +366,8 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
     so the difference between the two groups is caused by the amount alone; effect: change in log ms per word per
     unit of share, which approximates how much one more point of Japanese slows reading.
     presses: the reader's heavier/lighter presses per surface (intensity.py) and the share of the time spent at
-    each level, from the ops log.
+    each level, from the ops log. A chat with Japanese turned off (threads.py, the "thread" changes) counts as one
+    more chat lighter press (threadsOff: how many chats).
     """
     since = now_ms - days * DAY_MS
     opens = {}
@@ -408,6 +409,7 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
             slow = mean([math.log(p['msPerWord']) for p in untouched]) - mean([math.log(p['msPerWord']) for p in jittered])
             jitter['effect'] = round(slow / gap, 3)
     presses = {}
+    threads_off = len({c['session'] for c in changes if c['surface'] == 'thread' and c['off'] and c['at'] >= since})
     for surface in ('chat', 'browser'):
         mine = [c for c in changes if c['surface'] == surface]
         recent = [c for c in mine if c['at'] >= since]
@@ -419,11 +421,13 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
                 time_at[c['level']] = time_at.get(c['level'], 0) + end - start
         lighter = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b < a)
         heavier = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b > a)
+        lighter += threads_off if surface == 'chat' else 0
         verdict = ('too heavy' if lighter >= 5 and lighter >= 3 * max(1, heavier) else
                    'too light' if heavier >= 5 and heavier >= 3 * max(1, lighter) else None)
         presses[surface] = {'lighter': lighter, 'heavier': heavier, 'hoursAt': {str(k): round(v / 3_600_000, 1)
                                                                                for k, v in sorted(time_at.items())},
                             'verdict': verdict}
+    presses['chat']['threadsOff'] = threads_off
     return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'presses': presses}
 
 
@@ -447,7 +451,9 @@ def calibration_text(report):
         p = report['presses'][surface]
         hours = ', '.join(f'{h} h at {int(k):+d}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
         verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''
-        lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){verdict}.')
+        n = p.get('threadsOff')
+        chats = f', counting {n} chat{"s" if n != 1 else ""} with Japanese turned off' if n else ''
+        lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){chats}{verdict}.')
     return '\n'.join(lines)
 
 
