@@ -28,12 +28,15 @@ The log (collector.py, feedback.py) holds, without page text:
   context, the word's index in the context, and a client id that makes resends harmless.
 - contexts: one row per paragraph per page load (browser) or chat message per window session (T3): its box,
   every glossed word in it as [word, x, y] relative to the context, and, for the browser, its word count and when
-  its Japanese was first on screen ("shown"). The words of shown paragraphs are the denominator of the peek rate
-  (paragraphs that got no Japanese don't count).
+  its Japanese was first on screen ("shown"). The words of shown paragraphs are the denominator of the peek rate.
+  Paragraphs planned to get Japanese that got none (no candidates fit, or the random thinning left none) are shown
+  too, with no glossed words, when enough of them is on screen: the baseline for calibration. They don't count
+  toward the peek rate and carry no evidence about words.
 - reading: evidence of where the reader was, in contexts with glossed words (browser paragraphs, T3 messages): clicks
   (point, link or text), text selections (box, length, the indexes of the glossed words covered, drag time), mouse
   paths over T3 messages ([ms, x, y] points), and stays on screen of each paragraph (its band in the context; ms of
-  possible reading, plus the time away, with media playing, or idle for 30 s). The model below doesn't use it yet.
+  possible reading, plus the time away, with media playing, or idle for 30 s), also of paragraphs left without
+  Japanese. The model below doesn't use it yet.
 
 Commands (`known`, `learn`) are kept with their time in `commands.jsonl` so a replay can place them.
 
@@ -182,11 +185,13 @@ candidates (no model call); a heavier one raises the ceiling and asks the model 
 On the web, half the passages are also thinned at random to between 50% and 100% of what fits (levels.js
 jitterFor), and every passage's shown record carries its plan: the level, the factors, the swaps allowed and the
 candidates offered. Because the thinning is random, comparing thinned and untouched passages measures what the amount
-of Japanese alone does to reading time and opens. Every press is a `set` op, so the ops log says how often and when
-the default felt wrong. `fw.py calibrate` reports both (knowledge.json "calibration"): screen time per word and opens
-per 100 words by the share of Japanese in a passage, the thinned-versus-untouched effect, and per surface the
-presses and hours spent away from normal. Many lighter presses mean the default is too heavy, and the slowdown curve
-says how much each extra point of Japanese costs.
+of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
+change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
+`set` op, so the ops log says how often and when the default felt wrong. `fw.py calibrate` reports both
+(knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
+starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
+from the 0.5 points it needs), and per surface the presses and hours spent away from normal. Many lighter presses
+mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
 
 ## Inspecting
 

@@ -11,7 +11,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
   {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
                                         -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
   {"type": "stats", "since": ms}        -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
-                                            "readingMs", "last"}: what the log holds, on the collector when one is set
+                                            "blankPassages", "readingMs", "last"}: what the log holds, on the collector
+                                            when one is set
   {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
   {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
                                         -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither: read)
@@ -100,7 +101,8 @@ def handle(message):
         if collector:
             return feedback.remote_stats(collector, since)
         if not feedback.default_path().exists():
-            return {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'readingMs': [0, 0], 'last': None, 'since': since}
+            return {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'blankPassages': [0, 0], 'readingMs': [0, 0],
+                    'last': None, 'since': since}
         return dict(feedback.stats(since), ok=True)
     if kind == 'intensity':  # the extension's shortcut or popup: {surface, set: value} or {surface, step}
         surface = message.get('surface')

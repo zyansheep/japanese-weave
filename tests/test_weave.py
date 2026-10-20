@@ -756,7 +756,8 @@ class Collector(Home):
         state_dir = fwlib.home()
         state_dir.mkdir(parents=True, exist_ok=True)
         self.assertEqual(fw_host.handle({'type': 'stats', 'since': 0}),  # no log here yet, and none created
-                         {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'readingMs': [0, 0], 'last': None, 'since': 0})
+                         {'ok': True, 'counts': {}, 'shownWords': [0, 0], 'blankPassages': [0, 0], 'readingMs': [0, 0],
+                          'last': None, 'since': 0})
         self.assertFalse(feedback.default_path().exists())
         (state_dir / 'collector').write_text(self.url + '\n')
         feedback.forward(self.url, [self.item(), self.item('pin')], 't3')
@@ -1507,7 +1508,8 @@ class Knowledge(Home):
         contexts[('browser', view, 'c')] = {'surface': 'browser', 'view': view, 'context': 'c', 'annotations': notes,
                                            'words': words, 'shown_at': at, 'height': 80, 'active': active,
                                            'seen_until': at,
-                                           'plan': None if jitter is None else {'level': level, 'jitter': jitter}}
+                                           'plan': None if jitter is None else {'level': level, 'jitter': jitter,
+                                                                                 'candidates': 6}}
         for i in opened:
             rows.append({'id': len(rows) + 1, 'at': at + 1000 + i, 'surface': 'browser', 'kind': 'peek',
                          'word': notes[i][0], 'dwell_ms': 1500, 'view': view, 'context': 'c', 'position': i, 'uid': None})

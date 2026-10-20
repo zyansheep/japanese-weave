@@ -585,7 +585,8 @@ def log_cmd(args):
             d = row['detail']
             left_out = ', '.join(f'{d[k] / 1000:.0f}s {k}' for k in ('away', 'media', 'idle') if d[k] >= 1000)
             print(f'{when}  {row["surface"]:<7} on screen {row["ms"] / 1000:.0f}s of {d["wall"] / 1000:.0f}s'
-                  f'{f" ({left_out})" if left_out else ""}, a paragraph with {plural(glossed, "glossed word")}')
+                  f'{f" ({left_out})" if left_out else ""}, a paragraph with '
+                  f'{plural(glossed, "glossed word") if glossed else "no Japanese"}')
         elif row['kind'] == 'trace':
             print(f'{when}  {row["surface"]:<7} mouse path {plural(len(row["detail"]["points"]), "point")} over '
                   f'{row["ms"] / 1000:.1f}s, a message with {plural(glossed, "glossed word")}')
@@ -612,8 +613,10 @@ def collected(totals):
         total, today = kind(*names)
         parts.append(f'{plural(total, noun)} ({today} today)')
     shown = totals.get('shownWords') or [0, 0]
+    blank = totals.get('blankPassages') or [0, 0]  # an older collector doesn't count them
     reading = [round(ms / 60000) for ms in totals.get('readingMs') or [0, 0]]
-    return (f'Collected: {", ".join(parts)}; {plural(shown[0], "word")} shown on pages ({shown[1]} today); '
+    blanks = f', and {plural(blank[0], "passage")} without Japanese ({blank[1]} today)' if blank[0] else ''
+    return (f'Collected: {", ".join(parts)}; {plural(shown[0], "word")} shown on pages ({shown[1]} today){blanks}; '
             f'{reading[0]} min reading on screen ({reading[1]} today).')
 
 
