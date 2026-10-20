@@ -157,8 +157,9 @@ class Brief(Home):
 
     def test_full_has_no_calibration_line(self):
         state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('今', 'active')]}
-        self.assertIn('under the', weave.calibration(ENGLISH, state, level=2))
+        self.assertIn('under budget', weave.calibration(ENGLISH, state, level=2))
         self.assertEqual(weave.calibration(ENGLISH, state, level=intensity.FULL), '')
+        self.assertEqual(weave.calibration(ENGLISH, state, level=intensity.OFF), '')  # the hook sends a note instead
 
     def test_the_off_note_is_plain_english_and_fits_codex(self):
         until = int(time.time() * 1000) + intensity.DURATION_MS
@@ -192,7 +193,7 @@ class Hook(Home):
         self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], -2)  # one press heavier: Japanese again
         context, out = self.hook('And again.', transcript_path=str(self.log))
         self.assertIn(', turned much lighter for now by the user): ', context)
-        self.assertIn('under the', context)
+        self.assertIn('under budget', context)
         self.assertIn('systemMessage', out)
 
     def test_full_keeps_the_recall_cue_and_drops_the_calibration_line(self):

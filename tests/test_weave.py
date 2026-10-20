@@ -248,18 +248,27 @@ class Brief(Home):
 
     def test_brief_text(self):
         lines = weave.brief(self.state(), self.seen).split('\n')
-        self.assertIn('about 12%', lines[0])
-        self.assertIn('never over 20%', lines[0])
-        self.assertIn('at most 4 in one sentence', lines[0])
+        self.assertNotIn('%', lines[0])  # a lookup budget, not a share of the words
+        self.assertIn('Known words cost the user nothing', lines[0])
+        self.assertIn('about 2 per 100 words (6 in a 300-word reply), at most one in a sentence', lines[0])
         self.assertIn('never conjugated', lines[0])
+        self.assertIn('No Japanese outside these lists', lines[0])
         self.assertIn('never in files, code', lines[0])
-        self.assertTrue(lines[1].endswith(': 結局 = meaning, "hint"; 一緒に = meaning, "hint"'))
-        self.assertTrue(lines[2].endswith(': 最悪') and lines[3].endswith(': 中') and lines[4].endswith(': meaning → でも'))
+        # no evidence yet: learning words at the neutral prior (about 1 in 4), known words free
+        self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 4: '
+                                   '結局 = meaning, "hint"; 一緒に = meaning, "hint"')
+        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも; meaning → 中; meaning → 最悪')
+        self.assertEqual(len(lines), 3)
         self.assertNotIn('何', '\n'.join(lines[1:]))  # queued words are not in use yet
         three = weave.brief(self.state(3), self.seen)
-        self.assertIn('about 25%', three)
+        self.assertIn('one sentence in five should be fully Japanese', three)
+        self.assertIn('sentences of known words, particles and これ/それ only', three)
+        self.assertIn('No other Japanese anywhere, not even a common word', three)
+        self.assertNotIn('any common word', three)
         self.assertNotIn('"hint"', three)
-        self.assertIn('about 40%', weave.brief(self.state(4), self.seen))
+        self.assertNotIn('%', three)
+        self.assertIn('two sentences in five', weave.brief(self.state(4), self.seen))
 
     def test_recall_every_third_turn_shaky_first(self):
         state = self.state()
@@ -275,14 +284,22 @@ class Brief(Home):
         self.assertEqual(weave.share(english, words), (0, 57, 0, 0))
         woven = 'The build passes, でも the cache is warm, だから nothing else needs 問題, 今 もっと 簡単 things wait. ' * 3
         self.assertEqual(weave.share(woven + '```でも だから```\n(問題 = problem, "mondai")\nRecall: でも?', words), (18, 54, 6, 0))
-        self.assertIn('under the 12% target', weave.calibration(english, state))
-        self.assertIn('over the 20% cap', weave.calibration(woven, state))
+        self.assertIn('under budget, so use more learning words', weave.calibration(english, state))
+        # 6 learning words at the neutral prior's 0.27 in 54 words: about 3 lookups per 100 words, budget 0.5
+        line = weave.calibration(woven, state)
+        self.assertIn('had 18 Japanese words in 54 (12 known, 6 learning, 0 off the lists): about 2.99 expected lookups '
+                      'per 100 words against a budget of 0.5 (known words are free): over budget, so use fewer learning '
+                      'words', line)
         self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
         japanese = ('README.md にセクションを追加しました。空のエクスポートは行を削除しますが、テーブルは残ります。'
                     '他の問題は sync.py にあるので、直すかどうか教えてください。') * 2
-        self.assertIn('slipped into Japanese sentences', weave.calibration(japanese, state))
+        self.assertIn('so this time use no Japanese outside the lists', weave.calibration(japanese, state))
         state3 = dict(state, stage=3)
-        self.assertNotIn('slipped', weave.calibration(japanese, state3))  # Japanese sentences are the point at Stage 3
+        self.assertIn('outside the lists', weave.calibration(japanese, state3))  # off-list words at any stage
+        listed = ('The cache was the cause. 問題は簡単です。 The rest of the build still runs the way it did before, '
+                  'and nothing else in the release needs a change from you today. ') * 2
+        self.assertNotIn('outside the lists', weave.calibration(listed, state3))  # particles and です in a sentence
+        self.assertIn('outside the lists', weave.calibration(listed, state))  # but no grammar below Stage 3
         overlap = [word('一緒'), word('一緒に'), word('今'), word('今日')]
         self.assertEqual(weave.share('Let us go 一緒に, 今日 then 一緒 it. ' * 6, overlap)[0], 18)  # 3 per sentence
 
@@ -1375,18 +1392,18 @@ class Intensity(Home):
         self.assertEqual(intensity.describe({'level': 0}), 'normal')
 
     def test_the_chat_brief_follows_the_level(self):
-        self.assertEqual(weave.amounts(3), (25, 35, 4, 2))
-        self.assertEqual(weave.amounts(3, -1), (18, 24, 4, 1))
-        self.assertEqual(weave.amounts(3, 2), (45, 63, 4, 4))
-        self.assertEqual(weave.amounts(4, 2), (55, 65, 4, 6))  # capped
-        self.assertEqual(weave.amounts(1, -2), (3, 8, 2, 0))
+        self.assertEqual([weave.japanese_sentences(3, level) for level in (0, -1, 2)], [2, 1, 4])
+        self.assertEqual((weave.japanese_sentences(4, 2), weave.japanese_sentences(1, -2)), (6, 0))  # capped; none
         state = {'stage': 3, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
-        plain, light = weave.brief(state, {}), weave.brief(state, {}, level=-1)
-        self.assertIn('about 25%', plain)
+        plain, light, heavy = (weave.brief(state, {}, level=level) for level in (0, -1, 1))
+        self.assertIn('about 2 per 100 words', plain)
         self.assertIn('one sentence in five', plain)
         self.assertIn('(Stage 3, turned lighter for now by the user)', light)
-        self.assertIn('about 18%', light)
+        self.assertIn('about 1 per 100 words (3 in a 300-word reply), at most one in a sentence', light)
         self.assertIn('one sentence in ten', light)
+        self.assertIn('about 3 per 100 words (9 in a 300-word reply), at most 2 in a sentence', heavy)
+        for brief in (plain, light, heavy):
+            self.assertIn('Known (write the Japanese every time the English word has that meaning): meaning → でも', brief)
 
     def test_the_native_host_saves_and_reads_the_browser_level(self):
         fwlib.save_state(fwlib.new_state(known_top=40))
@@ -1620,8 +1637,134 @@ class Knowledge(Home):
         state = {'stage': 2, 'stage_pinned': True, 'paused': False,
                  'words': [word('一緒に', 'active'), word('結局', 'shaky'), word('多分', 'active')]}
         know = {'offset': {'t3': 0.0}, 'words': {'多分': {'k': 1.1, 'sd': 0.5}, '一緒に': {'k': 4, 'sd': 0.5}}}
-        line = weave.brief(state, {}, know=know).split('\n')[1]
-        self.assertTrue(line.endswith(': 多分 = meaning, "hint"; 結局 = meaning, "hint"; 一緒に = meaning, "hint"'), line)
+        lines = weave.brief(state, {}, know=know).split('\n')
+        self.assertTrue(lines[1].endswith(': 多分 = meaning, "hint"; 結局 = meaning, "hint"'), lines[1])
+        self.assertTrue(lines[2].endswith(': meaning → 一緒に'), lines[2])  # known at a glance, whatever its status
+
+
+class Budget(Home):
+    """Below full a level is a lookup budget: words known at a glance are free, learning words spend it."""
+
+    def know(self, ks, t3=0.0, browser=0.0):
+        return {'offset': {'t3': t3, 'browser': browser}, 'words': {ja: {'k': k, 'sd': 0.5} for ja, k in ks.items()}}
+
+    def test_known_at_a_glance_and_learning_split_by_lookup_chance(self):
+        words = [word('でも'), word('中'), word('最悪'), word('一緒に', 'active'), word('結局', 'shaky'), word('多分', 'active')]
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False, 'words': words}
+        # 中: known but looked up often; 結局: shaky but known at a glance; 最悪 and 一緒に: no evidence (their status)
+        know = self.know({'でも': 4.0, '中': 0.5, '結局': 3.0, '多分': 1.5})
+        free, learning, p = weave.lists(state, {}, know)
+        self.assertEqual([w['ja'] for w in free], ['でも', '最悪', '結局'])
+        self.assertEqual([w['ja'] for w in learning], ['一緒に', '多分', '中'])  # p 0.27, 0.18, 0.38: nearest 0.25 first
+        self.assertAlmostEqual(p['最悪'], knowledge.sigmoid(-fwlib.KNOWN_PRIOR_K))
+        self.assertAlmostEqual(p['一緒に'], knowledge.sigmoid(-knowledge.prior(None)))
+        self.assertAlmostEqual(weave.chance(word('中'), know), knowledge.sigmoid(-0.5))
+        self.assertAlmostEqual(weave.chance(word('最悪'), self.know({}, t3=0.5)), knowledge.sigmoid(0.5 - 2.5))  # T3
+        lines = weave.brief(state, {}, know=know).split('\n')
+        self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 3: '
+                                   '一緒に = meaning, "hint"; 中 = meaning, "hint" | sometimes, about 1 in 5: '
+                                   '多分 = meaning, "hint"')
+        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも; meaning → 最悪; meaning → 結局')
+        # mean chance (0.27 + 0.38 + 0.18) / 3: 0.5 / 0.28 is 1.8, so 2 per 100 words
+        self.assertIn('about 2 per 100 words (6 in a 300-word reply)', lines[0])
+        none = weave.brief(state, {}, know=self.know({ja: 5.0 for ja in ('でも', '中', '最悪', '一緒に', '結局', '多分')}))
+        self.assertIn('No learning words right now, only known ones.', none)
+        self.assertIn('Learning now, by how often the user looks one up: none\n', none)
+
+    def test_band_names_the_band_words_not_known_at_a_glance(self):
+        state = fwlib.new_state('2026-01-01', known_top=200)  # and the next 5 words come in as learning words
+        state.update(stage=3, stage_pinned=True)
+        often = [w['ja'] for w in state['words'][10:40]]  # known, but the gloss log says they are looked up a lot
+        brief = weave.brief(state, {}, know=self.know({ja: 1.0 for ja in often}))
+        free, learning, _ = weave.lists(state, {}, self.know({ja: 1.0 for ja in often}))
+        self.assertEqual(len(free), 170)
+        self.assertEqual(len(learning), weave.LEARN_MAX)
+        lines = brief.split('\n')
+        self.assertTrue(lines[2].startswith('Default swaps: '), lines[2])
+        band = lines[3]
+        self.assertTrue(band.startswith('Known (if unsure a word is one of them, keep the English): roughly the 205 '
+                                        'most common Japanese words and phrases, except these, not known at a glance '
+                                        'yet: '), band)
+        named = band.split('yet: ')[1].rstrip('.').split(', ')
+        unlisted = [ja for ja in often if ja not in {w['ja'] for w in learning}]
+        self.assertEqual(named, unlisted)  # the 6 that didn't make the learning list; the 24 that did are listed there
+        self.assertTrue(all(ja in lines[1] for ja in often if ja not in unlisted))
+        self.assertNotIn('use freely', brief)
+        self.assertLess(len(brief), 3400)
+        self.assertEqual(fwlib.known_band(state), (205, [], []))  # the default still describes status known
+
+    def test_learning_words_per_100_words_spend_the_budget(self):
+        self.assertIsNone(weave.per_100(0.5, []))
+        self.assertEqual(weave.per_100(0.5, [0.25] * 4), 2)
+        self.assertEqual(weave.per_100(0.5, [0.12]), 4)  # 4.2
+        self.assertEqual(weave.per_100(0.3, [0.27]), 1)  # 1.1: halves under 2
+        self.assertEqual(weave.per_100(0.15, [0.27]), 0.5)  # 0.56: never none while there are learning words
+        self.assertEqual(weave.per_100(0.15, [0.9]), 0.5)
+        self.assertEqual(weave.per_100(0.5, [0.3, 0.4]), 1.5)  # 1.43
+        self.assertEqual(weave.per_100(1.2, [0.1]), weave.PER_100[1])  # 12, at most 8
+        self.assertEqual([weave.most_per_100(level) for level in (-2, -1, 0, 1, 2)], [5, 5, 5, 8, 8])  # per sentence
+        self.assertEqual(weave.per_100(1.5, [0.1], weave.most_per_100(0)), 5)  # 15, but one a sentence
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
+        self.assertIn('about 0.5 per 100 words (2 in a 300-word reply), at most one in a sentence',
+                      weave.brief(state, {}, level=-2))
+        self.assertIn('about 4 per 100 words (12 in a 300-word reply), at most 2 in a sentence',
+                      weave.brief(state, {}, level=2))  # 1.2 / 0.27
+        self.assertEqual(weave.lookup_budget(state), intensity.BUDGETS[0])
+        state['prefs'] = {'challenge': 1.5}  # the popup's challenge is normal's budget and scales the others
+        self.assertEqual(weave.lookup_budget(state), 1.5)
+        self.assertAlmostEqual(weave.lookup_budget(state, -1), 0.9)
+        self.assertIn('about 5 per 100 words', weave.brief(state, {}))  # 1.5 / 0.27 is 5.6, but one a sentence
+        state['prefs'] = {'challenge': 3}
+        reply = 'The build passes and the cache is warm, so we ship it 今. ' * 3 + 'Nothing else needs doing today. ' * 9
+        line = weave.calibration(reply, state)  # 3 learning words in 84
+        self.assertIn('about 0.96 expected lookups per 100 words against a budget of 3', line)
+        self.assertTrue(line.endswith(': on budget.'), line)  # 5 per 100 words, all it asks for, would spend 1.35
+        self.assertIsNone(weave.lookup_budget(state, intensity.FULL))
+
+    def test_feedback_line_compares_expected_lookups_with_the_budget(self):
+        words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active')]
+        state = {'stage': 2, 'stage_pinned': True, 'words': words}
+        filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. '
+        one = filler * 5 + 'Then the 問題 goes away. '  # 1 learning word, at the neutral prior's 0.27, in 95
+        line = weave.calibration(one, state)
+        self.assertIn('had 1 Japanese words in 95 (0 known, 1 learning, 0 off the lists): about 0.28 expected lookups '
+                      'per 100 words', line)
+        self.assertIn('against a budget of 0.5 (known words are free): on budget.', line)
+        self.assertIn('over budget', weave.calibration(one, state, level=-2))  # 0.25 against 0.15
+        self.assertIn('under budget', weave.calibration(one, state, level=2))  # against 1.2
+        known = filler.replace('so', 'だから') * 5  # known words are free, however many
+        self.assertIn('(5 known, 0 learning, 0 off the lists): about 0.00 expected lookups', weave.calibration(known, state))
+        settled = self.know({'簡単': 4.0, '問題': 4.0})  # no learning words to use more of: no nudge
+        self.assertTrue(weave.calibration(filler * 5, state, know=settled).endswith('are free): on budget.'))
+        # off the lists: a word not in use yet, a katakana loanword, or a listed word conjugated
+        for reply in (filler * 5 + 'Then the 設定 goes away.', filler * 5 + 'Then the キャッシュ goes away.',
+                      filler * 5 + 'Then it is 簡単です now.'):
+            line = weave.calibration(reply, state)
+            self.assertIn('1 off the lists', line)
+            self.assertTrue(line.endswith('so this time use no Japanese outside the lists.'), line)
+        self.assertIn('1 off the lists', weave.calibration(filler * 5 + 'Then the 中 goes away.',
+                                                           dict(state, words=words + [word('中', 'queue')])))
+        self.assertEqual(weave.calibration(filler * 5, state, level=intensity.FULL), '')
+        self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
+
+    def test_words_known_at_a_glance_leave_their_learning_slot(self):
+        state = fwlib.new_state('2026-10-01')
+        for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
+            fwlib.refill(state, day, settled=set())
+        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
+        self.assertEqual(len(active), fwlib.WINDOW)
+        self.assertEqual(fwlib.refill(state, '2026-10-05'), 0)  # no knowledge.json: every word takes its slot
+        # the gloss log says 3 of them are known at a glance on the web (browser offset), whatever T3 says
+        fwlib.write_json(fwlib.home() / 'knowledge.json', self.know({active[0]: 4.0, active[1]: 3.5, active[2]: 2.5,
+                                                                     active[3]: 1.0}, t3=5.0, browser=1.0))
+        self.assertEqual(fwlib.settled_words(), {active[0], active[1]})  # sigmoid(1 - 2.5) is 0.18: not yet
+        self.assertEqual(fwlib.refill(state, '2026-10-05'), 2)
+        self.assertEqual([fwlib.find(state, ja)['status'] for ja in active[:2]], ['active', 'active'])  # unchanged
+        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW + 2)
+        self.assertEqual(fwlib.refill(state, '2026-10-06'), 0)  # the learning set is full again
+        self.assertEqual(fwlib.settled_words({'offset': {'browser': True}, 'words': {'x': {'k': 'high'}, 'y': None}}), set())
+        self.assertEqual(fwlib.settled_words([]), set())
 
 
 class DamagedState(Home):

@@ -161,8 +161,21 @@ words; the controller sets how much.
 
 ## Chat
 
-A prompt can't enforce a per-reply budget, so chat only uses the estimates for order: the learning list is sorted by
-learning value (most useful first), which is what "use 2 to 4 per reply" draws from.
+A prompt can't enforce a per-reply budget exactly, so the brief (weave.py) asks for an amount the budget pays for and
+the next turn says how the last reply did. Each word in use gets a chat lookup chance p: its estimate with the T3
+offset, else from its status (known: k = 2.5, fwlib.KNOWN_PRIOR_K; otherwise the neutral prior). Words with p under
+8% (fwlib.FREE_P) are known at a glance, whatever their status: they cost nothing and go in wherever the English has
+their meaning, listed as swaps or, from 150 of them, as a band whose exceptions name every band word that isn't one
+of them and isn't listed as learning. The rest are learning words, known ones included: up to 24, by learning value
+(most useful first), grouped by p with rough odds (often, about 1 in 4; sometimes; rarely). The brief asks for the
+budget over their mean p per 100 words (to the nearest half under 2; at least 0.5, at most 5 per word allowed in a
+sentence and 8 in all), at most intensity.per_sentence in a sentence, where the English around each makes its meaning
+clear. Fully Japanese sentences (Stage 3 on) may use only known words, particles and です/ます, and no stage may use
+Japanese outside the lists. The line on the last reply counts its known, learning and off-list words and its expected
+lookups per 100 words: p summed over the learning (and unlisted) words used, plus 0.27 (the neutral prior) per
+off-list word, over its words; known words are left out, being free. Off-list Japanese gets "no Japanese outside the
+lists"; else over 1.5 times the budget asks for fewer learning words, and under half of it (or of what the most the
+brief asks for would spend) for more.
 
 ## Status from evidence
 
@@ -187,7 +200,8 @@ know is worth teaching it.
 - A flip on a known word counts like a peek day (two such days within a week make it shaky), not instant shaky; a
   flip on a learning word restarts its graduation clock.
 - Shaky words take learning slots: new words fill the learning set up to 20 active plus shaky words, instead of all
-  new words stopping while 5 or more are shaky.
+  new words stopping while 5 or more are shaky. A learning or shaky word known at a glance (browser p under 8% in
+  knowledge.json) keeps its status but takes no slot; without an estimate it takes one.
 
 ## Where it runs
 
@@ -209,18 +223,20 @@ The reader can turn the Japanese heavier or lighter for a while, separately in c
 the usual amount; the ends are modes of their own, -3 off (no Japanese) and 3 full (all the reader can follow), and a
 press past either end stays there and restarts the clock. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma
 (lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
-`fw.py intensity [chat|browser] up|down|normal|off|full`. In chat the hook scales the target, the cap and the share
-of fully Japanese sentences. On web pages a lighter level keeps that share of each passage's cached
+`fw.py intensity [chat|browser] up|down|normal|off|full`. In chat a level is a lookup budget per 100 words
+(intensity.BUDGETS: 0.15, 0.3, 0.5, 0.8, 1.2 from -2 to 2; a challenge, when set, is normal's and scales the rest)
+spent on learning words only (see Chat above), and it also scales the share of fully Japanese sentences. On web
+pages a lighter level keeps that share of each passage's cached
 candidates (no model call); a heavier one raises the ceiling and picks from the full answer (one answer and one cache
 for +1, +2 and full; asked for more on their own, the heavier levels got little more than normal, see
 docs/swap-prompt.md).
 
 In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
-calibration line or the export notice. Full replaces the target and cap with two rules: a sentence the reader could
+calibration line or the export notice. Full replaces the budget with two rules: a sentence the reader could
 follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in Japanese, and one
 that must stay English (steps, code, commands, paths, exact technical detail) swaps in every listed word, known or
 learning. The rules on zero-Japanese topics (health, money, safety and the like), on Japanese only in the chat reply,
-and on glosses stay as at every other level; there is no calibration line (no target to correct toward). A chat
+and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
 turned off on its own (threads.py) stays off at any level.
 
 On the web, half the passages are also thinned at random to between 50% and 100% of what fits (levels.js
@@ -256,7 +272,7 @@ the word swaps inside them, with no ceiling, budget or random thinning (the plan
 - `fw.py why WORD`: its prior, every scored observation with its weight, k over time, and moves. WORD may be a form
   of the word (なります).
 - `fw.py status`: the looked-up words lined up to come in next; `fw.py calibrate`: the 30 words opened most in the
-  last 30 days that the word list doesn't have, which is what the chat's Japanese sentences use beyond it.
+  last 30 days that the word list doesn't have, which is what chat replies slip in beyond it.
 
 ## Decisions from the review
 
