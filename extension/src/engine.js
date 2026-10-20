@@ -19,7 +19,7 @@ export async function requestSwaps({ keys, apiKey, model, level, stage = 0, batc
   const keyFor = { gemini: apiKey, ...keys };
   const percent = density > 0 ? Math.round(density * intensityFactor(heavy)) : 0;
   const system = buildSystemParts(level, words, shownToday, percent, stage, heavy);
-  const user = buildUserContent(batch, percent);
+  const user = buildUserContent(batch, percent, { level, words, heavy });
   const candidates = candidatesFor(model, keyFor);
   if (!candidates.length) throw new Error(`No key for ${model}`);
   const models = candidates.filter((m) => !(cooldown.get(m) > now()));

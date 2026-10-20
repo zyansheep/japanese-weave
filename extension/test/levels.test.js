@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
-  numberTrap, planSwaps, jitterFor, JITTER_MIN,
+  numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -281,6 +281,14 @@ describe('the compact answer', () => {
     expect(kept('I went to the store, then home.')).toBe(true);
     const noun = [{ k: 'p', o: 'going to the store', f: '店に行くこと', p: '店|に|行く|こと', g: 'going to the store', c: 'x' }];
     expect(validateSwaps(2, noun, words, 'I like going to the store with her.').length).toBe(1);
+    expect(kept('As soon as I went to the store we saw it.')).toBe(true); // a subject pronoun starts a new clause
+  });
+  test('f only has to say what the pieces say: bars and punctuation in f are let through', () => {
+    const kept = (f, p, k = 'p') => validateSwaps(2, [{ k, o: 'x', f, p, g: 'x', c: 'x' }], words)[0]?.f;
+    expect(kept('母|と|店|に|行く', '母|と|店|に|行く')).toBe('母と店に行く'); // f written with the bars
+    expect(kept('母と、店に行きました。', '母|と|店|に|行きました|。', 's')).toBe('母と店に行きました。'); // a comma the pieces left out
+    expect(kept('母と店に行く', '母|と|店|に|行く|。')).toBe('母と店に行く'); // a phrase keeps the English full stop
+    expect(kept('母と店に行く', '母|と|店|に|見る')).toBe(undefined); // other words are still a mismatch
   });
   test('conjugations follow the verb: 行く is 行って, not 行いて', () => {
     const named = (t, w) => validateSwaps(2, [{ kind: 'phrase', o: 'x', f: t, parts: [{ t, w }], g: 'x', ctx: 'x' }], words).length;
@@ -289,6 +297,22 @@ describe('the compact answer', () => {
     expect(named('見ませんでした', '見る')).toBe(1);
     expect(named('見せた', '見る')).toBe(0);
     expect(named('しています', 'する')).toBe(1);
+  });
+});
+
+describe('word swaps where the word cannot go', () => {
+  test('mae and ato never stand in for "before" or "after"; a verb that acts on something needs something after it', () => {
+    expect(misplaced({ o: 'Before', f: '前' }, 'Before you run the script, check it.')).toBe(true);
+    expect(misplaced({ o: 'after', f: '後' }, 'Call me after lunch.')).toBe(true);
+    expect(misplaced({ o: 'front', f: '前' }, 'Meet me in front of the store.')).toBe(false);
+    expect(misplaced({ o: 'stop', f: '止める' }, 'Otherwise the program will stop with an error.')).toBe(true);
+    expect(misplaced({ o: 'opened', f: '開ける' }, 'The door opened.')).toBe(true);
+    expect(misplaced({ o: 'opened', f: '開ける' }, 'He opened the window.')).toBe(false);
+    expect(misplaced({ o: 'stop', f: '止める' }, 'Please stop the music.')).toBe(false);
+    expect(misplaced({ kind: 'phrase', o: 'before bed', f: '寝る前', parts: [] }, 'before bed')).toBe(false);
+    const words = [{ ja: '前', en: 'before / front', hint: 'mae', status: 'shaky' }, { ja: '止める', en: 'stop', hint: 'tomeru', status: 'known' }];
+    expect(validateSwaps(2, [{ k: 'w', o: 'Before', f: '前', p: '', g: '', c: 'Before you run' },
+      { k: 'w', o: 'stop', f: '止める', p: '', g: '', c: 'will stop' }], words, 'Before you run it, the program will stop.')).toEqual([]);
   });
 });
 

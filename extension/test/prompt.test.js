@@ -11,7 +11,8 @@ describe('prompt', () => {
     for (const w of L1_WORDS) if (!katakana(w.ja)) expect(p).toContain(`${w.ja} = ${w.en}`);
     expect(p).toContain('THREE KINDS OF SWAP');
     expect(p).toContain('"so" as an intensifier');
-    expect(p).toContain('Zero Japanese in passages about health');
+    expect(p).toContain('Zero Japanese in passages that give or ask for health');
+    expect(p).toContain('A passing mention (a parked car');
     expect(p).toContain('Default is to swap');
     expect(p).toContain('No sentence swaps yet');
   });
@@ -28,11 +29,11 @@ describe('prompt', () => {
     expect(p).toContain('about one sentence in ten');
   });
   test('user content and schema shape', () => {
-    expect(buildUserContent([{ id: 'a', text: 'hi', extra: 1 }])).toBe('Passages:\n[{"id":"a","text":"hi"}]');
+    expect(buildUserContent([{ id: 'a', text: 'hi', extra: 1 }])).toBe('Passages:\n[{"id":"a","text":"hi","target":2}]');
     const twenty = Array(20).fill('word').join(' ');
     expect(buildUserContent([{ id: 'a', text: twenty }], 15)).toContain('"target":3');
     expect(buildSystemPrompt(2, undefined, [], 15)).toContain('about 15% of the words');
-    expect(buildSystemPrompt(2)).not.toContain('"target"');
+    expect(buildSystemPrompt(2)).toContain('Each passage comes with a "target"');
     expect(RESPONSE_SCHEMA.properties.passages.items.required).toEqual(['id', 'swaps']);
     const swap = RESPONSE_SCHEMA.properties.passages.items.properties.swaps.items;
     expect(swap.required).toEqual(['k', 'o', 'f', 'p', 'g', 'c']);
@@ -65,9 +66,33 @@ describe('prompt', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
     expect(buildSystemPrompt(2, words, [], 0, 3, 0)).toBe(buildSystemPrompt(2, words, [], 0, 3));
     expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('about one sentence in three');
-    expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('two or three word or phrase swaps each');
     expect(buildSystemPrompt(2, words, [], 0, 3, 2)).toContain('about two sentences in five');
-    expect(buildSystemPrompt(1, words, [], 0, 1, 2)).toContain('one or two word or phrase swaps in every sentence');
+  });
+  test('every passage gets a target: the most swaps planSwaps shows, by sentences or density, raised by a heavier intensity', () => {
+    const target = (text, ...args) => JSON.parse(buildUserContent([{ id: 'a', text }], ...args).slice('Passages:\n'.length))[0].target;
+    const two = 'The first sentence is here today. The second one follows it now.';
+    expect(target(two)).toBe(4); // Level 2: two per sentence
+    expect(target(two, 0, { level: 1 })).toBe(2);
+    expect(target(two, 0, { heavy: 1 })).toBe(6); // 4 x 1.4
+    expect(target(two, 0, { heavy: 2 })).toBe(7); // 4 x 1.8
+    expect(target(two, 25)).toBe(3); // a density: its share of the 12 words
+  });
+  test('each passage names the listed words its English says: learning words, then known ones as leads', () => {
+    const words = [
+      { ja: 'ある', en: 'have / exist', status: 'shaky' },
+      { ja: '入る', en: 'enter', status: 'active' },
+      { ja: '犬', en: 'dog', status: 'known' },
+      { ja: 'そして', en: 'and then / and', status: 'known' },
+      { ja: 'バス', en: 'bus', status: 'known' },
+    ];
+    const [p] = JSON.parse(buildUserContent([{ id: 'a', text: 'We entered and the dogs had a bus. I have been there.' }], 0, { words })
+      .slice('Passages:\n'.length));
+    expect(p.learning).toEqual(['ある = have / exist: had', '入る = enter: entered']);
+    expect(p.listed).toEqual(['犬 = dog: dogs']); // not "and" for soshite, nor a katakana loanword
+    expect(buildUserContent([{ id: 'a', text: 'Nothing listed here at all.' }], 0, { words })).not.toContain('learning');
+    // without the plugin's word state, the level's bundled list
+    expect(buildUserContent([{ id: 'a', text: 'But the rain stopped.' }], 0, { level: 1 })).toContain('"learning":["でも = but');
+    expect(buildSystemPrompt(2, words)).toContain('"listed" names the KNOWN words');
   });
   test('the stage sets how many sentences go fully into Japanese', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
