@@ -314,6 +314,19 @@ class Collector(Home):
 class Calibration(unittest.TestCase):
     NOW = 1_800_000_000_000
 
+    def test_a_burst_of_presses_is_one_decision(self):
+        hour, second = 3_600_000, 1000
+        chat = lambda at, level: {'at': at, 'surface': 'chat', 'level': level, 'until': at + 3 * hour if level else 0,
+                                  'source': 't3', 'machine': 'm'}
+        trying = [chat(self.NOW - 5 * hour + i * second, level) for i, level in enumerate([1, 0, 1, 2, 2, 1, 0])]
+        overshoot = [chat(self.NOW - 2 * hour, -1), chat(self.NOW - 2 * hour + 5 * second, -2),
+                     chat(self.NOW - 2 * hour + 9 * second, -1)]
+        report = knowledge.calibrate([], {}, trying + overshoot, self.NOW)
+        self.assertEqual((report['presses']['chat']['lighter'], report['presses']['chat']['heavier']), (1, 0))
+        expired = [chat(self.NOW - 10 * hour, 1), chat(self.NOW - hour, 1)]  # the first ran out: up again from normal
+        report = knowledge.calibrate([], {}, expired, self.NOW)
+        self.assertEqual(report['presses']['chat']['heavier'], 2)
+
     def test_chats_turned_off_count_as_lighter_presses(self):
         hour = 3_600_000
         chat = lambda at, level: {'at': at, 'surface': 'chat', 'level': level, 'until': at + 3 * hour, 'source': 't3',

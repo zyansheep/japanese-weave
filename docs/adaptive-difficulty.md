@@ -199,7 +199,9 @@ jitterFor), and every passage's shown record carries its plan: the level, the fa
 candidates offered. Because the thinning is random, comparing thinned and untouched passages measures what the amount
 of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
 change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
-`set` op, so the ops log says how often and when the default felt wrong. `fw.py calibrate` reports both
+`set` op, so the ops log says how often and when the default felt wrong. Presses less than a minute apart count as
+one decision, judged by where they end (trying the keys, or overshooting and stepping back, isn't evidence), and a
+level that ran out counts as normal before the next press. `fw.py calibrate` reports both
 (knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
 starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
 from the 0.5 points it needs), and per surface the presses and hours spent away from normal. Many lighter presses

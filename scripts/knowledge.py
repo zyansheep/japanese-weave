@@ -56,6 +56,7 @@ PACES = (150, 250, 400, 650)   # the reading model's grid, scored by how well it
 READ_MAXES = (0.5, 0.7, 0.9)
 TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
 CALIBRATION_DAYS = 30
+BURST_MS = 60_000          # intensity presses this close together are one decision (calibrate)
 SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese, after a bin for none
 THIN_MIN_PASSAGES = 20     # thinned and untouched passages each before the thinning's effect is measured
 THIN_MIN_GAP = 0.005       # and how much less Japanese the thinned ones must have on average
@@ -374,6 +375,21 @@ def tune(rows, contexts, listed, intervals, commands, now_ms):
 
 # ---- calibration: is the default amount right? ----
 
+def decisions(changes):
+    """[(at, before, after)] levels for one surface's intensity changes, oldest first: changes less than BURST_MS apart
+    are one decision (trying the keys, overshooting), judged by where they end; a level that ran out was normal."""
+    out, prev = [], None
+    for c in changes:
+        if prev is None or c['at'] - prev['at'] >= BURST_MS:
+            if prev is not None:
+                out[-1][2] = prev['level']
+            out.append([c['at'], prev['level'] if prev and prev['level'] and prev['until'] > c['at'] else 0, None])
+        prev = c
+    if prev is not None:
+        out[-1][2] = prev['level']
+    return [tuple(d) for d in out]
+
+
 def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
     """Evidence on the default amount of Japanese, over the last `days` days.
 
@@ -443,8 +459,8 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
             end = min(mine[i + 1]['at'] if i + 1 < len(mine) else now_ms, c['until'] if c['level'] else now_ms)
             if end > start and c['level']:
                 time_at[c['level']] = time_at.get(c['level'], 0) + end - start
-        lighter = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b < a)
-        heavier = sum(1 for a, b in zip([0] + [c['level'] for c in recent], [c['level'] for c in recent]) if b > a)
+        decided = [(a, b) for at, a, b in decisions(mine) if at >= since]
+        lighter, heavier = sum(1 for a, b in decided if b < a), sum(1 for a, b in decided if b > a)
         lighter += threads_off if surface == 'chat' else 0
         verdict = ('too heavy' if lighter >= 5 and lighter >= 3 * max(1, heavier) else
                    'too light' if heavier >= 5 and heavier >= 3 * max(1, lighter) else None)
