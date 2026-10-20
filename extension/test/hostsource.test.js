@@ -136,11 +136,15 @@ describe('interaction log', () => {
     const shown = { kind: 'shown', at: now, view: 'a1b2', context: 'c0ffee', words: 48, box: [0, 0, 600, 80], annotations: [['de', 1, 0]] };
     expect(cleanInteraction(shown, now)).toEqual(shown);
     for (const words of [0, 1.5, 10001, '48']) expect(cleanInteraction({ ...shown, words }, now)).toBeNull();
-    const plan = { level: -1, intensity: 0.7, jitter: 0.62, limit: 2, candidates: 4 };
+    const plan = { level: -1, intensity: 0.7, jitter: 0.62, limit: 2, candidates: 4, budget: 0.186, expected: 0.41 };
     expect(cleanInteraction({ ...shown, plan: { ...plan, text: 'x' } }, now)).toEqual({ ...shown, plan });
-    const full = { level: 3, intensity: 5, jitter: 1, limit: 9, candidates: 9 }; // levels.js planSwaps at full
+    const old = { level: -1, intensity: 0.7, jitter: 0.62, limit: 2, candidates: 4 }; // before levels meant a lookup budget
+    expect(cleanInteraction({ ...shown, plan: old }, now)).toEqual({ ...shown, plan: old });
+    const full = { level: 3, intensity: 5, jitter: 1, limit: 9, candidates: 9, expected: 2.5 }; // levels.js planSwaps at full: no budget
     expect(cleanInteraction({ ...shown, plan: full }, now)).toEqual({ ...shown, plan: full });
-    for (const bad of [{ ...plan, level: 4 }, { ...plan, jitter: 1.2 }, { ...plan, limit: -1 }]) {
+    expect(cleanInteraction({ ...shown, plan: { ...plan, budget: 0, expected: 0 } }, now).plan).toMatchObject({ budget: 0, expected: 0 });
+    for (const bad of [{ ...plan, level: 4 }, { ...plan, jitter: 1.2 }, { ...plan, limit: -1 }, { ...plan, budget: -0.1 },
+      { ...plan, expected: 1001 }, { ...plan, budget: NaN }, { ...plan, budget: '0.5' }, { ...plan, expected: null }]) {
       expect(cleanInteraction({ ...shown, plan: bad }, now)).toBeNull();
     }
   });

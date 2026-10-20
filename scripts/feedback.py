@@ -12,8 +12,10 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 blank passage, with annotations [], when enough of it was; in T3 once per message, its prose words;
                 older T3 messages have a word count from their transcript and no shown time), for browser passages
                 how the amount was chosen ("plan", JSON {level: the reader's intensity -3..3, intensity: its factor,
-                jitter: the passage's random factor (1: none), limit: swaps allowed, candidates: swaps the model
-                offered}); seq orders changes for export
+                jitter: the passage's random factor (1: none), limit: swaps kept (before 2026-10-20: allowed),
+                candidates: swaps the model offered, and since then budget: lookups the passage could spend on words
+                not known at a glance (none at full), expected: lookups predicted if it is read}); seq orders changes
+                for export
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -218,11 +220,15 @@ def _clean(item, now):
 
 
 def _plan_ok(plan, num):
+    """As the extension's cleanPlan (hostsource.js) checks it; budget and expected are optional, as plans from before
+    levels meant a lookup budget have neither (and full's has no budget)."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
-    return (isinstance(plan, dict) and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates'}
+    amount = lambda key: key not in plan or (num(plan[key]) and 0 <= plan[key] <= 1000)
+    return (isinstance(plan, dict)
+            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
-            and integer(plan.get('candidates'), 1000))
+            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected'))
 
 
 MAX_TRACE_POINTS = 200

@@ -36,6 +36,7 @@ test('popup: off until a time with a way back, full, and the Less and More butto
     await settle();
     expect($('operationText').textContent).toBe(`Off until ${clock}`);
     expect($('intensityInfo').textContent).toBe(`off until ${clock}`);
+    expect($('levelInfo').textContent).toBe('L1 · no Japanese for now');
     expect($('intensityBack').hidden).toBe(false);
     expect($('lighter').disabled).toBe(true);
     expect($('heavier').disabled).toBe(false);
@@ -44,10 +45,12 @@ test('popup: off until a time with a way back, full, and the Less and More butto
     expect(asked.find((m) => m.type === 'intensity')).toEqual({ type: 'intensity', step: 0 });
     expect($('operationText').textContent).toBe('On');
     expect($('intensityInfo').textContent).toBe('normal');
+    expect($('levelInfo').textContent).toBe('L1 · known words wherever they fit, plus ~0.5 lookups per 100 words'); // no host: normal's own
     expect($('intensityBack').hidden).toBe(true);
     $('heavier').click();
     await settle();
     expect($('intensityInfo').textContent).toBe(`full until ${clock}`);
+    expect($('levelInfo').textContent).toBe('L1 · all the Japanese it can for now');
     expect($('heavier').disabled).toBe(true);
     expect($('lighter').disabled).toBe(false);
   } finally {

@@ -122,19 +122,24 @@ export async function flushEvents({ storage, send }) {
   }
 }
 
-// How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed.
+// How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed. budget (the
+// passage's lookups to spend; none at full) and expected (lookups predicted if it is read) are optional, as plans from
+// before levels meant a lookup budget have neither; the host checks the same (feedback.py _plan_ok).
 function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
   const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
-  if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)) return undefined;
-  return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates };
+  const amount = (x) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1000);
+  if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)
+    || !amount(plan.budget) || !amount(plan.expected)) return undefined;
+  return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates,
+    ...(plan.budget !== undefined ? { budget: plan.budget } : {}), ...(plan.expected !== undefined ? { expected: plan.expected } : {}) };
 }
 
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every
 // glossed word in the same passage sat relative to the passage. Words and positions only, never page text. uid makes
 // a resend harmless. kind 'shown' instead marks when a passage's Japanese first came on screen, with its word count
-// (the denominator of the peek rate) and its plan (how many swaps it was allowed and why). 'click' and 'select' mark
+// (the denominator of the peek rate) and its plan (how many swaps it kept and why). 'click' and 'select' mark
 // where the reader was: a click's point (x, y from the passage's corner) and whether it hit a link or control; a
 // selection's box, its length in characters and the glossed words it covered (indexes into annotations), never its
 // text. 'visible' is one stay of the passage on screen: ms is

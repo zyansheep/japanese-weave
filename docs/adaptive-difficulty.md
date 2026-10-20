@@ -129,35 +129,43 @@ the volume.
 
 ## Choosing words (browser)
 
-Selection happens when results are read from the cache, not when Gemini is called: the cache keeps every validated
-candidate, so changing estimates or the dial never pays for new Gemini calls.
+Selection happens when results are read from the cache, not when the model is called: the cache keeps every validated
+candidate, so changing estimates, the budget or the level never pays for new model calls.
 
-Per passage, given the count limit N (the density setting or the level rule) and a peek budget B:
+A level is a lookup budget (scripts/intensity.py BUDGETS, mirrored in levels.js): the lookups per 100 words the reader
+puts up with, spent only on words not known at a glance. Per passage, with B = the level's budget per 100 words *
+jitter (the random thinning, below) * passage words / 100, and one use per Japanese word:
 
-1. Learning candidates (active or shaky words) are ordered by learning value: closeness of their predicted peek
-   chance to the 25% target on the log-odds scale, with Thompson sampling (k drawn from N(k_w, var_w)) so uncertain
-   words still get shown.
-2. An active word not yet shown today is admitted first, outside the budget (at most one per passage), so new words
-   always gather evidence.
-3. Each next learning word is admitted while its p fits the remaining budget; the first that doesn't fit is admitted
-   with probability remaining / p (so short passages still get learning words in expectation), then learning stops.
-4. Known words fill the rest of N; they cost nothing.
+1. Each candidate's listed words get their estimate (k and sd from knowledge.json; without one, k = 2.5, fwlib
+   KNOWN_PRIOR_K, for a known word, else the neutral prior) and a mean lookup chance p. A candidate whose words all
+   have p < 0.08 (fwlib FREE_P) is free: shown wherever the model offered it, at every level but off, except that the
+   random thinning keeps each with probability jitter.
+2. The others cost the sum of p over their words not known at a glance, and are ordered by learning value: closeness
+   of the least-known word's predicted lookup chance to the 25% target on the log-odds scale, with Thompson sampling (k
+   drawn from N(k_w, var_w)) so uncertain words still get shown.
+3. One with an active word not yet shown today is admitted first, outside the budget (at most one per passage), so new
+   words always gather evidence.
+4. Each next one is admitted while its cost fits the remaining budget, at most PER_SENTENCE in one sentence (one up to
+   normal, two when heavier; a full sentence passes to the next candidate); the first that doesn't fit is admitted
+   with probability remaining / cost (so short passages still get learning words in expectation), then it stops.
+5. The popup's density, when set, caps the total, budgeted candidates first; without it there is no other ceiling.
 
-Randomness is seeded by the passage and the day, so a page repaints the same way. Changing the dial repaints open
-pages; new estimates and the controller's daily budget apply to passages as they are painted, so words don't change
-under you while you read. Selection only chooses among Gemini's candidates, so a dial above what they can supply
-saturates (the controller's scale stops at 4).
+The passage's plan records B and the lookups expected (the sum of p over every listed word shown). Randomness is seeded
+by the passage and the day, so a page repaints the same way. Changing the challenge or the level repaints open pages;
+new estimates and the controller's daily budget apply to passages as they are painted, so words don't change under you
+while you read. Selection only chooses among the model's candidates, so a budget above what they can supply saturates
+(the controller's scale stops at 4).
 
 ### The dial and the budget
 
-`challenge` is the target number of peeks per 100 words shown, default 0 (adaptation off: today's behavior). It
-lives in the word state's preferences, so the browser and chat share it; set it with `fw.py challenge X`,
-`/japanese-weave:challenge X` or the popup.
+`challenge` is the target number of peeks per 100 words shown, default 0: normal's budget is then intensity.py's 0.5
+lookups per 100 words, unsteered. It lives in the word state's preferences, so the browser and chat share it; set it
+with `fw.py challenge X`, `/japanese-weave:challenge X` or the popup.
 
-B = budget per 100 words * passage words / 100, where budget per 100 words = challenge * scale. A daily controller
-compares the realized browser peek rate over the last 3 days (peeks per 100 words shown) with the target and moves
-scale by sqrt(target / realized), clamped to [0.25, 4], once at least 300 words were shown. The model picks which
-words; the controller sets how much.
+Normal's budget per 100 words = challenge * scale (0.5 * 1 without a challenge), sent by the native host as `budget`;
+the other levels scale with it (intensity.budget). A daily controller compares the realized browser peek rate over the
+last 3 days (peeks per 100 words shown) with the target and moves scale by sqrt(target / realized), clamped to
+[0.25, 4], once at least 300 words were shown. The model picks which words; the controller sets how much.
 
 ## Chat
 
@@ -223,13 +231,12 @@ The reader can turn the Japanese heavier or lighter for a while, separately in c
 the usual amount; the ends are modes of their own, -3 off (no Japanese) and 3 full (all the reader can follow), and a
 press past either end stays there and restarts the clock. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma
 (lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
-`fw.py intensity [chat|browser] up|down|normal|off|full`. In chat a level is a lookup budget per 100 words
-(intensity.BUDGETS: 0.15, 0.3, 0.5, 0.8, 1.2 from -2 to 2; a challenge, when set, is normal's and scales the rest)
-spent on learning words only (see Chat above), and it also scales the share of fully Japanese sentences. On web
-pages a lighter level keeps that share of each passage's cached
-candidates (no model call); a heavier one raises the ceiling and picks from the full answer (one answer and one cache
-for +1, +2 and full; asked for more on their own, the heavier levels got little more than normal, see
-docs/swap-prompt.md).
+`fw.py intensity [chat|browser] up|down|normal|off|full`. On both surfaces -2..2 are lookup budgets of 0.15, 0.3,
+0.5, 0.8 and 1.2 per 100 words (intensity.BUDGETS; scaled with normal's when a challenge is set), spent only on words
+not known at a glance: known words are free everywhere but off. In chat (see Chat above) the level also scales the
+share of fully Japanese sentences. On web pages (see Choosing words) a lighter level picks from each passage's cached
+candidates (no model call), a heavier one from the full answer (one answer and one cache for +1, +2 and full; asked for
+more on their own, the heavier levels got little more than normal, see docs/swap-prompt.md).
 
 In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
 calibration line or the export notice. Full replaces the budget with two rules: a sentence the reader could
@@ -239,9 +246,10 @@ learning. The rules on zero-Japanese topics (health, money, safety and the like)
 and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
 turned off on its own (threads.py) stays off at any level.
 
-On the web, half the passages are also thinned at random to between 50% and 100% of what fits (levels.js
-jitterFor), and every passage's shown record carries its plan: the level, the factors, the swaps allowed and the
-candidates offered. Because the thinning is random, comparing thinned and untouched passages measures what the amount
+On the web, half the passages are also thinned at random by a share between 50% and 100% (levels.js jitterFor), which
+keeps each free word with that chance and scales the budget by it, and every passage's shown record carries its plan:
+the level, its factor, the share, the swaps kept, the candidates offered, the budget and the lookups expected.
+Because the thinning is random, comparing thinned and untouched passages measures what the amount
 of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
 change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
 `set` op, so the ops log says how often and when the default felt wrong; one into off counts as lighter and one
@@ -262,8 +270,9 @@ interactions are logged, since there is no Japanese to measure. Full (+3) has it
 heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known,
 the passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words
 and the allowed grammar can say completely, at any stage. planSwaps shows every validated candidate, sentences before
-the word swaps inside them, with no ceiling, budget or random thinning (the plan says level 3, intensity 5, jitter
-1). Both ends last 3 hours after the last press like the other levels; a press further at an end restarts the clock.
+the word swaps inside them, with no ceiling, budget or random thinning (the plan says level 3, intensity 5, jitter 1,
+and has no budget). Both ends last 3 hours after the last press like the other levels; a press further at an end
+restarts the clock.
 
 ## Inspecting
 
