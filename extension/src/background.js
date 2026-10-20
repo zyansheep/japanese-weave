@@ -23,6 +23,7 @@ const INTENSITY_ALARM = 'intensity'; // when a heavier or lighter spell ends
 const INTENSITY_MS = 3 * 3600 * 1000; // as ../scripts/intensity.py DURATION_MS
 const SYNC_MINUTES = 30; // word statuses change at most a few times a day
 const FLUSH_DELAY_MS = 10000;
+const FLUSH_AT = 200; // queued log items sent at once, before a long scroll fills the queue (hostsource LOG_MAX)
 const cooldown = new Map(); // model -> rate-limit cooldown end; worker memory is enough
 const KEY_NAMES = ['apiKey', 'hostKey', 'anthropicKey', 'hostAnthropicKey'];
 // Pasted keys win over the ones setup stored.
@@ -238,8 +239,9 @@ async function logInteraction(msg, sender) {
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
   const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
   if (!item || (item.word !== undefined && !(await listed(item.word)))) return { ok: false };
-  await locked(() => queueLog(chromeStorage, [item]));
-  scheduleFlush();
+  const queued = await locked(() => queueLog(chromeStorage, [item]));
+  if (queued >= FLUSH_AT) void flush();
+  else scheduleFlush();
   return { ok: true };
 }
 
