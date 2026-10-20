@@ -11,7 +11,7 @@ Ops (each also carries uid, day, at and machine; see stamp):
   events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser (fwlib.apply_event)
   mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
-             "intensity_chat"?, "intensity_browser"?: {level, until, at, source}}}   (intensity.py)
+             "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja]}]}   chat replies scanned on some machine
@@ -478,6 +478,15 @@ def change_intensity(surface, delta, source):
     submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}, wait=False)
     error = (reply or {}).get('error') if isinstance(reply, dict) else None
     return intensity.current({intensity.pref(surface): value}, surface), error or 'collector unreachable; queued'
+
+
+def set_intensity(surface, level, source):
+    """A level set directly (fw.py intensity off|full), for DURATION_MS from now: a set op, here or on the collector,
+    queued when it is out of reach. Returns ({level, until, at}, error or None)."""
+    value = intensity.at_level(level, source)
+    queued = submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}).get('queued')
+    error = 'collector unreachable; queued' if queued else None
+    return intensity.current({intensity.pref(surface): value}, surface), error
 
 
 def live_intensity(surface, timeout=LIVE_TIMEOUT):

@@ -78,7 +78,7 @@ way round.
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
 | `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
-| `/japanese-weave:intensity [chat\|browser] up\|down\|normal` | More or less Japanese for the next 3 hours |
+| `/japanese-weave:intensity [chat\|browser] up\|down\|normal\|off\|full` | More or less Japanese, none (off) or all you can follow (full), for the next 3 hours |
 | `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
@@ -191,6 +191,15 @@ in the browser (a toast on the page and the toolbar badge show the level) and in
 press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
 default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
 down or up.
+
+**The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
+for 3 hours like the levels between (a press past either end stays there and restarts the clock);
+`fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
+means the hook sends only a one-line note to reply in plain English, until the time runs out or you press heavier.
+Full has no target or cap: every sentence you could follow in plain Japanese (your known and learning words plus
+common grammar) is written in Japanese, and the sentences that must stay English (steps, code, commands, exact
+technical detail) swap in every known or learning word. A chat turned off with `off here` stays off at any level.
+`fw.py calibrate` counts a press into off as lighter and into full as heavier.
 
 **Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
 Japanese in what you say to me") or run `/japanese-weave:intensity off here`, and that chat gets no Japanese from

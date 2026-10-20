@@ -590,7 +590,7 @@ class FeedbackStore(Home):
         shown = dict(self.item(), kind='shown', words=48, plan={'level': -1, 'intensity': 0.7, 'jitter': 0.62,
                                                                   'limit': 3, 'candidates': 5})
         del shown['word'], shown['position'], shown['dwellMs']
-        bad = [dict(shown, context='c2', plan={'level': 3, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1}),
+        bad = [dict(shown, context='c2', plan={'level': 4, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1}),
                dict(shown, context='c3', plan={'level': 0, 'intensity': 1, 'jitter': 1.5, 'limit': 1, 'candidates': 1}),
                dict(shown, context='c4', plan={'level': 0, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1,
                                                'text': 'page text'})]
@@ -880,9 +880,10 @@ class Hub(Home):
         self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 1)
         value, error = hub.change_intensity('chat', 1, 't3')
         self.assertEqual((value['level'], error), (2, None))
-        self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 2)  # at most 2
-        self.assertEqual(intensity.current(self.served()['prefs'], 'chat')['level'], 2)
-        self.assertEqual(hub.live_intensity('chat')['level'], 2)  # asked of the collector, not the cache
+        self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 3)  # full
+        self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], 3)  # at most full
+        self.assertEqual(intensity.current(self.served()['prefs'], 'chat')['level'], 3)
+        self.assertEqual(hub.live_intensity('chat')['level'], 3)  # asked of the collector, not the cache
         self.assertEqual(hub.live_intensity('browser'), dict(intensity.NORMAL))
         reply = feedback.request(self.url + '/v1/intensity', {'surface': 'chat', 'step': 2, 'source': 't3'})
         self.assertEqual(reply['ok'], False)
@@ -893,8 +894,8 @@ class Hub(Home):
         self.assertIn('Web pages: lighter (-1) until', out.getvalue())
         changes = feedback.intensity_changes(self.server_home / 'interactions.sqlite')
         self.assertEqual([(c['surface'], c['level'], c['source']) for c in changes],
-                         [('chat', 1, 't3'), ('chat', 2, 't3'), ('chat', 2, 't3'), ('chat', 0, 'command'),
-                          ('browser', -1, 'command')])
+                         [('chat', 1, 't3'), ('chat', 2, 't3'), ('chat', 3, 't3'), ('chat', 3, 't3'),
+                          ('chat', 0, 'command'), ('browser', -1, 'command')])
         brief = []
         with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
             with mock.patch('sys.stdout', new=io.StringIO()):
@@ -1359,9 +1360,9 @@ class Intensity(Home):
 
     def test_steps_clamp_expire_and_go_back_to_normal(self):
         prefs = {}
-        for _ in range(3):
+        for _ in range(4):
             prefs['intensity_chat'] = intensity.step(prefs, 'chat', 1, 't3', self.NOW)
-        self.assertEqual(intensity.current(prefs, 'chat', self.NOW), {'level': 2, 'until': self.NOW + intensity.DURATION_MS,
+        self.assertEqual(intensity.current(prefs, 'chat', self.NOW), {'level': 3, 'until': self.NOW + intensity.DURATION_MS,
                                                                       'at': self.NOW})
         self.assertEqual(intensity.current(prefs, 'browser', self.NOW)['level'], 0)
         self.assertEqual(intensity.current(prefs, 'chat', self.NOW + intensity.DURATION_MS)['level'], 0)  # expired
@@ -1369,7 +1370,7 @@ class Intensity(Home):
         self.assertEqual(intensity.step(prefs, 'chat', -1, 't3', later)['level'], -1)  # from normal again
         self.assertEqual(intensity.step(prefs, 'chat', 0, 't3', self.NOW), {'level': 0, 'until': 0, 'at': self.NOW,
                                                                              'source': 't3'})
-        self.assertFalse(intensity.valid({'level': 3, 'until': 0, 'at': 0}))
+        self.assertFalse(intensity.valid({'level': 4, 'until': 0, 'at': 0}))
         self.assertFalse(intensity.valid({'level': 1, 'until': 0, 'at': 0, 'note': 'x'}))
         self.assertEqual(intensity.describe({'level': 0}), 'normal')
 

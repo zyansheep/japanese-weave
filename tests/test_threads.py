@@ -215,7 +215,8 @@ class Hook(Home):
         self.assertEqual(self.thread_ops(), [('s1', True, 'command'), ('s1', False, 'command'), ('s9', True, 'command')])
         with mock.patch('sys.stderr', new=io.StringIO()):
             for args in (['intensity', 'off', 'here'], ['intensity', 'off', 'normal', 'here', '--session', 's1'],
-                         ['intensity', 'browser', 'off', 'here', '--session', 's1'], ['intensity', 'off']):
+                         ['intensity', 'browser', 'off', 'here', '--session', 's1'], ['intensity', 'off', 'full'],
+                         ['intensity', 'full', 'here', '--session', 's1']):
                 with self.assertRaises(SystemExit, msg=args):
                     self.fw(*args)
 

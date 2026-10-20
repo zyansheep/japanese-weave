@@ -23,6 +23,7 @@ import time
 import feedback
 import fwlib
 import inflection
+import intensity
 
 KNOWLEDGE = 'knowledge.json'
 COMMANDS = 'commands.jsonl'
@@ -402,9 +403,9 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
     the two groups is caused by the amount alone; gap: how much less Japanese the thinned ones have (share), once both
     groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how much
     one more point of Japanese slows reading, once the gap is over THIN_MIN_GAP.
-    presses: the reader's heavier/lighter presses per surface (intensity.py) and the share of the time spent at
-    each level, from the ops log. A chat with Japanese turned off (threads.py, the "thread" changes) counts as one
-    more chat lighter press (threadsOff: how many chats).
+    presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
+    heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
+    (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats).
     """
     since = now_ms - days * DAY_MS
     opens = {}
@@ -498,7 +499,8 @@ def calibration_text(report):
         lines.append('No randomly thinned passages yet (extension 0.6.0 and later).')
     for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
         p = report['presses'][surface]
-        hours = ', '.join(f'{h} h at {int(k):+d}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
+        at = lambda k: {str(intensity.OFF): 'off', str(intensity.FULL): 'at full'}.get(k, f'at {int(k):+d}')
+        hours = ', '.join(f'{h} h {at(k)}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
         verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''
         n = p.get('threadsOff')
         chats = f', counting {n} chat{"s" if n != 1 else ""} with Japanese turned off' if n else ''

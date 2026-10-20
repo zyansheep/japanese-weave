@@ -15,7 +15,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             when one is set
   {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
   {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
-                                        -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither: read)
+                                        -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither:
+                                            read); level -3 is off, 3 full
 
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
 evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
@@ -111,7 +112,7 @@ def handle(message):
         if 'set' in message:
             value = message['set']
             if not intensity.valid(value):
-                return {'ok': False, 'error': 'set: {level -2..2, until, at, source}'}
+                return {'ok': False, 'error': 'set: {level -3..3, until, at, source}'}
             hub.submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}, wait=False)
             return {'ok': True, 'intensity': intensity.current({intensity.pref(surface): value}, surface)}
         if 'step' in message:
