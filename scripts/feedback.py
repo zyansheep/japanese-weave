@@ -10,7 +10,7 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), and for browser
                 passages its word count, when its glossed words were first on screen ("shown"; for a blank passage,
                 with annotations [], when enough of it was) and how the amount was chosen ("plan", JSON {level: the
-                reader's intensity -2..2, intensity: its factor, jitter: the passage's random factor (1: none), limit:
+                reader's intensity -3..3, intensity: its factor, jitter: the passage's random factor (1: none), limit:
                 swaps allowed, candidates: swaps the model offered}); seq orders changes for export
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
@@ -44,6 +44,7 @@ import urllib.error
 import urllib.request
 
 import fwlib
+import intensity
 
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
@@ -216,7 +217,7 @@ def _clean(item, now):
 def _plan_ok(plan, num):
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     return (isinstance(plan, dict) and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates'}
-            and plan.get('level') in (-2, -1, 0, 1, 2) and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
+            and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
             and integer(plan.get('candidates'), 1000))
 
@@ -476,7 +477,7 @@ def intensity_changes(path=None):
         prefs = op.get('prefs') or {}
         for surface in ('chat', 'browser'):
             value = prefs.get(f'intensity_{surface}')
-            if isinstance(value, dict) and value.get('level') in (-2, -1, 0, 1, 2):
+            if isinstance(value, dict) and value.get('level') in intensity.LEVELS:
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],
                             'until': value.get('until') or 0, 'source': value.get('source') or ''})
     return out

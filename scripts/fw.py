@@ -38,8 +38,11 @@
   fw.py glosses abbr|footer                          T3 Code chats: gloss each Japanese word in an <abbr> shown
                                                      on hover or click (needs a T3 build that renders them), or
                                                      in a footer line (default)
-  fw.py intensity [chat|browser] [up|down|normal]    Japanese heavier or lighter for 3 hours, in chat replies
-                                                     (default) or on web pages; no step: show the level
+  fw.py intensity [chat|browser] [up|down|normal|off|full]
+                                                     Japanese heavier or lighter for 3 hours, in chat replies
+                                                     (default) or on web pages; off: none, full: every sentence
+                                                     that can be Japanese (each also for 3 hours); no step: show
+                                                     the level
   fw.py intensity [off|normal] here [--session ID]   no Japanese in one chat until turned back on (normal); ID:
                                                      its session id (default $CLAUDE_CODE_SESSION_ID)
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
@@ -786,15 +789,19 @@ def intensity_cmd(args):
     if 'here' in args.words:
         return thread_cmd(args)
     surfaces = [w for w in args.words if w in intensity.SURFACES]
-    steps = [w for w in args.words if w in ('up', 'down', 'normal')]
+    steps = [w for w in args.words if w in ('up', 'down', 'normal', 'off', 'full')]
     if len(surfaces) + len(steps) != len(args.words) or len(surfaces) > 1 or len(steps) > 1:
-        sys.exit('Usage: fw.py intensity [chat|browser] [up|down|normal], or one chat: fw.py intensity off|normal here')
+        sys.exit('Usage: fw.py intensity [chat|browser] [up|down|normal|off|full], or one chat: '
+                 'fw.py intensity off|normal here')
     surface, step = (surfaces or ['chat'])[0], (steps or [None])[0]
     names = {'chat': 'Chat replies', 'browser': 'Web pages'}
     if step is None:
         print(f'{names[surface]}: {intensity.describe(hub.live_intensity(surface, timeout=hub.TIMEOUT))}.')
         return
-    value, error = hub.change_intensity(surface, {'up': 1, 'down': -1, 'normal': 0}[step], 'command')
+    if step in ('off', 'full'):  # set outright, not a step from the level in effect
+        value, error = hub.set_intensity(surface, intensity.OFF if step == 'off' else intensity.FULL, 'command')
+    else:
+        value, error = hub.change_intensity(surface, {'up': 1, 'down': -1, 'normal': 0}[step], 'command')
     if error:
         print(f'Note: {error}.')
     print(f'{names[surface]}: {intensity.describe(value)}.'
@@ -877,7 +884,7 @@ def main(argv=None):
     p.add_argument('value', help='off, ' + ', '.join(str(c) for c in knowledge.CHALLENGES[1:]))
     p.set_defaults(run=challenge_cmd)
     p = sub.add_parser('intensity')
-    p.add_argument('words', nargs='*', metavar='chat|browser up|down|normal, or off|normal here')
+    p.add_argument('words', nargs='*', metavar='chat|browser up|down|normal|off|full, or off|normal here')
     p.add_argument('--session', help='the chat for "here": its Claude Code session id')
     p.set_defaults(run=intensity_cmd)
     sub.add_parser('calibrate').set_defaults(run=calibrate_cmd)

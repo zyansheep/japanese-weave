@@ -188,20 +188,31 @@ know is worth teaching it.
 ## Intensity and calibration
 
 The reader can turn the Japanese heavier or lighter for a while, separately in chat and on web pages
-(scripts/intensity.py): levels -2..2, times 0.5, 0.7, 1, 1.4 or 1.8 the usual amount, for 3 hours after the last
-change. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma (lighter) in the browser and in T3 Code, the popup's
-Less/More buttons, or `fw.py intensity [chat|browser] up|down|normal`. In chat the hook scales the target, the cap and
-the share of fully Japanese sentences. On web pages a lighter level keeps that share of each passage's cached
+(scripts/intensity.py): levels -3..3, for 3 hours after the last change. -2..2 are times 0.5, 0.7, 1, 1.4 or 1.8
+the usual amount; the ends are modes of their own, -3 off (no Japanese) and 3 full (all the reader can follow), and a
+press past either end stays there and restarts the clock. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma
+(lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
+`fw.py intensity [chat|browser] up|down|normal|off|full`. In chat the hook scales the target, the cap and the share
+of fully Japanese sentences. On web pages a lighter level keeps that share of each passage's cached
 candidates (no model call); a heavier one raises the ceiling and asks the model for more (its own cache).
+
+In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
+calibration line or the export notice. Full replaces the target and cap with two rules: a sentence the reader could
+follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in Japanese, and one
+that must stay English (steps, code, commands, paths, exact technical detail) swaps in every listed word, known or
+learning. The rules on zero-Japanese topics (health, money, safety and the like), on Japanese only in the chat reply,
+and on glosses stay as at every other level; there is no calibration line (no target to correct toward). A chat
+turned off on its own (threads.py) stays off at any level.
 
 On the web, half the passages are also thinned at random to between 50% and 100% of what fits (levels.js
 jitterFor), and every passage's shown record carries its plan: the level, the factors, the swaps allowed and the
 candidates offered. Because the thinning is random, comparing thinned and untouched passages measures what the amount
 of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
 change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
-`set` op, so the ops log says how often and when the default felt wrong. Presses less than a minute apart count as
-one decision, judged by where they end (trying the keys, or overshooting and stepping back, isn't evidence), and a
-level that ran out counts as normal before the next press. `fw.py calibrate` reports both
+`set` op, so the ops log says how often and when the default felt wrong; one into off counts as lighter and one
+into full as heavier, like any other step. Presses less than a minute apart count as one decision, judged by where
+they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level that ran out counts as
+normal before the next press. `fw.py calibrate` reports both
 (knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
 starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
 from the 0.5 points it needs), and per surface the presses and hours spent away from normal. Many lighter presses

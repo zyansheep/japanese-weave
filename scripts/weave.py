@@ -85,9 +85,11 @@ def tier(word, seen):
 def brief(state, seen, recall=None, markup=False, know=None, level=0):
     """The per-turn instructions. markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each
     Japanese word carries its own gloss instead of a footer line. know: knowledge.json (adaptive difficulty), which
-    orders learning words by learning value, most useful first. level: the chat intensity in effect (intensity.py)."""
+    orders learning words by learning value, most useful first. level: the chat intensity in effect (intensity.py); at
+    full there is no target: every sentence that can be plain Japanese is, and the rest swap in every listed word."""
     stage = fwlib.stage_for(state)
     target, cap, per_sentence, sentences = amounts(stage, level)
+    full = intensity.is_full(level)
     entry = lambda w: w['ja'] if w['status'] == 'known' else f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
     def usefulness(w):
         if not know or w['status'] == 'known':
@@ -97,41 +99,30 @@ def brief(state, seen, recall=None, markup=False, know=None, level=0):
     words = sorted(fwlib.introduced(state),
                    key=lambda w: (usefulness(w), w['status'] != 'shaky', -seen.get(w['ja'], {}).get('n', 0)))
     swap = lambda w: f'{w["en"]} → {w["ja"]}'
-    def group(name, show=entry):
-        picked = [w for w in words if tier(w, seen) == name]
+    def picked(name):
+        found = [w for w in words if tier(w, seen) == name]
         if name == 'rare':  # least exposure first, so fading words get pushed back in
-            picked.sort(key=lambda w: seen.get(w['ja'], {}).get('n', 0))
-        return '; '.join(show(w) for w in picked[:LIMITS.get(name)]) or 'none'
+            found.sort(key=lambda w: seen.get(w['ja'], {}).get('n', 0))
+        return found[:LIMITS.get(name)]
+    group = lambda name, show=entry: '; '.join(show(w) for w in picked(name)) or 'none'
     banded = sum(w['status'] == 'known' for w in state['words']) >= fwlib.COLLAPSE_AT
-    grammar = ('Every sentence stays an English sentence with Japanese words swapped in, like "The build passes 今, でも '
-               'the cache is stale, だから I cleared it." Write each word exactly as listed (same kanji and kana), never '
-               'conjugated, and with no particles, です/ます or other Japanese grammar around it; adjectives go before their '
-               'noun as listed ("a 新しい build", "the 簡単 fix"); suru-nouns stand in for the English verb or noun ("let me '
-               '確認 the logs"). No Japanese outside these lists and no katakana loanwords; if a sentence starts turning '
-               'Japanese, rewrite it in English. '
-               if stage < 3 else
-               f'About {IN_TEN[sentences]} should be fully Japanese '
-               f'({sentences} in a ten-sentence reply): short, plain です/ます sentences, guessable from the '
-               'English around them, like "問題は設定です。" or "これで大丈夫です。" Steps stay English, so put the Japanese '
-               'sentences in the explanation, summary and advice around them. The other sentences stay English with listed '
-               'words swapped in as written, without particles. In Japanese sentences use any common word the user would '
-               'follow, not only the lists. ')
-    turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
-    text = (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese passively. Write your '
-            f'chat reply in English and swap in Japanese words from the lists below: about {target}% of the words in a reply '
-            f'(about {round(target * 1.5)} in a 150-word reply{", so most sentences carry one or two" if stage <= 2 else ""}), '
-            f'never over {cap}%, at most {per_sentence} in one sentence. Under target is the usual miss, so count as you write. '
-            'Put a space on each side of a Japanese word inside English text, as for an English word. '
-            f'{grammar}Use a word only where it means exactly what the English word would mean there; where one doesn\'t '
-            'fit, use another from the lists instead (だから only for "so" meaning therefore, never "so big"; でも and しかし '
-            'only for "but" joining two ideas; もう for "already", まだ for "still" or "not yet"; 前 and 後 only before or '
-            'after a noun or a time, never joining clauses; はい and いいえ only as answers). If a reply runs long on '
-            f'Japanese, cut {"known" if banded else "seen-a-lot"} words first. Plain English for code, '
-            'commands, paths, numbers, names, IDs, option letters and steps the user will follow, and no Japanese right before '
-            'a path; zero Japanese, and no recall cue, for health, medication, legal, money, safety, emergency, driving or '
-            'urgent topics. Japanese goes only in your chat reply: never in files, code, configs, commit or PR text, messages '
-            'to other agents, subagent prompts, or drafts and documents meant to be shared. '
-            + ('No bold on Japanese words and no glosses, readings or romaji in the text itself. Wrap each Japanese '
+    as_listed = ('Write each word exactly as listed (same kanji and kana), never conjugated, and with no particles, '
+                 'です/ます or other Japanese grammar around it; adjectives go before their noun as listed ("a 新しい '
+                 'build", "the 簡単 fix"); suru-nouns stand in for the English verb or noun ("let me 確認 the logs"). ')
+    like = 'like "問題は設定です。" or "これで大丈夫です。"'
+    space = 'Put a space on each side of a Japanese word inside English text, as for an English word. '
+    fit = lambda instead: ('Use a word only where it means exactly what the English word would mean there; where one '
+                           f'doesn\'t fit, {instead} (だから only for "so" meaning therefore, never "so big"; でも and '
+                           'しかし only for "but" joining two ideas; もう for "already", まだ for "still" or "not yet"; 前 '
+                           'and 後 only before or after a noun or a time, never joining clauses; はい and いいえ only as '
+                           'answers). ')
+    plain = ('Plain English for code, commands, paths, numbers, names, IDs'
+             + (' and option letters' if full else ', option letters and steps the user will follow')
+             + ', and no Japanese right before a path; zero Japanese, and no recall cue, for health, medication, '
+             'legal, money, safety, emergency, driving or urgent topics. Japanese goes only in your chat reply: never '
+             'in files, code, configs, commit or PR text, messages to other agents, subagent prompts, or drafts and '
+             'documents meant to be shared. ')
+    glosses = ('No bold on Japanese words and no glosses, readings or romaji in the text itself. Wrap each Japanese '
                'word in <abbr title="hiragana reading · meaning">, like <abbr title="たぶん · maybe">多分</abbr>; a word '
                'written only in kana gets just its meaning, like <abbr title="but / however">でも</abbr>. Glossed words '
                'are looked up one at a time, so in a fully Japanese sentence wrap each word the same way (conjugated '
@@ -144,11 +135,47 @@ def brief(state, seen, recall=None, markup=False, know=None, level=0):
                'No bold on Japanese words and no inline glosses or romaji. End the reply with one footer line glossing the '
                'learning words you used that are not glossed earlier in this chat, at most 8, with the romaji, like: '
                '(多分 = maybe, "tabun"); nothing to gloss, no footer.\n')
-            + f'Learning now (use 2 to 4 per reply): {group("learn")}\n'
-            f'Rarely seen (pepper in a couple per reply where the sentence makes the meaning obvious): {group("rare")}\n'
-            + (band_line(state) if banded else
-               f'Seen sometimes (about 2 in 3 places one fits): {group("some")}\n'
-               f'Seen a lot, as default swaps (write the Japanese every time the English word has that meaning): {group("lot", swap)}'))
+    if full:
+        known = '; '.join(swap(w) for name in ('rare', 'some', 'lot') for w in picked(name)) or 'none'
+        text = (f'Japanese Weave (Stage {stage}, turned to full for now by the user): the user is a native English '
+                'speaker learning Japanese passively and wants, for now, all the Japanese they can follow, with no '
+                'percentage target or cap. Write every sentence of your chat reply that can be written fully in plain '
+                'Japanese the user would follow (the words in the lists below plus common grammar: particles, '
+                f'demonstratives, verb endings and plain desu/masu forms) fully in Japanese, {like} Sentences that '
+                'must stay English (steps the user will follow, code, commands, paths, exact technical detail, or '
+                'anything that needs a Japanese word not in the lists) stay English sentences, with the Japanese '
+                'swapped in for every English word that has a word in the lists, known or learning. '
+                f'{as_listed}No other Japanese words and no katakana loanwords. Too little Japanese is the usual miss, '
+                'so check each sentence as you write it: fully Japanese if it can be, otherwise every listed word '
+                'swapped in. '
+                + space + fit('keep the English word') + plain + glosses
+                + f'Learning now (use each one wherever it fits): {group("learn")}\n'
+                + (band_line(state) if banded else
+                   f'Known (write the Japanese every time the English word has that meaning): {known}'))
+    else:
+        grammar = ('Every sentence stays an English sentence with Japanese words swapped in, like "The build passes 今, '
+                   f'でも the cache is stale, だから I cleared it." {as_listed}No Japanese outside these lists and no '
+                   'katakana loanwords; if a sentence starts turning Japanese, rewrite it in English. '
+                   if stage < 3 else
+                   f'About {IN_TEN[sentences]} should be fully Japanese '
+                   f'({sentences} in a ten-sentence reply): short, plain です/ます sentences, guessable from the '
+                   f'English around them, {like} Steps stay English, so put the Japanese sentences in the explanation, '
+                   'summary and advice around them. The other sentences stay English with listed words swapped in as '
+                   'written, without particles. In Japanese sentences use any common word the user would follow, not '
+                   'only the lists. ')
+        turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
+        text = (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese passively. Write your '
+                f'chat reply in English and swap in Japanese words from the lists below: about {target}% of the words in a reply '
+                f'(about {round(target * 1.5)} in a 150-word reply{", so most sentences carry one or two" if stage <= 2 else ""}), '
+                f'never over {cap}%, at most {per_sentence} in one sentence. Under target is the usual miss, so count as you write. '
+                f'{space}{grammar}{fit("use another from the lists instead")}If a reply runs long on '
+                f'Japanese, cut {"known" if banded else "seen-a-lot"} words first. '
+                + plain + glosses
+                + f'Learning now (use 2 to 4 per reply): {group("learn")}\n'
+                f'Rarely seen (pepper in a couple per reply where the sentence makes the meaning obvious): {group("rare")}\n'
+                + (band_line(state) if banded else
+                   f'Seen sometimes (about 2 in 3 places one fits): {group("some")}\n'
+                   f'Seen a lot, as default swaps (write the Japanese every time the English word has that meaning): {group("lot", swap)}'))
     if recall and not markup:  # with popover glosses every word already tests recall, so no extra lines
         text += (f'\nIf this reply is longer than a few sentences, open it with "Recall: {recall["ja"]}?" on its own line '
                  f'and end it, after the footer, with: Recall: {recall["ja"]} = {recall["en"]}, "{recall["hint"]}"')
@@ -211,7 +238,10 @@ def share(text, words):
 
 
 def calibration(text, state, level=0):
-    """One line on how much Japanese the last reply in this chat had, so the next one corrects toward the target."""
+    """One line on how much Japanese the last reply in this chat had, so the next one corrects toward the target
+    (none at full, which has no target)."""
+    if intensity.is_full(level):
+        return ''
     japanese, total, learning, off_list = share(text, fwlib.introduced(state))
     if total < SHORT:
         return ''
@@ -347,6 +377,14 @@ def interactive(env=None, data=None, exec_check=codex_exec, args_check=claude_ar
     return not one_shot(args_check())
 
 
+def off_note(until, codex=False):
+    """What the hook says instead of the brief while chat intensity is off (intensity.py), like threads.note."""
+    how = 'pressing heavier (Alt+Shift+.)' + ('' if codex else ' or running /japanese-weave:intensity normal')
+    return (f'Japanese Weave: the user turned Japanese off in chat replies for now, until {intensity.clock(until)}, so '
+            'reply in plain English, with no Japanese words, glosses or recall lines. They can bring it back sooner by '
+            f'{how}.')
+
+
 def switch(session, prompt, thread):
     """This chat's switch after the user's prompt: a plain request to stop Japanese here, or to bring it back, or
     `/japanese-weave:intensity off here`, takes effect on this very turn and goes to the ops log (threads.py)."""
@@ -397,13 +435,16 @@ def main(argv):
     session = data.get('session_id') if threads.valid_session(data.get('session_id')) else None
     try:
         live, thread = hub.live_chat(session, state)
-        level = live['level']
     except Exception:
-        level, thread = 0, None
+        live, thread = dict(intensity.NORMAL), None
+    level = live['level']
     if session:
         thread = switch(session, data.get('prompt'), thread)
-    if threads.is_off(thread):  # Japanese off in this chat: one line instead of the brief and its extras
-        note = threads.note(codex='turn_id' in data)
+    codex = 'turn_id' in data
+    # Japanese off in this chat (at any level), or in all chats for now: one line instead of the brief and its extras
+    note =(threads.note(codex=codex) if threads.is_off(thread) else
+            off_note(live['until'], codex) if intensity.is_off(level) else None)
+    if note:
         print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': note}},
                          ensure_ascii=False))
         return 0

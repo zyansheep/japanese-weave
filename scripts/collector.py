@@ -21,7 +21,8 @@ private network such as Tailscale. Python 3.9+, standard library only.
   GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
                           &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null
   POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of the heavier/lighter shortcut (T3 Code,
-                          fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level, until, at}}
+                          fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level, until, at}};
+                          level -3 (off) .. 3 (full), a press past either end stays there (intensity.py)
 
 Every few minutes it also applies the day's promotion rules and refreshes the knowledge estimates (hub.maintain).
 
