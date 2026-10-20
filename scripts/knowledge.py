@@ -7,9 +7,11 @@ evidence the reader knew it in proportion to the chance it was read: certain dow
 passage (halving per line below it), else from the passage's time on screen against the time reading down to the word
 takes (read_chance). The update is the gradient of log P(what happened) with P(open) = P(read) * P(peek).
 T3 messages are logged only when something in them was opened, so there an update is conditioned on the episode having
-at least one open, and only the line rule applies. refresh() replays the whole log from scratch (deterministic,
-retunable), writes knowledge.json, steers the peek-rate dial, makes a few guarded status moves, and reports whether
-the default amount of Japanese looks right (calibration).
+at least one open, and only the line rule applies. Every lexicon word is scored, words not introduced yet included,
+and a glossed word is matched to its entry through its dictionary form (inflection.py: T3 glosses conjugated verbs
+whole). refresh() replays the whole log from scratch (deterministic, retunable), writes knowledge.json, steers the
+peek-rate dial, makes a few guarded status moves, and reports whether the default amount of Japanese looks right
+(calibration) and which opened words the lexicon doesn't have (unlisted).
 """
 import json
 import math
@@ -20,6 +22,7 @@ import time
 
 import feedback
 import fwlib
+import inflection
 
 KNOWLEDGE = 'knowledge.json'
 COMMANDS = 'commands.jsonl'
@@ -56,6 +59,8 @@ CALIBRATION_DAYS = 30
 SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese
 MIN_PASSAGE_WORDS = 15
 MIN_ACTIVE_MS = 1000
+UNLISTED_DAYS = 30         # opened words with no lexicon entry, counted over this many days
+UNLISTED_TOP = 30          # and kept in knowledge.json, most opened first
 
 
 def sigmoid(x):
@@ -172,14 +177,21 @@ def _line_height(ys):
     return statistics.median(gaps) if gaps else 20.0
 
 
+def matcher(listed):
+    """listed as a function from a glossed word to its entry or None: a set of words matches as written."""
+    return listed if callable(listed) else (lambda word: word if word in listed else None)
+
+
 def observations(surface, context, items, listed, read=None):
-    """[(word, y, weight)] for the listed words of one passage or message.
+    """[(entry, y, weight)] for the lexicon words of one passage or message. listed: a set of words, or a function
+    from a glossed word (perhaps a conjugated form) to its entry (matcher).
 
     Opened: y 1 for a pin or flip or a peek open at least GLANCE_MS, GLANCE_Y for a shorter peek; T3 peeks under
     T3_NOISE_MS don't count. Unopened: y 0, weighted by the chance it was read: 1 down to the lowest opened line,
     halving per line below it, or read(y, line) when that is higher (a browser passage's time on screen). Without
     read, nothing opened means [] (a T3 message is logged only when something was opened). Words of a sentence whose
     whole-sentence translation was opened get nothing (it was read in English)."""
+    match = matcher(listed)
     notes = context['annotations']
     opened = {}
     for row in items:
@@ -201,8 +213,9 @@ def observations(surface, context, items, listed, read=None):
     line = _line_height([n[2] for n in notes])
     lowest = max(notes[i][2] for i in opened) if opened else None
     best = {}
-    for index, (word, _x, y_pos) in enumerate(notes):
-        if word not in listed or index in excluded:
+    for index, (written, _x, y_pos) in enumerate(notes):
+        word = match(written)
+        if word is None or index in excluded:
             continue
         if index in opened:
             y, weight = opened[index], 1.0
@@ -246,9 +259,11 @@ class Word:
 
 
 def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, top=READ_MAX, losses=None):
-    """Every word's knowledge after the whole log; also the T3 offset. pace, top: the reading model (read_chance).
-    losses: a list to append, for every listed word of every browser passage shown, (opened, predicted chance of an
-    open) before the update, with the read chance from time on screen alone: how well the model predicts (tune)."""
+    """Every word's knowledge after the whole log; also the T3 offset. listed: as in observations. pace, top: the
+    reading model (read_chance). losses: a list to append, for every listed word of every browser passage shown,
+    (opened, predicted chance of an open) before the update, with the read chance from time on screen alone: how well
+    the model predicts (tune)."""
+    match = matcher(listed)
     words = {}
     offset = {'browser': 0.0, 't3': 0.0}
 
@@ -259,10 +274,10 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
 
     timeline = [(e[2][-1]['at'], 0, e) for e in episodes(rows, contexts, now_ms)]
     timeline += [(e[0], 2, e) for e in showings(rows, contexts, now_ms)]
-    timeline += [(c['at'], 1, c) for c in commands if c['word'] in listed]
+    timeline += [(c['at'], 1, c) for c in commands if match(c['word'])]
     for at, kind, item in sorted(timeline, key=lambda t: (t[0], t[1])):
         if kind == 1:
-            word = get(item['word'])
+            word = get(match(item['word']))
             word.age(at)
             word.command_at = at
             if item['kind'] == 'known':
@@ -280,7 +295,7 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
                 word.age(at)
                 q = sigmoid(offset['browser'] - word.k)
                 if losses is not None:
-                    alone = max(0.05, read_chance(context, _y_of(context, ja), line, pace, top))
+                    alone = max(0.05, read_chance(context, _y_of(context, ja, match), line, pace, top))
                     losses.append((y > 0, min(1 - 1e-6, max(1e-6, alone * q))))
                 eta = max(ETA_MIN, ETA_MAX / (1 + ETA_SLOPE * word.n))
                 if y > 0:  # opened, so read: log P(open | read) = log q
@@ -329,8 +344,8 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
     return words, offset
 
 
-def _y_of(context, ja):
-    return next((n[2] for n in context['annotations'] if n[0] == ja), 0)
+def _y_of(context, ja, match):
+    return next((n[2] for n in context['annotations'] if match(n[0]) == ja), 0)
 
 
 def tune(rows, contexts, listed, intervals, commands, now_ms):
@@ -451,6 +466,31 @@ def calibration_text(report):
     return '\n'.join(lines)
 
 
+def unlisted(rows, listed, now_ms, days=UNLISTED_DAYS):
+    """Opened words with no lexicon entry over the last `days` days, most opened first: what the chat's Japanese
+    sentences use that the word list doesn't have. {days, opens, words: number of such words, top: [[word, opens]]}.
+    Sentence translations and T3 peeks under T3_NOISE_MS don't count."""
+    match, since, counts = matcher(listed), now_ms - days * DAY_MS, {}
+    for row in rows:
+        if row['at'] < since or row['word'] in PUNCTUATION:
+            continue
+        if row['surface'] == 't3' and row['kind'] == 'peek' and row['dwell_ms'] < T3_NOISE_MS:
+            continue
+        if match(row['word']) is None:
+            counts[row['word']] = counts.get(row['word'], 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:UNLISTED_TOP]
+    return {'days': days, 'opens': sum(counts.values()), 'words': len(counts), 'top': [list(kv) for kv in top]}
+
+
+def unlisted_text(summary):
+    """fw.py calibrate: the opened words the lexicon doesn't have, in one line."""
+    if not summary or not summary.get('opens'):
+        return f'Every word opened in the last {(summary or {}).get("days", UNLISTED_DAYS)} days is in the word list.'
+    top = ', '.join(f'{word} {n}' for word, n in summary['top'])
+    return (f'Opened but not in the word list, last {summary["days"]} days ({summary["opens"]} opens of '
+            f'{summary["words"]} words): {top}')
+
+
 # ---- the dial ----
 
 def peek_rate(rows, contexts, now_ms):
@@ -490,7 +530,8 @@ def bounds(word, offset=0.0):
 def plan_moves(state, words, moves_today, now_ms):
     """Evidence moves on top of the day rules: shaky -> known when the upper bound of p < 0.15, known -> shaky when
     the lower bound > 0.35 and it was opened recently. At most MOVE_CAP per direction per day, none right after a
-    command. Also the graduation veto: active words whose lower bound > 0.3."""
+    command. Also the graduation veto: active words whose lower bound > 0.3. Words not introduced yet (queue) never
+    move: fwlib.refill brings them in."""
     moves, veto = [], []
     done = {'known': moves_today.get('known', 0), 'shaky': moves_today.get('shaky', 0)}
     for w in state['words']:
@@ -542,7 +583,7 @@ def refresh(now=None):
         rows, contexts = feedback.load(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
-        listed = {w['ja'] for w in state['words'] if w['status'] != 'queue'}
+        listed = inflection.lexicon(state['words']).entry  # every lexicon word, queue words too
         intervals, commands = anki_intervals(), read_commands()
         reading = previous.get('reading')
         if not isinstance(reading, dict) or reading.get('day') != today:  # the reading model's grid, once a day
@@ -576,6 +617,7 @@ def refresh(now=None):
                      'days': RATE_DAYS},
             'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
             'calibration': calibrate(rows, contexts, feedback.intensity_changes(feedback.default_path()), now_ms),
+            'unlisted': unlisted(rows, listed, now_ms),
             'words': {ja: {'k': round(w.k, 3), 'n': round(w.n, 2), 'sd': round(w.sd, 3), 'mu': round(w.mu, 2),
                            'obs': w.obs, 'opened': w.opened, 'recent': len(w.recent), 'last': w.last,
                            'history': w.history} for ja, w in words.items()},

@@ -59,7 +59,12 @@ minutes have passed since the last thing that happened in it. T3: an episode is 
 (surface, view, context) with no gap over 10 minutes; T3 logs a message only when something in it was opened, so only
 such engaged episodes exist, scored once their last interaction is 10 minutes old.
 
-Every listed word among the context's annotations becomes one observation per episode:
+Every lexicon word among the context's annotations becomes one observation per episode, words not introduced yet
+included (they start at the prior like any other). An annotation is matched to its entry through its dictionary form
+(scripts/inflection.py): T3 glosses every word of a fully Japanese sentence, conjugated verbs whole, so なります counts
+for なる, 待っています for 待つ and 出てきます for 出る (or 出てくる, if listed). The word as written wins, then the
+candidate the fewest steps back, then the earliest entry; a form is matched only to a real entry of the right kind
+(戻せます is not 戻る). Opened words with no entry (燃料, リスト) count toward knowledge.json "unlisted" instead.
 
 - y = 1 if opened (a pin or flip, or a peek open at least 600 ms); y = 0.6 for a shorter peek (a soft label: a
   glance to confirm). T3 peeks under 300 ms are noise (the mouse passing over a word) and are dropped.
@@ -150,6 +155,12 @@ using an 80% bound:
 Safety: at most 3 evidence moves per direction per day; none within 14 days of a `known` or `learn` command for that
 word; nothing at all if the log shrank since the last refresh. Every move is recorded in knowledge.json.
 
+Words not introduced yet are scored but never moved. Instead, whatever the dial, one you opened in at least 2
+messages or passages over the last 14 days (knowledge.json "recent") is introduced before the lexicon order when a
+learning slot opens, most opened first (fwlib.refill; the 20 slots and 5 new words a day stay). Two encounters, not
+two opens: opening the same word twice in one message is one look, while a chat that keeps using a word you don't
+know is worth teaching it.
+
 ### Rule fixes that don't need the model
 
 - A flip on a known word counts like a peek day (two such days within a week make it shaky), not instant shaky; a
@@ -192,7 +203,10 @@ says how much each extra point of Japanese costs.
 
 - `fw.py knowledge`: the dial, budget and realized peek rate; the T3 offset; recent evidence moves; the words with
   the most evidence.
-- `fw.py why WORD`: its prior, every scored observation with its weight, k over time, and moves.
+- `fw.py why WORD`: its prior, every scored observation with its weight, k over time, and moves. WORD may be a form
+  of the word (なります).
+- `fw.py status`: the looked-up words lined up to come in next; `fw.py calibrate`: the 30 words opened most in the
+  last 30 days that the word list doesn't have, which is what the chat's Japanese sentences use beyond it.
 
 ## Decisions from the review
 

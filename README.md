@@ -105,7 +105,9 @@ whose name contains NAME.
 ## How words advance
 
 - **Exposure day**: a day you saw the word in a chat reply, or on a web page.
-- **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day.
+- **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day. Words you
+  looked up before they were introduced (opened in 2 different messages or passages within 14 days) come in first,
+  most opened first; then the list order.
 - **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
 - **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
   often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or

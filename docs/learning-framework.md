@@ -43,7 +43,9 @@ What exists today:
   needed for the browser.
 - **Browser peeks and flips**: time, word, how long the gloss stayed open (glosses need a 0.7 s hover first).
 - **Chat peeks and pins**, but no shown records: a message is logged only if you opened something in it. Row 4 does
-  not exist today, and chat data leans toward opens. Leave chat out of the fit until it sends shown records.
+  not exist today, and chat data leans toward opens. Leave chat out of the fit until it sends shown records. Chat
+  glosses words as written, conjugated verbs whole (なります); the replay maps each to its dictionary form
+  (scripts/inflection.py), and every lexicon word counts, not only the ones introduced so far.
 
 Since extension 0.3.1 time on screen is logged too (visible stays), and since 0.6.0 each shown passage's plan (the
 swaps allowed, the candidates offered, the reader's intensity and a random thinning factor). Not logged: the candidate
