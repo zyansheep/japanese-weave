@@ -27,22 +27,26 @@ The log (collector.py, feedback.py) holds, without page text:
   turned back to English, browser): time, surface (browser | t3), word, how long the gloss stayed open, view,
   context, the word's index in the context, and a client id that makes resends harmless.
 - contexts: one row per paragraph per page load (browser) or chat message per window session (T3): its box,
-  every glossed word in it as [word, x, y] relative to the context, and, for the browser, its word count and when
-  its Japanese was first on screen ("shown"). The words of shown paragraphs are the denominator of the peek rate.
+  every glossed word in it as [word, x, y] relative to the context, its word count and when it was shown ("shown":
+  in the browser when its Japanese was first on screen; T3 sends one per message with its prose words). T3 messages
+  logged before that get their word count from the transcript and have no shown time. The words of shown browser
+  paragraphs are the denominator of the peek rate.
   Paragraphs planned to get Japanese that got none (no candidates fit, or the random thinning left none) are shown
   too, with no glossed words, when enough of them is on screen: the baseline for calibration. They don't count
   toward the peek rate and carry no evidence about words.
 - reading: evidence of where the reader was, in contexts with glossed words (browser paragraphs, T3 messages): clicks
   (point, link or text), text selections (box, length, the indexes of the glossed words covered, drag time), mouse
   paths over T3 messages ([ms, x, y] points), and stays on screen of each paragraph (its band in the context; ms of
-  possible reading, plus the time away, with media playing, or idle for 30 s), also of paragraphs left without
-  Japanese. The model below doesn't use it yet.
+  possible reading, plus the time away, with media playing, or idle for 30 s; in T3 the paragraph's word count, from
+  the build that sends them), also of paragraphs left without Japanese. T3 logs a stay for every paragraph with
+  glossed words that was on screen for a second, opened or not. The model below uses the stays; clicks, selections
+  and mouse paths not yet.
 
 Commands (`known`, `learn`) are kept with their time in `commands.jsonl` so a replay can place them.
 
 ## The model
 
-For a glossed word w shown on surface s (a browser passage, or a T3 message in which something was opened):
+For a glossed word w shown on surface s (a browser passage, or a T3 message):
 
     P(peek) = sigmoid(s_offset - k_w(t))
 
@@ -51,16 +55,18 @@ For a glossed word w shown on surface s (a browser passage, or a T3 message in w
 - Forgetting: between observations, k_w decays toward its prior mu_w with a half-life of 45 days, but only
   downward (knowledge fades; ignorance doesn't turn into knowledge by waiting).
 - s_offset: 0 for the browser; a learned offset for T3 (its popover opens after 0.3 s instead of 0.7 s), moved by
-  0.02 per episode and clamped to [-1.5, 1.5].
+  0.02 times the mean gradient per message and clamped to [-1.5, 1.5].
 - Priors from outside the model only: Anki interval i gives mu = min(3, 0.5 + 0.8 * ln(1 + i)); any other word 1.0.
   A `known` command raises k to at least 2.5 (and adds evidence); `learn` lowers it to at most 0.
 
 ### Episodes and observations
 
-Browser: every passage shown (its "shown" record, one per passage per page view) is scored, opened or not, once 10
-minutes have passed since the last thing that happened in it. T3: an episode is the interactions in one
-(surface, view, context) with no gap over 10 minutes; T3 logs a message only when something in it was opened, so only
-such engaged episodes exist, scored once their last interaction is 10 minutes old.
+Every browser passage shown (its "shown" record, one per passage per page view) and every T3 message with a word
+count is scored, opened or not, once 10 minutes have passed since the last thing that happened in it (its shown
+record, its last stay on screen, its last open). A T3 message without a word count (logged before T3 sent them and
+not backfilled) falls back to episodes: the interactions in one (surface, view, context) with no gap over 10
+minutes, scored once their last interaction is 10 minutes old. Only messages with an open have episodes, so those
+are corrected for that (below).
 
 Every lexicon word among the context's annotations becomes one observation per episode, words not introduced yet
 included (they start at the prior like any other). An annotation is matched to its entry through its dictionary form
@@ -78,25 +84,35 @@ candidate the fewest steps back, then the earliest entry; a form is matched only
   screen while a reader could have been reading it (its visible stays: tab focused, no media playing, input in the
   last 30 s), words its word count, and share how far down the word sits (at least 0.1). pace starts at 300 ms per
   word and top at 0.7; a passage never on screen like that gives no evidence at all.
+- In a T3 message the same formula runs on the paragraph the word is in: the stays whose band holds the word's top
+  (from half a line, at most 10 px, above the band down to its bottom), their ms added; words is the paragraph's
+  count when T3 sent it, else the message's words times the band's height over the summed height of the distinct
+  bands with stays (as if all its words were in those paragraphs: the read chance errs low); share is how far
+  down the band the word sits. A word whose paragraph has no stay gets 0 from this, so only the line rule from the
+  words opened can weigh it.
 - Unopened words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in
   English. Words opened in that sentence still count as opened.
 
-### Browser: the chance it was read
+### Passages and messages shown: the chance it was read
 
-With every browser passage in the log, there is no selection to correct for. The update is the gradient of the log
-likelihood with P(open) = r * p (an open means it was read):
+With every browser passage and every T3 message with a word count in the log, there is no selection to correct for.
+The update is the gradient of the log likelihood with P(open) = r * p (an open means it was read):
 
     opened:      k_w += eta_w * (p_w - y)
     not opened:  k_w += eta_w * r * p_w * (1 - p_w) / (1 - r * p_w)          n_w += r
 
+The T3 offset follows the same gradients with respect to it, per message: s_offset (T3) += 0.02 * (sum over opened
+words of (y - p) - sum over the others of r * p * (1 - p) / (1 - r * p)) / (sum of the weights, 1 for an open).
+
 The reading model (pace, top) can't be checked on its own, but it changes how well opens are predicted. Once a day
 the replay is scored on a grid (pace 150-650 ms, top 0.5-0.9) by the mean log loss of P(open) for every listed word
 of every passage, each predicted before its own update with the read chance from time on screen alone; the best pair
-replaces the defaults once there are 60 browser opens to judge by (knowledge.json "reading").
+replaces the defaults once there are 60 browser opens to judge by (knowledge.json "reading"). Only browser passages
+are scored, but the pair is the reader's pace, so T3 messages use it too.
 
-### Correcting for "only engaged episodes are seen" (T3)
+### Correcting for "only engaged episodes are seen" (T3 messages without a word count)
 
-T3 episodes are logged only because something was opened, so a naive update is biased toward "unknown" (a one-word
+Episodes exist only because something was opened, so a naive update is biased toward "unknown" (a one-word
 paragraph exists in the log only when that word was peeked). The likelihood is conditioned on at least one peek.
 With Q the predicted chance of no peek at all in the episode, Q = product of (1 - p_j):
 
@@ -217,8 +233,11 @@ they end (trying the keys, or overshooting and stepping back, isn't evidence), a
 normal before the next press. `fw.py calibrate` reports both
 (knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
 starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
-from the 0.5 points it needs), and per surface the presses and hours spent away from normal. Many lighter presses
-mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
+from the 0.5 points it needs), the chat side (T3 messages with a word count: lookups per 100 words, how many
+messages had none, and the lookups of listed words the model expected, read chance from the stays times p before
+each message's update, against those seen: how well calibrated the model is on chat), and per surface the presses
+and hours spent away from normal. Many lighter presses mean the default is too heavy, and the slowdown curve says how
+much each extra point of Japanese costs.
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
@@ -248,4 +267,5 @@ the word swaps inside them, with no ceiling, budget or random thinning (the plan
   stochastic budget so short passages aren't starved; candidates are not overgenerated (that hurt Gemini's fit).
 - Evidence moves use uncertainty bounds, are rate-limited, and sit on top of the day rules instead of racing them.
 - Log integrity: client ids against resends, a 7-day time window, gap-split episodes, sentence translations.
-- Deferred: shown records and retries for T3 (chat has no peek-rate dial yet), merging browser and T3 contexts.
+- Deferred: retries for T3 (chat has no peek-rate dial yet), merging browser and T3 contexts. T3 shown records
+  (word counts) came later, so chat messages without lookups count too.
