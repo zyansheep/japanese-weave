@@ -4,7 +4,7 @@ import { costUsd } from '../src/usage.js';
 
 // The worker on its own: passages that arrive while a model call runs share the next call, a passage that came back
 // meanwhile isn't asked for again, and Claude Haiku is called with the key the native host passed along, in smaller
-// calls that run at the same time. Then the intensity: lighter picks from the cache, heavier asks the model for more.
+// calls that run at the same time. Then the intensity: lighter picks from the cache, heavier from the full answer.
 test('background: misses from every tab share one call; Haiku with the host key, three calls at once; intensity', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
@@ -136,18 +136,40 @@ test('background: misses from every tab share one call; Haiku with the host key,
     expect(Object.values(lighter.plans)[0]).toMatchObject({ level: -1, intensity: 0.7, candidates: 1 });
     expect(await dispatch({ type: 'intensity', step: 2 }, popup)).toEqual({ error: 'step is 1, -1 or 0' });
     expect(await dispatch({ type: 'intensity', step: 1 }, tab(1))).toBe(undefined); // pages can't change it
-    // Heavier: its own cache, and the model is asked for more.
+    // Heavier: picked from the full answer, which has its own cache; +2 and full pick from the same one.
     await dispatch({ type: 'intensity', step: 1 }, popup);
     expect((await dispatch({ type: 'intensity', step: 1 }, popup)).intensity.level).toBe(1);
     const heavy = await dispatch({ type: 'config' }, tab(1));
-    await dispatch({ type: 'swaps', revision: heavy.revision, items: [one(heavy)] }, tab(1));
+    const heavier = await dispatch({ type: 'swaps', revision: heavy.revision, items: [one(heavy)] }, tab(1));
     expect(calls.length).toBe(made + 1);
-    // a heavier target per passage (2 swaps for its one sentence, times 1.4) and more sentence swaps
+    expect(Object.values(heavier.plans)[0]).toMatchObject({ level: 1, intensity: 1.4 });
+    // no target in the full answer, and its prompt
     const passage = (call) => JSON.parse(call.body.messages[0].content.replace(/^Passages:\n/, ''))[0];
-    expect(passage(calls.at(-1)).target).toBe(3);
+    expect(passage(calls.at(-1)).target).toBeUndefined();
     expect(passage(calls[made - 1]).target).toBe(2);
-    expect(JSON.stringify(calls.at(-1).body.system)).toContain('about one sentence in three');
-    expect(JSON.stringify(calls[0].body)).not.toContain('about one sentence in three');
+    expect(JSON.stringify(calls.at(-1).body.system)).toContain('The reader asked for FULL Japanese');
+    expect(JSON.stringify(calls[0].body)).not.toContain('FULL Japanese');
+    for (const level of [2, 3]) {
+      expect((await dispatch({ type: 'intensity', step: 1 }, popup)).intensity.level).toBe(level);
+      const cfg = await dispatch({ type: 'config' }, tab(1));
+      expect(cfg.revision).not.toBe(heavy.revision);
+      const picked = await dispatch({ type: 'swaps', revision: cfg.revision, items: [one(cfg)] }, tab(1));
+      expect(Object.values(picked.plans)[0]).toMatchObject({ level });
+    }
+    expect(calls.length).toBe(made + 1);
+    // At full, Haiku gets calls of 3 (models.js FULL_BATCH): the full answer is about twice as long.
+    const top = await dispatch({ type: 'config' }, tab(1));
+    gate = opened();
+    const seven = Array.from({ length: 7 }, (_, n) => `Passage ${n} at full for Haiku is long enough, but it says very little.`);
+    const asked = dispatch({ type: 'swaps', revision: top.revision, items: seven.map((t) => ({ key: `${top.revision}:${hashKey(t)}`, text: t })) }, tab(2));
+    await until(() => calls.length === made + 4);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls.slice(made + 1).map((c) => c.ids.length)).toEqual([3, 3, 1]);
+    gate.open();
+    gate = null;
+    expect(Object.keys((await asked).results)).toHaveLength(7);
+    await dispatch({ type: 'intensity', step: -1 }, popup);
+    await dispatch({ type: 'intensity', step: -1 }, popup);
     expect((await dispatch({ type: 'status' }, popup)).intensity.level).toBe(1);
   } finally {
     Object.assign(globalThis, saved);

@@ -194,7 +194,9 @@ press past either end stays there and restarts the clock. Keys Alt+Shift+Period 
 (lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
 `fw.py intensity [chat|browser] up|down|normal|off|full`. In chat the hook scales the target, the cap and the share
 of fully Japanese sentences. On web pages a lighter level keeps that share of each passage's cached
-candidates (no model call); a heavier one raises the ceiling and asks the model for more (its own cache).
+candidates (no model call); a heavier one raises the ceiling and picks from the full answer (one answer and one cache
+for +1, +2 and full; asked for more on their own, the heavier levels got little more than normal, see
+docs/swap-prompt.md).
 
 In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
 calibration line or the export notice. Full replaces the target and cap with two rules: a sentence the reader could
@@ -220,12 +222,12 @@ mean the default is too heavy, and the slowdown curve says how much each extra p
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
-interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt: no per-passage
-target, a candidate for every listed word, learning or known, the passage says in its listed sense (in every place it
-says it), and a sentence swap for every sentence listed words and the allowed grammar can say completely, at any
-stage. planSwaps shows every validated candidate, sentences before the word swaps inside them, with no ceiling, budget
-or random thinning (the plan says level 3, intensity 5, jitter 1). Both ends last 3 hours after the last press like
-the other levels; a press further at an end restarts the clock.
+interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt, which the
+heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known,
+the passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words
+and the allowed grammar can say completely, at any stage. planSwaps shows every validated candidate, sentences before
+the word swaps inside them, with no ceiling, budget or random thinning (the plan says level 3, intensity 5, jitter
+1). Both ends last 3 hours after the last press like the other levels; a press further at an end restarts the clock.
 
 ## Inspecting
 

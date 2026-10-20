@@ -140,10 +140,15 @@ function formOf(t, entry, readings = true) {
 
 // A piece the answer didn't name: the listed word it is, as written or as a form of one, else null. The longest form
 // wins; words as listed come before kanji words written in kana (しました is する, not 知る read しる).
+// So the past of suru is suru, not the kanji for "below" read the same way (shita), which glossed every "studied"
+// (benkyou shita) "below".
 function pieceWord(t, idx) {
-  const hit = idx.exact.get(exactJa(t)) || idx.folded.get(normalizeJa(t));
-  if (hit) return hit;
+  const exact = idx.exact.get(exactJa(t));
+  if (exact) return exact;
+  const folded = idx.folded.get(normalizeJa(t));
+  if (folded && normalizeJa(folded.canon) === normalizeJa(t)) return folded; // as listed, in another script
   for (const readings of [false, true]) {
+    if (readings && folded) return folded; // a kanji word written in kana
     let best = null;
     let length = 0;
     for (const entry of idx.exact.values()) {
@@ -223,14 +228,38 @@ function validateGroup(kind, s, o, idx) {
 const KINDS = { w: 'word', p: 'phrase', s: 'sentence' };
 function expand(s) {
   if ('kind' in s || !KINDS[s.k]) return s;
-  const pieces = typeof s.p === 'string' && s.p.trim() ? s.p.split('|') : [];
+  const pieces = typeof s.p === 'string' && s.p.trim() ? s.p.split('|').filter((t) => t.trim()) : []; // also a bar at the end
   const kind = KINDS[s.k] === 'word' && pieces.length > 1 ? 'phrase' : KINDS[s.k]; // a phrase sent as a word
   return { kind, o: s.o, f: s.f, parts: pieces.length ? pieces.map((t) => ({ t, w: null })) : undefined, g: s.g, ctx: s.c };
 }
 
+// A word swap of a listed word: its written form canonicalized (kanji as listed), gloss, romaji and kana from the list.
+const wordSwap = (hit, o, ctx, sharedWords) => ({
+  o,
+  f: hit.canon,
+  g: hit.en,
+  h: hit.hint,
+  ...(hit.kana && hit.kana !== hit.canon ? { k: hit.kana } : {}),
+  ctx: typeof ctx === 'string' ? ctx.trim() : '',
+  ...(sharedWords ? { word: hit.word, ...(hit.status ? { status: hit.status } : {}) } : {}),
+});
+// Endings a verb or adjective may carry and still stand alone in English order.
+const ENDINGS = new Set(['ます', 'ました', 'ません', 'ませんでした', 'た', 'て', 'ない', 'なかった', 'いる', 'います', 'いた', 'いました',
+  'ている', 'ています', 'ていた', 'ていました']);
+const SUBJECTS = /^(i|we|you|he|she|they|it|this|that)\b/i;
+// A phrase that is one listed verb or adjective alone, conjugated to fit the English ("The company itta the update
+// would...", "There was" as atta): the listed word, if a phrase would leave English hanging after it (dangles). Not
+// where the English it replaces has its subject ("I stopped" as yamemashita), which a word swap would lose.
+function loneWord(group) {
+  const [first, ...rest] = group.parts;
+  if (SUBJECTS.test(group.o) || wordCount(group.o) > 3) return null;
+  return first.word && rest.every((p) => !p.word && ENDINGS.has(p.t)) ? first.word : null;
+}
+
 // Fail closed: keep only swaps whose Japanese is on the list (the plugin's word state, else the level's bundled list).
-// A word swap is one listed word: its written form canonicalized (kanji as listed), gloss, romaji and kana from the list.
-// A phrase or sentence swap is listed words and grammar only (validateGroup). Swaps without a kind are word swaps.
+// A word swap is one listed word (wordSwap). A phrase or sentence swap is listed words and grammar only (validateGroup);
+// a phrase of one conjugated word that would leave English hanging after it is shown as a word swap of that word as
+// listed. Swaps without a kind are word swaps.
 // text: the passage, to drop number words that are labels or ranks there (numberTrap).
 export function validateSwaps(level, swaps, sharedWords, text = '') {
   if (!Array.isArray(swaps)) return [];
@@ -244,20 +273,16 @@ export function validateSwaps(level, swaps, sharedWords, text = '') {
     if (!o || !s.f.trim()) continue;
     if (s.kind === 'phrase' || s.kind === 'sentence') {
       const group = validateGroup(s.kind, s, o, idx);
-      if (group && !numberTrap(group, text) && !dangles(group, text)) out.push(group);
+      if (!group || numberTrap(group, text)) continue;
+      if (!dangles(group, text)) { out.push(group); continue; }
+      const lone = loneWord(group);
+      const swap = lone && wordSwap(idx.exact.get(exactJa(lone)), o, s.ctx, sharedWords);
+      if (swap && !misplaced(swap, text)) out.push(swap);
       continue;
     }
     const hit = idx.exact.get(exactJa(s.f)) || idx.folded.get(normalizeJa(s.f));
     if (!hit) continue;
-    const swap = {
-      o,
-      f: hit.canon,
-      g: hit.en,
-      h: hit.hint,
-      ...(hit.kana && hit.kana !== hit.canon ? { k: hit.kana } : {}),
-      ctx: typeof s.ctx === 'string' ? s.ctx.trim() : '',
-      ...(sharedWords ? { word: hit.word, ...(hit.status ? { status: hit.status } : {}) } : {}),
-    };
+    const swap = wordSwap(hit, o, s.ctx, sharedWords);
     if (!numberTrap(swap, text) && !misplaced(swap, text)) out.push(swap);
   }
   return out;
@@ -265,21 +290,36 @@ export function validateSwaps(level, swaps, sharedWords, text = '') {
 
 // Word swaps the prompt forbids that the passage's hints (hints.js) invited on Haiku: mae or ato for "before" or "after",
 // which only go after a noun in Japanese order ("mae you run the script"), and a verb that acts on something where
-// nothing follows to act on ("the program will tomeru with an error"). Every place the English occurs is checked.
+// nothing follows to act on ("the program will tomeru with an error"). Every place the English occurs is checked. Also
+// two seen in full answers: ageru "give (away)" for "gave me" (that is kureru), and a swap that would leave a
+// contraction's tail on the page ("I've" as watashi've), where the swap's context puts it there.
 const CLAUSE_JOINERS = new Set(['before', 'after']);
 const TRANSITIVE = new Set(['止める', '開ける', '始める', '変える', '上げる', '終える', '消す', '入れる', '出す', '続ける']);
 const NO_OBJECT = new Set(['with', 'at', 'in', 'on', 'for', 'to', 'from', 'by', 'and', 'but', 'or', 'so', 'when', 'if', 'because',
   'after', 'before', 'until', 'while', 'now', 'again', 'soon', 'suddenly', 'today', 'yet', 'too', 'then', 'there', 'here',
   'early', 'late', 'already']);
+const TO_ME = new Set(['me', 'us']);
+const CONTRACTION = /^['’](ve|m|ll|d|re)\b/i;
+const nextWord = (text, end) => /^\s*([A-Za-z][A-Za-z']*)/.exec(text.slice(end))?.[1];
 export function misplaced(swap, text) {
   if (swap.parts) return false;
   if (/^[前後]$/.test(swap.f)) return CLAUSE_JOINERS.has(swap.o.toLowerCase());
-  if (!TRANSITIVE.has(swap.f) || !text) return false;
-  for (let i = text.indexOf(swap.o); i !== -1; i = text.indexOf(swap.o, i + 1)) {
-    const next = /^\s*([A-Za-z][A-Za-z']*)/.exec(text.slice(i + swap.o.length))?.[1];
-    if (!next || NO_OBJECT.has(next.toLowerCase())) return true;
-  }
+  if (!text) return false;
+  if (contracted(swap, text)) return true;
+  const check = TRANSITIVE.has(swap.f) ? (next) => !next || NO_OBJECT.has(next.toLowerCase())
+    : swap.f === 'あげる' ? (next) => TO_ME.has(next?.toLowerCase()) : null;
+  if (!check) return false;
+  for (let i = text.indexOf(swap.o); i !== -1; i = text.indexOf(swap.o, i + 1)) if (check(nextWord(text, i + swap.o.length))) return true;
   return false;
+}
+// The place the swap's context points at (else every place its English occurs) is followed by 've, 'm, 'll, 'd or 're.
+function contracted(swap, text) {
+  const whole = (s, o) => [...s.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'gu'))]
+    .map((m) => m.index);
+  const at = swap.ctx ? text.indexOf(swap.ctx) : -1;
+  const inCtx = at >= 0 ? whole(swap.ctx, swap.o) : [];
+  const places = inCtx.length === 1 ? [at + inCtx[0]] : whole(text, swap.o);
+  return places.length > 0 && places.every((i) => CONTRACTION.test(text.slice(i + swap.o.length)));
 }
 
 // A phrase in Japanese order that ends in a verb ends its clause: "I 店に行きました with my mom" leaves English hanging
@@ -428,6 +468,12 @@ export const INTENSITY_LEVELS = [-3, -2, -1, 0, 1, 2, 3];
 export const INTENSITY_NAMES = { '-3': 'off', '-2': 'much lighter', '-1': 'lighter', 0: 'normal', 1: 'heavier', 2: 'much heavier', 3: 'full' };
 export const INTENSITY_FACTORS = { '-3': 0, '-2': 0.5, '-1': 0.7, 0: 1, 1: 1.4, 2: 1.8 };
 export const intensityFactor = (level) => INTENSITY_FACTORS[level] ?? 1;
+// The model answer a level's swaps are picked from: normal's for the lighter levels, full's for the heavier ones. Asked
+// for more with a higher target of their own, Haiku showed little more than at normal (+1 1.13 times, +2 1.25, and +2
+// below normal once), and pushed harder, it made more wrong swaps (8% at +2); full's answer holds about 1.55 times
+// normal's, at full's accuracy (docs/swap-prompt.md). So +1, +2 and full share one answer and one cache, and stepping
+// between them never waits for a model.
+export const answerLevel = (level) => (level > 0 ? INTENSITY_FULL : 0);
 // 'heavier (+1)', 'much lighter (−2)', 'off', 'full', 'normal': the ends have no number, they aren't a step of the amount.
 export function intensityLabel(level) {
   const name = INTENSITY_NAMES[level] ?? INTENSITY_NAMES[0];
@@ -451,11 +497,11 @@ export function jitterFor(seed) {
 const roundRandom = (n, random) => Math.floor(n) + (random() < n - Math.floor(n) ? 1 : 0);
 
 // A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates, a
-// new dial or a lighter intensity never cost a model call. Returns { swaps, plan }: plan says how the amount was chosen
-// ({ level, intensity, jitter, limit, candidates }), logged with the passage's shown record.
-// The ceiling is the level's per-sentence rule or the density target, raised by a heavier intensity; a lighter one and
-// the passage's random thinning (jitter, the share kept: 1 for half the passages, see jitterFor) keep that share of
-// what fits.
+// new dial or another intensity on the same side of normal never cost a model call. Returns { swaps, plan }: plan says
+// how the amount was chosen ({ level, intensity, jitter, limit, candidates }), logged with the passage's shown record.
+// The ceiling is the level's per-sentence rule or the density target, raised by a heavier intensity (whose candidates are
+// full's, answerLevel); a lighter one and the passage's random thinning (jitter, the share kept: 1 for half the
+// passages, see jitterFor) keep that share of what fits.
 // budgetPer100: expected peeks per 100 words (0: the dial is off). Without it, learning words (active/shaky) go first,
 // then known ones. With it, learning words go by learning value, a predicted peek chance near TARGET_P, judged on k
 // drawn from N(k, sd) so uncertain words still get shown. One active word not shown today goes first, outside the
