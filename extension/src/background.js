@@ -7,7 +7,8 @@ import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
 import { candidatesFor, MAX_BATCH, BATCH, FULL_BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, INTENSITY_OFF,
+  INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
@@ -236,14 +237,15 @@ async function callModel(ctx, batch) {
   });
 }
 
-// Picks each passage's swaps from its cached candidates (planSwaps): the dial's budget, the host's per-word estimates,
-// the intensity and the passage's random thinning, seeded by the passage and the day so a passage repaints the same
-// way. Returns { swaps, plan }.
+// Picks each passage's swaps from its cached candidates (planSwaps): the level's lookup budget (normal's from the host:
+// the challenge when set, steered, else intensity.py's), the host's per-word estimates, the intensity and the
+// passage's random thinning, seeded by the passage and the day so a passage repaints the same way. Returns
+// { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
   const shown = await shownToday(chromeStorage, day);
-  const budgetPer100 = ctx.challenge ? wordState?.budget || ctx.challenge : 0;
+  const budgetPer100 = intensityBudget(ctx.intensity.level, wordState?.budget);
   return (text, swaps) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
     return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
@@ -299,7 +301,8 @@ async function syncWords() {
   return { ok: !res.error, error: res.error, count: res.state?.words?.length || 0, stage: res.state?.stage || 0 };
 }
 
-// The adaptive-difficulty dial (peeks per 100 words shown, 0: off) lives in the word state, shared with chat.
+// The challenge (normal's lookups per 100 words shown, 0: intensity.py's default budget) lives in the word state, shared
+// with chat.
 async function setChallenge(msg) {
   const reply = await send({ type: 'prefs', challenge: msg.challenge });
   if (!reply?.ok) return { ok: false, error: reply?.error || 'the Japanese Weave host refused the setting' };

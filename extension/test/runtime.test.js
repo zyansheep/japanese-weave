@@ -20,9 +20,11 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
   let release;
   const hostEvents = [];
   const hostLog = [];
-  let dialScale = 1; // the host's controller: budget = challenge * scale
-  let hostState = { version: 'test.1', stage: 1, paused: false, prefs: { extension_sites: 'ask' }, words: [
-    { ja: 'et', en: 'and', hint: 'ay', status: 'active' },
+  let dialScale = 1; // the host's controller: budget = (challenge or normal's 0.5) * scale
+  // 'et' is not known at a glance (lookup chance 0.083, over levels.js FREE_P), so it spends the budget: 3 lookups per
+  // 100 words leave these passages of 8 or 9 words 0.12 or more even when thinned to half, so it is always shown.
+  let hostState = { version: 'test.1', stage: 1, paused: false, prefs: { extension_sites: 'ask' }, challenge: 3, budget: 3, words: [
+    { ja: 'et', en: 'and', hint: 'ay', status: 'active', k: 2.4, sd: 0.2 },
     { ja: 'très', en: 'very', hint: 'treh', status: 'shaky' },
   ] };
   const listener = (arr) => ({ addListener: (fn) => arr.push(fn) });
@@ -62,7 +64,10 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
           if (msg.type === 'events') { hostEvents.push(...msg.events); return { ok: true, applied: msg.events.length }; }
           if (msg.type === 'log') { hostLog.push(...msg.items); return { ok: true, stored: msg.items.length }; }
           if (msg.type === 'stats') return { ok: true, counts: { 'browser:peek': [hostLog.filter((i) => i.kind === 'peek').length, 0] }, shownWords: [8, 8], since: msg.since };
-          if (msg.type === 'prefs') { hostState = { ...hostState, challenge: msg.challenge, budget: msg.challenge * dialScale }; return { ok: true, challenge: msg.challenge }; }
+          if (msg.type === 'prefs') {
+            hostState = { ...hostState, challenge: msg.challenge, budget: (msg.challenge || 0.5) * (msg.challenge ? dialScale : 1) };
+            return { ok: true, challenge: msg.challenge };
+          }
           return { ok: false };
         },
       },
@@ -270,19 +275,22 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     await call({ type: 'syncWords' }); await wait();
     expect(el.querySelector('.fw-word')).not.toBeNull();
 
-    // The dial: set in the popup, kept by the host; pages repaint from the cached candidates without a model call.
+    // The challenge: set in the popup, kept by the host, whose controller makes it normal's budget; pages repaint from
+    // the cached candidates without a model call.
     const callsBeforeDial = modelCalls;
     const revisionBeforeDial = (await dispatch({ type: 'config' }, page())).revision;
-    hostState = { ...hostState, words: hostState.words.map((w) => (w.ja === 'et' ? { ...w, k: 8, sd: 0.1 } : w)) };
+    dialScale = 1e-9; // the host's controller saw far too many lookups
     expect(await call({ type: 'setChallenge', challenge: 1.5 })).toMatchObject({ ok: true });
     await wait();
     expect((await dispatch({ type: 'config' }, page())).revision).not.toBe(revisionBeforeDial);
-    expect(el.querySelector('.fw-word')?.textContent).toBe('et'); // a word this well known fits the budget
-    expect(await call({ type: 'status' })).toMatchObject({ budget: 1.5 });
-    dialScale = 1e-9; // the host's controller saw far too many peeks
-    await call({ type: 'setChallenge', challenge: 3 }); await wait();
-    expect(el.querySelector('.fw-word')).toBeNull();
+    expect(el.querySelector('.fw-word')).toBeNull(); // 'et' no longer fits
+    dialScale = 2;
+    await call({ type: 'setChallenge', challenge: 2 }); await wait(); // steered to 4
+    expect(el.querySelector('.fw-word')?.textContent).toBe('et');
+    expect(await call({ type: 'status' })).toMatchObject({ budget: 4 });
     await call({ type: 'setChallenge', challenge: 0 }); await wait();
+    expect(await call({ type: 'status' })).toMatchObject({ budget: 0.5 }); // normal's own, unsteered
+    await call({ type: 'setChallenge', challenge: 3 }); await wait();
     expect(el.querySelector('.fw-word')?.textContent).toBe('et');
     expect(modelCalls).toBe(callsBeforeDial);
 

@@ -132,7 +132,9 @@ def handle(message):
 
 def adaptive(state, words):
     """Per-word estimates and the dial for the extension; starts a background refresh when they are stale. Never
-    waits on the network: the refresh runs in its own process."""
+    waits on the network: the refresh runs in its own process. budget: normal's lookups per 100 words (the challenge
+    when set, else intensity.BUDGETS[0]) times the controller's scale, which only steers while a challenge is set; the
+    extension scales the other levels from it (intensity.budget)."""
     know = knowledge.load()
     for w in words:
         entry = (know.get('words') or {}).get(w['ja'])
@@ -141,8 +143,8 @@ def adaptive(state, words):
     if not fwlib.collector_url() and knowledge.is_stale(know) and feedback.default_path().exists():
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
-    scale = (know.get('controller') or {}).get('scale', 1.0)
-    return {'challenge': challenge, 'budget': round(challenge * scale, 3), 'rate': know.get('rate')}
+    scale = (know.get('controller') or {}).get('scale', 1.0) if challenge else 1.0
+    return {'challenge': challenge, 'budget': round((challenge or intensity.BUDGETS[0]) * scale, 3), 'rate': know.get('rate')}
 
 
 def main():

@@ -130,7 +130,8 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(calls[1].passages[0].target).toBeUndefined();
     expect(calls[0].passages[0].target).toBe(4);
     const [swaps] = Object.values(full.results);
-    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 5, candidates: 5 });
+    // no budget at full; expected: the lookups predicted, 4 known words without estimates at 0.076 and the dog twice at 0.269
+    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 5, candidates: 5, expected: 0.841 });
     expect(swaps.map((s) => s.f)).toEqual(['大きい日でした。', 'でも', '犬', '犬', '大きい']);
     // Heavier at full stays full, for 3 hours from this press.
     const first = local.intensity.until;

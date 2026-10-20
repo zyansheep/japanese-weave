@@ -318,6 +318,17 @@ exactly, and at +1 and +2 the full answer's size, not the ceiling, is what usual
 was added for the places full still misses: the second "I" was the only common case safe enough, and the prompt now
 gets most of them. Flash and Argon were not measured on prompt 5.
 
+## Levels as lookup budgets (2026-10-20)
+
+The measurements above are of the old ceilings (one or two swaps a sentence, times the level's factor). Since then a
+web level is a lookup budget (`scripts/intensity.py` BUDGETS, mirrored in `levels.js`; docs/adaptive-difficulty.md):
+`planSwaps` shows every candidate whose words are all known at a glance (a mean lookup chance under 0.08) wherever the
+model offered it, at every level but off, and spends 0.15, 0.3, 0.5, 0.8 or 1.2 lookups per 100 words (-2..+2) on the
+rest, at most one of those a sentence up to normal and two when heavier. The random thinning keeps each known word with
+the passage's share and scales its budget by it; full is unchanged. The prompt and its per-passage `target` are
+unchanged too, so the target now only says how many swaps to offer: with known words free, what the model offers is
+what bounds them. The lab's "ceiling" column still computes the old rule.
+
 ## Tuning it again
 
 `tools/prompt-lab/lab.mjs` runs passages through the extension's own pipeline and prints them woven, ⟦word or phrase⟧

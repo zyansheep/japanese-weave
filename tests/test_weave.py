@@ -1,6 +1,7 @@
 """Offline tests for the hook, word state, native host and setup. Run: python3 -m unittest discover -s tests"""
 import io
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -595,6 +596,16 @@ class FeedbackStore(Home):
                dict(shown, context='c4', plan={'level': 0, 'intensity': 1, 'jitter': 1, 'limit': 1, 'candidates': 1,
                                                'text': 'page text'})]
         self.assertEqual(feedback.record([shown] + bad, 'browser'), {'stored': 1, 'duplicates': 0, 'rejected': 3})
+        # Since levels meant a lookup budget (levels.js planSwaps): the passage's budget and the lookups expected, both
+        # optional (full has no budget, older plans neither), as hostsource.js cleanPlan checks them.
+        num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+        new = dict(shown['plan'], budget=0.186, expected=0.41)
+        full = {'level': 3, 'intensity': 5, 'jitter': 1, 'limit': 9, 'candidates': 9, 'expected': 2.5}
+        for plan in (new, full, shown['plan'], dict(new, budget=0, expected=0)):
+            self.assertTrue(feedback._plan_ok(plan, num), plan)
+        for plan in (dict(new, budget=-0.1), dict(new, expected=1001), dict(new, budget=float('nan')), dict(new, budget='0.5'),
+                     dict(new, expected=None), dict(new, budget=True)):
+            self.assertFalse(feedback._plan_ok(plan, num), plan)
         stays = [dict(self.item(), kind='visible', y=0, height=40, ms=ms, wall=ms + 500, away=500, media=0, idle=0,
                       uid=f'v1-{ms}') for ms in (1500, 2500)]
         feedback.record(stays, 'browser')
@@ -1606,9 +1617,22 @@ class Knowledge(Home):
             fw.main(['why', first])
         self.assertIn('Adaptive difficulty: off.', out.getvalue())
         self.assertIn('no evidence in the gloss log yet', out.getvalue())  # the refresh found no log
-        self.assertEqual(fw_host.handle({'type': 'state'})['challenge'], 0)
+        fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'}})
+        state = fw_host.handle({'type': 'state'})
+        # without a challenge, normal's own budget, which the controller doesn't steer
+        self.assertEqual((state['challenge'], state['budget']), (0, intensity.BUDGETS[0]))
         with self.assertRaises(SystemExit):
             fw.main(['challenge', '5'])
+
+    def test_the_extension_means_the_same_by_a_level(self):
+        import re
+        js = (ROOT / 'extension' / 'src' / 'levels.js').read_text(encoding='utf-8')
+        table = lambda name: {int(k.strip("' ")): float(v) for k, v in
+                              re.findall(r"('?-?\d'?): ([\d.]+)", re.search(rf'export const {name} = {{([^}}]*)}}', js).group(1))}
+        constant = lambda name: float(re.search(rf'export const {name} = ([\d.]+);', js).group(1))
+        self.assertEqual(table('INTENSITY_BUDGETS'), intensity.BUDGETS)
+        self.assertEqual(table('INTENSITY_PER_SENTENCE'), intensity.PER_SENTENCE)
+        self.assertEqual((constant('FREE_P'), constant('KNOWN_PRIOR_K')), (fwlib.FREE_P, fwlib.KNOWN_PRIOR_K))
 
     def test_the_extension_offers_the_same_dial(self):
         import re

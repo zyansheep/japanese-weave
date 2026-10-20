@@ -118,11 +118,12 @@ test('blank passages: a shown record and stays when planned, nothing when guarde
 test('a blank passage\'s plan and records pass the checks on the way to the host', () => {
   const text = 'We walked by the river all morning long.';
   const none = planSwaps(1, [], text, []);
-  expect(none).toEqual({ swaps: [], plan: { level: 0, intensity: 1, jitter: 1, limit: 0, candidates: 0 } });
-  const swap = { o: 'river', f: '川', g: 'river', h: 'kawa', ctx: '' };
+  // normal's 0.5 lookups per 100 words: 0.04 in these 8
+  expect(none).toEqual({ swaps: [], plan: { level: 0, intensity: 1, jitter: 1, limit: 0, candidates: 0, budget: 0.04, expected: 0 } });
+  const swap = { o: 'river', f: '川', g: 'river', h: 'kawa', ctx: '' }; // a word with no estimate: 0.27, over the budget
   const thinned = Array.from({ length: 50 }, (_, seed) => planSwaps(1, [swap], text, [], { seed, jitter: 0.5 }))
     .find((r) => !r.swaps.length);
-  expect(thinned.plan).toEqual({ level: 0, intensity: 1, jitter: 0.5, limit: 0, candidates: 1 });
+  expect(thinned.plan).toEqual({ level: 0, intensity: 1, jitter: 0.5, limit: 0, candidates: 1, budget: 0.02, expected: 0 });
   const now = 1_800_000_000_000;
   const where = { at: now, view: 'a1b2', context: 'c0ffee', box: [0, 0, 600, 40], annotations: [] };
   for (const plan of [none.plan, thinned.plan]) {

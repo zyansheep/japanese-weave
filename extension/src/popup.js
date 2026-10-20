@@ -1,4 +1,4 @@
-import { resolveLevel, intensityLabel, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
+import { resolveLevel, intensityLabel, intensityBudget, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { MODELS, MODEL_NAMES, providerOf } from './models.js';
 import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
 import { describeStats } from './hostsource.js';
@@ -44,11 +44,14 @@ async function refresh() {
   $('accessNote').textContent = s.newSitesEnabled
     ? (all ? 'On for every site except the ones you turn off. Webmail, AI chat and local addresses start off.' : 'Your browser needs your OK before this can run on other sites.')
     : 'Off on sites until you turn them on here.';
-  const { stage, chosen, effective } = resolveLevel(s, c.stage);
-  const amount = s.density ? `${s.density}% of words` : effective <= 1 ? '~1 word per 1–2 sentences' : '1–2 words per sentence';
+  const { stage, chosen } = resolveLevel(s, c.stage);
+  const level = c.intensity?.level || 0;
+  // What the level means on pages (levels.js intensityBudget): known words free, a lookup budget for the rest.
+  const amount = level === INTENSITY_OFF ? 'no Japanese for now' : level === INTENSITY_FULL ? 'all the Japanese it can for now'
+    : `known words wherever they fit, plus ~${+intensityBudget(level, status.budget).toFixed(2)} lookups per 100 words`
+      + (s.density ? `, at most ${s.density}% of words` : '');
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
   $('density').value = String(s.density || 0);
-  const level = c.intensity?.level || 0;
   const ends = level ? new Date(c.intensity.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
   $('intensityInfo').textContent = level ? `${intensityLabel(level)} until ${ends}` : 'normal';
   $('intensityInfo').title = 'Alt+Shift+. for more, Alt+Shift+, for less; from Off (no Japanese) to Full (all it can); back to normal 3 hours after the last change';
