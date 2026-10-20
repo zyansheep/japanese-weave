@@ -22,6 +22,8 @@ import threading
 import time
 import unicodedata
 
+import inflection
+
 try:
     import fcntl
 except ImportError:  # Windows: no locking (untested platform)
@@ -34,6 +36,7 @@ ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Ank
 # ---- promotion rules (documented in README "How words advance") ----
 WINDOW = 20             # learning slots: active plus shaky words
 NEW_PER_DAY = 5         # new words per day, including the first day
+LOOKED_UP = 2           # a word not introduced yet, opened in this many messages or passages in 14 days, comes first
 GRADUATE_DAYS = 3       # active -> known: exposure days needed, and length of the clean streak
 SHAKY_DAYS = 7          # shaky -> known: days with no new flip, asked or peek
 PEEK_WINDOW = 7         # a known word peeked on 2 different days within this many days becomes shaky
@@ -343,7 +346,8 @@ def editing():
 
 
 def find(state, word):
-    """The entry for a word as written (多分), in kana (たぶん) or in romaji (tabun)."""
+    """The entry for a word as written (多分), in kana (たぶん), in romaji (tabun), or as a form of it (なります is
+    なる; inflection.py)."""
     k = key(word)
     for w in state['words']:
         if key(w['ja']) == k:
@@ -356,7 +360,9 @@ def find(state, word):
         for w in state['words']:
             if roman_key(w['hint']) == r:
                 return w
-    return None
+        return None
+    ja = inflection.lexicon(state['words']).entry(word) if JAPANESE.search(word) else None
+    return next((w for w in state['words'] if w['ja'] == ja), None) if ja else None
 
 
 def set_status(word, status, day):
@@ -386,18 +392,18 @@ def exposure_days(word, chat=None):
     return dict(sorted(days.items()))
 
 
-def refill(state, day, cap=NEW_PER_DAY):
-    """Fill the learning set (active plus shaky words, which are being relearned) up to WINDOW from lexicon order,
-    at most cap new words per day."""
+def refill(state, day, cap=NEW_PER_DAY, looked=None):
+    """Fill the learning set (active plus shaky words, which are being relearned) up to WINDOW, at most cap new words
+    per day: first the words you looked up (looked_up, most opened first), then lexicon order."""
     words = state['words']
     last_day, count = state.get('refilled') or ['', 0]
     count = count if last_day == day else 0
     room = min(WINDOW - sum(w['status'] in ('active', 'shaky') for w in words), cap - count)
     added = 0
-    for w in words:
-        if added >= room:
-            break
-        if w['status'] == 'queue':
+    if room > 0:
+        looked = looked_up() if looked is None else looked
+        queue = sorted((w for w in words if w['status'] == 'queue'), key=lambda w: -looked.get(w['ja'], 0))
+        for w in queue[:room]:
             set_status(w, 'active', day)
             added += 1
     state['refilled'] = [day, count + added]
@@ -415,6 +421,16 @@ def graduates(word, chat=None):
     peeks = word.get('peeks') or []
     clean = (not word['last_bad'] or word['last_bad'] < streak) and not (peeks and peeks[-1] >= streak)
     return clean and 'seen' in days.values()
+
+
+def looked_up():
+    """{word: messages or passages it was opened in over the last 14 days} for the words opened in at least
+    LOOKED_UP of them (knowledge.json, which scores words not introduced yet too). One open is often curiosity, and
+    opening the same word again in one message is still one encounter; two encounters mean the chat keeps using a
+    word you don't know."""
+    words = (read_json(home() / 'knowledge.json', {}) or {}).get('words') or {}
+    return {ja: e['recent'] for ja, e in words.items()
+            if isinstance(e, dict) and isinstance(e.get('recent'), int) and e['recent'] >= LOOKED_UP}
 
 
 def graduation_veto():

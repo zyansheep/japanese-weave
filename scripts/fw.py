@@ -20,7 +20,7 @@
                                                      or review, not new or suspended) at the front of the
                                                      list; mature cards (interval >= N days, default 21)
                                                      become known unless --no-known
-  fw.py status                                       stage, word counts, learning words
+  fw.py status                                       stage, word counts, learning words, looked-up words next in
   fw.py log [N]                                      the latest N gloss peeks and flips (default 20), with how
                                                      long each stayed open and the glossed words around it
                                                      (from the collector when one is set)
@@ -41,7 +41,8 @@
   fw.py intensity [chat|browser] [up|down|normal]    Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; no step: show the level
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
-                                                     much Japanese a passage had, and your heavier/lighter presses
+                                                     much Japanese a passage had, your heavier/lighter presses,
+                                                     and the words you opened that aren't in the word list
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
                                                      (with a collector: send them and anything queued, and
                                                      refresh the cached state)
@@ -527,6 +528,10 @@ def status(_args):
         for w in by.get(name, []):
             days = len(fwlib.exposure_days(w, chat))
             print(f'  {name:6} {w["ja"]} = {w["en"]}, "{w["hint"]}"  (seen on {days} day{"s" if days != 1 else ""})')
+    looked = fwlib.looked_up()
+    lined_up = sorted((w for w in by.get('queue', []) if w['ja'] in looked), key=lambda w: -looked[w['ja']])
+    if lined_up:
+        print('  next in, as you looked them up: ' + ', '.join(f'{w["ja"]} = {w["en"]}' for w in lined_up[:10]))
     nxt = next((n for n, s in sorted(fwlib.STAGES) if fwlib.stage_for(state) < s), None)
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
@@ -789,10 +794,13 @@ def intensity_cmd(args):
 
 
 def calibrate_cmd(args):
-    report = (knowledge.load() or {}).get('calibration')
+    know = knowledge.load() or {}
+    report = know.get('calibration')
     if not report:
         sys.exit('No calibration yet: it comes with the next knowledge refresh (every 10 minutes on the collector).')
     print(knowledge.calibration_text(report))
+    if 'unlisted' in know:
+        print(knowledge.unlisted_text(know['unlisted']))
 
 
 def main(argv=None):
