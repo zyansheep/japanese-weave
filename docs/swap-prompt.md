@@ -13,19 +13,26 @@ A phrase or sentence comes back split into pieces, `"母|と|一緒に|店|に|�
 (or a conjugated form of one) or grammar from a fixed set: particles, です/だ, ます forms, ない/た/て/ている/たい endings,
 こと and の. `validateSwaps` in `extension/src/levels.js` works out which listed word each piece is and drops the whole
 swap if any piece is an unlisted word, if the pieces don't spell the Japanese, or if a sentence doesn't end like one.
+The pieces are what gets painted, so the Japanese only has to say the same: bars, commas and full stops in it that the
+pieces leave out are let through, and a phrase loses a final full stop (the English sentence keeps its own).
 A conjugated piece has to be a real form of the word, made from its own conjugation (行きました and 行って for 行く, not
 行いて; 見せた is not a form of 見る). So a sentence only ever uses words from your list, and a model slip costs a swap,
 never a wrong word on the page. Glosses, romaji and kana all come from the list, so a word swap comes back as just the
 English, the Japanese and a few words of context (`{"k": "w", "o": "but", "f": "でも", "c": "x but y"}`). That compact
 answer is about 40% shorter than one naming every piece's word and gloss, and output costs five times what input does.
 
-Two mistakes the prompt forbids are also caught in code, because Gemini Flash kept making them on real pages:
+Three mistakes the prompt forbids are also caught in code, because Gemini Flash kept making them on real pages, or Haiku
+did once each passage named the listed words in it (below):
 
 - a number word that is a label, a rank or a pronoun: "Day one" (日 一つ), "number one", "chapter two", "the first",
   "the one", "no one", "one day" (someday), "one-on-one", or a counter like 一つ before hours or people
   (`numberTrap`). "two ideas" -> 二つ and "only one of the ideas" stay.
 - a Japanese-order phrase ending in a verb with English still hanging after it: "Yesterday I 店に行きました with my mom"
-  (`dangles`). It may be followed by punctuation or a word that starts a new clause ("and", "but", "so"...).
+  (`dangles`). It may be followed by punctuation or a word that starts a new clause ("and", "but", "so"... or a subject
+  pronoun: "As soon as we ie ni hairimashita we could smell the smoke", in kanji and kana on the page).
+- a word swap that can't stand where it is (`misplaced`): mae or ato ("before / front", "after / later") for "before" or
+  "after" ("mae you run the script"), and a verb that acts on something, like tomeru "stop (something)", with nothing
+  after it to act on ("the program will tomeru with an error").
 
 On the page a phrase or sentence is one group: each of its words is underlined and glossed on its own (a peek is logged
 for that word), a sentence's 。 shows the translation of the whole sentence, and a click anywhere flips the group back
@@ -93,6 +100,91 @@ With 16 passages in a call, Flash wrote about as much Japanese but dropped phras
 against 4 with 8 per call). One line in the prompt fixed that ("make it a phrase wherever one fits... Give every
 passage this care, however many come at once"): 3-6 phrases per run at 16.
 
+## Haiku's thin pages, and what fixed them (2026-10-19)
+
+Two days after the switch to Haiku, pages carried about half as much Japanese (5.7% of words against 11.2% with Flash
+on 10-16) and fewer learning words among the swaps (10% against 27%). A day's swap cache held 557 passages: 43% with no
+validated candidate and 38% with one, mostly I, but, this, we, you. Measured with Haiku 5.5 at low effort and the real
+Stage 3 word list (297 known, 22 learning) on two new sets: `live.json`, 30 short passages written like the cache's
+(titles, tweets, comments, median 17 words), and `web.json`, 30 passages each saying the English of a learning word
+somewhere. Each passage lists the learning words a careful answer would use (`learn`) and its traps.
+
+What it was:
+
+- Not validation. A run dropped 1 to 12 of 40 to 64 returned candidates, nearly all rightly (hanging verbs, unlisted
+  words). The wrong drops were Japanese written with the bars or with a comma the pieces left out, and a phrase followed
+  by a new clause that starts with a subject pronoun; both are let through now.
+- Haiku returned too little: 1.3 to 2.1 candidates a passage, and none for 10-30% of `live.json`, against "one or two
+  word or phrase swaps" a sentence. Its thinking (`display: "summarized"`, lab only) says why: it settles on "one clean
+  swap" and drops others as "a bit awkward"; it misses listed words in the long list or takes them for unlisted ("thing",
+  "night", "people" are all listed); it read `"c": ... words that contain o` as words containing the letter o; it
+  skipped a complaint about parking as "borderline driving-related".
+- Calls of six were thinner than calls of one (1.2-1.5 against 1.5-1.7 valid candidates a passage on `live.json`), and
+  the extension's queue mostly sends one passage a call anyway (486 calls for 557 passages).
+- Learning words were skipped where the passage says them: 8 of 31 found on `live.json` (six a call), 11-14 of 31 (one
+  a call), 17-23 of 43 on `web.json`. The grammatical ones most: "about" (nitsuite), "has" or "there is" (aru),
+  "became" (naru), "different" (chigau), "entered" (hairu), "in front of" (mae).
+- Raising effort to medium found a few more learning words (17 of 31 against 11-16 at low, same prompt) at 1.6 times
+  the cost and 1.7 times the time; not taken.
+
+What changed (`PROMPT_VERSION` 4; the cache revision includes it, so every passage is asked once more):
+
+- Every passage carries a `target`: the most swaps `planSwaps` shows in it (two a sentence at Level 2, one at Level 1,
+  the density's share when one is set, raised 1.4 or 1.8 times when heavier), and the prompt says why: the extension
+  picks from what comes back, learning words first, so one safe swap teaches little.
+- Every passage names the listed words whose English it says (`hints.js`): `"learning": ["aru = have / exist: has"]`
+  for learning words, `"listed"` for known ones. The glosses are matched with their English forms (has, became, men,
+  cutest) plus a few the gloss leaves out (about, there is, different, myself), but not "have" as a helper verb, not
+  vague English for a known word (and, so, that, when, time, ask...), never number words or katakana loanwords. About
+  70-90 uncached tokens a passage. The prompt asks for every learning word that fits, even past the target, says the
+  hints come by spelling alone and must pass the meaning rules, and that a word swap only has to keep the English
+  readable (a phrase still teaches more).
+- Zero Japanese only for passages that give or ask for health, legal, money, safety or driving advice, or report an
+  emergency; a passing mention is fine. `c` is "2-6 words ... including the English o itself"; no swap without
+  Japanese; soshite only between clauses; ja and dewa only as "well then".
+- In code: `misplaced` (above), the subject pronoun in `dangles`, and the looser match of f against the pieces.
+
+The same sets before and after, two runs each where there are two numbers:
+
+| Set, passages a call | | Returned a passage | Valid a passage | Passages with none | Shown a passage | Shown with a learning word | `learn` words found | $ per 1,000 passages |
+|---|---|---|---|---|---|---|---|---|
+| live, 6 | before | 1.3, 1.6 | 1.2, 1.5 | 30%, 10% | 1.1, 1.4 | 25%, 19% | 8, 8 of 31 | 0.29 |
+| | after | 2.2, 2.0 | 2.1, 2.0 | 7%, 7% | 1.8, 1.8 | 31%, 28% | 17, 14 of 31 | 0.35 |
+| live, 1 | before | 2.1, 1.7 | 1.7, 1.5 | 20%, 17% | 1.5, 1.3 | 36%, 30% | 14, 11 of 31 | 0.44 |
+| | after | 2.4 | 2.3 | 3% | 1.9 | 28% | 16 of 31 | 0.55 |
+| web, 6 | before | 1.7, 1.7 | 1.7, 1.5 | 10%, 17% | 1.5, 1.4 | 40%, 38% | 20, 17 of 43 | 0.28 |
+| | after | 2.8, 2.8 | 2.7, 2.6 | 0%, 0% | 2.3, 2.2 | 50%, 51% | 31, 30 of 43 | 0.33 |
+| web, 1 | before | 2.1 | 1.9 | 3% | 1.7 | 46% | 23 of 43 | 0.68 |
+| | after | 2.8 | 2.6 | 0% | 2.2 | 39% | 24 of 43 | 0.64 |
+| eval16, 6 | before | 3.1, 2.6 | 2.9, 2.5 | 6%, 12% | 2.8, 2.5 | | | 0.50 |
+| | after | 4.1, 3.9 | 3.9, 3.8 | 6%, 6% | 3.6, 3.6 | | | 0.52 |
+
+"Shown" is what `planSwaps` keeps (two a sentence), so after the change most passages are at that ceiling. Phrases
+held up (7-17 a run of `eval16.json` against 8-14, and 2-3 sentence swaps against 2-4); an earlier wording without "a phrase
+teaches more" had half as many. The one passage of `eval16.json` left with none is "Day one of flying...", rightly.
+
+Accuracy, read swap by swap: about 3-4% of swaps carry a wrong or doubtful sense before and after, so there are more of
+them in number. Before: chikara for electric "power", "all the hard work" as "all the difficult work", "one more player"
+as ichi. After, the same two plus a few the hints invited: chikara for "power users", tanomu "request" for "asked if",
+tsumori "intention" for "your plan", kaeru "go home" for "go back", ikaga for "How I Became...", dono for "which one",
+motto for "one more player" ("how" and "ask" no longer point at a known word). The two hint-invited rule breaks seen in testing, mae for "Before you run the
+script" and tomeru for "the program will stop", are dropped in code now. Number traps held: "Day one", "one thing",
+"the last one" were all left English or dropped.
+
+Cost: the prompt grew by about 490 tokens (read from the cache), each passage brings 70-90 tokens of hints, and the
+answers grew by 15-30%. A call of one passage went from about $0.00045 to $0.00055 (cache writes aside), a call of six
+from $0.0017 to about $0.0021: about a fifth more, or $0.36 a day instead of $0.30 at today's 490 calls.
+
+Batching: calls of six cost about $0.35 per 1,000 passages against $0.55 for calls of one, but take 16-24 s against
+5-6 s, and passages that reach the queue together already share a call. A gather delay would only group passages that
+come in while scrolling, saving at most about $0.10 a day for seconds more before every passage, so the queue is
+unchanged.
+
+Flash and Argon get the same prompt and hints. They were never as timid as Haiku (Flash already filled pages at 11%),
+so for them the target mostly confirms the old "one or two a sentence", and the hints mainly add learning words; the
+known-word hints may invite more literal swaps from Flash, which has more sense slips than Haiku. Not measured: run
+both through the lab once before relying on them.
+
 ## Tuning it again
 
 `tools/prompt-lab/lab.mjs` runs passages through the extension's own pipeline and prints them woven, ⟦word or phrase⟧
@@ -104,6 +196,8 @@ GEMINI_KEY_FILE=~/path/to/key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs
 ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs claude-haiku-5-5
 ```
 
-`BATCH=8` sends 8 passages a call instead of 16.
+`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live). At the end it prints the
+counts: candidates a passage as returned and after validation, passages with none, swaps shown and how many have a
+learning word, and with `web.json` or `live.json`, how many of the `learn` words came back.
 
 Bump `PROMPT_VERSION` in `prompt.js` whenever the prompt changes, so cached answers from the old one aren't reused.

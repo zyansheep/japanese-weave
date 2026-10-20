@@ -142,8 +142,12 @@ test('background: misses from every tab share one call; Haiku with the host key,
     const heavy = await dispatch({ type: 'config' }, tab(1));
     await dispatch({ type: 'swaps', revision: heavy.revision, items: [one(heavy)] }, tab(1));
     expect(calls.length).toBe(made + 1);
-    expect(JSON.stringify(calls.at(-1).body.system)).toContain('two or three word or phrase swaps');
-    expect(JSON.stringify(calls[0].body)).not.toContain('two or three');
+    // a heavier target per passage (2 swaps for its one sentence, times 1.4) and more sentence swaps
+    const passage = (call) => JSON.parse(call.body.messages[0].content.replace(/^Passages:\n/, ''))[0];
+    expect(passage(calls.at(-1)).target).toBe(3);
+    expect(passage(calls[made - 1]).target).toBe(2);
+    expect(JSON.stringify(calls.at(-1).body.system)).toContain('about one sentence in three');
+    expect(JSON.stringify(calls[0].body)).not.toContain('about one sentence in three');
     expect((await dispatch({ type: 'status' }, popup)).intensity.level).toBe(1);
   } finally {
     Object.assign(globalThis, saved);

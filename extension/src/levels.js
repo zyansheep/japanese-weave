@@ -202,8 +202,13 @@ function validateGroup(kind, s, o, idx) {
       } else return null;
     }
   }
+  // A phrase sits inside an English sentence, which keeps its own full stop.
+  if (kind === 'phrase') while (parts.length > 1 && !parts.at(-1).word && /^[。？！?!]+$/.test(parts.at(-1).t)) parts.pop();
   const f = parts.map((p) => p.t).join('');
-  if (exactJa(f) !== exactJa(s.f)) return null;
+  // The pieces are what is shown; f only has to say the same. Haiku sometimes wrote f with the bars, or with a comma or
+  // full stop the pieces leave out.
+  const bare = (t) => exactJa(t).replace(/[|、。，,？！?!]/g, '');
+  if (bare(f) !== bare(s.f)) return null;
   const words = parts.filter((p) => p.word).map((p) => p.word);
   if (!words.length || (kind === 'sentence' && !SENTENCE_END.test(f))) return null;
   const g = (typeof s.g === 'string' && s.g.trim() ? s.g.trim() : o).slice(0, 300); // the English it replaces says it too
@@ -253,15 +258,35 @@ export function validateSwaps(level, swaps, sharedWords, text = '') {
       ctx: typeof s.ctx === 'string' ? s.ctx.trim() : '',
       ...(sharedWords ? { word: hit.word, ...(hit.status ? { status: hit.status } : {}) } : {}),
     };
-    if (!numberTrap(swap, text)) out.push(swap);
+    if (!numberTrap(swap, text) && !misplaced(swap, text)) out.push(swap);
   }
   return out;
 }
 
+// Word swaps the prompt forbids that the passage's hints (hints.js) invited on Haiku: mae or ato for "before" or "after",
+// which only go after a noun in Japanese order ("mae you run the script"), and a verb that acts on something where
+// nothing follows to act on ("the program will tomeru with an error"). Every place the English occurs is checked.
+const CLAUSE_JOINERS = new Set(['before', 'after']);
+const TRANSITIVE = new Set(['止める', '開ける', '始める', '変える', '上げる', '終える', '消す', '入れる', '出す', '続ける']);
+const NO_OBJECT = new Set(['with', 'at', 'in', 'on', 'for', 'to', 'from', 'by', 'and', 'but', 'or', 'so', 'when', 'if', 'because',
+  'after', 'before', 'until', 'while', 'now', 'again', 'soon', 'suddenly', 'today', 'yet', 'too', 'then', 'there', 'here',
+  'early', 'late', 'already']);
+export function misplaced(swap, text) {
+  if (swap.parts) return false;
+  if (/^[前後]$/.test(swap.f)) return CLAUSE_JOINERS.has(swap.o.toLowerCase());
+  if (!TRANSITIVE.has(swap.f) || !text) return false;
+  for (let i = text.indexOf(swap.o); i !== -1; i = text.indexOf(swap.o, i + 1)) {
+    const next = /^\s*([A-Za-z][A-Za-z']*)/.exec(text.slice(i + swap.o.length))?.[1];
+    if (!next || NO_OBJECT.has(next.toLowerCase())) return true;
+  }
+  return false;
+}
+
 // A phrase in Japanese order that ends in a verb ends its clause: "I 店に行きました with my mom" leaves English hanging
 // after the verb. Punctuation, the end, or a word that starts a new clause may follow it, wherever it occurs.
+// A subject pronoun starts a clause too: "As soon as we ie ni hairimashita we could smell the smoke".
 const CLAUSE_START = new Set(['and', 'but', 'so', 'or', 'because', 'then', 'when', 'while', 'if', 'until', 'since', 'though',
-  'although', 'unless']);
+  'although', 'unless', 'i', 'we', 'he', 'she', 'they']);
 export function dangles(swap, text) {
   if (swap.kind !== 'phrase' || !text) return false;
   const at = swap.parts.findLastIndex((p) => p.word);
@@ -352,7 +377,7 @@ export function swapTarget(text, density) {
 }
 
 // Swaps a passage may have: the level's per-sentence rule, or the density target.
-const swapLimit = (level, text, density) => (density > 0 ? swapTarget(text, density) : (level <= 1 ? 1 : 2) * sentenceCount(text));
+export const swapLimit = (level, text, density) => (density > 0 ? swapTarget(text, density) : (level <= 1 ? 1 : 2) * sentenceCount(text));
 // One use per Japanese word: a phrase or sentence uses every listed word in it.
 const oncePerWord = (swaps) => {
   const used = new Set();
