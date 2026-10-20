@@ -1,6 +1,6 @@
 // System prompt and response schema. Word, phrase and sentence swaps, each split into pieces so levels.js can check every
 // Japanese word against the list. Tuned against Gemini and Haiku on real passages (docs/swap-prompt.md).
-import { wordsForLevel, swapTarget, swapLimit, intensityFactor, PARTICLES } from './levels.js';
+import { wordsForLevel, swapTarget, swapLimit, intensityFactor, PARTICLES, INTENSITY_FULL } from './levels.js';
 import { wordHints } from './hints.js';
 
 // Bumped whenever the prompt or the response changes shape, so cached answers from an older prompt aren't reused.
@@ -54,6 +54,9 @@ function sentenceRate(level, stage, heavy = 0) {
 // Haiku at low effort settled on one "safe" swap a passage, or none, against "one or two per sentence"; a number per
 // passage, with the reason, got it to return what the extension can show (docs/swap-prompt.md).
 const TARGET = 'Each passage comes with a "target": how many swaps the extension may show in it (a phrase or sentence swap counts as one). Return about that many, spread across its sentences, and fewer only when nothing else fits the rules: the extension picks from what you return, LEARNING words first, so a passage held to one safe swap teaches little. Every LEARNING word that fits goes in, even past the target.';
+// Full intensity (3): no target, every swap the rules allow, sentence swaps at any stage. The other levels' prompts are
+// unchanged by it and full has its own cache (background.js cacheRevision), so PROMPT_VERSION stays.
+const FULL = 'The reader asked for FULL Japanese: as much as the rules below allow, with no target. Return a swap for every listed word, LEARNING and KNOWN, whose listed meaning the passage says in that sense, wherever it says it (the same word may be swapped in several places, each with its own "c"). Write every sentence that can be said completely with listed words and the grammar below as a sentence swap; where only part of a sentence can, make phrases and words of the rest. Every swap still follows the MEANING RULES: where the sense differs or you are unsure, leave the English.';
 
 // The rules come first and the word lists last, known words before learning words (whose order changes as words are
 // shown during the day), so consecutive calls share a long prefix that Gemini caches. With the plugin's word state,
@@ -61,7 +64,8 @@ const TARGET = 'Each passage comes with a "target": how many swaps the extension
 // percent: the share of words to swap; 0: the level's rule. Either way each passage comes with its target
 // (buildUserContent).
 // stage: the plugin's stage (1-4, 0 without it), which sets how many sentences go fully into Japanese. heavy: 0, or the
-// reader's heavier intensity (1, 2), which asks for more of everything (the caller scales percent itself).
+// reader's heavier intensity (1, 2), which asks for more of everything (the caller scales percent itself), or full (3),
+// which asks for every swap the list allows, whatever the stage and percent.
 // Two parts: everything up to the known words, which stays the same all day, and the learning words, so a provider with
 // explicit caching (Anthropic) can mark both.
 export function buildSystemParts(level, sharedWords, shownToday = [], percent = 0, stage = 0, heavy = 0) {
@@ -78,9 +82,11 @@ export function buildSystemParts(level, sharedWords, shownToday = [], percent = 
   } else {
     learning = `LEARNING words (Level ${lvl}):\n${wordsForLevel(lvl).filter((w) => !KATAKANA_ONLY.test(w.ja)).map(entry).join('; ')}`;
   }
-  heavy = [0, 1, 2].includes(heavy) ? heavy : 0;
-  const sentences = sentenceRate(lvl, Number(stage) || 0, heavy);
-  const amount = percent > 0
+  heavy = [0, 1, 2, INTENSITY_FULL].includes(heavy) ? heavy : 0;
+  const full = heavy === INTENSITY_FULL;
+  const sentences = full ? '' : sentenceRate(lvl, Number(stage) || 0, heavy);
+  const amount = full ? FULL
+    : percent > 0
     ? `Swap about ${percent}% of the words. ${TARGET}${sentences ? ` Put ${sentences} fully into Japanese when one can be said completely.` : ''}`
     : sentences
     ? `${TARGET} Aim for ${sentences} as a sentence swap: look for short ones in replies, captions, dialogue and diaries. Make it a phrase wherever one fits ("we bought fish" -> "we 魚を買いました", not 魚 alone). Give every passage this care, however many come at once.`
@@ -92,7 +98,7 @@ THREE KINDS OF SWAP
 2. phrase: a short English phrase replaced by natural Japanese in Japanese word order, built only from listed words and grammar. Use it whenever single words would leave Japanese in an order Japanese never uses, or a particle is needed. "after work" -> 仕事の後, "with my friends" stays English (友達 is not listed), "watch a movie together" -> 一緒に映画を見る, "go home every day" -> 毎日家に帰る. Two neighbouring swaps should usually be one phrase. A phrase is a few words, never a clause with its own subject and verb, and never leaves English words dangling after Japanese verbs ("I 店に行った with my mom" is wrong): if a whole clause would go into Japanese, make the whole sentence a sentence swap, or use word swaps.
 3. sentence: a whole short sentence written fully in natural Japanese. o is the complete sentence exactly as written, with its final punctuation; f ends with 。 or ？. Use です/ます, or plain forms in casual speech (tweets, replies, captions). Only when every bit of its meaning can be said with listed words and grammar: never drop, add or soften meaning (keep "really" -> 本当に, "very", "again", times and people). When a sentence can be said completely, prefer the sentence swap over word swaps in it: "Last night I watched a movie at home." -> 昨日の夜、家で映画を見ました。 "It's raining again." -> また雨です。 "Do you like dogs?" -> 犬が好きですか？ "I didn't understand at all." stays English (全然 is not listed).
 
-${amount} Skip a passage entirely if a swap would make it hard to follow.
+${amount}${full ? '' : ' Skip a passage entirely if a swap would make it hard to follow.'}
 
 LEARNING words come first. A passage may come with "learning": LEARNING words whose English appears in it, each with the English found ("ある = have / exist: has"). Swap every one the passage uses in its listed sense: inside a phrase or sentence where one fits, else as a word. They are found by spelling alone, so check each against the MEANING RULES below, and leave it where the sense differs: a helper verb ("have been"), another meaning ("enter the code" is not 入る, "the rest of it" is not 休む "rest"), or a rule ("before you run" stays English, "the program will stop" too). Then look for other LEARNING words said in other English, then KNOWN words: "listed" names the KNOWN words whose English appears, as leads to check the same way.
 
@@ -124,8 +130,9 @@ ${known}`, learning];
 export const buildSystemPrompt = (...args) => buildSystemParts(...args).join('');
 
 // Each passage with its target, the most swaps planSwaps (levels.js) shows in it: the density's share of its words, else
-// the level's per-sentence rule raised by a heavier intensity (heavy 1, 2; the caller has already scaled density); and
-// the listed words whose English it says (hints.js), learning and known, the model's main lead to its learning words.
+// the level's per-sentence rule raised by a heavier intensity (heavy 1, 2; the caller has already scaled density), and no
+// target at full (heavy 3), where planSwaps shows everything; and the listed words whose English it says (hints.js),
+// learning and known, the model's main lead to its learning words.
 // Without the plugin's word state, the level's bundled list, which the prompt lists as learning words.
 export function buildUserContent(batch, density = 0, { level = 2, words, heavy = 0 } = {}) {
   const target = (text) => (density > 0 ? swapTarget(text, density) : Math.round(swapLimit(level, text, 0) * Math.max(1, intensityFactor(heavy))));
@@ -134,6 +141,6 @@ export function buildUserContent(batch, density = 0, { level = 2, words, heavy =
     const hints = wordHints(text, listed);
     const list = (learning) => hints.filter((h) => h.learning === learning).map((h) => `${h.ja} = ${h.en}: ${h.found}`);
     const [learning, known] = [list(true), list(false)];
-    return { id, text, target: target(text), ...(learning.length ? { learning } : {}), ...(known.length ? { listed: known } : {}) };
+    return { id, text, ...(heavy === INTENSITY_FULL ? {} : { target: target(text) }), ...(learning.length ? { learning } : {}), ...(known.length ? { listed: known } : {}) };
   }));
 }

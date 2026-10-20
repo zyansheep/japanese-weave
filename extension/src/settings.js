@@ -1,6 +1,7 @@
 // Preferences, stored under chrome.storage.local["settings"]. The model keys are stored apart from these, so
 // the config pages get never carries them.
-import { MODELS, DEFAULT_MODEL } from './models.js';
+import { MODELS, DEFAULT_MODEL, providerOf } from './models.js';
+import { INTENSITY_OFF } from './levels.js';
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
@@ -82,6 +83,35 @@ export function siteEnabled(settings, url) {
     const u = new URL(url);
     return /^https?:$/.test(u.protocol) && settings.enabled && siteOn(settings, u.hostname);
   } catch { return false; }
+}
+
+// Why a page gets no Japanese, '' when it does: the one test for the worker, the content script and the toolbar icon.
+// ctx is a page config (background.js context): settings with newSitesEnabled resolved, hasKey, paused, origins and
+// intensity. Global reasons come first, in the order a reader would fix them. url undefined: the browser didn't tell
+// (no access to the tab without the "tabs" permission), which with every site allowed means a page that isn't a website.
+// 'switched-off' | 'paused' | 'intensity-off' | 'no-gemini-key' | 'no-anthropic-key' | 'unsupported' | 'hidden' |
+// 'site-off' | 'not-on' | 'private' | 'no-access'.
+export function globalOffReason(ctx) {
+  if (!ctx.settings.enabled) return 'switched-off';
+  if (ctx.paused) return 'paused';
+  if (ctx.intensity?.level === INTENSITY_OFF) return 'intensity-off';
+  if (!ctx.hasKey) return providerOf(ctx.settings.model) === 'anthropic' ? 'no-anthropic-key' : 'no-gemini-key';
+  return '';
+}
+export function offReason(ctx, url) {
+  const global = globalOffReason(ctx);
+  if (global) return global;
+  if (url === undefined) return hasSiteAccess('https://example.com/', ctx.origins) && hasSiteAccess('http://example.com/', ctx.origins) ? 'unsupported' : 'hidden';
+  let u;
+  try { u = new URL(url); } catch { return 'unsupported'; }
+  if (!/^https?:$/.test(u.protocol)) return 'unsupported';
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  const override = Object.hasOwn(ctx.settings.siteOverrides, host) ? ctx.settings.siteOverrides[host] : undefined;
+  if (override === false) return 'site-off';
+  if (override === undefined && !ctx.settings.newSitesEnabled) return 'not-on';
+  if (override === undefined && offByDefault(host)) return 'private';
+  if (!hasSiteAccess(url, ctx.origins)) return 'no-access';
+  return '';
 }
 
 export function hasSiteAccess(url, origins = []) {

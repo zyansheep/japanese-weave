@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
-  numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced,
+  numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced, intensityLabel, intensityFactor, INTENSITY_LEVELS, INTENSITY_NAMES,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -103,6 +103,27 @@ describe('choosing swaps', () => {
     const kept = Array.from({ length: 1000 }, (_, i) => planSwaps(2, swaps.slice(0, 1), 'One sentence here.', words,
       { intensity: -1, seed: i }).swaps.length);
     expect(kept.reduce((a, b) => a + b, 0) / kept.length).toBeCloseTo(0.7, 1);
+  });
+
+  test('planSwaps at full: every candidate, sentences first, a word again where its English is again; off: none', () => {
+    const listed = [...words, { ja: '日', en: 'day', hint: 'hi', status: 'known' }];
+    const passage = 'It was a big day. It was a very long one, but fine, but late.';
+    const [sentence] = validateSwaps(2, [{ k: 's', o: 'It was a big day.', f: '大きい日でした。', p: '大きい|日|でした|。',
+      g: 'It was a big day.', c: 'It was a big day.' }], listed, passage);
+    expect(sentence.kind).toBe('sentence');
+    const offered = [...swaps, sentence, swaps[0]]; // the model's order, and one exact repeat
+    const full = planSwaps(2, offered, passage, listed, { intensity: 3, density: 5, budgetPer100: 1, jitter: 0.5, seed: 3 });
+    expect(full.swaps[0]).toBe(sentence); // placed before the word swaps inside it (text.js applySwaps)
+    expect(full.swaps.slice(1)).toEqual(swaps); // both buts, in the model's order, the repeat dropped
+    expect(full.plan).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 6, candidates: 6 });
+    expect(planSwaps(2, offered, passage, listed).swaps.length).toBeLessThan(6);
+    expect(planSwaps(2, offered, passage, listed, { intensity: -3, seed: 3 }).swaps).toEqual([]);
+  });
+  test('intensity levels -3..3: names, labels and factors', () => {
+    expect(INTENSITY_LEVELS.map((l) => INTENSITY_NAMES[l])).toEqual(['off', 'much lighter', 'lighter', 'normal', 'heavier', 'much heavier', 'full']);
+    expect(INTENSITY_LEVELS.map(intensityLabel)).toEqual(['off', 'much lighter (−2)', 'lighter (−1)', 'normal', 'heavier (+1)',
+      'much heavier (+2)', 'full']);
+    expect(INTENSITY_LEVELS.map(intensityFactor)).toEqual([0, 0.5, 0.7, 1, 1.4, 1.8, 1]); // full has no factor, it has no ceiling
   });
 
   // 200 words, 10 learning candidates and 10 known ones, room for all of them.

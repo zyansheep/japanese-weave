@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Japanese Weave: two cream threads woven through two vermilion ones on an indigo tile. On a 16-unit grid, so every
+       straight edge falls on a pixel at 16, 32, 48, 96 and 128 px. tools/make-icons.sh rasterizes it, and makes the grey
+       "off" icon by swapping these three colors. -->
+  <rect width="16" height="16" rx="3.5" fill="#233067"/>
+  <rect x="2" y="4" width="12" height="3" fill="#f6ead2"/>
+  <rect x="2" y="9" width="12" height="3" fill="#f6ead2"/>
+  <rect x="4" y="2" width="3" height="12" fill="#e2452f"/>
+  <rect x="9" y="2" width="3" height="12" fill="#e2452f"/>
+  <!-- the crossings where a cream thread goes over -->
+  <rect x="9" y="4" width="3" height="3" fill="#f6ead2"/>
+  <rect x="4" y="9" width="3" height="3" fill="#f6ead2"/>
+</svg>

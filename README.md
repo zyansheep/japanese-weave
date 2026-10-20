@@ -65,6 +65,15 @@ level from [blocks/](blocks/level-01.md).
   only), or Claude Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s
   for a page's first passages. Passages from every tab share calls, up to 16 a call
   ([docs/swap-prompt.md](docs/swap-prompt.md)).
+- **From off to full on pages** (extension): Alt+Shift+Comma and Alt+Shift+Period (or the popup's Less and More) step
+  the Japanese on pages from **Off** to **Full** for 3 hours after the last press: off (−3), much lighter, lighter,
+  normal, heavier, much heavier, full (+3). Off puts every woven page back in English at once, sends nothing to the
+  model and logs nothing, until a heavier press or the popup's **Turn back on**. Full asks the model for every listed
+  word, learning or known, that a passage says in that sense, and every sentence your words and simple grammar can say
+  whole, and shows all of it, still checked word by word. The toolbar badge shows the level (`−2`, `+1`, `off`,
+  `full`) and `···` while the model works on that tab's page; the icon turns grey where a page gets no Japanese, and
+  its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, no
+  key, or a page extensions can't run on.
 
 All of it shares one word list on your machine, so words you see on the web count toward the chat and the other
 way round.
@@ -221,6 +230,7 @@ may call.
 python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex
 python3 scripts/make_blocks.py                   # regenerate blocks/ and extension/src/starter.js
 cd extension && bun install && bun test           # extension (happy-dom)
+sh tools/make-icons.sh                            # redraw the extension's icons from tools/icons/icon.svg
 python3 tests/model_eval.py --out /tmp/jw-eval    # live check via claude -p
 ```
 

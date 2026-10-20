@@ -185,6 +185,18 @@ so for them the target mostly confirms the old "one or two a sentence", and the 
 known-word hints may invite more literal swaps from Flash, which has more sense slips than Haiku. Not measured: run
 both through the lab once before relying on them.
 
+## Full intensity (+3)
+
+At the top of the reader's intensity scale the page gets all the Japanese the list allows. The amount paragraph is
+replaced: passages carry no target; the model is asked for a swap for every listed word, learning or known, whose
+listed meaning the passage says, in every place it says it (each with its own `c`), and for a sentence swap for every
+sentence listed words and the grammar list can say completely, at any stage, with phrases and words where only part of
+a sentence can. "Skip a passage if a swap would make it hard to follow" is left out; the meaning rules and the
+validation are unchanged. `planSwaps` shows everything that validates, with no ceiling or thinning, sentences first so
+`applySwaps` places a sentence before the word swaps inside it, and a word again where its English comes again. Full
+has its own cache (the cache revision includes the heavier level), and the other levels' prompts are unchanged, so
+`PROMPT_VERSION` stayed 4. Not measured on live models yet: `INTENSITY=3` runs the prompt lab at full.
+
 ## Tuning it again
 
 `tools/prompt-lab/lab.mjs` runs passages through the extension's own pipeline and prints them woven, ⟦word or phrase⟧
@@ -196,7 +208,8 @@ GEMINI_KEY_FILE=~/path/to/key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs
 ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs claude-haiku-5-5
 ```
 
-`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live). At the end it prints the
+`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live); `INTENSITY=1`, `2` or `3`
+asks and picks as at that level (without the random thinning). At the end it prints the
 counts: candidates a passage as returned and after validation, passages with none, swaps shown and how many have a
 learning word, and with `web.json` or `live.json`, how many of the `learn` words came back.
 

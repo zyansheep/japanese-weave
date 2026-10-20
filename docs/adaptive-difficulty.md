@@ -207,6 +207,15 @@ starting with passages that got none, the thinned-versus-untouched effect (or ho
 from the 0.5 points it needs), and per surface the presses and hours spent away from normal. Many lighter presses
 mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
 
+On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
+English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
+interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt: no per-passage
+target, a candidate for every listed word, learning or known, the passage says in its listed sense (in every place it
+says it), and a sentence swap for every sentence listed words and the allowed grammar can say completely, at any
+stage. planSwaps shows every validated candidate, sentences before the word swaps inside them, with no ceiling, budget
+or random thinning (the plan says level 3, intensity 5, jitter 1). Both ends last 3 hours after the last press like
+the other levels; a press further at an end restarts the clock.
+
 ## Inspecting
 
 - `fw.py knowledge`: the dial, budget and realized peek rate; the T3 offset; recent evidence moves; the words with
