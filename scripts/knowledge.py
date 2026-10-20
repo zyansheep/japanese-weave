@@ -2,11 +2,13 @@
 Python 3.9+, standard library only.
 
 Model: P(peek) = sigmoid(offset_s - k_w). k_w is the reader's knowledge of a word on a log-odds scale, learned by
-Elo-style updates. Browser: every passage shown counts (its "shown" record), opened or not. A word left unopened is
-evidence the reader knew it in proportion to the chance it was read: certain down to the lowest opened line of the
-passage (halving per line below it), else from the passage's time on screen against the time reading down to the word
-takes (read_chance). The update is the gradient of log P(what happened) with P(open) = P(read) * P(peek).
-T3 messages are logged only when something in them was opened, so there an update is conditioned on the episode having
+Elo-style updates. Every browser passage shown (its "shown" record) and every T3 message with a word count counts,
+opened or not. A word left unopened is evidence the reader knew it in proportion to the chance it was read: certain
+down to the lowest opened line (halving per line below it), else from time on screen against the time reading down to
+the word takes (read_chance: the passage's stays in the browser; stay_chance: in T3, the stays of the paragraph the
+word is in). The update is the gradient of log P(what happened) with P(open) = P(read) * P(peek), and the T3 offset
+follows the same gradient. A T3 message without a word count (logged before T3 sent them, and not backfilled) is
+replayed as episodes, which exist only when something was opened: there an update is conditioned on the episode having
 at least one open, and only the line rule applies. Every lexicon word is scored, words not introduced yet included,
 and a glossed word is matched to its entry through its dictionary form (inflection.py: T3 glosses conjugated verbs
 whole). refresh() replays the whole log from scratch (deterministic, retunable), writes knowledge.json, steers the
@@ -53,6 +55,7 @@ CHALLENGES = (0, 0.5, 1, 1.5, 2, 3)
 PUNCTUATION = set('。？！?!.')
 PACE_MS = 300              # ms per word a reader takes on a passage with Japanese in it (about 200 words a minute)
 READ_MAX = 0.7             # the most a passage's time on screen alone says about a word in it being read
+SLACK_PX = 10              # how far above a T3 paragraph's band a word's top may sit and still be in it (stay_chance)
 PACES = (150, 250, 400, 650)   # the reading model's grid, scored by how well it predicts opens (tune)
 READ_MAXES = (0.5, 0.7, 0.9)
 TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
@@ -124,13 +127,16 @@ def read_commands():
 # ---- episodes and observations ----
 
 def is_showing(context):
-    """A browser passage with a shown record: replayed whole, opened or not (showings)."""
+    """A browser passage with a shown record, or a T3 message with a word count (from its shown record, or backfilled
+    from its transcript): replayed whole, opened or not (showings)."""
+    if context['surface'] == 't3':
+        return context.get('words') is not None
     return context['surface'] == 'browser' and context.get('shown_at') is not None
 
 
 def episodes(rows, contexts, now_ms):
-    """Interactions grouped by (surface, view, context) and split at gaps over GAP_MS; only settled ones. Browser
-    passages with a shown record are left to showings()."""
+    """Interactions grouped by (surface, view, context) and split at gaps over GAP_MS; only settled ones. Showings
+    (is_showing) are left to showings()."""
     groups = {}
     for row in rows:
         groups.setdefault((row['surface'], row['view'], row['context']), []).append(row)
@@ -150,8 +156,10 @@ def episodes(rows, contexts, now_ms):
 
 
 def showings(rows, contexts, now_ms):
-    """Every browser passage shown, with its interactions (maybe none), once settled: SETTLE_MS after the last thing
-    that happened in it. [(at, key, context, items)] oldest first."""
+    """Every browser passage and T3 message shown (is_showing), with its interactions (maybe none), once settled:
+    SETTLE_MS after the last thing that happened in it (its shown record, its last stay, its last interaction; a T3
+    message with a backfilled word count has no shown record, and one with none of these is skipped).
+    [(at, key, context, items)] oldest first."""
     groups = {}
     for row in rows:
         groups.setdefault((row['surface'], row['view'], row['context']), []).append(row)
@@ -160,20 +168,49 @@ def showings(rows, contexts, now_ms):
         if not is_showing(context):
             continue
         items = sorted(groups.get(key, []), key=lambda r: (r['at'], r['id']))
-        last = max([context['shown_at'], context.get('seen_until') or 0] + [r['at'] for r in items])
-        if last <= now_ms - SETTLE_MS:
+        last = max([context.get('shown_at') or 0, context.get('seen_until') or 0] + [r['at'] for r in items])
+        if last and last <= now_ms - SETTLE_MS:
             out.append((last, key, context, items))
     return sorted(out, key=lambda e: e[0])
+
+
+def _chance(ms, words, share, pace, top):
+    """The chance of having read down to `share` of the way through `words` words in `ms` of possible reading, at
+    `pace` ms a word, at most `top`."""
+    if words <= 0 or ms <= 0:
+        return 0.0
+    return top * (1 - math.exp(-ms / (pace * words * min(1.0, max(0.1, share)))))
 
 
 def read_chance(context, y, line, pace=PACE_MS, top=READ_MAX):
     """The chance a word at height y of a passage was read, from the passage's time on screen alone: the time reading
     down to that line takes at `pace` against the time a reader could have been reading the passage."""
-    words, height, active = context.get('words') or 0, context.get('height') or 0, context.get('active') or 0
-    if not words or active <= 0:
+    height = context.get('height') or 0
+    return _chance(context.get('active') or 0, context.get('words') or 0, (y + line) / height if height > 0 else 1.0,
+                   pace, top)
+
+
+def stay_chance(context, y, line, pace=PACE_MS, top=READ_MAX):
+    """The chance a word at height y of a T3 message was read, from the stays on screen of the paragraph it is in (the
+    stays whose band holds the word's top, from half a line above the band, at most SLACK_PX, down to its bottom; their
+    ms added), as read_chance does for a passage. The paragraph's words are the stays' count when sent, else the
+    message's words per pixel of its height (of the distinct bands on record when the height is missing) times the
+    band's height, at least 1: the message's words include paragraphs without Japanese, which have no stays. No stay
+    holds the word: 0."""
+    stays = context.get('stays') or []
+    slack = min(line / 2, SLACK_PX)
+    mine = [s for s in stays if s['height'] > 0 and s['y'] - slack <= y < s['y'] + s['height']]
+    if not mine:
         return 0.0
-    share = min(1.0, max(0.1, (y + line) / height)) if height > 0 else 1.0
-    return top * (1 - math.exp(-active / (pace * words * share)))
+    band = max(mine, key=lambda s: s['ms'])  # one paragraph; its bands differ only if its layout changed
+    counted = [s['words'] for s in mine if s.get('words')]
+    if counted:
+        words = max(counted)
+    else:
+        height = context.get('height') or sum(h for _y, h in {(s['y'], s['height']) for s in stays})
+        total = context.get('words') or 0
+        words = max(1.0, total * band['height'] / height) if total and height > 0 else 0
+    return _chance(sum(s['ms'] for s in mine), words, (y - band['y'] + line) / band['height'], pace, top)
 
 
 def _line_height(ys):
@@ -192,8 +229,8 @@ def observations(surface, context, items, listed, read=None):
 
     Opened: y 1 for a pin or flip or a peek open at least GLANCE_MS, GLANCE_Y for a shorter peek; T3 peeks under
     T3_NOISE_MS don't count. Unopened: y 0, weighted by the chance it was read: 1 down to the lowest opened line,
-    halving per line below it, or read(y, line) when that is higher (a browser passage's time on screen). Without
-    read, nothing opened means [] (a T3 message is logged only when something was opened). The unopened words of a
+    halving per line below it, or read(y, line) when that is higher (time on screen: read_chance, stay_chance). Without
+    read, nothing opened means [] (an episode exists only because something was opened). The unopened words of a
     sentence whose whole-sentence translation was opened get nothing (it was read in English); its opened words still
     count as opened."""
     match = matcher(listed)
@@ -258,16 +295,25 @@ class Word:
                 self.k = self.mu + (self.k - self.mu) * 0.5 ** (days / FORGET_DAYS)
         self.last = at if self.last is None else max(self.last, at)
 
+    def k_at(self, at):
+        """k as age(at) would leave it, without aging the word."""
+        if self.last is not None and at > self.last and self.k > self.mu:
+            return self.mu + (self.k - self.mu) * 0.5 ** ((at - self.last) / DAY_MS / FORGET_DAYS)
+        return self.k
+
     @property
     def sd(self):
         return math.sqrt(2 / (1 + self.n))
 
 
-def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, top=READ_MAX, losses=None):
+def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, top=READ_MAX, losses=None, chat=None):
     """Every word's knowledge after the whole log; also the T3 offset. listed: as in observations. pace, top: the
-    reading model (read_chance). losses: a list to append, for every listed word of every browser passage shown,
-    (opened, predicted chance of an open) before the update, with the read chance from time on screen alone: how well
-    the model predicts (tune)."""
+    reading model (read_chance, stay_chance). losses: a list to append, for every listed word of every browser passage
+    shown, (opened, predicted chance of an open) before the update, with the read chance from time on screen alone: how
+    well the model predicts (tune). chat: a list to append, for every T3 message shown (with a word count), {at, words,
+    lookups: its opens (T3 peeks under T3_NOISE_MS left out), expected: the sum over its listed words of read chance
+    from time on screen alone times P(peek), before the update, observed: its opened listed words (a glance counts
+    GLANCE_Y)} (calibrate)."""
     match = matcher(listed)
     words = {}
     offset = {'browser': 0.0, 't3': 0.0}
@@ -291,15 +337,21 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
                 word.k = min(word.k, LEARN_COMMAND_K)
             continue
         if kind == 2:
-            _at, _key, context, items = item
-            read = lambda y, line, c=context: read_chance(c, y, line, pace, top)
-            obs = observations('browser', context, items, listed, read)
-            line = _line_height([n[2] for n in context['annotations']]) if losses is not None else 0
+            _at, (surface, _view, _context), context, items = item
+            chance = stay_chance if surface == 't3' else read_chance
+            read = lambda y, line, c=context, f=chance: f(c, y, line, pace, top)
+            obs = observations(surface, context, items, listed, read)
+            line = _line_height([n[2] for n in context['annotations']])
+            for ja, _y, _w in obs:
+                get(ja).age(at)
+            if chat is not None and surface == 't3':
+                chat.append(_chat_record(at, context, items, obs, words, intervals, match, offset['t3'],
+                                         lambda y: read(y, line)))
+            residual = total = 0.0
             for ja, y, weight in obs:
-                word = get(ja)
-                word.age(at)
-                q = sigmoid(offset['browser'] - word.k)
-                if losses is not None:
+                word = words[ja]
+                q = sigmoid(offset[surface] - word.k)
+                if losses is not None and surface == 'browser':
                     alone = max(0.05, read_chance(context, _y_of(context, ja, match), line, pace, top))
                     losses.append((y > 0, min(1 - 1e-6, max(1e-6, alone * q))))
                 eta = max(ETA_MIN, ETA_MAX / (1 + ETA_SLOPE * word.n))
@@ -308,12 +360,19 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
                     word.n += 1.0
                     word.opened += 1
                     word.recent.append(at)
+                    residual += y - q
+                    total += 1.0
                 else:  # not opened, read with chance r: log (1 - r q)
-                    word.k += eta * weight * q * (1 - q) / (1 - weight * q)
+                    slope = weight * q * (1 - q) / (1 - weight * q)
+                    word.k += eta * slope
                     word.n += weight
+                    residual -= slope
+                    total += weight
                 word.obs += 1
-                word.history.append({'at': at, 'surface': 'browser', 'y': y, 'w': round(weight, 2), 'k': round(word.k, 2)})
+                word.history.append({'at': at, 'surface': surface, 'y': y, 'w': round(weight, 2), 'k': round(word.k, 2)})
                 del word.history[:-30]
+            if surface == 't3' and total:  # the same gradients, with respect to the offset
+                offset['t3'] = max(-T3_LIMIT, min(T3_LIMIT, offset['t3'] + T3_RATE * residual / total))
             continue
         (surface, _view, _context), context, items = item
         obs = observations(surface, context, items, listed)
@@ -351,6 +410,22 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
 
 def _y_of(context, ja, match):
     return next((n[2] for n in context['annotations'] if match(n[0]) == ja), 0)
+
+
+def _chat_record(at, context, items, obs, words, intervals, match, offset, read):
+    """One T3 message for calibrate: its lookups, and the model's expected lookups of its listed words against them."""
+    best = {}
+    for written, _x, y in context['annotations']:
+        ja = match(written)
+        if ja is not None:
+            best[ja] = max(best.get(ja, 0.0), read(y))
+    expected = 0.0
+    for ja, r in best.items():
+        word = words.get(ja)
+        expected += r * sigmoid(offset - (word.k_at(at) if word is not None else prior(intervals.get(ja))))
+    lookups = sum(1 for r in items if not (r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS))
+    return {'at': at, 'words': context.get('words') or 0, 'lookups': lookups, 'expected': expected,
+            'observed': sum(y for _ja, y, _w in obs if y > 0)}
 
 
 def tune(rows, contexts, listed, intervals, commands, now_ms):
@@ -391,7 +466,7 @@ def decisions(changes):
     return [tuple(d) for d in out]
 
 
-def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
+def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, chat=None):
     """Evidence on the default amount of Japanese, over the last `days` days.
 
     reading: browser passages shown with some time on screen, by the share of their words in Japanese (the first bin,
@@ -406,6 +481,9 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
     presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
     heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
     (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats).
+    chat: T3 messages shown (with a word count), from replay's chat list: how many, their words, lookups and lookups
+    per 100 words, how many had none, and the lookups of listed words the model expected before seeing each message
+    against those observed (how well calibrated it is on chat).
     """
     since = now_ms - days * DAY_MS
     opens = {}
@@ -415,7 +493,8 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
             opens[key] = opens.get(key, 0) + 1
     passages = []
     for key, c in contexts.items():
-        if not is_showing(c) or c['shown_at'] < since or (c.get('words') or 0) < MIN_PASSAGE_WORDS:
+        if c['surface'] != 'browser' or not is_showing(c) or c['shown_at'] < since or \
+                (c.get('words') or 0) < MIN_PASSAGE_WORDS:
             continue
         if (c.get('active') or 0) < MIN_ACTIVE_MS:
             continue
@@ -469,7 +548,15 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS):
                                                                                for k, v in sorted(time_at.items())},
                             'verdict': verdict}
     presses['chat']['threadsOff'] = threads_off
-    return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'presses': presses}
+    messages = [m for m in chat or [] if m['at'] >= since]
+    shown, lookups = sum(m['words'] for m in messages), sum(m['lookups'] for m in messages)
+    replies = {'messages': len(messages), 'words': shown, 'lookups': lookups,
+               'per100': round(100 * lookups / shown, 2) if shown else None,
+               'none': sum(1 for m in messages if not m['lookups']),
+               'expected': round(sum(m['expected'] for m in messages), 1),
+               'observed': round(sum(m['observed'] for m in messages), 1)}
+    return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'chat': replies,
+            'presses': presses}
 
 
 def calibration_text(report):
@@ -497,6 +584,14 @@ def calibration_text(report):
             lines.append(f'  Not enough of either yet to measure the effect ({THIN_MIN_PASSAGES} each).')
     else:
         lines.append('No randomly thinned passages yet (extension 0.6.0 and later).')
+    c = report.get('chat')  # knowledge.json from before has none
+    if c and c['messages']:
+        rate = f' ({c["per100"]:.2f} per 100 words)' if c['per100'] is not None else ''
+        lines.append(f'Chat: {c["messages"]} messages of {c["words"]} words, {c["lookups"]} lookups{rate}, '
+                     f'{c["none"]} messages with none; listed words: {c["expected"]:.1f} lookups expected, '
+                     f'{c["observed"]:.1f} seen.')
+    elif c is not None:
+        lines.append('No chat messages with a word count yet.')
     for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
         p = report['presses'][surface]
         at = lambda k: {str(intensity.OFF): 'off', str(intensity.FULL): 'at full'}.get(k, f'at {int(k):+d}')
@@ -631,7 +726,9 @@ def refresh(now=None):
         reading = previous.get('reading')
         if not isinstance(reading, dict) or reading.get('day') != today:  # the reading model's grid, once a day
             reading = dict(tune(rows, contexts, listed, intervals, commands, now_ms), day=today)
-        words, offset = replay(rows, contexts, listed, intervals, commands, now_ms, reading['pace'], reading['top'])
+        chat = []
+        words, offset = replay(rows, contexts, listed, intervals, commands, now_ms, reading['pace'], reading['top'],
+                               chat=chat)
         rate, shown, peeks = peek_rate(rows, contexts, now_ms)
         challenge = challenge_of(state)
         controller = steer(previous.get('controller'), challenge, rate, shown, today)
@@ -659,7 +756,8 @@ def refresh(now=None):
             'rate': {'per100': round(rate, 2) if rate is not None else None, 'shownWords': shown, 'peeks': peeks,
                      'days': RATE_DAYS},
             'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
-            'calibration': calibrate(rows, contexts, feedback.intensity_changes(feedback.default_path()), now_ms),
+            'calibration': calibrate(rows, contexts, feedback.intensity_changes(feedback.default_path()), now_ms,
+                                     chat=chat),
             'unlisted': unlisted(rows, listed, now_ms),
             'words': {ja: {'k': round(w.k, 3), 'n': round(w.n, 2), 'sd': round(w.sd, 3), 'mu': round(w.mu, 2),
                            'obs': w.obs, 'opened': w.opened, 'recent': len(w.recent), 'last': w.last,

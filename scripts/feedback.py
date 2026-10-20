@@ -7,11 +7,13 @@ for calibration (knowledge.py). Words, positions, times and counts only, never t
 
 Stored in <state dir>/interactions.sqlite (schema 5):
   contexts      one row per passage per page load (browser) or message render (T3): its box on the page, the
-                glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), and for browser
-                passages its word count, when its glossed words were first on screen ("shown"; for a blank passage,
-                with annotations [], when enough of it was) and how the amount was chosen ("plan", JSON {level: the
-                reader's intensity -3..3, intensity: its factor, jitter: the passage's random factor (1: none), limit:
-                swaps allowed, candidates: swaps the model offered}); seq orders changes for export
+                glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), its word count
+                and when it was shown ("shown": in the browser when its glossed words were first on screen, for a
+                blank passage, with annotations [], when enough of it was; in T3 once per message, its prose words;
+                older T3 messages have a word count from their transcript and no shown time), for browser passages
+                how the amount was chosen ("plan", JSON {level: the reader's intensity -3..3, intensity: its factor,
+                jitter: the passage's random factor (1: none), limit: swaps allowed, candidates: swaps the model
+                offered}); seq orders changes for export
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -23,7 +25,8 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                   visible  one stay on screen of a paragraph: y, height (the paragraph's band; in the browser the whole
                            passage); ms: the time a reader could have been reading it; detail {"wall": all its time on
                            screen, and the rest by why it doesn't count: "away" (page hidden or window not focused),
-                           "media" (sound or video playing), "idle" (no input for 30 s)}
+                           "media" (sound or video playing), "idle" (no input for 30 s); "words": the paragraph's word
+                           count, when sent (T3)}
                   trace    the mouse path over a message (T3): ms: its span; detail {"points": [[ms since at, x, y]]}
 
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
@@ -250,9 +253,13 @@ def _clean_reading(item, clean, num):
             return None
         if not all(span(t, MAX_VISIT_MS) for t in times) or times[0] > times[1]:
             return None
+        words = item.get('words')
+        if words is not None and not (count(words) and 0 <= words <= 10_000):
+            return None
         ms, wall, away, media, idle = (round(t) for t in times)
+        detail = {'wall': wall, 'away': away, 'media': media, 'idle': idle}
         return dict(row, y=round(item['y']), height=round(item['height']), ms=ms,
-                    detail={'wall': wall, 'away': away, 'media': media, 'idle': idle})
+                    detail=detail if words is None else dict(detail, words=words))
     if not coord(item.get('x')) or not coord(item.get('y')):
         return None
     row = dict(row, x=round(item['x']), y=round(item['y']))
@@ -431,7 +438,9 @@ def sync_mirror(collector, path, timeout=4, pages=20):
 def load(path=None):
     """Everything knowledge.py replays: interactions oldest first, and contexts keyed by (surface, view, context),
     each with its plan (None when not recorded), its time on screen when a reader could have been reading it
-    ("active", the ms of its visible stays, 0 without any) and when its last stay began ("seen_until")."""
+    ("active", the ms of its visible stays, 0 without any) and when its last stay began ("seen_until"). T3 messages
+    also keep their stays one by one, oldest first ("stays": [{y, height, ms, words}], words None when not sent): each
+    is one paragraph's band."""
     con = connect(path)
     try:
         rows = [dict(zip(INTERACTION_COLUMNS, r)) for r in con.execute(
@@ -442,6 +451,8 @@ def load(path=None):
             c['annotations'] = json.loads(c['annotations'])
             c['plan'] = json.loads(c['plan']) if c['plan'] else None
             c['active'], c['seen_until'] = 0, None
+            if c['surface'] == 't3':
+                c['stays'] = []
             contexts[(c['surface'], c['view'], c['context'])] = c
         for surface, view, context, ms, last in con.execute(
                 "SELECT surface, view, context, coalesce(sum(ms), 0), max(at) FROM reading WHERE kind = 'visible' "
@@ -449,6 +460,14 @@ def load(path=None):
             c = contexts.get((surface, view, context))
             if c is not None:
                 c['active'], c['seen_until'] = ms, last
+        for view, context, y, height, ms, detail in con.execute(
+                "SELECT view, context, y, height, ms, detail FROM reading WHERE kind = 'visible' AND surface = 't3' "
+                'ORDER BY at, id'):
+            c = contexts.get(('t3', view, context))
+            if c is not None:
+                words = json.loads(detail).get('words')
+                c['stays'].append({'y': y, 'height': height, 'ms': ms or 0,
+                                   'words': words if isinstance(words, int) and not isinstance(words, bool) else None})
     finally:
         con.close()
     return rows, contexts
