@@ -137,14 +137,14 @@ async function inject() {
 for (const value of DENSITIES) {
   const opt = document.createElement('option');
   opt.value = String(value);
-  opt.textContent = value ? `${value}% of words` : 'Auto (by level)';
+  opt.textContent = value ? `at most ${value}% of words` : 'No cap';
   $('density').appendChild(opt);
 }
 
 for (const value of CHALLENGES) {
   const opt = document.createElement('option');
   opt.value = String(value);
-  opt.textContent = value ? `${value} peeks per 100 words` : 'Off';
+  opt.textContent = value ? `${value} lookups per 100 words` : `Default (${intensityBudget(0)} per 100 words)`;
   $('challenge').appendChild(opt);
 }
 

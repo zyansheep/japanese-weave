@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Japanese Weave",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "Swaps a few English words for Japanese on any website, at your Japanese Weave level.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArvmqhsPqLEYrxjxSjopBU/JLY9q+PDa4yjZU3lvKMre+SznJh1pYMhGymAi5YRTOnY59v8t/uze2sx8W8TWy+BfXHh3v0oKefF4GzJ4pNh0N2ucsoFoN2+io+wd+FGqKI/WekpO/V7+yrfynPajM57G1aVztdHUyipdhs8ifWxMXEWklKsT0YaJbD3pgvyBEL2i2fG+OCOVLOlDeGgiZaUvdeGyaVgB8nX0bBKMf/fYzXo9wn5P8XJfR9D76sixxC/NxEjvfEgYB/bZf/+lbmLsyLJ5C0U4WJjlxwKa5T4azbGAECe65hAFHncXZm3Z5HkztjT5UQkyqMYuA10nnTQIDAQAB",
   "permissions": [
