@@ -192,7 +192,7 @@ class Hook(Home):
         self.assertEqual(context, threads.note())
         context, out = self.hook('Prove it again.', session='s2', transcript_path=str(log))  # another chat
         self.assertIn('Japanese Weave (Stage', context)
-        self.assertIn('under the', context)
+        self.assertIn('under budget', context)
         self.assertIn('systemMessage', out)
         self.assertEqual(self.hook('no japanese please')[0], threads.note())  # already off: nothing new to log
         context, _ = self.hook('japanese back on', transcript_path=str(log))

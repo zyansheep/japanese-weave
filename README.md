@@ -124,7 +124,8 @@ whose name contains NAME.
 - **Exposure day**: a day you saw the word in a chat reply, or on a web page.
 - **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day. Words you
   looked up before they were introduced (opened in 2 different messages or passages within 14 days) come in first,
-  most opened first; then the list order.
+  most opened first; then the list order. A learning or shaky word the gloss log says you know at a glance (under an
+  8% chance of a lookup) keeps its status but gives its slot to a new word.
 - **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
 - **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
   often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or
@@ -132,12 +133,18 @@ whose name contains NAME.
   [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md)).
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
 
-| Stage | Japanese in a reply | Per sentence | Shape |
-|---|---|---|---|
-| 1 | about 6%, never over 10% | at most 2 | English sentences with swapped words |
-| 2 | about 12%, never over 20% | at most 4 | same |
-| 3 | about 25%, never over 35% | at most 4 | plus one short です/ます sentence in five |
-| 4 | about 40%, never over 55% | at most 4 | plus two in five |
+In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
+glance goes in wherever the English has its meaning, and learning words go in as often as your intensity's lookup
+budget allows (see [Adaptive difficulty](#adaptive-difficulty)). The stage sets the shape:
+
+| Stage | Shape of a chat reply |
+|---|---|
+| 1, 2 | English sentences with swapped words |
+| 3 | plus one short です/ます sentence in five, made of known words |
+| 4 | plus two in five |
+
+The claude.ai and ChatGPT blocks (`/japanese-weave:export`) can't see your lookups, so they still ask for a share
+of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4.
 
 Japanese has no spaces, so chat exposure is counted with script-aware matching: a kanji word can't sit inside a
 longer kanji run (今 isn't counted in 今日), a kana word can't sit inside a kana run, and readings of three or more
@@ -195,8 +202,9 @@ From the log, Japanese Weave estimates for every word how likely you are to open
 web pages at a steady level: set a challenge (`fw.py challenge 1.5`, the command above, or the popup), the number of
 glosses you'd open per 100 words shown, and each page gets the learning words closest to a 25% chance of being
 opened, as many as fit that budget, with known words filling the rest. A daily controller nudges the budget until
-your real rate matches the dial. Chat uses the same estimates to order its learning words. Strong evidence also moves
-words between learning and known, a few a day. It's off (0) by default.
+your real rate matches the dial. Chat uses the same estimates to tell the words you know at a glance from the
+learning ones, and to order the learning ones. Strong evidence also moves words between learning and known, a few a
+day. It's off (0) by default.
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.
@@ -208,12 +216,19 @@ press is logged, and half of the web passages are thinned at random, so `fw.py c
 default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
 down or up.
 
+**In chat, a level is a lookup budget**: how many lookups per 100 words you put up with, spent only on words you
+don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,
+when set, is normal's budget and scales the others). Words you know at a glance (under an 8% chance of a lookup)
+cost nothing and go in wherever they fit at every level but off, so lighter and heavier change the learning words
+only: the brief asks for as many per 100 words as spend about the budget, at most one in a sentence (two at heavier
+and much heavier), and the line on the last reply says whether it went over or under.
+
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
 for 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
 means the hook sends only a one-line note to reply in plain English, until the time runs out, you press heavier,
 or you say "japanese back on" in any chat.
-Full has no target or cap: every sentence you could follow in plain Japanese (your known and learning words plus
+Full has no budget: every sentence you could follow in plain Japanese (your known and learning words plus
 common grammar) is written in Japanese, and the sentences that must stay English (steps, code, commands, exact
 technical detail) swap in every known or learning word. A chat turned off with `off here` stays off at any level.
 `fw.py calibrate` counts a press into off as lighter and into full as heavier.

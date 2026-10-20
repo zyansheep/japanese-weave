@@ -12,6 +12,7 @@ import csv
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -398,13 +399,16 @@ def exposure_days(word, chat=None):
     return dict(sorted(days.items()))
 
 
-def refill(state, day, cap=NEW_PER_DAY, looked=None):
+def refill(state, day, cap=NEW_PER_DAY, looked=None, settled=None):
     """Fill the learning set (active plus shaky words, which are being relearned) up to WINDOW, at most cap new words
-    per day: first the words you looked up (looked_up, most opened first), then lexicon order."""
+    per day: first the words you looked up (looked_up, most opened first), then lexicon order. A learning word the
+    gloss log says you know at a glance (settled) keeps its status but no longer takes a slot."""
     words = state['words']
     last_day, count = state.get('refilled') or ['', 0]
     count = count if last_day == day else 0
-    room = min(WINDOW - sum(w['status'] in ('active', 'shaky') for w in words), cap - count)
+    settled = settled_words() if settled is None else settled
+    taken = sum(w['status'] in ('active', 'shaky') and w['ja'] not in settled for w in words)
+    room = min(WINDOW - taken, cap - count)
     added = 0
     if room > 0:
         looked = looked_up() if looked is None else looked
@@ -437,6 +441,18 @@ def looked_up():
     words = (read_json(home() / 'knowledge.json', {}) or {}).get('words') or {}
     return {ja: e['recent'] for ja, e in words.items()
             if isinstance(e, dict) and isinstance(e.get('recent'), int) and e['recent'] >= LOOKED_UP}
+
+
+def settled_words(know=None):
+    """Words known at a glance by the gloss log: a predicted lookup chance (knowledge.json, browser offset) under
+    FREE_P. A word with no estimate there isn't. Read here, not through knowledge.py, which imports this module."""
+    know = read_json(home() / 'knowledge.json', {}) if know is None else know
+    know = know if isinstance(know, dict) else {}
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    offset = know['offset'].get('browser') if isinstance(know.get('offset'), dict) else None
+    least = (offset if number(offset) else 0.0) - math.log(FREE_P / (1 - FREE_P))  # p < FREE_P exactly when k > least
+    words = know['words'] if isinstance(know.get('words'), dict) else {}
+    return {ja for ja, e in words.items() if isinstance(e, dict) and number(e.get('k')) and e['k'] > least}
 
 
 def graduation_veto():
@@ -512,24 +528,28 @@ COLLAPSE_AT = 150      # from this many known words, the brief and exports name 
 EXCEPTIONS_MAX = 15    # most exceptions named on each side of the band
 
 
-def known_band(state):
+def known_band(state, known=None, listed=None):
     """Compact description of the known set by lexicon rank (the lexicon is in frequency/usefulness order).
 
     Returns (n, missing, extra): known = words ranked 1..n, except `missing` (ranked <= n but not yet introduced;
     learning words are listed separately anyway), plus `extra` (known words ranked > n). n minimizes the number
-    of exceptions; ties go to the larger band."""
+    of exceptions; ties go to the larger band. known: the words (ja) to describe instead of those with status known;
+    listed: the words listed separately instead of the active and shaky ones (any other word in the band is missing)."""
     words = state['words']
-    known_after = sum(w['status'] == 'known' for w in words)
-    queue_before = 0
+    is_known = (lambda w: w['status'] == 'known') if known is None else (lambda w: w['ja'] in known)
+    aside = (lambda w: w['status'] in ('active', 'shaky')) if listed is None else (lambda w: w['ja'] in listed)
+    gap = lambda w: not is_known(w) and not aside(w)
+    known_after = sum(map(is_known, words))
+    gaps_before = 0
     best = (known_after, 0)
     for rank, w in enumerate(words, 1):
-        known_after -= w['status'] == 'known'
-        queue_before += w['status'] == 'queue'
-        if queue_before + known_after <= best[0]:
-            best = (queue_before + known_after, rank)
+        known_after -= is_known(w)
+        gaps_before += gap(w)
+        if gaps_before + known_after <= best[0]:
+            best = (gaps_before + known_after, rank)
     n = best[1]
-    missing = [w['ja'] for w in words[:n] if w['status'] == 'queue']
-    extra = [w['ja'] for w in words[n:] if w['status'] == 'known']
+    missing = [w['ja'] for w in words[:n] if gap(w)]
+    extra = [w['ja'] for w in words[n:] if is_known(w)]
     return n, missing, extra
 
 
