@@ -9,12 +9,13 @@
 //
 // WORDS: the word state as the extension gets it (python tools/prompt-lab/words.py > /tmp/words.json); without it, the
 // bundled Level 2 list. BATCH: passages per call, PARALLEL: calls at once (both as in the extension: 16 and 1, Haiku 6
-// and 3). Keys are read from files so they never appear in a command line or the shell history.
+// and 3). INTENSITY: the reader's level, 1 or 2 (heavier) or 3 (full), for its prompt and picking, without the random
+// thinning. Keys are read from files so they never appear in a command line or the shell history.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Window } from 'happy-dom';
 import { requestSwaps } from '../../extension/src/engine.js';
-import { selectSwaps } from '../../extension/src/levels.js';
+import { planSwaps } from '../../extension/src/levels.js';
 import { parseSwapsResponse } from '../../extension/src/gemini.js';
 import { applySwaps } from '../../extension/src/text.js';
 import { costUsd } from '../../extension/src/usage.js';
@@ -27,6 +28,7 @@ const keys = { gemini: keyFile('GEMINI_KEY_FILE'), anthropic: keyFile('ANTHROPIC
 if (!keys.gemini && !keys.anthropic) throw new Error('set GEMINI_KEY_FILE or ANTHROPIC_KEY_FILE to a file holding the key');
 const BATCH = Number(process.env.BATCH || BATCHES[model] || MAX_BATCH);
 const PARALLEL = Number(process.env.PARALLEL || PARALLELS[model] || 1);
+const INTENSITY = Math.max(0, Math.min(3, Number(process.env.INTENSITY) || 0));
 const state = process.env.WORDS ? JSON.parse(readFileSync(process.env.WORDS, 'utf8')) : { stage: 2, words: undefined };
 const passages = JSON.parse(readFileSync(passagesPath, 'utf8'));
 const doc = new Window().document;
@@ -50,7 +52,8 @@ await Promise.all(Array.from({ length: PARALLEL }, async () => {
   while (next < batches.length) {
     const n = next++;
     const t = Date.now();
-    answers[n] = await requestSwaps({ keys, model, level: 2, stage: state.stage, words: state.words, shownToday: [], batch: batches[n], fetchImpl });
+    answers[n] = await requestSwaps({ keys, model, level: 2, stage: state.stage, words: state.words, shownToday: [], batch: batches[n], fetchImpl,
+      heavy: INTENSITY });
     answers[n].seconds = (Date.now() - t) / 1000;
   }
 }));
@@ -64,7 +67,7 @@ for (const [n, batch] of batches.entries()) {
   for (const p of batch) {
     const el = doc.createElement('p');
     el.textContent = p.text;
-    const shown = selectSwaps(2, r.results[p.id], p.text, state.words, { seed: 1 });
+    const shown = planSwaps(2, r.results[p.id], p.text, state.words, { seed: 1, intensity: INTENSITY }).swaps;
     applySwaps(el, shown);
     const found = new Set(r.results[p.id].flatMap((s) => s.words || [s.word]));
     Object.assign(counts, { raw: counts.raw + (raw.get(p.id)?.length || 0), valid: counts.valid + r.results[p.id].length,

@@ -68,6 +68,23 @@ describe('prompt', () => {
     expect(buildSystemPrompt(2, words, [], 0, 3, 1)).toContain('about one sentence in three');
     expect(buildSystemPrompt(2, words, [], 0, 3, 2)).toContain('about two sentences in five');
   });
+  test('full asks for every swap the list allows, sentences at any stage, with no target; the other levels are unchanged', () => {
+    const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }, { ja: '犬', en: 'dog', hint: 'inu', status: 'active' }];
+    const full = buildSystemPrompt(1, words, [], 0, 1, 3);
+    expect(full).toContain('The reader asked for FULL Japanese');
+    expect(full).toContain('LEARNING and KNOWN');
+    expect(full).toContain('as a sentence swap');
+    for (const gone of ['No sentence swaps yet', 'Each passage comes with a "target"', 'Skip a passage entirely']) expect(full).not.toContain(gone);
+    expect(buildSystemPrompt(2, words, [], 15, 3, 3)).toBe(buildSystemPrompt(2, words, [], 0, 3, 3)); // no density at full
+    expect(buildSystemPrompt(2, words, [], 0, 3, 3)).toBe(full); // nor a stage
+    for (const heavy of [0, 1, 2]) {
+      expect(buildSystemPrompt(2, words, [], 0, 3, heavy)).not.toContain('FULL');
+      expect(buildSystemPrompt(2, words, [], 0, 3, heavy)).toContain('Skip a passage entirely if a swap would make it hard to follow.');
+    }
+    expect(buildSystemPrompt(2, words, [], 0, 3, 9)).toBe(buildSystemPrompt(2, words, [], 0, 3, 0)); // unknown: normal
+    const [p] = JSON.parse(buildUserContent([{ id: 'a', text: 'But the dog ran home.' }], 0, { words, heavy: 3 }).slice('Passages:\n'.length));
+    expect(p).toEqual({ id: 'a', text: 'But the dog ran home.', learning: ['犬 = dog: dog'], listed: ['でも = but: But'] });
+  });
   test('every passage gets a target: the most swaps planSwaps shows, by sentences or density, raised by a heavier intensity', () => {
     const target = (text, ...args) => JSON.parse(buildUserContent([{ id: 'a', text }], ...args).slice('Passages:\n'.length))[0].target;
     const two = 'The first sentence is here today. The second one follows it now.';

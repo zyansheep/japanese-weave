@@ -1,6 +1,7 @@
 // Word state from the Japanese Weave Claude Code plugin, through the browser native messaging host that its
 // setup step installs. No chrome APIs here: the native-message function and storage are injected so this
 // tests without a browser. Without the host, the bundled lists in levels.js keep working.
+import { INTENSITY_LEVELS } from './levels.js';
 
 export const HOST = 'com.japaneseweave.host';
 export const STATE_KEY = 'wordState';
@@ -42,10 +43,10 @@ export function parseState(data) {
   };
 }
 
-// A saved intensity ({level -2..2, until, at} in ms; ../scripts/intensity.py), or null.
+// A saved intensity ({level -3..3, until, at} in ms; ../scripts/intensity.py), or null.
 export function cleanIntensity(value) {
   const ms = (x) => Number.isInteger(x) && x >= 0 && x <= 1e14;
-  if (!value || ![-2, -1, 0, 1, 2].includes(value.level) || !ms(value.until) || !ms(value.at)) return null;
+  if (!value || !INTENSITY_LEVELS.includes(value.level) || !ms(value.until) || !ms(value.at)) return null;
   return { level: value.level, until: value.until, at: value.at };
 }
 
@@ -126,7 +127,7 @@ function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
   const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
-  if (![-2, -1, 0, 1, 2].includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)) return undefined;
+  if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)) return undefined;
   return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates };
 }
 

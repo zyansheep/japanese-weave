@@ -3,7 +3,7 @@ import { buildSystemParts, buildUserContent, RESPONSE_SCHEMA } from './prompt.js
 import { askGemini } from './gemini.js';
 import { askClaude } from './anthropic.js';
 import { candidatesFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from './models.js';
-import { validateSwaps, intensityFactor } from './levels.js';
+import { validateSwaps, intensityFactor, INTENSITY_FULL } from './levels.js';
 
 const ASK = { gemini: askGemini, anthropic: askClaude };
 
@@ -12,12 +12,13 @@ const ASK = { gemini: askGemini, anthropic: askClaude };
 export const COOLDOWN_MS = { 429: 60000, 503: 30000, 529: 30000, timeout: 30000 };
 
 // keys: { gemini, anthropic } (apiKey alone is the Gemini key). density: percent of words to swap (0: the level's
-// per-sentence rules). heavy: the reader's heavier intensity (1, 2; 0 otherwise), which asks the model for more. Returns { results, model, errors, usage }: results are every validated swap, uncapped
-// (selectSwaps picks from them when they're read from the cache); usage lists every billed attempt
-// ({ model, input, output, cached?, written? } tokens); a thrown error carries the same `usage`.
+// per-sentence rules). heavy: the reader's heavier intensity (1, 2; 0 otherwise), which asks the model for more, or full
+// (3), which asks for every swap the list allows and leaves the density out. Returns { results, model, errors, usage }:
+// results are every validated swap, uncapped (selectSwaps picks from them when they're read from the cache); usage
+// lists every billed attempt ({ model, input, output, cached?, written? } tokens); a thrown error carries the same `usage`.
 export async function requestSwaps({ keys, apiKey, model, level, stage = 0, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0, heavy = 0 }) {
   const keyFor = { gemini: apiKey, ...keys };
-  const percent = density > 0 ? Math.round(density * intensityFactor(heavy)) : 0;
+  const percent = density > 0 && heavy < INTENSITY_FULL ? Math.round(density * intensityFactor(heavy)) : 0;
   const system = buildSystemParts(level, words, shownToday, percent, stage, heavy);
   const user = buildUserContent(batch, percent, { level, words, heavy });
   const candidates = candidatesFor(model, keyFor);

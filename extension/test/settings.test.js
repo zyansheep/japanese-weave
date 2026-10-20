@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'bun:test';
-import { cleanSettings, siteEnabled, siteOn } from '../src/settings.js';
+import { cleanSettings, siteEnabled, siteOn, hasSiteAccess, offReason, globalOffReason } from '../src/settings.js';
 
 it('webmail, AI chat and local addresses start off; a popup choice wins', () => {
   const every = { ...cleanSettings(), newSitesEnabled: true };
@@ -54,4 +54,43 @@ it('density is a percent from the offered list, 0 (the level rule) otherwise', (
   expect(cleanSettings().density).toBe(0);
   expect(cleanSettings({ density: 15 }).density).toBe(15);
   for (const bad of [7, -5, 100, '15', 15.5]) expect(cleanSettings({ density: bad }).density).toBe(0);
+});
+
+describe('offReason', () => {
+  const ctx = (patch = {}, settings = {}) => ({ hasKey: true, paused: false, origins: ['<all_urls>'], intensity: { level: 0, until: 0 },
+    ...patch, settings: { ...cleanSettings(settings), newSitesEnabled: true, ...settings } });
+  // the worker's test before offReason
+  const before = (c, url) => c.hasKey && !c.paused && siteEnabled(c.settings, url) && hasSiteAccess(url, c.origins);
+  test('one reason per page, global ones first, in the order a reader would fix them', () => {
+    const page = 'https://example.com/a';
+    expect(offReason(ctx(), page)).toBe('');
+    expect(offReason(ctx({ paused: true, hasKey: false }, { enabled: false }), page)).toBe('switched-off');
+    expect(offReason(ctx({ paused: true, intensity: { level: -3, until: 1 } }), page)).toBe('paused');
+    expect(offReason(ctx({ intensity: { level: -3, until: 1 }, hasKey: false }), page)).toBe('intensity-off');
+    expect(offReason(ctx({ intensity: { level: -2, until: 1 } }), page)).toBe('');
+    expect(offReason(ctx({ hasKey: false }), page)).toBe('no-gemini-key');
+    expect(offReason(ctx({ hasKey: false }, { model: 'claude-haiku-5-5' }), page)).toBe('no-anthropic-key');
+    expect(globalOffReason(ctx({ hasKey: false }))).toBe('no-gemini-key');
+    expect(globalOffReason(ctx())).toBe('');
+    for (const url of ['about:addons', 'chrome://extensions/', 'moz-extension://abc/src/popup.html', 'file:///home/a.html', 'not a url']) {
+      expect(offReason(ctx(), url)).toBe('unsupported');
+    }
+    expect(offReason(ctx({}, { siteOverrides: { 'example.com': false } }), 'https://Example.com./a')).toBe('site-off');
+    expect(offReason(ctx({}, { newSitesEnabled: false }), page)).toBe('not-on');
+    expect(offReason(ctx({}, { newSitesEnabled: false, siteOverrides: { 'example.com': true } }), page)).toBe('');
+    expect(offReason(ctx(), 'https://mail.google.com/mail/u/0/')).toBe('private');
+    expect(offReason(ctx({}, { siteOverrides: { 'mail.google.com': true } }), 'https://mail.google.com/')).toBe('');
+    expect(offReason(ctx({ origins: ['https://x.com/*'] }), page)).toBe('no-access');
+    // The browser hides the address of a tab the extension has no access to: with every site allowed, it isn't a website.
+    expect(offReason(ctx(), undefined)).toBe('unsupported');
+    expect(offReason(ctx({ origins: ['https://x.com/*'] }), undefined)).toBe('hidden');
+  });
+  test('active exactly where the worker was active before, and never at intensity off', () => {
+    const urls = ['https://example.com/', 'http://example.com/', 'https://mail.google.com/', 'http://localhost:3000/', 'https://x.com/home',
+      'about:blank', 'file:///tmp/a.html', 'https://news.example.org/'];
+    const contexts = [ctx(), ctx({ paused: true }), ctx({ hasKey: false }), ctx({}, { enabled: false }), ctx({}, { newSitesEnabled: false }),
+      ctx({ origins: ['https://x.com/*'] }), ctx({ origins: [] }), ctx({}, { siteOverrides: { 'news.example.org': false, localhost: true } })];
+    for (const c of contexts) for (const url of urls) expect(!offReason(c, url)).toBe(!!before(c, url));
+    for (const url of urls) expect(offReason(ctx({ intensity: { level: -3, until: 1 } }), url)).toBe('intensity-off');
+  });
 });

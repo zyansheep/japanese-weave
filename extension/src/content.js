@@ -4,9 +4,9 @@
 // (blank). Every async reply belongs to one config generation.
 import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEnglish, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
-import { siteEnabled, hasSiteAccess } from './settings.js';
+import { offReason } from './settings.js';
 import { selector, readable } from './page.js';
-import { wordCount } from './levels.js';
+import { wordCount, intensityLabel, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
 import { MAX_BATCH } from './models.js';
 import { readingState, account, newStay, paused } from './attention.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -79,7 +79,9 @@ const send = (msg) => {
     return Promise.reject(e);
   }
 };
-const on = () => !orphaned && config?.hasKey && !config.paused && siteEnabled(config.settings, location.href) && hasSiteAccess(location.href, config.origins);
+// Off (paused, the site, no key, the reader's intensity at off...): nothing is woven or logged, and stop() has put the
+// page back in English.
+const on = () => !orphaned && !!config && !offReason(config, location.href);
 const targets = () => selector(location.href);
 // Only real user input on spans this extension made; pages can't forge flips, peeks or seen events.
 const swapFor = (e) => {
@@ -416,9 +418,8 @@ function update(next, retry = false) {
   config = next; start();
 }
 
-// Feedback for the heavier/lighter shortcut: a small panel in the corner with the level, a five-step meter and when it
-// ends. In a shadow root, so the page's styles neither reach it nor are touched.
-const LEVEL_NAMES = { '-2': 'Much lighter', '-1': 'Lighter', 0: 'Normal', 1: 'Heavier', 2: 'Much heavier' };
+// Feedback for the heavier/lighter shortcut: a small panel in the corner with the level, a seven-step meter from Off to
+// Full and when it ends. In a shadow root, so the page's styles neither reach it nor are touched.
 let toastHost = null;
 let toastTimer = null;
 function showIntensity({ level, until }) {
@@ -436,20 +437,27 @@ function showIntensity({ level, until }) {
       .meter { display: flex; gap: 3px; margin: 6px 0 4px; }
       .meter i { width: 18px; height: 6px; border-radius: 3px; background: rgba(248, 250, 252, 0.2); }
       .meter i.lit { background: #f8fafc; } .meter i.mid { outline: 1px solid rgba(248, 250, 252, 0.6); }
+      .meter i.end { width: 10px; } .meter i.end.lit { background: #fbbf24; }
+      .ends { display: flex; justify-content: space-between; color: rgba(248, 250, 252, 0.7); font-size: 11px; }
       .note { color: rgba(248, 250, 252, 0.7); font-size: 12px; }
-    </style><div class="box"><div class="title"></div><div class="meter">${'<i></i>'.repeat(5)}</div><div class="note"></div></div>`;
+    </style><div class="box"><div class="title"></div><div class="meter">${'<i></i>'.repeat(INTENSITY_LEVELS.length)}</div>
+      <div class="ends"><span>Off</span><span>Full</span></div><div class="note"></div></div>`;
     toastHost.box = root.querySelector('.box');
     document.documentElement.append(toastHost);
   }
   const box = toastHost.box;
   const ends = level ? new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-  box.querySelector('.title').textContent = `Japanese on pages: ${LEVEL_NAMES[level]}${level ? ` (${level > 0 ? '+' : '−'}${Math.abs(level)})` : ''}`;
+  const label = intensityLabel(level);
+  box.querySelector('.title').textContent = `Japanese on pages: ${label[0].toUpperCase()}${label.slice(1)}`;
   box.querySelectorAll('.meter i').forEach((cell, i) => {
-    const step = i - 2;
-    cell.className = (level > 0 ? step > 0 && step <= level : level < 0 ? step < 0 && step >= level : false) || step === 0 ? 'lit' : '';
+    const step = INTENSITY_LEVELS[i];
+    const lit = level > 0 ? step > 0 && step <= level : level < 0 ? step < 0 && step >= level : false;
+    cell.className = lit || step === 0 ? 'lit' : '';
     if (step === 0) cell.classList.add('mid');
+    if (Math.abs(step) === INTENSITY_LEVELS.at(-1)) cell.classList.add('end');
   });
-  box.querySelector('.note').textContent = `${level ? `Until ${ends} · ` : ''}Alt+Shift+. more, Alt+Shift+, less`;
+  box.querySelector('.note').textContent = level === INTENSITY_OFF ? `No Japanese until ${ends} · Alt+Shift+. turns it back on`
+    : `${level ? `Until ${ends} · ` : ''}Alt+Shift+. more, Alt+Shift+, less`;
   box.classList.add('on');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => box.classList.remove('on'), 2500);

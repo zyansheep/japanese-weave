@@ -1,4 +1,4 @@
-import { resolveLevel } from './levels.js';
+import { resolveLevel, intensityLabel, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { MODELS, MODEL_NAMES, providerOf } from './models.js';
 import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
 import { describeStats } from './hostsource.js';
@@ -49,12 +49,12 @@ async function refresh() {
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
   $('density').value = String(s.density || 0);
   const level = c.intensity?.level || 0;
-  $('intensityInfo').textContent = level
-    ? `${INTENSITY_NAMES[level]} until ${new Date(c.intensity.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : 'normal';
-  $('intensityInfo').title = 'Alt+Shift+. for more, Alt+Shift+, for less; back to normal 3 hours after the last change';
-  $('lighter').disabled = level <= -2;
-  $('heavier').disabled = level >= 2;
+  const ends = level ? new Date(c.intensity.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  $('intensityInfo').textContent = level ? `${intensityLabel(level)} until ${ends}` : 'normal';
+  $('intensityInfo').title = 'Alt+Shift+. for more, Alt+Shift+, for less; from Off (no Japanese) to Full (all it can); back to normal 3 hours after the last change';
+  $('lighter').disabled = level <= INTENSITY_OFF;
+  $('heavier').disabled = level >= INTENSITY_FULL;
+  $('intensityBack').hidden = level !== INTENSITY_OFF;
   $('challenge').value = String(c.challenge || 0);
   $('challenge').disabled = !status.words; // the dial lives in the native host's word state
   const rate = status.rate;
@@ -72,7 +72,8 @@ async function refresh() {
   $('wordInfo').textContent = status.words
     ? `${status.words} from Claude Code · ${ago(status.fetchedAt)}${c.paused ? ' · paused' : ''}`
     : 'built-in list';
-  $('operation').textContent = !s.enabled ? 'Off'
+  $('operationText').textContent = !s.enabled ? 'Off'
+    : level === INTENSITY_OFF ? `Off until ${ends}`
     : !c.hasKey ? `Add ${providerOf(s.model) === 'anthropic' ? 'an Anthropic' : 'a Gemini'} key to start`
     : c.paused ? 'Paused from Claude Code'
     : host && !siteEnabled(s, tab.url) ? 'Off on this site'
@@ -105,7 +106,6 @@ async function showStats() {
   $('collectedInfo').textContent = res?.ok ? more : (res?.queued?.length ? `${res.queued.length} waiting to send` : '');
 }
 
-const INTENSITY_NAMES = { '-2': 'much lighter (−2)', '-1': 'lighter (−1)', 1: 'heavier (+1)', 2: 'much heavier (+2)' };
 async function stepIntensity(step) {
   const reply = await send({ type: 'intensity', step });
   if (reply?.error) throw new Error(reply.error);
@@ -158,6 +158,7 @@ $('levelOverride').addEventListener('change', (e) => run(() => save({ settings: 
 $('model').addEventListener('change', (e) => run(() => save({ settings: { model: e.target.value } })));
 $('lighter').addEventListener('click', () => run(() => stepIntensity(-1)));
 $('heavier').addEventListener('click', () => run(() => stepIntensity(1)));
+$('intensityBack').addEventListener('click', () => run(() => stepIntensity(0)));
 $('density').addEventListener('change', (e) => run(() => save({ settings: { density: Number(e.target.value) || 0 } })));
 $('challenge').addEventListener('change', (e) => run(async () => {
   const res = await send({ type: 'setChallenge', challenge: Number(e.target.value) });
@@ -188,7 +189,7 @@ $('syncWords').addEventListener('click', () => run(async () => {
 $('clearCache').addEventListener('click', () => run(async () => {
   const res = await send({ type: 'clearCache' });
   await refresh();
-  $('operation').textContent = `Cleared ${res.removed}`;
+  $('operationText').textContent = `Cleared ${res.removed}`;
 }));
 
 void run(async () => {

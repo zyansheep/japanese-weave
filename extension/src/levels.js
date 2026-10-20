@@ -419,9 +419,25 @@ export function seededRandom(seed) {
 }
 const normal = (random) => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 
-// Intensity (the reader's heavier/lighter shortcut, ../scripts/intensity.py): times the usual amount, per level -2..2.
-export const INTENSITY_FACTORS = { '-2': 0.5, '-1': 0.7, 0: 1, 1: 1.4, 2: 1.8 };
+// Intensity (the reader's heavier/lighter shortcut, ../scripts/intensity.py): levels -3..3. The ends go further than a
+// factor: off (-3) weaves nothing and calls no model, full (3) shows every validated candidate of a prompt that asks for
+// all the Japanese the list allows. Between them, times the usual amount.
+export const INTENSITY_OFF = -3;
+export const INTENSITY_FULL = 3;
+export const INTENSITY_LEVELS = [-3, -2, -1, 0, 1, 2, 3];
+export const INTENSITY_NAMES = { '-3': 'off', '-2': 'much lighter', '-1': 'lighter', 0: 'normal', 1: 'heavier', 2: 'much heavier', 3: 'full' };
+export const INTENSITY_FACTORS = { '-3': 0, '-2': 0.5, '-1': 0.7, 0: 1, 1: 1.4, 2: 1.8 };
 export const intensityFactor = (level) => INTENSITY_FACTORS[level] ?? 1;
+// 'heavier (+1)', 'much lighter (−2)', 'off', 'full', 'normal': the ends have no number, they aren't a step of the amount.
+export function intensityLabel(level) {
+  const name = INTENSITY_NAMES[level] ?? INTENSITY_NAMES[0];
+  return level && Math.abs(level) < INTENSITY_FULL ? `${name} (${level > 0 ? '+' : '−'}${Math.abs(level)})` : name;
+}
+// Full has no ceiling; its plan says 5, the largest factor a plan may record (hostsource.js cleanPlan).
+const FULL_PLAN_FACTOR = 5;
+// Sentences, then phrases, then words, so where a bigger swap and the smaller ones inside it are both offered, the
+// bigger one is placed (text.js applySwaps skips a swap overlapping one placed before it).
+const SIZE = { sentence: 0, phrase: 1 };
 // Random thinning, so the effect of the amount of Japanese on reading can be measured (knowledge.py calibrate): half the
 // passages are left alone, the other half keep a random share of their swaps between JITTER_MIN and 1. Seeded by the
 // passage and day like everything else here, so a passage repaints the same way.
@@ -446,8 +462,20 @@ const roundRandom = (n, random) => Math.floor(n) + (random() < n - Math.floor(n)
 // budget, so new words gather evidence. Then learning words while their peek chances fit the passage's budget; the
 // first that doesn't fit gets in with probability remaining / p, so short passages still get learning words on average.
 // Known words fill the rest. Seeded by the passage and day, so a passage repaints the same way.
+// At full intensity every candidate is shown: no ceiling, no thinning, no budget, and a Japanese word may be used again
+// where the passage says its English again (only exact repeats are dropped); bigger swaps first.
 export function planSwaps(level, swaps, text, sharedWords, { density = 0, budgetPer100 = 0, seed = 0, shownToday = [],
   intensity = 0, jitter = 1 } = {}) {
+  if (intensity >= INTENSITY_FULL) {
+    const seen = new Set();
+    const all = swaps.filter((s) => {
+      const key = JSON.stringify([s.o, s.f, s.ctx || '']);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => (SIZE[a.kind] ?? 2) - (SIZE[b.kind] ?? 2)); // stable: the model's order within a size
+    return { swaps: all, plan: { level: INTENSITY_FULL, intensity: FULL_PLAN_FACTOR, jitter: 1, limit: all.length, candidates: all.length } };
+  }
   const scale = intensityFactor(intensity);
   const unique = oncePerWord(swaps);
   const random = seededRandom(seed);

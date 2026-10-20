@@ -6,12 +6,13 @@ import { createCache, chromeStorage } from './cache.js';
 import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
 import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
-import { cleanSettings, newSitesDefault, siteEnabled, hasSiteAccess } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor } from './levels.js';
+import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
+import { createToolbar } from './toolbar.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
 
@@ -19,7 +20,7 @@ const store = chrome.storage.local;
 const cache = createCache(chromeStorage);
 const send = (message) => chrome.runtime.sendNativeMessage(HOST, message);
 const ALARM = 'sync';
-const INTENSITY_ALARM = 'intensity'; // when a heavier or lighter spell ends
+const INTENSITY_ALARM = 'intensity'; // when a level away from normal ends
 const INTENSITY_MS = 3 * 3600 * 1000; // as ../scripts/intensity.py DURATION_MS
 const SYNC_MINUTES = 30; // word statuses change at most a few times a day
 const FLUSH_DELAY_MS = 10000;
@@ -53,7 +54,8 @@ function intensityOf(data, now = Date.now()) {
 // What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped. The
 // cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial and a lighter intensity: the cache
 // holds every validated candidate and those only change which of them planSwaps picks, so they never cost a model
-// call. A heavier intensity asks the model for more, so it has its own cache.
+// call. A heavier intensity, and full, ask the model for more, so each has its own cache. Off (-3) changes the revision
+// too, so pages go back to English at once (settings.js offReason).
 async function context() {
   await ready;
   const data = await store.get(['settings', 'wordState', 'epoch', 'intensity', ...KEY_NAMES]);
@@ -73,13 +75,41 @@ async function context() {
     intensity: { level: intensity.level, until: intensity.until } };
 }
 
-const activeOn = (ctx, url) => ctx.hasKey && !ctx.paused && siteEnabled(ctx.settings, url) && hasSiteAccess(url, ctx.origins);
+const activeOn = (ctx, url) => !offReason(ctx, url);
 
 async function broadcast(type = 'config') {
   const config = await context();
   const tabs = await chrome.tabs.query({});
   await Promise.allSettled(tabs.map((t) => chrome.tabs.sendMessage(t.id, { type, config })));
+  await armIntensity(config.intensity);
+  await showToolbar(config, tabs);
 }
+// The end of a level away from normal redraws every page, wherever it was set: here, or on another machine (the host's
+// word state brings it).
+const armIntensity = async ({ level, until }) => { if (level) await chrome.alarms.create(INTENSITY_ALARM, { when: until }); };
+
+// The toolbar button (toolbar.js): grey with the reason where a tab gets no Japanese, "···" while a model works on a
+// tab's passages, else the level. Redrawn for every tab whenever settings, the word state, the level or site access
+// change (broadcast), and per tab when it is switched to, loads a page or closes.
+const toolbar = createToolbar(chrome.action);
+async function showToolbar(ctx, tabs) {
+  ctx ??= await context();
+  tabs ??= await chrome.tabs.query({});
+  await toolbar.show({ ...ctx.intensity, reason: globalOffReason(ctx) }, tabs.map((t) => [t.id, offReason(ctx, t.url)]));
+}
+async function showTab(tabId, url, how) {
+  const reason = offReason(await context(), url);
+  if (how) await toolbar.navigated(tabId, reason, how);
+  else await toolbar.tab(tabId, reason);
+}
+chrome.tabs.onActivated?.addListener(({ tabId }) => {
+  void Promise.resolve(chrome.tabs.get?.(tabId)).then((tab) => showTab(tabId, tab?.url)).catch(() => {});
+});
+chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {
+  if (!change.url && !change.status) return;
+  void showTab(tabId, tab?.url, { loading: change.status === 'loading' || !!change.url }).catch(() => {});
+});
+chrome.tabs.onRemoved?.addListener((tabId) => toolbar.closed(tabId));
 
 async function swaps(msg, sender) {
   const ctx = await context();
@@ -102,6 +132,7 @@ async function swaps(msg, sender) {
   };
   const misses = items.filter((i) => !(cacheKey(i) in cached));
   if (!misses.length) return picked(cached);
+  const done = toolbar.wait(sender.tab?.id); // the tab's button says a model is at work until this answer is in
   try {
     const fresh = await gather(ctx, misses.map((i) => ({ id: cacheKey(i), text: i.text })));
     const now = await context();
@@ -109,6 +140,8 @@ async function swaps(msg, sender) {
     return picked({ ...cached, ...fresh });
   } catch (e) {
     return { ...picked(cached), error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
+  } finally {
+    done();
   }
 }
 
@@ -164,9 +197,11 @@ async function answer(ctx, group) {
   }
 }
 
-// One model call for a batch; the swaps go into the cache and the tokens into usage.
+// One model call for a batch; the swaps go into the cache and the tokens into usage. None once the reader turned the
+// Japanese off, which a lighter level's cacheRevision doesn't show.
 async function callModel(ctx, batch) {
-  if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
+  const current = await context();
+  if (current.cacheRevision !== ctx.cacheRevision || current.intensity.level === INTENSITY_OFF) return null;
   let fresh;
   try {
     if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
@@ -306,44 +341,37 @@ async function stats() {
 }
 
 // One press of the heavier/lighter shortcut (or the popup): step 1 heavier, -1 lighter, 0 back to normal, for
-// INTENSITY_MS from now. Takes effect here at once (lighter: from the cached candidates; heavier: a model call per
-// passage), and goes to the host so the change is logged with the word state (calibration).
+// INTENSITY_MS from now; at off (-3) or full (3) a press further that way keeps the level and restarts the clock.
+// Takes effect here at once (lighter: from the cached candidates; heavier and full: a model call per passage; off:
+// pages back to English, no model calls), and goes to the host so the change is logged with the word state
+// (calibration).
 async function stepIntensity(step, source) {
   if (![-1, 0, 1].includes(step)) throw new Error('step is 1, -1 or 0');
   const now = Date.now();
   const current = intensityOf(await store.get(['intensity', 'wordState']), now);
-  const level = step ? Math.max(-2, Math.min(2, current.level + step)) : 0;
+  const level = step ? Math.max(INTENSITY_OFF, Math.min(INTENSITY_FULL, current.level + step)) : 0;
   const value = { level, until: level ? now + INTENSITY_MS : 0, at: now };
   await store.set({ intensity: value });
-  if (level) await chrome.alarms.create(INTENSITY_ALARM, { when: value.until });
-  else await chrome.alarms.clear(INTENSITY_ALARM);
+  if (!level) await chrome.alarms.clear(INTENSITY_ALARM); // else broadcast sets it for the new end
   void send({ type: 'intensity', surface: 'browser', set: { ...value, source } }).catch(() => {});
-  await showIntensity(value, true);
+  await showToast(value);
   await broadcast();
   return { ok: true, intensity: { level, until: value.until } };
 }
-async function intensityEnded() {
-  await showIntensity(intensityOf(await store.get(['intensity', 'wordState'])), false);
-  await broadcast();
-}
-// The toolbar badge says the level while it lasts (+1, -2...); a press also shows a toast on the page in front.
-async function showIntensity(value, toast) {
-  const level = value.until > Date.now() ? value.level : 0;
-  await chrome.action.setBadgeText({ text: level ? `${level > 0 ? '+' : '−'}${Math.abs(level)}` : '' });
-  if (level) await chrome.action.setBadgeBackgroundColor({ color: level > 0 ? '#b45309' : '#2563eb' });
-  if (!toast) return;
+// A press shows a toast on the page in front; the toolbar badge (broadcast) says the level while it lasts.
+async function showToast({ level, until }) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id != null) await chrome.tabs.sendMessage(tab.id, { type: 'intensity', intensity: { level, until: value.until } }).catch(() => {});
+  if (tab?.id != null) await chrome.tabs.sendMessage(tab.id, { type: 'intensity', intensity: { level, until } }).catch(() => {});
 }
 chrome.commands?.onCommand.addListener((command) => {
   const step = { 'intensity-up': 1, 'intensity-down': -1 }[command];
   if (step) void ready.then(() => stepIntensity(step, 'shortcut')).catch(() => {});
 });
-// After a restart the spell may still run: the badge and its end come back.
+// After a restart the level may still run: its end comes back, and every tab's button is drawn afresh, which also
+// clears a "···" left from a worker that stopped during a call.
 void ready.then(async () => {
-  const value = intensityOf(await store.get(['intensity', 'wordState']));
-  await showIntensity(value, false);
-  if (value.level) await chrome.alarms.create(INTENSITY_ALARM, { when: value.until });
+  await armIntensity(intensityOf(await store.get(['intensity', 'wordState'])));
+  await showToolbar();
 }).catch(() => {});
 
 async function status() {
@@ -411,6 +439,6 @@ chrome.runtime.onInstalled.addListener(arm);
 chrome.runtime.onStartup.addListener(arm);
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === ALARM) void syncWords().catch(() => {});
-  if (a.name === INTENSITY_ALARM) void intensityEnded().catch(() => {});
+  if (a.name === INTENSITY_ALARM) void broadcast().catch(() => {}); // the level ran out: back to normal everywhere
 });
 void ready.then(registerSites).catch(() => {});
