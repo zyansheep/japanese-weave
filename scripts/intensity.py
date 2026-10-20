@@ -16,6 +16,13 @@ LEVELS = (OFF, -2, -1, 0, 1, 2, FULL)
 # is all that fits.
 FACTORS = {OFF: 0.0, -2: 0.5, -1: 0.7, 0: 1.0, 1: 1.4, 2: 1.8, FULL: 1.8}
 NAMES = {OFF: 'off', -2: 'much lighter', -1: 'lighter', 0: 'normal', 1: 'heavier', 2: 'much heavier', FULL: 'full'}
+# What a level means: the lookups per 100 words read the reader puts up with, spent on words they don't know at a
+# glance yet. Words they do know (a predicted lookup chance under fwlib.FREE_P) cost nothing and are used wherever
+# they fit, at every level but off. Normal starts at the chat's lookup rate before levels meant this (0.33 per 100
+# words shown, 2026-10-20). Off has no budget and full no limit; the popup's challenge, when set, replaces normal's
+# budget and scales the others with it.
+BUDGETS = {-2: 0.15, -1: 0.3, 0: 0.5, 1: 0.8, 2: 1.2}
+PER_SENTENCE = {-2: 1, -1: 1, 0: 1, 1: 2, 2: 2}  # most budgeted (not-yet-known) words in one sentence
 DURATION_MS = 3 * 3600 * 1000
 NORMAL = {'level': 0, 'until': 0, 'at': 0}
 
@@ -68,6 +75,21 @@ def step(prefs, surface, delta, source, now=None):
 
 def factor(level):
     return FACTORS.get(level, 1.0)
+
+
+def budget(level, normal=None):
+    """Lookups per 100 words a level allows for words not known at a glance: 0 at off, None (no limit) at full.
+    normal: normal's budget when the reader set one (the challenge), which scales every level."""
+    if is_off(level):
+        return 0.0
+    if is_full(level):
+        return None
+    base = BUDGETS.get(level, BUDGETS[0])
+    return base * normal / BUDGETS[0] if normal else base
+
+
+def per_sentence(level):
+    return PER_SENTENCE.get(level, PER_SENTENCE[0])
 
 
 def is_off(level):

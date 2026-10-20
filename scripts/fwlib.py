@@ -42,6 +42,12 @@ SHAKY_DAYS = 7          # shaky -> known: days with no new flip, asked or peek
 PEEK_WINDOW = 7         # a known word peeked on 2 different days within this many days becomes shaky
 ASSUMED_WEIGHT = 1      # a day with only opt-in "assumed" exposure (fw.py log-chat-day) counts this much
 STAGES = [(400, 4), (150, 3), (40, 2)]  # (known words, stage): first match wins; otherwise Stage 1
+# Known at a glance: a word whose predicted lookup chance (knowledge.json) is under FREE_P costs nothing against the
+# intensity's lookup budget (intensity.BUDGETS) and is used wherever it fits; it no longer takes a learning slot
+# either. A word the log has nothing on yet starts at KNOWN_PRIOR_K (log-odds of not looking it up) if its status is
+# known, else at the neutral prior (knowledge.prior).
+FREE_P = 0.08
+KNOWN_PRIOR_K = 2.5
 
 
 KANJI = '\u3005\u3006\u4e00-\u9fff\uf900-\ufaff'   # 々 〆 and CJK ideographs
