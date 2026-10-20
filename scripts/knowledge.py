@@ -189,8 +189,9 @@ def observations(surface, context, items, listed, read=None):
     Opened: y 1 for a pin or flip or a peek open at least GLANCE_MS, GLANCE_Y for a shorter peek; T3 peeks under
     T3_NOISE_MS don't count. Unopened: y 0, weighted by the chance it was read: 1 down to the lowest opened line,
     halving per line below it, or read(y, line) when that is higher (a browser passage's time on screen). Without
-    read, nothing opened means [] (a T3 message is logged only when something was opened). Words of a sentence whose
-    whole-sentence translation was opened get nothing (it was read in English)."""
+    read, nothing opened means [] (a T3 message is logged only when something was opened). The unopened words of a
+    sentence whose whole-sentence translation was opened get nothing (it was read in English); its opened words still
+    count as opened."""
     match = matcher(listed)
     notes = context['annotations']
     opened = {}
@@ -215,7 +216,7 @@ def observations(surface, context, items, listed, read=None):
     best = {}
     for index, (written, _x, y_pos) in enumerate(notes):
         word = match(written)
-        if word is None or index in excluded:
+        if word is None or (index in excluded and index not in opened):
             continue
         if index in opened:
             y, weight = opened[index], 1.0

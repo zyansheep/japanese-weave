@@ -75,7 +75,8 @@ candidate the fewest steps back, then the earliest entry; a form is matched only
   screen while a reader could have been reading it (its visible stays: tab focused, no media playing, input in the
   last 30 s), words its word count, and share how far down the word sits (at least 0.1). pace starts at 300 ms per
   word and top at 0.7; a passage never on screen like that gives no evidence at all.
-- Words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in English.
+- Unopened words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in
+  English. Words opened in that sentence still count as opened.
 
 ### Browser: the chance it was read
 

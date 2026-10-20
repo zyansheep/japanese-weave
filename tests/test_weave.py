@@ -1433,6 +1433,8 @@ class Knowledge(Home):
         got = dict((w, y) for w, y, _ in knowledge.observations('t3', {'annotations': two}, [{'kind': 'pin', 'word': '？',
                                                                 'dwell_ms': 900, 'position': 3}], {'今', 'でも'}))
         self.assertEqual(got, {'今': 0.0})  # only the translated sentence is excluded
+        got = dict((w, y) for w, y, _ in knowledge.observations('t3', context, [row(1), row(5, 900, 'pin')], listed))
+        self.assertEqual(got, {'問題': 1.0})  # a word opened in it still counts; its other words were read in English
 
     def test_episodes_split_at_gaps_and_wait_to_settle(self):
         rows, contexts = [], {}
