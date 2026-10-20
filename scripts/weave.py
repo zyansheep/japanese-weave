@@ -89,6 +89,19 @@ def chance(word, know=None):
     return knowledge.sigmoid(offset - (fwlib.KNOWN_PRIOR_K if word['status'] == 'known' else knowledge.prior(None)))
 
 
+# Fully Japanese example sentences and the listed words each one needs. The brief shows two whose words the user knows
+# at a glance: a fixed pair used words still in the user's queue and nudged Claude toward them.
+EXAMPLES = (('今日は忙しいです。', ('今日', '忙しい')), ('これで大丈夫です。', ('大丈夫',)), ('それは本当です。', ('本当',)),
+            ('仕事は終わりました。', ('仕事', '終わる')), ('これは簡単です。', ('簡単',)), ('問題は設定です。', ('問題', '設定')))
+
+
+def examples(chances):
+    """'like "A" or "B"' from EXAMPLES, the first two whose words are known at a glance (else the last two)."""
+    fits = [s for s, needs in EXAMPLES if all(chances.get(ja, 1.0) < fwlib.FREE_P for ja in needs)]
+    a, b = (fits + [s for s, _ in EXAMPLES[::-1] if s not in fits])[:2]
+    return f'like "{a}" or "{b}"'
+
+
 def lists(state, seen=None, know=None):
     """The word lists below full: (known at a glance, in lexicon order; learning, best learning value first, at most
     LEARN_MAX; {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
@@ -153,7 +166,7 @@ def brief(state, seen, recall=None, markup=False, know=None, level=0):
     as_listed = ('Write each word exactly as listed (same kanji and kana), never conjugated, and with no particles, '
                  'です/ます or other Japanese grammar around it; adjectives go before their noun as listed ("a 新しい '
                  'build", "the 簡単 fix"); suru-nouns stand in for the English verb or noun ("let me 確認 the logs"). ')
-    like = 'like "問題は設定です。" or "これで大丈夫です。"'
+    like = examples({w['ja']: chance(w, know) for w in fwlib.introduced(state)})
     space = 'Put a space on each side of a Japanese word inside English text, as for an English word. '
     fit = lambda instead: ('Use a word only where it means exactly what the English word would mean there; where one '
                            f'doesn\'t fit, {instead} (だから only for "so" meaning therefore, never "so big"; でも and '

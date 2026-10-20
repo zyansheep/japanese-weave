@@ -1805,5 +1805,14 @@ class DamagedState(Home):
         self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.PREVIOUS), before)
 
 
+class Examples(unittest.TestCase):
+    def test_example_sentences_use_words_known_at_a_glance(self):
+        known = {'仕事': 0.02, '終わる': 0.03, '簡単': 0.05, '今日': 0.02, '忙しい': 0.3, '問題': 0.27}
+        self.assertEqual(weave.examples(known), 'like "仕事は終わりました。" or "これは簡単です。"')
+
+    def test_without_known_examples_the_brief_still_has_two(self):
+        self.assertEqual(weave.examples({}), 'like "問題は設定です。" or "これは簡単です。"')
+
+
 if __name__ == '__main__':
     unittest.main()
