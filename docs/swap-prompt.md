@@ -42,6 +42,29 @@ to English. A flip of a group is logged but not counted against the word clicked
 How many sentences go fully into Japanese follows the stage: about one in five at Stage 3 and 4, one in ten at Stage 2
 (or Level 2 without the plugin), none at Stage 1. The rest of the density rules are unchanged.
 
+## Which text is a passage
+
+`extension/src/page.js` picks the passages. Anywhere: a paragraph, list item, quote, heading, article or main element
+holding no smaller one, in English or unmarked, at least 6 words and at most 2000 characters long, not inside a
+link, button, form, menu, header, footer, code, editable or hidden part, and not on a zero-Japanese topic. Three
+sites have their own passages, because their prose is not in those elements:
+
+- **X**: each tweet's text.
+- **Google results** (`/search` on google.com and the country domains): a result's snippet (its `[data-sncf]`
+  container, or the `.VwiC3b` class), a featured snippet, the knowledge panel's description (`[data-attrid]`), and the
+  paragraphs and list items of AI answers (`[data-subtree="aimc"]`: the overview, and People also ask answers once
+  opened), all inside the results (`#rcnt`), never in ads. A snippet's date, an AI answer's citation chips and hidden
+  headings are left out of the text; a part of an AI answer still hidden (collapsed, or fading in) waits until it
+  shows. Titles are headings inside links, so they never match; when Google changes its markup, nothing is woven
+  rather than its chrome.
+- **YouTube** (www and m): comments and community posts (`#content-text`) and the video description, collapsed or
+  opened. The description's text runs between its links (timestamps, URLs); each run is a passage, so a long
+  description still gets Japanese. On m.youtube.com only the description: each comment there is a button.
+
+On Google and YouTube a part shown later (an attribute like `hidden` or `aria-hidden` removed) is woven then, and
+YouTube's moves between videos are woven afresh. Short comments stay English: under 6 words a passage gives the model
+too little to fit a word into its sense.
+
 ## The meaning rules, and the mistakes they came from
 
 Tested on 2026-10-16 against the 17 passages in `tools/prompt-lab/corpus.json` and 8 unseen ones in

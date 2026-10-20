@@ -108,12 +108,22 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(plain).toMatchObject({ level: 0, candidates: 3 }); // one use per word: the sentence's words aren't swapped again
     await settle();
     expect(shown(1)).toMatchObject({ text: '', title: 'Japanese Weave' });
+    // A page with nothing to weave (its content script says so once the page settles) is faded and says which. Only a
+    // tab's top frame is heard, and only the known states.
+    expect(await dispatch({ type: 'nothing', why: 'none' }, tab(1))).toEqual({ ok: true });
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '', title: 'Japanese Weave: nothing on this page to weave (no English paragraphs found)' });
+    expect(await dispatch({ type: 'nothing', why: 'none' }, { ...tab(3), frameId: 4 })).toEqual({ ok: false });
+    expect(await dispatch({ type: 'nothing', why: 'blank' }, tab(1))).toEqual({ ok: false });
+    expect(await dispatch({ type: 'nothing', why: 'unfit' }, tab(1))).toEqual({ ok: true });
+    expect(shown(1).title).toBe('Japanese Weave: no Japanese fit the text on this page');
+    expect(shown(3).icon).toBe(ICONS.off);
 
     // Full: three presses up; its own cache and prompt, and every candidate shown.
     expect((await press(1, 3)).intensity.level).toBe(3);
     expect(natives.filter((m) => m.type === 'intensity').map((m) => m.set.level)).toEqual([1, 2, 3]);
     expect(toasts.at(-1)).toEqual([1, expect.objectContaining({ level: 3 })]);
-    expect(shown(1)).toMatchObject({ icon: ICONS.on, text: 'full', title: expect.stringContaining('full until') });
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: 'full', title: expect.stringContaining('full until') }); // the level shows
+    expect(shown(1).title).toContain('no Japanese fit');
     const full = await ask(passage());
     expect(calls).toHaveLength(2);
     expect(calls[1].body.systemInstruction.parts[0].text).toContain('The reader asked for FULL Japanese');
@@ -165,12 +175,15 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(Object.values(back.plans)[0]).toMatchObject({ level: -2, candidates: 3 });
     expect(calls).toHaveLength(3);
     await settle();
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '−2' });
+    await dispatch({ type: 'nothing', why: '' }, tab(1)); // Japanese turned up
     expect(shown(1)).toMatchObject({ icon: ICONS.on, text: '−2' });
     expect(shown(2)).toMatchObject({ icon: ICONS.off, text: '−2' });
     expect(shown(3)).toMatchObject({ icon: ICONS.off, text: '−2' });
 
-    // A wait ends when the tab loads another page, or closes, before the answer is in.
+    // A wait ends when the tab loads another page, or closes, before the answer is in; so does nothing to weave.
     await press(0);
+    await dispatch({ type: 'nothing', why: 'none' }, tab(1));
     gate = opened();
     const left = ask(passage(' left behind'));
     const closing = ask(passage(' closing'), 2);
