@@ -59,7 +59,11 @@ level from [blocks/](blocks/level-01.md).
   sessions too, so the hook checks for a `t3 serve` parent and weaves there.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
   word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
-  only from your words plus particles and endings. Hover a word for its meaning, romaji and kana, or a sentence's 。
+  only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
+  item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google results a snippet,
+  the knowledge panel's description and AI answers (the overview, and People also ask once opened), never titles,
+  links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or opened,
+  never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。
   for its translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by
   default, Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys
   only), or Claude Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s
@@ -74,7 +78,9 @@ level from [blocks/](blocks/level-01.md).
   toolbar badge shows the level (`−2`, `+1`, `off`, `full`) and `···` while the model works on that tab's page; the
   icon turns grey where a page gets no Japanese, and
   its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, no
-  key, or a page extensions can't run on.
+  key, or a page extensions can't run on. Once a page has settled, the icon is faded where it has nothing to weave,
+  and its tooltip says whether no English paragraphs were found or no Japanese fit the text; it comes back when
+  Japanese turns up (more comments, the next results, another video).
 
 All of it shares one word list on your machine, so words you see on the web count toward the chat and the other
 way round.

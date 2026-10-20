@@ -1,11 +1,12 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
 // handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks and selections in passages with
 // glossed words, and when passages are shown and their on-screen time, also for planned passages left without Japanese
-// (blank). Every async reply belongs to one config generation.
+// (blank). Once the page settles it tells the background whether it found anything to weave, for the toolbar icon.
+// Every async reply belongs to one config generation.
 import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEnglish, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
 import { offReason } from './settings.js';
-import { selector, readable } from './page.js';
+import { selector, readable, skipped, revealing } from './page.js';
 import { wordCount, intensityLabel, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
 import { MAX_BATCH } from './models.js';
 import { readingState, account, newStay, paused } from './attention.js';
@@ -68,6 +69,7 @@ function orphan() {
   observer?.disconnect(); observer = null;
   near?.disconnect(); visible?.disconnect(); onscreen?.disconnect();
   clearTimeout(timer); timer = null; clearInterval(navTimer); clearInterval(stayTimer); stayTimer = null;
+  calm();
   pending.clear(); inflight.clear(); stays.clear(); inView.clear(); hideTip();
 }
 const send = (msg) => {
@@ -83,6 +85,7 @@ const send = (msg) => {
 // page back in English.
 const on = () => !orphaned && !!config && !offReason(config, location.href);
 const targets = () => selector(location.href);
+const skip = () => skipped(location.href); // parts of a passage that are no part of its text (page.js)
 // Only real user input on spans this extension made; pages can't forge flips, peeks or seen events.
 const swapFor = (e) => {
   const span = e.isTrusted && e.target?.closest?.(`span.${SWAP_CLASS}`);
@@ -294,7 +297,7 @@ function paint(el, key) {
   if (!on() || keys.get(el) !== key || !readable(el, location.href)) return;
   const swaps = memo.get(key);
   if (!swaps || (!swaps.length && !plans.has(key))) return; // a blank passage is still watched on screen
-  applySwaps(el, swaps);
+  if (applySwaps(el, swaps, skip()) && reported) report('');
   for (const span of el.querySelectorAll(`.${SWAP_CLASS}`)) if (isSwap(span)) visible.observe(span);
   onscreen?.observe(el);
   observer?.takeRecords();
@@ -305,7 +308,7 @@ function consider(el) {
   if (el.querySelector(`.${SWAP_CLASS}`)) revert(el);
   observer?.takeRecords();
   if (!readable(el, location.href)) { keys.delete(el); return; }
-  const text = flatten(el).text;
+  const text = flatten(el, skip()).text;
   const key = `${config.revision}:${hashKey(text)}`;
   keys.set(el, key);
   sizes.set(el, wordCount(text));
@@ -346,17 +349,60 @@ async function flush() {
     if (result?.plans?.[i.key]) plans.set(i.key, result.plans[i.key]);
     if (p) for (const el of p.els) paint(el, i.key);
   }
+  settle();
   if (result?.stale) { try { update(await send({ type: 'config' })); } catch { /* reloaded or gone */ } return; }
   if ([...pending.keys()].some((k) => !inflight.has(k))) timer = setTimeout(flush, 50);
+}
+// The toolbar's "nothing to weave" state (toolbar.js): once no passage waits for the model and none has turned up or
+// changed for SETTLE_MS (or SETTLE_MAX_MS on a page that never goes quiet), the background hears 'none' when the page
+// has no passage this extension may weave, 'unfit' when the model answered for some and none got Japanese, else ''.
+// Japanese turning up clears it at once (paint); a new page (SPA navigation, a new config) is looked at afresh. While
+// the page is unsettled a check runs every SETTLE_TICK_MS.
+const SETTLE_MS = 3000;
+const SETTLE_MAX_MS = 15000;
+const SETTLE_TICK_MS = 500;
+let settleTicker = null;
+let unsettled = 0; // when the page stopped being settled, 0 while it is
+let stirred = 0; // when a passage last turned up or changed, or an answer came
+let reported = null; // the state last sent, null before any
+function report(why) {
+  if (why === reported) return;
+  reported = why;
+  void send({ type: 'nothing', why }).catch(() => { if (reported === why) reported = null; });
+}
+function settle() {
+  stirred = Date.now();
+  if (!unsettled) unsettled = stirred;
+  if (!settleTicker) settleTicker = setInterval(settled, SETTLE_TICK_MS);
+}
+function calm() {
+  clearInterval(settleTicker);
+  settleTicker = null;
+  unsettled = 0;
+}
+const woven = (el) => [...el.querySelectorAll(`span.${SWAP_CLASS}`)].some(isSwap);
+function settled() {
+  const now = Date.now();
+  if (!on()) { calm(); return; }
+  if ((now - stirred < SETTLE_MS && now - unsettled < SETTLE_MAX_MS) || pending.size || inflight.size || timer) return;
+  calm();
+  const live = [...tracked].filter((el) => el.isConnected);
+  if (live.some(woven)) { report(''); return; }
+  const answered = live.some((el) => memo.has(keys.get(el)));
+  const found = answered || live.some((el) => keys.has(el) || readable(el, location.href));
+  report(!found ? 'none' : answered ? 'unfit' : '');
 }
 function track(root) {
   if (root.nodeType !== 1) return;
   const elements = root.matches(targets()) ? [root, ...root.querySelectorAll(targets())] : root.querySelectorAll(targets());
+  let added = false;
   for (const el of elements) {
     if (tracked.has(el) || !readable(el, location.href)) continue;
     tracked.add(el);
     near.observe(el);
+    added = true;
   }
+  if (added) settle();
 }
 function mutations(records) {
   const changed = new Set();
@@ -366,7 +412,10 @@ function mutations(records) {
     const el = base?.closest(targets());
     if (el && tracked.has(el)) changed.add(el);
     else if (el) track(el);
+    // A shown or hidden part (page.js revealing): passages in it may be readable now.
+    if (r.type === 'attributes' && base && base !== el) track(base);
   }
+  if (changed.size) settle();
   for (const el of changed) {
     forget(el);
     if (el.querySelector(`.${SWAP_CLASS}`)) revert(el);
@@ -395,11 +444,15 @@ function start() {
     for (const e of entries) if (e.isIntersecting && !keys.has(e.target)) consider(e.target);
   }, { rootMargin: '600px' });
   observer = new MutationObserver(mutations);
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  const attributeFilter = revealing(location.href);
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true,
+    ...(attributeFilter.length ? { attributes: true, attributeFilter } : {}) });
   track(document.documentElement);
+  settle();
 }
 function stop() {
   generation++;
+  calm(); reported = null;
   observer?.disconnect(); observer = null;
   near?.disconnect(); visible?.disconnect();
   clearTimeout(timer); timer = null;
@@ -495,6 +548,7 @@ window.addEventListener('scroll', hideTip, { passive: true, capture: true });
 document.addEventListener('visibilitychange', seenVisible);
 document.addEventListener('visibilitychange', staysOnVisibility);
 window.addEventListener('pagehide', () => { for (const passage of [...stays.keys()]) endStay(passage); });
+window.addEventListener('pageshow', (e) => { if (e.persisted && observer) { reported = null; settle(); } });
 for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchstart']) {
   document.addEventListener(type, noteInput, { capture: true, passive: true });
 }

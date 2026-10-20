@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
-import { appearance, badgeText, createToolbar, reasonText, ICONS, WAIT_FRAMES, COLORS } from '../src/toolbar.js';
+import { appearance, badgeText, createToolbar, reasonText, nothingText, ICONS, WAIT_FRAMES, COLORS } from '../src/toolbar.js';
 
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const until = new Date(2026, 9, 19, 21, 40).getTime();
@@ -62,6 +62,21 @@ describe('appearance', () => {
     expect(appearance({ level: 2, until, waiting: true }).title).toContain(`much heavier (+2) until ${clock(until)}`);
     expect(appearance({ waiting: true, reason: 'site-off' })).toMatchObject({ icon: 'off', text: '' });
   });
+  test('a page with nothing to weave is faded and says which, under off and the wait, with the level kept', () => {
+    expect(appearance({ nothing: 'none' })).toEqual({ icon: 'faded', text: '', color: COLORS.lighter,
+      title: 'Japanese Weave: nothing on this page to weave (no English paragraphs found)' });
+    expect(appearance({ nothing: 'unfit', level: 1, until })).toEqual({ icon: 'faded', text: '+1', color: COLORS.heavier,
+      title: `Japanese Weave: no Japanese fit the text on this page · heavier (+1) until ${clock(until)}` });
+    expect(appearance({ nothing: 'unfit', level: 3, until }).text).toBe('full');
+    // off (any reason) > waiting > nothing to weave > normal
+    expect(appearance({ nothing: 'none', reason: 'site-off' })).toEqual(appearance({ reason: 'site-off' }));
+    expect(appearance({ nothing: 'none', level: -3, until, reason: 'intensity-off' })).toMatchObject({ icon: 'off', text: 'off' });
+    expect(appearance({ nothing: 'unfit', waiting: true, frame: 2 })).toEqual(appearance({ waiting: true, frame: 2 }));
+    expect(appearance({ nothing: '' })).toEqual(appearance());
+    expect(appearance({ nothing: 'something else' })).toEqual(appearance()); // only the two known states fade the icon
+    expect(nothingText('none')).not.toBe(nothingText('unfit'));
+    expect(ICONS.faded[16]).toBe('/icons/faded-16.png');
+  });
 });
 
 test('every icon the manifest and the toolbar name is there (tools/make-icons.sh)', () => {
@@ -70,6 +85,7 @@ test('every icon the manifest and the toolbar name is there (tools/make-icons.sh
   const paths = [...Object.values(manifest.icons), ...Object.values(manifest.action.default_icon),
     ...Object.values(ICONS).flatMap((set) => Object.values(set).map((p) => p.replace(/^\//, '')))];
   expect(paths).toContain('icons/off-16.png');
+  expect(paths).toContain('icons/faded-48.png');
   for (const path of paths) expect(existsSync(new URL(path, root))).toBe(true);
 });
 
@@ -147,6 +163,46 @@ describe('createToolbar', () => {
     expect(bar.waiting(1) || bar.waiting(3)).toBe(false);
     expect(shown(3).text).toBe('');
     expect(timers.intervals.size).toBe(0);
+  });
+
+  test('nothing to weave per tab: faded until Japanese turns up or the tab loads another page', async () => {
+    const { action, calls, shown } = fakeAction();
+    const timers = fakeTimers();
+    const bar = createToolbar(action, timers);
+    await bar.show({ level: 1, until }, [[1, ''], [2, ''], [3, 'site-off']]);
+    await bar.nothing(1, 'none');
+    await bar.nothing(3, 'unfit');
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '+1', title: expect.stringContaining('no English paragraphs found') });
+    expect(shown(2)).toMatchObject({ icon: ICONS.on, text: '+1' });
+    expect(shown(3)).toMatchObject({ icon: ICONS.off, title: expect.stringContaining('turned off on this site') });
+    // It outlasts a redraw of every tab (settings or the level changed), and the off reason still wins while it lasts.
+    await bar.show({ level: 0 }, [[1, ''], [2, ''], [3, 'site-off']]);
+    expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '' });
+    await bar.show({ level: 0 }, [[1, ''], [2, ''], [3, '']]);
+    expect(shown(3)).toMatchObject({ icon: ICONS.faded, title: 'Japanese Weave: no Japanese fit the text on this page' });
+    // A model at work shows over it, and it comes back when the call ends.
+    const done = bar.wait(1); await settle();
+    expect(shown(1)).toMatchObject({ icon: ICONS.on, text: WAIT_FRAMES[0] });
+    done(); await settle();
+    expect(shown(1).icon).toBe(ICONS.faded);
+    // Japanese turned up: the plain icon. An unknown state counts as something to weave.
+    await bar.nothing(1, '');
+    expect(shown(1)).toMatchObject({ icon: ICONS.on, title: 'Japanese Weave' });
+    await bar.nothing(1, 'bogus');
+    expect(shown(1).icon).toBe(ICONS.on);
+    // A new page forgets it (an SPA's new URL too); the page finishing its load does not.
+    await bar.nothing(2, 'none');
+    await bar.navigated(2, '', { loading: false });
+    expect(shown(2).icon).toBe(ICONS.faded);
+    await bar.navigated(2, '');
+    expect(shown(2).icon).toBe(ICONS.on);
+    // Closed: forgotten. Nothing is sent for a tab that is no tab.
+    bar.closed(3);
+    const before = calls.length;
+    await bar.nothing(undefined, 'none');
+    expect(calls.length).toBe(before);
+    await bar.nothing(3, 'none');
+    expect(shown(3).icon).toBe(ICONS.faded); // a tab the worker hears from again is drawn again
   });
 
   test('works with parts of the API missing or failing (tests, old browsers, a closed tab)', async () => {

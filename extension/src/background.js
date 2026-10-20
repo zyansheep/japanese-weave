@@ -90,8 +90,9 @@ async function broadcast(type = 'config') {
 const armIntensity = async ({ level, until }) => { if (level) await chrome.alarms.create(INTENSITY_ALARM, { when: until }); };
 
 // The toolbar button (toolbar.js): grey with the reason where a tab gets no Japanese, "···" while a model works on a
-// tab's passages, else the level. Redrawn for every tab whenever settings, the word state, the level or site access
-// change (broadcast), and per tab when it is switched to, loads a page or closes.
+// tab's passages, faded where its page has nothing to weave (the content script says so once the page settles), else
+// the level. Redrawn for every tab whenever settings, the word state, the level or site access change (broadcast), and
+// per tab when it is switched to, loads a page or closes.
 const toolbar = createToolbar(chrome.action);
 async function showToolbar(ctx, tabs) {
   ctx ??= await context();
@@ -111,6 +112,13 @@ chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {
   void showTab(tabId, tab?.url, { loading: change.status === 'loading' || !!change.url }).catch(() => {});
 });
 chrome.tabs.onRemoved?.addListener((tabId) => toolbar.closed(tabId));
+// From the content script of a tab's top frame: '' (it has something to weave), 'none' (no passage it may weave) or
+// 'unfit' (no Japanese fit the passages the model saw).
+async function nothing(msg, sender) {
+  if (sender.frameId || sender.tab?.id == null || !['', 'none', 'unfit'].includes(msg.why)) return { ok: false };
+  await toolbar.nothing(sender.tab.id, msg.why);
+  return { ok: true };
+}
 
 async function swaps(msg, sender) {
   const ctx = await context();
@@ -386,7 +394,8 @@ async function status() {
     usage: await readUsage(chromeStorage), intensity: config.intensity };
 }
 
-// Pages may only ask for config, swaps, events and interactions; everything else is popup-only.
+// Pages may only ask for config and swaps, and send events, interactions and what they have to weave; everything else
+// is popup-only.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || sender.id !== chrome.runtime.id) return false;
   const popup = sender.url === chrome.runtime.getURL('src/popup.html');
@@ -396,12 +405,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     swaps: () => swaps(msg, sender),
     event: () => record(msg, sender),
     interaction: () => logInteraction(msg, sender),
+    nothing: () => nothing(msg, sender),
     status, stats, syncWords, clearCache,
     save: () => save(msg),
     setChallenge: () => setChallenge(msg),
     intensity: () => stepIntensity(msg.step, 'popup'),
   };
-  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction'].includes(msg.type)))) return false;
+  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction', 'nothing'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));
   return true;
 });

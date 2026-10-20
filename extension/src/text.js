@@ -23,7 +23,8 @@ export const swapWord = (span) => owned.get(span) || '';
 //   text  = raw with whitespace runs collapsed to one space and ends trimmed (what the model sees)
 //   map   = text index -> raw index
 //   segs  = [{ node, start, end, ok }] raw ranges; ok=false inside links/code/etc or for virtual text
-export function flatten(root) {
+// skip: a selector for parts left out altogether (a site's dates, citation chips, hidden labels: page.js skipped).
+export function flatten(root, skip = '') {
   const segs = [];
   let raw = '';
   const push = (node, data, ok) => {
@@ -37,12 +38,14 @@ export function flatten(root) {
         push(child, child.data, !blocked);
       } else if (child.nodeType === ELEMENT_NODE) {
         const tag = child.tagName;
-        if (tag === 'IMG') {
+        if (owned.has(child)) {
+          push(null, child.getAttribute('data-en') || child.textContent, false);
+        } else if (skip && child.matches(skip)) {
+          continue;
+        } else if (tag === 'IMG') {
           push(null, child.getAttribute('alt') || '', false);
         } else if (tag === 'BR') {
           push(null, '\n', false);
-        } else if (owned.has(child)) {
-          push(null, child.getAttribute('data-en') || child.textContent, false);
         } else {
           walk(child, blocked || SKIP_TAGS.has(tag) || child.matches('[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="button"],[hidden],[aria-hidden="true"],[translate="no"],.notranslate'));
         }
@@ -172,9 +175,9 @@ function wrap(place, swap) {
   return span;
 }
 
-// Applies validated swaps [{o, f, g, h, ctx}] to root. Returns the number placed.
-export function applySwaps(root, swaps) {
-  const flat = flatten(root);
+// Applies validated swaps [{o, f, g, h, ctx}] to root, never inside skip (flatten). Returns the number placed.
+export function applySwaps(root, swaps, skip = '') {
+  const flat = flatten(root, skip);
   const placed = [];
   const used = [];
   for (const swap of swaps) {
