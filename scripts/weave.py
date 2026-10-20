@@ -379,7 +379,8 @@ def interactive(env=None, data=None, exec_check=codex_exec, args_check=claude_ar
 
 def off_note(until, codex=False):
     """What the hook says instead of the brief while chat intensity is off (intensity.py), like threads.note."""
-    how = 'pressing heavier (Alt+Shift+.)' + ('' if codex else ' or running /japanese-weave:intensity normal')
+    how = ('pressing heavier (Alt+Shift+.) or saying "japanese back on"' if codex else
+           'pressing heavier (Alt+Shift+.), saying "japanese back on" or running /japanese-weave:intensity normal')
     return (f'Japanese Weave: the user turned Japanese off in chat replies for now, until {intensity.clock(until)}, so '
             'reply in plain English, with no Japanese words, glosses or recall lines. They can bring it back sooner by '
             f'{how}.')
@@ -440,6 +441,12 @@ def main(argv):
     level = live['level']
     if session:
         thread = switch(session, data.get('prompt'), thread)
+    if hook and intensity.is_off(level) and (threads.request(data.get('prompt')) or (True,))[0] is False:
+        try:  # "japanese back on" also ends an off spell in all chats, on this very turn
+            live = hub.set_intensity('chat', 0, 'chat')[0]
+        except Exception:
+            live = dict(intensity.NORMAL)
+        level = live['level']
     codex = 'turn_id' in data
     # Japanese off in this chat (at any level), or in all chats for now: one line instead of the brief and its extras
     note =(threads.note(codex=codex) if threads.is_off(thread) else

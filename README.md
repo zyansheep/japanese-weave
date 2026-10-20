@@ -195,7 +195,8 @@ down or up.
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
 for 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
-means the hook sends only a one-line note to reply in plain English, until the time runs out or you press heavier.
+means the hook sends only a one-line note to reply in plain English, until the time runs out, you press heavier,
+or you say "japanese back on" in any chat.
 Full has no target or cap: every sentence you could follow in plain Japanese (your known and learning words plus
 common grammar) is written in Japanese, and the sentences that must stay English (steps, code, commands, exact
 technical detail) swap in every known or learning word. A chat turned off with `off here` stays off at any level.

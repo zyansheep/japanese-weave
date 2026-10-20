@@ -211,7 +211,10 @@ class Hook(Home):
         self.fw('intensity', 'off')
         self.assertEqual(self.hook('Next.')[0], threads.note())  # the chat's own switch wins over the level
         self.assertIn('turned Japanese off in chat replies', self.hook('Next.', session='s2')[0])
-        self.assertIn('turned Japanese off in chat replies', self.hook('japanese back on')[0])  # the chat is on again
+        context = self.hook('japanese back on')[0]  # the chat is on again, and asking ends the off spell too
+        self.assertIn('Japanese Weave (Stage', context)
+        self.assertEqual(fwlib.load_state()['prefs']['intensity_chat']['level'], 0)
+        self.assertNotIn('turned', self.hook('Next.', session='s2')[0])  # in all chats
 
     def test_off_and_full_are_set_outright_and_steps_still_step(self):
         self.assertIn('Chat replies: full (+3) until', self.fw('intensity', 'chat', 'full'))
