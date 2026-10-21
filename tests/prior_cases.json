@@ -1,0 +1,699 @@
+{
+ "note": "Cases scripts/knowledge.py (prior_estimate, word_features) and extension/src/prior.js (priorOf, wordFeatures) must agree on: a knowledge.json \"prior\" table and dictionary entries (data/dictionary.tsv, the fields the features read), each with its origin, Anki interval, features and prior k and sd.",
+ "table": {
+  "card": {
+   "new": 0.7,
+   "learning": 0.4,
+   "known": 0.5
+  },
+  "interval": 0.64,
+  "none": {
+   "new": 1.2,
+   "learning": 0.5,
+   "known": 2.5
+  },
+  "sd": {
+   "card": 0.74,
+   "none": 1.0
+  },
+  "words": {
+   "rank": -0.9,
+   "kanji known": 0.6,
+   "all kanji known": 0.3,
+   "kana": 0.2,
+   "katakana": 0.7,
+   "mixed": -0.1,
+   "verb": -0.25,
+   "adjective": 0.05,
+   "adverb": -0.35,
+   "other": 0.4,
+   "length": -0.2,
+   "rare": -0.45,
+   "loan": -0.5
+  },
+  "featured": [
+   "new",
+   "learning"
+  ],
+  "centre": {
+   "rank": 1000,
+   "length": 2
+  },
+  "kanji": "人山時強勉茶間食"
+ },
+ "cases": [
+  {
+   "entry": {
+    "id": 1320830,
+    "ja": "実は",
+    "kana": "じつは",
+    "pos": [
+     "exp",
+     "adv"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 484,
+    "kanji": [
+     "実"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.31515463835558755,
+    "mixed": 1.0,
+    "other": 1.0
+   },
+   "k": 1.7836391745200288,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1315920,
+    "ja": "時間",
+    "kana": "じかん",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 117,
+    "kanji": [
+     "時",
+     "間"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.9318141382538383,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.9386327244284542,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1358280,
+    "ja": "食べる",
+    "kana": "たべる",
+    "pos": [
+     "v1",
+     "vt"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 165,
+    "kanji": [
+     "食"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.7825160557860937,
+    "length": 0.5849625007211562,
+    "kanji known": 1.0,
+    "all kanji known": 1.0,
+    "mixed": 1.0,
+    "verb": 1.0
+   },
+   "k": 2.3372719500632533,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1080510,
+    "ja": "テレビ",
+    "kana": "てれび",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "kata",
+    "rank": 1033,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.014100321519620544,
+    "length": 0.5849625007211562,
+    "katakana": 1.0
+   },
+   "k": 1.7703172104881102,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1019420,
+    "ja": "アルバイト",
+    "kana": "あるばいと",
+    "pos": [
+     "n",
+     "vs",
+     "vi"
+    ],
+    "common": 3,
+    "loan": "ger",
+    "rank": 4841,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.6849350826408896,
+    "length": 1.3219280948873624,
+    "katakana": 1.0,
+    "loan": 1.0
+   },
+   "k": 0.5191728066457267,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1597150,
+    "ja": "タバコ",
+    "kana": "たばこ",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "por",
+    "rank": 2998,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.4768316285122607,
+    "length": 0.5849625007211562,
+    "katakana": 1.0,
+    "loan": 1.0
+   },
+   "k": 0.8538590341947341,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1587410,
+    "ja": "一ヶ月",
+    "kana": "いっかげつ",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 18862,
+    "kanji": [
+     "一",
+     "月"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 1.275587740517561,
+    "length": 0.5849625007211562
+   },
+   "k": -0.06502146661003627,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1580650,
+    "ja": "人々",
+    "kana": "ひとびと",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 465,
+    "kanji": [
+     "人"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.33254704711004607,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.3992923423990415,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1486360,
+    "ja": "美しい",
+    "kana": "うつくしい",
+    "pos": [
+     "adj-i"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 628,
+    "kanji": [
+     "美"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.20204035626280387,
+    "length": 0.5849625007211562,
+    "mixed": 1.0,
+    "adjective": 1.0
+   },
+   "k": 1.2148438204922922,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1381820,
+    "ja": "静か",
+    "kana": "しずか",
+    "pos": [
+     "adj-na"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 754,
+    "kanji": [
+     "静"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.12262865413022594,
+    "mixed": 1.0,
+    "adjective": 1.0
+   },
+   "k": 1.2603657887172033,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1013050,
+    "ja": "ゆっくり",
+    "kana": "ゆっくり",
+    "pos": [
+     "adv",
+     "adv-to",
+     "vs"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 560,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.25181197299379954,
+    "length": 1.0,
+    "kana": 1.0,
+    "adverb": 1.0
+   },
+   "k": 1.0766307756944196,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1008460,
+    "ja": "でも",
+    "kana": "でも",
+    "pos": [
+     "conj",
+     "prt",
+     "pref"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 45,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -1.3467874862246563,
+    "kana": 1.0,
+    "other": 1.0
+   },
+   "k": 3.0121087376021904,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1590880,
+    "ja": "関数",
+    "kana": "かんすう",
+    "pos": [
+     "n"
+    ],
+    "common": 0,
+    "loan": "",
+    "rank": 10796,
+    "kanji": [
+     "関",
+     "数"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 1.033262875884479,
+    "rare": 1.0
+   },
+   "k": -0.17993658829603126,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1110750,
+    "ja": "フォルダ",
+    "kana": "ふぉるだ",
+    "pos": [
+     "n"
+    ],
+    "common": 0,
+    "loan": "kata",
+    "rank": 10519,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 1.0219744551100602,
+    "length": 1.0,
+    "katakana": 1.0,
+    "rare": 1.0
+   },
+   "k": 0.3302229904009456,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1214540,
+    "ja": "缶",
+    "kana": "かん",
+    "pos": [
+     "n",
+     "ctr"
+    ],
+    "common": 3,
+    "loan": "dut,eng",
+    "rank": 5220,
+    "kanji": [
+     "缶"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.7176705030022621,
+    "length": -1.0,
+    "loan": 1.0
+   },
+   "k": 0.2540965472979641,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1302680,
+    "ja": "山",
+    "kana": "やま",
+    "pos": [
+     "n",
+     "ctr",
+     "n-pref"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 529,
+    "kanji": [
+     "山"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.2765443279648142,
+    "length": -1.0,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.5488898951683328,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1002430,
+    "ja": "お茶",
+    "kana": "おちゃ",
+    "pos": [
+     "n",
+     "vs",
+     "vi"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 4069,
+    "kanji": [
+     "茶"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.6094876898532853,
+    "kanji known": 1.0,
+    "all kanji known": 1.0,
+    "mixed": 1.0
+   },
+   "k": 1.4514610791320433,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1057580,
+    "ja": "サボる",
+    "kana": "さぼる",
+    "pos": [
+     "v5r",
+     "vt",
+     "vi"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 6882,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 0.8377146682849113,
+    "length": 0.5849625007211562,
+    "kana": 1.0,
+    "verb": 1.0
+   },
+   "k": 0.2790642983993486,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1512670,
+    "ja": "勉強",
+    "kana": "べんきょう",
+    "pos": [
+     "n",
+     "vs",
+     "vt",
+     "vi"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 926,
+    "kanji": [
+     "勉",
+     "強"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": -0.033389013318065645,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.130050111986259,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1432600,
+    "ja": "追徴",
+    "kana": "ついちょう",
+    "pos": [
+     "n",
+     "vs",
+     "vt"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 25002,
+    "kanji": [
+     "追",
+     "徴"
+    ]
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 1.3979747508409217
+   },
+   "k": -0.058177275756829516,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1148050,
+    "ja": "ＲＯＭ",
+    "kana": "ろむ",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 16001,
+    "kanji": []
+   },
+   "origin": "new",
+   "interval": null,
+   "features": {
+    "rank": 1.2041471252128477,
+    "length": 0.5849625007211562,
+    "katakana": 1.0
+   },
+   "k": 0.6992750871642056,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1315920,
+    "ja": "時間",
+    "kana": "じかん",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 117,
+    "kanji": [
+     "時",
+     "間"
+    ]
+   },
+   "origin": "learning",
+   "interval": null,
+   "features": {
+    "rank": -0.9318141382538383,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.2386327244284545,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1315920,
+    "ja": "時間",
+    "kana": "じかん",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 117,
+    "kanji": [
+     "時",
+     "間"
+    ]
+   },
+   "origin": "known",
+   "interval": null,
+   "features": {
+    "rank": -0.9318141382538383,
+    "kanji known": 1.0,
+    "all kanji known": 1.0
+   },
+   "k": 2.5,
+   "sd": 1.0
+  },
+  {
+   "entry": {
+    "id": 1358280,
+    "ja": "食べる",
+    "kana": "たべる",
+    "pos": [
+     "v1",
+     "vt"
+    ],
+    "common": 3,
+    "loan": "",
+    "rank": 165,
+    "kanji": [
+     "食"
+    ]
+   },
+   "origin": "new",
+   "interval": 30,
+   "features": {
+    "rank": -0.7825160557860937,
+    "length": 0.5849625007211562,
+    "kanji known": 1.0,
+    "all kanji known": 1.0,
+    "mixed": 1.0,
+    "verb": 1.0
+   },
+   "k": 4.035023760933747,
+   "sd": 0.74
+  },
+  {
+   "entry": {
+    "id": 1080510,
+    "ja": "テレビ",
+    "kana": "てれび",
+    "pos": [
+     "n"
+    ],
+    "common": 3,
+    "loan": "kata",
+    "rank": 1033,
+    "kanji": []
+   },
+   "origin": "shaky",
+   "interval": null,
+   "features": {
+    "rank": 0.014100321519620544,
+    "length": 0.5849625007211562,
+    "katakana": 1.0
+   },
+   "k": 1.7703172104881102,
+   "sd": 1.0
+  },
+  {
+   "entry": null,
+   "origin": "new",
+   "interval": null,
+   "features": {},
+   "k": 1.2,
+   "sd": 1.0
+  }
+ ]
+}
