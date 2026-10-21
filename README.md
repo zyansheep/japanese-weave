@@ -114,6 +114,11 @@ technical chat uses come first; the tier says which (A: connectors and adverbs, 
 fits), and the chat brief's default swaps are your known A words. `tools/` has the pipeline (`build_candidates.py`,
 the reviews in `curation/`, `assemble_lexicon.py`).
 
+**The dictionary.** [`data/dictionary.tsv`](data/dictionary.tsv) has every common JMdict entry (22,647) and the
+4,322 others ranked as well as a typical common one, with their frequency ranks, built by the same pipeline without
+the review (`tools/build_dictionary.py`). It is planned to become the vocabulary and isn't used at run time yet;
+[docs/dictionary.md](docs/dictionary.md) describes it.
+
 **Anki.** `fw.py anki <collection.anki2>` reads your collection (a temporary copy, so Anki can stay open) and puts
 every word on a card in learning or review (not new, not suspended) at the front of the list, most familiar first.
 Mature cards (interval of 21 days or more, `--mature-days`) are marked known; the rest become the first learning
@@ -276,5 +281,6 @@ python3 tests/model_eval.py --out /tmp/jw-eval    # live check via claude -p
 
 ## License
 
-MIT (French Weave © Jackie Oliver). The word list includes data derived from JMdict, © the Electronic Dictionary
-Research and Development Group, CC BY-SA 4.0.
+MIT (French Weave © Jackie Oliver). The word list and the dictionary (`data/lexicon.csv`, `data/dictionary.tsv`)
+include data derived from JMdict, © the Electronic Dictionary Research and Development Group, and are shared under its
+license, CC BY-SA 4.0.
