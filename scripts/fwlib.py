@@ -558,14 +558,14 @@ def introduced(state):
 
 
 COLLAPSE_AT = 150      # from this many known words, the exports name a rank band instead of listing them (the chat
-                       # brief names every word: weave.py)
+                       # brief names the most useful words: weave.py)
 EXCEPTIONS_MAX = 15    # most exceptions named on each side of the band
 
 
 def known_band(state, known=None, listed=None):
     """Compact description of the known set by rank in the word list (the exports' band). The list is the base list's
-    frequency/usefulness order only without Anki words: an Anki sync puts its words first, so the band then stops
-    meaning "the most common words" (the chat brief names every word instead).
+    frequency/usefulness order only without Anki words: an Anki sync puts its words first, so the exports pass the
+    words in the base list's order (export.by_lexicon).
 
     Returns (n, missing, extra): known = words ranked 1..n, except `missing` (ranked <= n but not yet introduced;
     learning words are listed separately anyway), plus `extra` (known words ranked > n). n minimizes the number

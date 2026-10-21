@@ -156,11 +156,14 @@ words * passage words / 100 (the random thinning, below, leaves it alone), and o
    from N(k_w, var_w)) so uncertain words still get shown; for a sentence of free words, closeness of its price.
 3. One with an active word not yet shown today is admitted first, outside the budget (at most one per passage), so new
    words always gather evidence.
-4. Each next one is admitted while its cost fits the remaining budget, at most PER_SENTENCE in one sentence (one up to
-   normal, two when heavier); a whole sentence only in a sentence with nothing budgeted yet, and then nothing more
-   there (a full sentence passes to the next candidate). The first that doesn't fit is admitted with probability
-   remaining / cost (so short passages still get learning words in expectation), then it stops. A sentence left
-   English keeps the free words the model offered inside it.
+4. B has two parts: whole sentences may spend up to SENTENCE_SHARE of it (18%), words and phrases the rest
+   (levels.js, as intensity.py split says for chat). Going down the one ranking, each is admitted while its cost fits
+   what is left of its part, at most PER_SENTENCE in one sentence (one up to normal, two when heavier); a whole
+   sentence only in a sentence with nothing budgeted yet, and then nothing more there (a full sentence passes to the
+   next candidate). A part stops at its first candidate that doesn't fit. A part whose candidates ran out first hands
+   what it has left to the other, which goes on from where it stopped. Then each part's first candidate that didn't
+   fit is admitted with probability remaining / cost (so short passages still get learning words in expectation). A
+   sentence left English keeps the free words the model offered inside it.
 5. The popup's density, when set, caps the total, budgeted candidates first; without it there is no other ceiling.
 
 The price of a whole sentence comes from the native host (`sentencePrice`, from knowledge.json once the fit makes one
@@ -170,6 +173,14 @@ a sentence's translation being opened until 2026-10-20: of 439 sentence ends in 
 chance as the replay weighs words (90% interval 5.4% to 11.4%, resampling replies). Before, how many sentences a
 passage got followed the stage (the prompt asked for one in five from Stage 3, one in ten at Stage 2, none at Stage
 1) and they were free when their words were.
+
+The share keeps whole sentences in the plan whatever the supply of learning words. Ranked like a word whose lookup
+chance is their price, far from the 25% target, they would otherwise get only what learning words leave: all of the
+budget on the web today, where learning words are scarce, but nothing once code finds enough candidates. SENTENCE_SHARE
+is 0.18 so that normal asks chat for as many sentences as its brief did at Stage 3 before they were priced: one in
+five, about 1.1 per 100 words (about 5.5 prose sentences in 100 words), at 0.08 each is 0.088 of normal's 0.5, and
+0.18 * 0.5 / 0.08 = 1.1. (The 123 counted T3 replies held 0.73 whole sentences per 100 words, counting every word of
+the replies, code included.)
 
 The passage's plan records B, the lookups expected (the sum of p over every listed word shown, plus the price of each
 sentence shown) and the sentence price. Randomness is seeded by the passage and the day, so a page repaints the same
@@ -194,45 +205,70 @@ A prompt can't enforce a per-reply budget exactly, so the brief (weave.py) asks 
 the next turn says how the last reply did. Each word in use gets a chat lookup chance p: its estimate with the T3
 offset, else from its status (known: k = 2.5, fwlib.KNOWN_PRIOR_K; otherwise the neutral prior). Words with p under 8%
 (fwlib.FREE_P) are known at a glance, whatever their status: they cost nothing and go in wherever the English has
-their meaning. The brief names each of them with its English, in the base list's order (connectors and the words
-technical chat uses first), then the Anki words; numbers and katakana words are left out, as the brief asks for plain
-English for numbers and no katakana loanwords. The first 12 that are connectors or adverbs (tier A in
-data/lexicon.csv) are the default swaps, written in Japanese every time. No kana readings: in the T3 chats with
-`<abbr>` glosses, Claude's own reading matched the list's in 400 of 401 glossed uses of listed kanji words, so a
-reading per word (about 1,000 characters for 212 kanji words) would buy little. The rest are learning words, known
-ones included: up to 24, by learning value (most useful first), grouped by p with rough odds (often, about 1 in 4;
-sometimes; rarely). The brief asks for the budget over their mean p per 100 words (to the nearest half under 2; at
-least 0.5, at most 5 per word allowed in a sentence and 8 in all), at most intensity.per_sentence in a sentence, where
-the English around each makes its meaning clear. Fully Japanese sentences (Stage 3 on) may use only known words,
-particles and です/ます, and no stage may use Japanese outside the lists. At full the known words are the same and every
-other word in use is listed as learning.
+their meaning. Numbers and katakana words are left out of the brief, as it asks for plain English for numbers and no
+katakana loanwords. The first 12 of the rest that are connectors or adverbs (tier A in data/lexicon.csv, in its
+order) are the default swaps, written in Japanese every time. The others are named with their English, the senses
+joined by a slash ("中 inside/during"), the most useful in chat first (weave.priority): those that came up in the
+user's chat replies on 2 days or more (exposure.json), then the base list's others in its order (frequency, with
+connectors and the words technical chat uses early), then the Anki words, whose meanings are their cards' and often
+odd. They take at most 4,400 characters (weave.KNOWN_ROOM, 250 to 290 words; on the 2026-10-20 state all 255 fit). The
+ones left out are still known at a glance: the brief says how many there are and to keep the English for any word not
+named, and a reply that uses one anyway is counted as using a known word, free, not as Japanese off the lists. No kana
+readings: in the T3 chats with `<abbr>` glosses, Claude's own reading matched the list's in 400 of 401 glossed uses of
+listed kanji words, so a reading per word (about 1,000 characters for 212 kanji words) would buy little.
+
+The rest of the words in use are learning words, known ones included: up to 24, by learning value (most useful first),
+grouped by p with rough odds (often, about 1 in 4; sometimes; rarely). The budget is split as on the web
+(intensity.split): whole sentences in Japanese may take up to 18% of it (SENTENCE_SHARE) at their price, the chance
+the reader opens the translation (knowledge.json sentencePrice for t3 once a fit makes one, else
+intensity.SENTENCE_PRICE, 0.08, the same as levels.js), learning words the rest, and what one can't use goes to the
+other. Learning words can use at most 5 per 100 words per word allowed in a sentence (8 at most) at their mean p, and
+none without learning words; sentences at most 3 per 100 words (weave.SENTENCES_MAX, three in five, the most the brief
+asked for before), and none without a word known at a glance to write them with. The brief asks for each part over
+its cost per 100 words, to the nearest half under 2 and the nearest whole number from there (learning words at least
+0.5): at normal on the 2026-10-20 state, 2 learning words and 1 whole sentence per 100 words, where before it asked
+for 3 learning words and, at Stage 3, one sentence in five unpriced. Learning words go at most intensity.per_sentence
+in a sentence, where the English around each makes its meaning clear. Whole sentences, at any stage now, are short
+and plain です/ます, made of known words, particles and これ/それ only; every other sentence stays English with listed
+words as written (below Stage 3 also never conjugated and with no particles around them), and no stage may use
+Japanese outside the lists. Full is the same brief with the budget lifted: the same lists, every sentence the user
+could follow written whole in Japanese (learning words and common grammar allowed), and every listed word wherever the
+English has its meaning, steps included, with no cap per sentence; one line of the rules says so.
 
 The hook's text stays in the conversation, so a chat gets the whole brief once (weave.chat_turn, with each chat's
-memory in sessions.json): the rules, the learning words, the default swaps and every known word. Later turns carry a
-digest of the rules with this reply's amounts, the learning words, the default swaps, and only the known words that
-changed since (newly known at a glance, or no longer). The rules come whole again when they change (to or from full,
-another stage, other glosses). The whole brief comes back after a compaction, which Claude Code marks with a
-`compact_boundary` system line in the transcript and Codex with a `compacted` line, and every 20 turns
+memory in sessions.json): the rules, the learning words, the default swaps and the named known words. Later turns
+carry a digest of the rules with this reply's amounts, the learning words, the default swaps, and only the known words
+that changed since (newly known at a glance or newly among the most useful, or no longer known at a glance). The rules
+come whole again when they change (another stage, other glosses or example sentences); a switch to or from full needs
+only the digest, which carries the amounts. The whole brief comes back after a compaction, which Claude Code marks
+with a `compact_boundary` system line in the transcript and Codex with a `compacted` line, and every 20 turns
 (weave.FULL_EVERY) in case the context lost it without a mark. A brief stays under 9,500 characters, since Claude Code
-files away hook text over 10,000; known words that don't fit are named on the next turn. On the 2026-10-20 state
-(Stage 3, 293 words known at a glance, `<abbr>` glosses), the old brief was about 4,000 characters (about 1,070
-tokens) on every turn; the whole brief is about 8,200 (2,360 tokens) and a later one 2,230 (590 tokens). A chat of 4
-turns or more comes out ahead; over the 24 chats in the user's transcripts the briefs total 75% of the old ones.
+files away hook text over 10,000: from Stage 3 the rest of a whole brief takes at most about 4,900, so the named
+known words always fit, and a word that doesn't (a stage pinned lower has longer rules) is named on the next turn. On
+the 2026-10-20 state (Stage 3, 293 words known at a glance, `<abbr>` glosses, with the feedback line), the brief
+before it named known words was about 4,000 characters on every turn; the whole brief is 8,128 and a later one 2,294
+(at full 7,597 and 1,786). With that state's other words made known, it is 8,737 at 500 known words and 8,717 at
+1,500, and later turns stay the same, where naming every word took the whole 9,500 on every turn until all were
+named (5 turns at 1,500).
 
 Each brief is kept as a record of what its reply was offered: a `brief` op (hub.py), which changes nothing and goes to
 the ops table where the state lives, through the outbox with a collector. Its fields follow a web passage's plan:
-level, intensity, budget, the learning words asked for per 100 words (ask), the costly words offered with their p, the
-delayed-start arms (empty until that experiment starts), the expected lookups (ask times their mean p), per 100 words
+level, intensity, budget, the learning words and whole sentences asked for per 100 words (ask, sentences), the price
+of a whole sentence (sentencePrice), the costly words offered with their p, the delayed-start arms (empty until that
+experiment starts), the expected lookups (ask times their mean p, plus sentences times their price), per 100 words
 where the web's are per passage; and the session id, the words known at a glance, whether the brief was whole, its
-length and, from Codex, the turn id. feedback.chat_briefs reads them back, and feedback.brief_for finds a reply's: the
-last of its chat sent at or before it.
+length and, from Codex, the turn id. Full has no budget, ask, sentences or expected. feedback.chat_briefs reads them
+back, and feedback.brief_for finds a reply's: the last of its chat sent at or before it.
 
-The line on the last reply counts its known, learning and off-list words and its expected lookups per 100 words: p
-summed over the learning (and unlisted) words used, plus 0.27 (the neutral prior) per off-list word, over its words;
-known words are left out, being free. Japanese inside code is left out too: fenced blocks of backticks or tildes (an
-unclosed one runs to the end), code spans of any number of backticks, and links (fwlib.strip_code). Off-list Japanese
-gets "no Japanese outside the lists"; else over 1.5 times the budget asks for fewer learning words, and under half of
-it (or of what the most the brief asks for would spend) for more.
+The line on the last reply counts its known, learning and off-list words, its whole sentences in Japanese (a run from
+a sentence break to 。, ？ or ！ with no Latin letters in it), and its expected lookups per 100 words: p summed over the
+learning (and unlisted) words used, plus 0.27 (the neutral prior) per off-list word and the price per whole sentence,
+over its words. Known words are left out, being free, whether the brief named them or not. Japanese inside code is
+left out too: fenced blocks of backticks or tildes (an unclosed one runs to the end), code spans of any number of
+backticks, and links (fwlib.strip_code). The particles and です/ます of a whole sentence are never off the lists; other
+hiragana is, below Stage 3. Off-list Japanese gets "no Japanese outside the lists"; else over 1.5 times the budget
+asks for fewer learning words, whole sentences or both, whichever spent over 1.5 times its part, and under half of
+what the brief asks for at most for more of whichever spent under half its part.
 
 ## Status from evidence
 
@@ -284,16 +320,16 @@ press past either end stays there and restarts the clock. Keys Alt+Shift+Period 
 (lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
 `fw.py intensity [chat|browser] up|down|normal|off|full`. On both surfaces -2..2 are lookup budgets of 0.15, 0.3,
 0.5, 0.8 and 1.2 per 100 words (intensity.BUDGETS; scaled with normal's when a challenge is set), spent only on words
-not known at a glance: known words are free everywhere but off. In chat (see Chat above) the level also scales the
-share of fully Japanese sentences. On web pages (see Choosing words) a lighter level picks from each passage's cached
+not known at a glance and on whole sentences in Japanese, which may take up to 18% (SENTENCE_SHARE): known words are
+free everywhere but off. On web pages (see Choosing words) a lighter level picks from each passage's cached
 candidates (no model call), a heavier one from the full answer (one answer and one cache for +1, +2 and full; asked for
 more on their own, the heavier levels got little more than normal, see docs/swap-prompt.md).
 
 In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
-calibration line or the export notice. Full replaces the budget with two rules: a sentence the reader could
-follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in Japanese, and one
-that must stay English (steps, code, commands, paths, exact technical detail) swaps in every listed word, known or
-learning. The rules on zero-Japanese topics (health, money, safety and the like), on Japanese only in the chat reply,
+calibration line or the export notice. Full is the normal brief with the budget lifted, said in one line: a sentence
+the reader could follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in
+Japanese, and the others swap in every listed word, known or learning, steps included, with no cap per sentence. The
+lists, the rules on zero-Japanese topics (health, money, safety and the like), on Japanese only in the chat reply,
 and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
 turned off on its own (threads.py) stays off at any level.
 

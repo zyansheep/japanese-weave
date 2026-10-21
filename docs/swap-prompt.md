@@ -338,7 +338,10 @@ lab's "ceiling" column still computes the old rule.
 Since 2026-10-20 a whole sentence is priced too: it costs the chance its translation is opened if it is read
 (`SENTENCE_PRICE`, 0.08, until the native host sends a fitted one), plus the lookup chances of any of its words not
 known at a glance, and it is its sentence's one budgeted swap. So the budget, not the stage, decides how many
-sentences a page gets, and at full, which has no budget, they are free. `planSwaps` also counts only the candidates
+sentences a page gets, and at full, which has no budget, they are free. Sentences may spend up to `SENTENCE_SHARE`
+(18%) of a passage's budget and words and phrases the rest, and what one can't use goes to the other, the rule chat
+uses too: on today's pages, where learning words are scarce, sentences still get what the words leave, and once code
+finds more candidates they keep their share. `planSwaps` also counts only the candidates
 `text.js locate` can place, and keeps none that overlaps one already kept, so a plan's swaps, `limit` and `expected`
 are what the page shows.
 

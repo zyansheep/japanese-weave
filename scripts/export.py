@@ -10,6 +10,7 @@ import time
 import fwlib
 
 CHATGPT_LIMIT = 1500   # characters per ChatGPT custom-instructions field (Free and Go; paid plans allow 5,000)
+CLAUDE_AI_MAX = 6000   # claude.ai doesn't document a limit for personal preferences; stay well inside a few pages
 KNOWN_LIST_MAX = fwlib.COLLAPSE_AT  # above this many known words, the state line names a rank band instead
 STAGE_SHAPES = {1: '', 2: '', 3: ' plus about one short, fully Japanese sentence in five (2 in a ten-sentence reply, '
                 'in the explanation around any steps)',
@@ -98,37 +99,59 @@ def ordinal(n):
     return f'{n}{"th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")}'
 
 
-def band_text(state, exceptions=fwlib.EXCEPTIONS_MAX):
+def by_lexicon(state):
+    """The state's words in the base list's order (data/lexicon.csv: frequency, with connectors and the words technical
+    chat uses early), then the words it lacks (Anki words) in the state's order. An Anki sync puts its words first in
+    the state, so the state's own order says nothing about how common a word is."""
+    rank = {fwlib.key(w['ja']): i for i, w in enumerate(fwlib.load_lexicon(fwlib.LEXICON))}
+    return sorted(state['words'], key=lambda w: rank.get(fwlib.key(w['ja']), len(rank)))
+
+
+def band_text(state, exceptions=fwlib.EXCEPTIONS_MAX, extras=None):
     """Known words as a frequency band plus exceptions; claude.ai and ChatGPT can't see the list, so it reads as
-    "common Japanese words up to about the N-th most frequent"."""
-    n, missing, extra = fwlib.known_band(state)
-    cut = lambda xs: ', '.join(xs[:exceptions]) + (f' and {len(xs) - exceptions} more' if len(xs) > exceptions else '')
+    "common Japanese words up to about the N-th most frequent". The band is over the base list's order (by_lexicon), so
+    N is a rank in it; known words beyond the band, Anki words among them, are named after it, the more frequent first.
+    exceptions: the most words named on each side of the band; extras: on the far side instead, when given."""
+    n, missing, extra = fwlib.known_band({'words': by_lexicon(state)})
+    cut = lambda xs, most: ', '.join(xs[:most]) + (f' and {len(xs) - most} more' if len(xs) > most else '')
     return (f'common Japanese words up to about the {ordinal(n)} most frequent'
-            + (f', except (not learned yet): {cut(missing)}' if missing else '')
-            + (f'; also: {cut(extra)}' if extra else ''))
+            + (f', except (not learned yet): {cut(missing, exceptions)}' if missing else '')
+            + (f'; also: {cut(extra, exceptions if extras is None else extras)}' if extra else ''))
 
 
-def state_line(state, now=None, known_max=KNOWN_LIST_MAX, dates=True, exceptions=fwlib.EXCEPTIONS_MAX, tail=None):
-    """The word-state line: Stage | Active | Shaky | Known | Synced, in the original state-line format."""
+def state_line(state, now=None, known_max=KNOWN_LIST_MAX, dates=True, exceptions=fwlib.EXCEPTIONS_MAX, tail=None,
+               extras=None):
+    """The word-state line: Stage | Active | Shaky | Known | Synced, in the original state-line format. Known words
+    are named in the base list's order (by_lexicon), the more frequent first, or above known_max described as a band
+    (band_text: exceptions, extras)."""
     words = state['words']
     by_added = lambda xs: sorted(xs, key=lambda w: w['added'])
     active = by_added([w for w in words if w['status'] == 'active'])
     shaky = by_added([w for w in words if w['status'] == 'shaky'])
-    known = [w for w in words if w['status'] == 'known']
+    known = [w for w in by_lexicon(state) if w['status'] == 'known']
     entry = lambda w, d: f'{w["ja"]} = {w["en"]}, "{w["hint"]}"' + (f' ({md(d)})' if dates else '')
     listing = lambda xs: '; '.join(xs) or 'none'
-    known_text = (band_text(state, exceptions) if len(known) > known_max
+    known_text = (band_text(state, exceptions, extras) if len(known) > known_max
                   else ', '.join(w['ja'] for w in known[:known_max]) or 'none')
     if 0 <= known_max < len(known) <= KNOWN_LIST_MAX:  # trimmed listing (ChatGPT)
         shown = ', '.join(w['ja'] for w in known[:known_max])
-        known_text = (f'{shown} and {len(known) - known_max} more of the most common Japanese words' if shown
-                      else f'the {len(known)} most common Japanese words')
+        # the words left out are the next most common only when the known words are the base list's first ones
+        common = fwlib.known_band({'words': by_lexicon(state)})[1:] == ([], [])
+        more = ' of the most common Japanese words' if common else ' not named here'
+        known_text = (f'{shown} and {len(known) - known_max} more{more}' if shown else
+                      f'the {len(known)} most common Japanese words' if common else f'{len(known)} words{more}')
     stamp = time.strftime('%Y-%m-%dT%H:%MZ', time.gmtime(time.time() if now is None else now))
     return (f'Japanese weave state{" (re-export about weekly)" if tail is None else ""} — Stage: {fwlib.stage_for(state)}'
             f' | Active (use most; gloss in footer): {listing([entry(w, w["added"]) for w in active])}'
             f' | Shaky (use often; gloss in footer): {listing([entry(w, w["changed"]) for w in shaky])}'
             f' | Known (use freely; never gloss): {known_text}'
             f' | {tail or "Synced: " + stamp}')
+
+
+def extra_counts(state):
+    """How many known words past the band to try naming, most first, down to none: every one, then fewer by five."""
+    known = sum(w['status'] == 'known' for w in state['words'])
+    return list(range(known, 0, -5)) + [0]
 
 
 def parse_state_line(line):
@@ -148,17 +171,23 @@ def parse_state_line(line):
     return out
 
 
-def claude_ai(state, now=None, tail=None, known_max=KNOWN_LIST_MAX):
-    """Personal preferences for claude.ai (Settings > Profile): the rules, then the state line."""
-    return rules() + '\n\n' + state_line(state, now, tail=tail, known_max=known_max)
+def claude_ai(state, now=None, tail=None, known_max=KNOWN_LIST_MAX, limit=CLAUDE_AI_MAX):
+    """Personal preferences for claude.ai (Settings > Profile): the rules, then the state line, with as many known
+    words past the band named as fit in limit characters."""
+    for extras in extra_counts(state) if sum(w['status'] == 'known' for w in state['words']) > known_max else [None]:
+        block = rules() + '\n\n' + state_line(state, now, tail=tail, known_max=known_max, extras=extras)
+        if len(block) <= limit:
+            break
+    return block
 
 
 def chatgpt(state, now=None, limit=CHATGPT_LIMIT, tail=None):
     """Two ChatGPT custom-instructions fields, each within limit: (about you: the state line without dates, known
     words trimmed to fit; how to respond: the short rules)."""
     known = sum(w['status'] == 'known' for w in state['words'])
-    if known > KNOWN_LIST_MAX:
-        tries = [dict(exceptions=e) for e in range(fwlib.EXCEPTIONS_MAX, -1, -5)]
+    if known > KNOWN_LIST_MAX:  # the known words past the band, as many as fit, then fewer exceptions
+        tries = ([dict(extras=e) for e in extra_counts(state)]
+                 + [dict(exceptions=e, extras=0) for e in range(fwlib.EXCEPTIONS_MAX, -1, -5)])
     else:
         tries = [dict(known_max=k) for k in list(range(known, 0, -10)) + [0]]
     for kwargs in tries:
