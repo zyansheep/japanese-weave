@@ -304,6 +304,18 @@ class Brief(Home):
         overlap = [word('一緒'), word('一緒に'), word('今'), word('今日')]
         self.assertEqual(weave.share('Let us go 一緒に, 今日 then 一緒 it. ' * 6, overlap)[0], 18)  # 3 per sentence
 
+    def test_the_feedback_line_ignores_code(self):
+        state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('簡単', 'active')]}
+        filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. ' * 5
+        quoted = ['\n```json\n{"ja": "設定"}\n```\n', 'The row is `設定,せってい` now.', '\n~~~\n設定 問題\n~~~\n',
+                  '\n````md\n```\n設定\n```\n````\n', 'Use ``設定`s`` here.', '\n  ```\n  設定\n  ```\n',
+                  'The fix: ```設定 = 1``` there.', '\n```\n設定 問題 状況\n']  # the last one never closed
+        for code in quoted:  # Japanese quoted as data is not woven
+            self.assertIn('(0 known, 0 learning, 0 off the lists)', weave.calibration(filler + code, state), code)
+        self.assertIn('(1 known, 1 learning, 1 off the lists)',
+                      weave.calibration(filler + 'Then `設定` and 設定 and でも and 簡単 stay. ``x`` ~~~', state))
+        self.assertEqual(fwlib.strip_code('a ``b` c`` d ``e'), 'a   d ``e')  # same-length runs pair; a lone one is text
+
     def test_last_reply(self):
         log = self.home / 'chat.jsonl'
         log.write_text('\n'.join([line('old reply, 今 more'), line('sub', sidechain=True),
