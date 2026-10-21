@@ -164,14 +164,29 @@ class Estimate(unittest.TestCase):
         self.assertEqual(found['known'], 0.5)
 
     def test_correction_for_guessing(self):
-        found = {'known': 0.6, 'se': 0.04, 'n': 60}
+        found = {'known': 0.6, 'se': 0.04, 'n': 60, 'low': 0.53, 'high': 0.66}
         same = probe.corrected(found, 0, 6)
-        self.assertEqual(same['known'], 0.6)
-        self.assertLess(same['low'], 0.6 - 1.645 * 0.04)  # 0 of 6 can't rule out some guessing
+        self.assertEqual((same['known'], same['high']), (0.6, 0.66))  # never above the share claimed
+        self.assertLess(same['low'], 0.53)  # 0 of 6 can't rule out some guessing
         one = probe.corrected(found, 1, 6)
         self.assertAlmostEqual(one['known'], (0.6 - 1 / 6) / (5 / 6), places=4)
+        self.assertLessEqual(one['high'], 0.66)
+        year = probe.corrected(found, 6, 36)  # the same rate over six probes: a narrower interval
+        self.assertEqual(year['known'], one['known'])
+        self.assertGreater(year['low'], one['low'])
         self.assertIsNone(probe.corrected(found, 6, 6))
         self.assertIsNone(probe.corrected(found, 0, 0))
+
+    def test_made_up_words_pool_over_the_last_year(self):
+        probes = [{'day': '2025-10-01', 'fakes': [['悪売', 1]] * 6},  # over a year ago
+                  {'day': '2026-01-01', 'fakes': [['悪売', 1]] + [['暗計', 0]] * 5},
+                  {'day': '2026-09-01', 'fakes': [['円説', 0]] * 5 + [['王会', None]]}]
+        self.assertEqual(probe.claims(probes, '2026-10-20'), (1, 11))
+        p = probe.sample(rng=random.Random(1), frame=FRAME)
+        est = probe.record(p, answered(p), 'chat', 60, (1, 11))['estimate']
+        self.assertEqual((est['claimed'], est['fakes'], est['claimed_year'], est['fakes_year']), (0, 6, 1, 17))
+        self.assertAlmostEqual(est['corrected'], max(0, (est['known'] - 1 / 17) / (16 / 17)), places=3)
+        self.assertIsNone(hub.validate(hub.stamp(probe.record(p, answered(p), 'chat', 60, (1, 11)))))
 
 
 class Simulated(unittest.TestCase):

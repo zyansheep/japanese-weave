@@ -189,7 +189,7 @@ def brief_error(op):
 PROBE_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands',
                 'estimate'}
 PROBE_SHARES = ('known', 'se', 'low', 'high', 'corrected', 'corrected_low', 'corrected_high', 'listed')
-PROBE_COUNTS = ('deff', 'n', 'claimed', 'fakes')
+PROBE_COUNTS = ('deff', 'n', 'claimed', 'fakes', 'claimed_year', 'fakes_year')
 
 
 def probe_error(op):

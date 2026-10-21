@@ -52,8 +52,10 @@ Made-up words. About 1 in 10 of the words shown. The share claimed known, f, is 
 estimate is the correction for guessing, (t - f) / (1 - f) (Anderson and Freebody 1983; Huibregtse, Admiraal and
 Meara 2002): if you say yes to a word you don't know with the chance you say yes to a made-up one, t = k + (1 - k) f,
 so k = (t - f) / (1 - f), on the same scale as the goal (detection measures such as d' measure telling words apart,
-not a share). Its interval adds f's uncertainty (binomial, half a claim added) by the delta method, so even 0 of 6
-claimed widens it: 6 fakes can't rule out some guessing.
+not a share). f pools the made-up words of the probes of the last FAKE_DAYS days: over-claiming is a habit of the
+reader, and 6 a probe pin it down poorly. The interval adds f's uncertainty (binomial, half a claim added) by the
+delta method, so even 0 of 6 claimed widens it downward; its top is never above the estimate's own, since the share
+known is at most the share claimed.
 
 Lookup habit (row R). For the words answered not known, the share of their read showings in the gloss log that were
 looked up: their opens over their read chances, from the showings (knowledge.showings, knowledge.observations, with
@@ -292,8 +294,8 @@ def estimate(words, bands, z=Z90):
 
 def corrected(found, claimed, shown, z=Z90):
     """The estimate corrected for guessing, (t - f) / (1 - f) with f = claimed / shown made-up words, and its interval
-    (the delta method, f's variance from claimed + 1/2 of shown + 1); None without made-up words answered or when
-    every one was claimed."""
+    (the delta method, f's variance from claimed + 1/2 of shown + 1; never above the estimate's own, since the share
+    known is at most the share claimed); None without made-up words answered or when every one was claimed."""
     if not found or not shown or claimed >= shown:
         return None
     t, f = found['known'], claimed / shown
@@ -301,11 +303,20 @@ def corrected(found, claimed, shown, z=Z90):
     smooth = (claimed + 0.5) / (shown + 1)
     variance = found['se'] ** 2 / (1 - f) ** 2 + smooth * (1 - smooth) / shown * (1 - t) ** 2 / (1 - f) ** 4
     low, high = interval(k, variance, found['n'], z)
-    return {'known': round(k, 4), 'low': round(low, 4), 'high': round(high, 4)}
+    return {'known': round(k, 4), 'low': round(min(low, k), 4), 'high': round(max(k, min(high, found['high'])), 4)}
 
 
-def record(probe, answers, via, seconds):
-    """The probe op for a probe (sample) and its answers (1 known, 0 not, None skipped, in question order)."""
+def claims(probes, today, days=FAKE_DAYS):
+    """(made-up words claimed, made-up words answered) in the probes of the last `days` days."""
+    mine = [a for p in probes or [] if p.get('day') and fwlib.days_between(p['day'], today) < days
+            for _ja, a in p.get('fakes') or [] if a is not None]
+    return sum(mine), len(mine)
+
+
+def record(probe, answers, via, seconds, earlier=(0, 0)):
+    """The probe op for a probe (sample) and its answers (1 known, 0 not, None skipped, in question order). earlier:
+    (made-up words claimed, answered) in the probes of the last year (claims), pooled with this one's for the
+    correction: over-claiming is a habit of the reader, and 6 made-up words alone pin it down poorly."""
     words, fakes = [], []
     for q, a in zip(probe['questions'], answers):
         if q.get('fake'):
@@ -314,8 +325,10 @@ def record(probe, answers, via, seconds):
             words.append([q['ja'], q['id'], q['band'], q['weight'], a])
     found = estimate([(b, w, a) for _ja, _id, b, w, a in words], probe['bands'])
     answered = [a for _ja, a in fakes if a is not None]
-    out = dict(found or {}, claimed=sum(answered), fakes=len(answered), listed=probe.get('listed'))
-    fixed = corrected(found, sum(answered), len(answered))
+    claimed, shown = sum(answered) + earlier[0], len(answered) + earlier[1]
+    out = dict(found or {}, claimed=sum(answered), fakes=len(answered), claimed_year=claimed, fakes_year=shown,
+               listed=probe.get('listed'))
+    fixed = corrected(found, claimed, shown)
     if fixed:
         out.update(corrected=fixed['known'], corrected_low=fixed['low'], corrected_high=fixed['high'])
     if out.get('listed') is not None:
@@ -446,6 +459,8 @@ def report(op, habit=None, fakes=()):
     claimed = [ja for ja, a in made_up if a == 1]
     line = f'  Made-up words you marked known: {est["claimed"]} of {est["fakes"]}'
     line += f' ({", ".join(claimed)})' if claimed else ''
+    if est.get('fakes_year', 0) > est['fakes']:
+        line += f'; {est["claimed_year"]} of {est["fakes_year"]} in the last year'
     if est.get('corrected') is not None:
         line += (f'. Corrected for guessing: {percent(est["corrected"])} '
                  f'({span(est["corrected_low"], est["corrected_high"])}).')
@@ -486,7 +501,9 @@ def history_text(state):
             lines.append(f'  {p["day"]}  no answers')
             continue
         parts = [f'{p["day"]}  known {percent(est["known"])} ({span(est["low"], est["high"])})',
-                 f'made up {est.get("claimed", 0)}/{est.get("fakes", 0)}']
+                 f'made up {est.get("claimed", 0)}/{est.get("fakes", 0)}'
+                 + (f' ({est["claimed_year"]}/{est["fakes_year"]} in the year)'
+                    if est.get('fakes_year', 0) > est.get('fakes', 0) else '')]
         if est.get('corrected') is not None:
             parts.append(f'corrected {percent(est["corrected"])} ({span(est["corrected_low"], est["corrected_high"])})')
         if est.get('listed') is not None:
@@ -537,7 +554,7 @@ def pending_path():
 def finish(probe, answers, via, seconds):
     """Keeps a probe's answers where the state lives (a probe op) and prints what it found."""
     import hub  # here, not at the top: hub imports this module
-    op = hub.stamp(record(probe, answers, via, seconds))
+    op = hub.stamp(record(probe, answers, via, seconds, claims(fwlib.load_state().get('probes'), fwlib.today())))
     result = hub.submit(op)
     if not result.get('ok', True):
         sys.exit(f'The probe was not kept: {result.get("error")}')

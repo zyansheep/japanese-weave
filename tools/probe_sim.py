@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks the probe's estimate (scripts/probe.py) on simulated readers whose knowledge is known.
 
-  python3 tools/probe_sim.py [--reps 2000] [--months 12] [--seed 1]
+  python3 tools/probe_sim.py [--reps 2000] [--months 12] [--seed 1] [--state DIR]
 
 A simulated reader knows each word of the probe's population with a chance that falls with its frequency rank,
 1 / (1 + (rank / r50)^1.5): r50 is the rank at which they know half the words (200: a beginner; 1,000; 4,000:
@@ -11,10 +11,13 @@ know or a made-up one with the chance `guess`. It reports the estimate's bias (m
 standard error (the spread of the estimates, and the mean of the standard errors the probe reports), and how often the
 90% interval holds the truth; the same for the estimate corrected for guessing. --months then follows readers through
 monthly probes, each drawn without the words of the last 90 days, as the no-repeat rule does, and reports the bias
-and coverage of each month: leaving out the recent words must not bias later probes.
+and coverage of each month: leaving out the recent words must not bias later probes, and the correction for guessing
+pools the made-up words of the year so far. --state DIR adds a reader who knows exactly the known words of the word
+state in DIR (a copy of a state dir), answering many probes.
 """
 import argparse
 import datetime as dt
+import json
 from pathlib import Path
 import random
 import statistics
@@ -32,6 +35,15 @@ def reader(frame, r50, rng, slope=SLOPE):
     return {it['ja']: rng.random() < 1 / (1 + (it['rank'] / r50) ** slope) for it in frame.items}
 
 
+def listed(frame, home):
+    """{word: known} for a reader who knows exactly the words a word state marks known (as probe.listed_share)."""
+    d = probe.dictionary.load()
+    state = json.loads((Path(home) / 'state.json').read_text(encoding='utf-8'))
+    found = (d.find(w['ja'], w.get('kana') or '', w.get('en') or '') for w in state['words'] if w['status'] == 'known')
+    known = {e['ja'] for e in found if e is not None}
+    return {it['ja']: it['ja'] in known for it in frame.items}
+
+
 def truth(frame, knows):
     total = sum(it['weight'] for it in frame.items)
     return sum(it['weight'] for it in frame.items if knows[it['ja']]) / total
@@ -45,7 +57,8 @@ def answers(questions, knows, guess, rng):
 def one(frame, knows, guess, rng, state=None, today='2026-10-20'):
     """One probe answered by a reader: its op (probe.record)."""
     p = probe.sample(state, rng=rng, today=today, frame=frame)
-    return probe.record(p, answers(p['questions'], knows, guess, rng), 'terminal', 0)
+    earlier = probe.claims((state or {}).get('probes'), today)
+    return probe.record(p, answers(p['questions'], knows, guess, rng), 'terminal', 0, earlier)
 
 
 def score(results):
@@ -62,12 +75,12 @@ def score(results):
     return out
 
 
-def profile(frame, r50, guess, reps, seed):
-    """reps readers, each answering one probe."""
+def profile(frame, r50, guess, reps, seed, knows=None):
+    """reps readers, each answering one probe (or one reader, knows, answering reps)."""
     rng, results = random.Random(seed), []
     for _ in range(reps):
-        knows = reader(frame, r50, rng)
-        results.append((truth(frame, knows), one(frame, knows, guess, rng)['estimate']))
+        mine = knows or reader(frame, r50, rng)
+        results.append((truth(frame, mine), one(frame, mine, guess, rng)['estimate']))
     return score(results)
 
 
@@ -111,6 +124,7 @@ def main():
     p.add_argument('--reps', type=int, default=2000)
     p.add_argument('--months', type=int, default=12)
     p.add_argument('--seed', type=int, default=1)
+    p.add_argument('--state', metavar='DIR', help='also a reader who knows the known words of this state dir')
     args = p.parse_args()
     frame = probe.Frame()
     print(f'Population: {len(frame.items)} words in {len(frame.bands)} bands of '
@@ -118,11 +132,16 @@ def main():
     for r50, guess in PROFILES:
         name = f'r50 {r50}' + (f', says yes to {100 * guess:.0f}% of unknown and made-up words' if guess else '')
         print(line(name, profile(frame, r50, guess, args.reps, args.seed)))
+    if args.state:
+        print(line(f'the known words of {args.state}', profile(frame, 0, 0.0, args.reps, args.seed,
+                                                               listed(frame, args.state))))
     if args.months:
         reps = max(1, args.reps // 10)
-        print(f'Monthly probes without the words of the last {probe.REPEAT_DAYS} days, {reps} readers (r50 1000):')
-        for m, s in enumerate(months(frame, 1000, 0.0, reps, args.months, args.seed), 1):
-            print('  ' + line(f'month {m}', s))
+        for guess in (0.0, 0.1):
+            print(f'Monthly probes without the words of the last {probe.REPEAT_DAYS} days, {reps} readers (r50 1000'
+                  + (f', yes to {100 * guess:.0f}% of unknown and made-up words' if guess else '') + '):')
+            for m, s in enumerate(months(frame, 1000, guess, reps, args.months, args.seed), 1):
+                print('  ' + line(f'month {m}', s))
 
 
 if __name__ == '__main__':
