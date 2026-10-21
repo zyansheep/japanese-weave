@@ -64,8 +64,9 @@ class FitWithSpeed(unittest.TestCase):
 
     def log(self, unknown, seed=1, quiet=()):
         """A log of 20 words, 10 at 5% and 10 at 50%, each looked up as its chance says over 40 showings, and 600
-        paragraphs of one to three of them on 40 pages: log ms = ln(300 words) + the page's pace + unknown x (the sum
-        of its words' chances) / words + Student-t noise. Words in quiet are never shown alone, only in paragraphs."""
+        paragraphs of one to three of them on 40 pages: log ms = ln(600 words) + the page's pace + unknown x (the sum
+        of its words' chances) / words + Student-t noise (600 ms a word: twice the reading model's 300, so nearly every
+        paragraph was read through, SPEED_THROUGH). Words in quiet are never shown alone, only in paragraphs."""
         rng = random.Random(seed)
         chances = {f'a{i}': 0.05 for i in range(10)}
         chances.update({f'b{i}': 0.5 for i in range(10)})
@@ -89,7 +90,7 @@ class FitWithSpeed(unittest.TestCase):
             count = rng.randint(10, 60)
             page = j % 40
             noise = rng.gauss(0, 0.4) / math.sqrt(rng.gammavariate(2, 0.5))  # Student-t with 4 degrees of freedom
-            ms = math.exp(math.log(300 * count) + pages[page] + unknown * sum(chances.get(w, 0.5) for w in listed)
+            ms = math.exp(math.log(600 * count) + pages[page] + unknown * sum(chances.get(w, 0.5) for w in listed)
                           / count + noise)
             events.append(evaluate.Group(at, 'browser', ('browser', f'page{page}', f'p{j}'), False, [],
                                          units=((ms, count, len(listed), listed, ms, 0),)))
@@ -130,6 +131,18 @@ class FitWithSpeed(unittest.TestCase):
         # it is held to what they say (SPEED_CAP): at most half of any word's information
         cap = knowledge.SPEED_CAP / (1 + knowledge.SPEED_CAP)
         self.assertLess(on.speed_summary()["most"], cap + 0.1)
+
+    def test_a_paragraph_on_screen_too_briefly_to_be_read_through_says_nothing(self):
+        until = NOW + 80 * HOUR
+        log = self.log(20.0)
+        through = lambda: sum(1 for e in log.events if e.units and e.units[0][0] >= knowledge.PACE_MS * e.units[0][1])
+        self.assertEqual(knowledge.Fit(log, until, speed=True).speed_summary()['units'], through())
+        for event in log.events:  # a tenth of them on screen for half the time reading them takes
+            if event.units and int(event.key[2][1:]) % 10 == 0:
+                ms, count, *rest = event.units[0]
+                event.units = ((knowledge.PACE_MS * count / 2, count, *rest),)
+        self.assertLess(through(), 600 - 59)
+        self.assertEqual(knowledge.Fit(log, until, speed=True).speed_summary()['units'], through())
 
     def test_a_fit_starts_from_the_last_one(self):
         until = NOW + 80 * HOUR

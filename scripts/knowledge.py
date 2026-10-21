@@ -832,14 +832,20 @@ SPACING_P = 0.10           # a costly word waits while recency holds its chance 
 # SPEED_GROUP_SD, with SPEED_GROUP_WEIGHT groups' worth of weight): the passages of a page, and a message's
 # paragraphs, are on screen together, so their times move together and say little about which of them was slow.
 # japanese and unknown are in words of reading time per word (unknown 10: a word sure to be unknown costs as long as
-# reading ten more). The term counts SPEED_WEIGHT, and unknown is held toward 0 by its prior: time on screen can't
-# outweigh the lookups. Off (SPEED False) until the replay shows it predicts lookups better on the live log
+# reading ten more). Only passages and paragraphs on screen long enough to have been read through count (SPEED_THROUGH).
+# The term's parameters are fitted with the words held (Fit._speed_alone), unknown is held toward 0 by its prior, and
+# each paragraph is tempered so that time gives no word more than SPEED_CAP times the information its lookups and
+# prior give it: time on screen can't outweigh the lookups. Off (SPEED False) until the replay shows it predicts lookups better on the live log
 # (docs/adaptive-difficulty.md says what result switches it on); `fw.py evaluate --models nospeed,speed` compares.
 SPEED = False
 SPEED_NU = 4               # the Student-t's degrees of freedom on log time: skims and pages left open are its tails
 SPEED_WORDS = 20           # the reference length of the pace intercepts
 SPEED_MIN_MS = MIN_ACTIVE_MS  # a passage or paragraph with less time than this (glosses' time off) gives no evidence
 SPEED_DWELL_MS = 30_000    # an open's gloss time taken off its paragraph's time, at most
+SPEED_THROUGH = 1.0        # a passage or paragraph on screen for less than this times the time reading it takes at
+                           # the reading model's pace was not read through: its time says how much of it was read, not
+                           # how fast (on the simulated reader with 40 words a word not recognised, counting them cost
+                           # new words' first exposures 0.0014 a day; left out, nothing)
 SPEED_WEIGHT = 1.0         # how much a passage's or paragraph's time counts, against an observation's 1
 SPEED_CAP = 1.0            # the most information time may give a word, against what its lookups and prior give it
 SPEED_GROUP_SD = 0.5       # the prior sd of a page's or message's own pace on log time: fitted, held toward this
@@ -1422,6 +1428,8 @@ class Fit:
                 self.commands.append((self._word(event.word), event.kind, decay))
                 continue
             for ms, count, japanese, listed, _active, _dwell in getattr(event, 'units', ()) if self.speed else ():
+                if ms < SPEED_THROUGH * by_surface(self.pace, event.surface) * count:
+                    continue
                 t3 = event.surface == 't3'
                 group = groups.setdefault(event.key if t3 else event.key[:2], len(groups))
                 units.append((t3, group, math.log(ms), math.log(count / SPEED_WORDS), japanese / count, 1 / count,
