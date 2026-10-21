@@ -643,7 +643,7 @@ LONG_DAYS = 7              # the long-term chance is the chance a week after the
 SOFT_MIN = 8               # how sharply the floor gives way to a word known better than it (recency_log_odds)
 CLOCK_EPS = 0.01           # the last-read chances stop once no read in the newer showings is less likely than this
 CONTEXT_MS = 3_600_000     # an earlier showing in the same page view or T3 window this recent is the same context
-CLOCK_PASSES = 2           # fits, each weighing the showings for the clock by the chances the one before found
+CLOCK_PASSES = 2           # fits from nothing, each weighing the clock's showings by the chances the one before found
 NO_FLOOR = 1.0             # a fit with nothing to start from starts from this floor (log odds), above every word,
 LOW_FLOOR = math.log(0.02) # and from this one: a lookup 2% of the time right after a read (the simulated reader's)
 FLOOR_STEP = 0.5           # the most the floor moves in one Newton step
@@ -852,24 +852,25 @@ class Fit:
         theta = [shared.get(name, SHARED[name][0]) for name in SHARED_NAMES]
         widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
         cold = recency and not frozen and not shared  # nothing to start from: from a low floor and a high one
+        passes = CLOCK_PASSES if cold or frozen else 1  # from an earlier fit, its chances weigh the clock already
         self._fit(log, [LOW_FLOOR if j == FLOOR and cold else v for j, v in enumerate(theta)], widths,
-                  start.get('k') or {})
+                  start.get('k') or {}, passes)
         if cold:
             first = dict(self.__dict__)
             self._fit(log, [NO_FLOOR if j == FLOOR else v for j, v in enumerate(theta)], widths,
-                      start.get('k') or {})
+                      start.get('k') or {}, passes)
             if first['objective'] <= self.objective:
                 self.__dict__.update(first)
         self.seconds = time.time() - started
 
-    def _fit(self, log, theta, widths, before):
-        """Fits from theta, the widths and before ({ja: k}; the others from their priors): with recency, CLOCK_PASSES
+    def _fit(self, log, theta, widths, before, passes):
+        """Fits from theta, the widths and before ({ja: k}; the others from their priors): with recency, `passes`
         times, each with the clock weighed by the chances the fit before found (the first, by the start's)."""
         self.theta, self.widths, self.k, self.var = list(theta), dict(widths), [], []
         self._terms(log, read_clocks(log, self.pace, self.top, self._chance(before)) if self.recency else {})
         self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
         self.iterations = self._run()
-        for _ in range(CLOCK_PASSES - 1 if self.recency else 0):
+        for _ in range(passes - 1 if self.recency else 0):
             self._terms(log, read_clocks(log, self.pace, self.top, self._chance()))
             self.iterations += self._run()
 
@@ -963,9 +964,24 @@ class Fit:
             return (offset + log(a), -o * ((m / o) ** (SOFT_MIN + 1) * (1 - u) + u) / a,
                     (1 - u) * (m / c) ** (SOFT_MIN + 1) * c / a)
 
+        jt3, jform, jfloor, jcontext = joins[T3], joins[FORM], joins[FLOOR], joins[CONTEXT]
+        # the shared parameters' gradient and information, summed here: t(3), f(orm), l (floor), c(ontext)
+        gt = gf = gl = gc = htt = htf = htl = htc = hff = hfl = hfc = hll = hlc = hcc = 0.0
         for w, s, f, y, r, u, x, v in zip(*self.terms):
-            eta, dk, dfl = eta_of(k[w], u, s, f, x)
-            q = 1 / (1 + exp(-min(30.0, max(-30.0, eta))))
+            kw = k[w]
+            kw = -30.0 if kw < -30.0 else 30.0 if kw > 30.0 else kw
+            eta = (t3 if s else 0.0) + (phi if f else 0.0) + delta * x
+            if u >= 1.0:  # back at the long-term chance
+                eta -= kw
+                dk, dfl = -1.0, 0.0
+            else:
+                o = exp(-kw)
+                m = (cp + o ** -SOFT_MIN) ** power
+                a = m + (o - m) * u
+                eta += log(a)
+                dk = -o * ((m / o) ** (SOFT_MIN + 1) * (1 - u) + u) / a
+                dfl = (1 - u) * (m / c) ** (SOFT_MIN + 1) * c / a
+            q = 1 / (1 + exp(-(30.0 if eta > 30.0 else -30.0 if eta < -30.0 else eta)))
             if y > 0:  # opened, so read: y log q + (1 - y) log (1 - q)
                 d, i = y - q, q * (1 - q)
                 total -= v * (y * log(q) + (1 - y) * log(1 - q))
@@ -975,15 +991,39 @@ class Fit:
                 total -= v * log(a)
             vd, vi = v * d, v * i
             grad[w] -= vd * dk
-            info[w] += vi * dk * dk
-            nonzero = [(j, z) for j, z in ((T3, 1.0 if s else 0.0), (FORM, 1.0 if f else 0.0), (FLOOR, dfl),
-                                            (CONTEXT, x)) if z]
-            for j, z in nonzero:
-                g[j] -= vd * z
-                joins[j][w] += vi * dk * z
-                row = h[j]
-                for j2, z2 in nonzero:
-                    row[j2] += vi * z * z2
+            vik = vi * dk
+            info[w] += vik * dk
+            if s:
+                gt -= vd
+                jt3[w] += vik
+                htt += vi
+                htl += vi * dfl
+                htc += vi * x
+                if f:
+                    htf += vi
+            if f:
+                gf -= vd
+                jform[w] += vik
+                hff += vi
+                hfl += vi * dfl
+                hfc += vi * x
+            if dfl:
+                gl -= vd * dfl
+                jfloor[w] += vik * dfl
+                hll += vi * dfl * dfl
+                hlc += vi * dfl * x
+            if x:
+                gc -= vd * x
+                jcontext[w] += vik * x
+                hcc += vi * x * x
+        for (a, b), value in (((T3, T3), htt), ((T3, FORM), htf), ((T3, FLOOR), htl), ((T3, CONTEXT), htc),
+                              ((FORM, FORM), hff), ((FORM, FLOOR), hfl), ((FORM, CONTEXT), hfc),
+                              ((FLOOR, FLOOR), hll), ((FLOOR, CONTEXT), hlc), ((CONTEXT, CONTEXT), hcc)):
+            h[a][b] += value
+            if a != b:
+                h[b][a] += value
+        for j, value in ((T3, gt), (FORM, gf), (FLOOR, gl), (CONTEXT, gc)):
+            g[j] += value
         for chosen, v in self.episodes:  # conditioned on at least one open: minus log (1 - none)
             found, none = [], 1.0
             for w, s, f, r, u, x in chosen:
@@ -1164,7 +1204,8 @@ def nested_loglik(log, fit, pace, top):
 
 def tune(log, until):
     """The reading model (pace, top) by profile likelihood over the grid PACES x READ_MAXES: at a point the whole log is
-    fitted (Fit, starting from the point before) and scored by the likelihood of what was opened under the reading
+    fitted (Fit, starting from the point before, without recency: pace and cap are about time on screen, and a dozen
+    fits with it would take most of a refresh on a long log) and scored by the likelihood of what was opened under the reading
     model the read chances come from (nested_loglik), on both surfaces. The search scores every other point first
     (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
     inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
@@ -1176,7 +1217,7 @@ def tune(log, until):
     def score(i, j):
         nonlocal start
         if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
-            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start)
+            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start, recency=False)
             start = fit.state()
             scores[(i, j)] = nested_loglik(log, fit, PACES[i], READ_MAXES[j])
 
