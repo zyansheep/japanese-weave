@@ -16,13 +16,13 @@
   },
   "x-scorsese": {
     "use": ["I=私|僕", "received=もらう", "book=本", "buy=買う"],
-    "ok": ["planning=つもり", "His=彼", "you=あなた|君"],
-    "not": ["I’d=私|僕", "and=そして", "Work=仕事"]
+    "ok": ["planning=つもり", "you=あなた|君"],
+    "not": ["I’d=私|僕", "His=彼", "and=そして", "Work=仕事"]
   },
   "x-monday": {
     "use": ["Monday=月曜日", "i=私|僕", "full=いっぱい"],
-    "ok": ["and=そして", "it=それ", "My=私|僕", "day=日"],
-    "not": ["one=一つ|一", "love=大好き"]
+    "ok": ["and=そして", "it=それ", "My=私|僕"],
+    "not": ["one=一つ|一", "love=大好き", "day=日"]
   },
   "hn-recruiter": {
     "use": ["I=私|僕", "good=いい", "really=本当に"],
@@ -86,8 +86,8 @@
   },
   "yt-foreigner": {
     "use": ["I=私|僕", "still=まだ", "this=これ", "odd=変|おかしい", "about=について"],
-    "ok": ["earlier=前", "recent=最近"],
-    "not": ["this=この", "earlier=さっき", "about=くらい", "most=多く|多い", "one=一つ|一"]
+    "ok": ["recent=最近"],
+    "not": ["this=この", "earlier=さっき|前", "about=くらい", "most=多く|多い", "one=一つ|一"]
   },
   "yt-deck": {
     "use": ["This=この", "a lot=沢山|多い|いっぱい|多く", "new=新しい"],
@@ -146,7 +146,7 @@
   },
   "docs-sealed": {
     "use": ["This=これ", "you=あなた|君", "all=全部", "but=でも|だけど", "new=新しい", "change=変更", "For example=例えば", "if=もし"],
-    "ok": ["great=いい", "that#1=その", "it=それ", "our=私たち", "So=つまり", "your=あなた|君"],
-    "not": ["This=この", "when=時|いつ", "that#0=それ", "that#1=それ", "that#2=それ", "all=みんな", "do=する|やる", "does=する|やる", "change=変える", "example#1=例えば", "then=じゃ|では|そして", "you’re=あなた|君"]
+    "ok": ["great=いい", "that#1=その", "it=それ", "our=私たち", "your=あなた|君"],
+    "not": ["This=この", "So=つまり", "when=時|いつ", "that#0=それ", "that#1=それ", "that#2=それ", "all=みんな", "do=する|やる", "does=する|やる", "change=変える", "example#1=例えば", "then=じゃ|では|そして", "you’re=あなた|君"]
   }
 }
