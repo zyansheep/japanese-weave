@@ -101,6 +101,7 @@ way round.
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
+| `/japanese-weave:probe` | Once a month, about 3 minutes: how much of your reading you would read without a lookup |
 
 From a terminal: `sh ~/.japanese-weave/app/scripts/run ~/.japanese-weave/app/scripts/fw.py <command>`.
 
@@ -264,6 +265,17 @@ turned off as a lighter press.
 one word's estimate and every observation behind it; `fw.py evaluate` scores the model on your log day by day, each
 day predicted from the days before, against a constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
+
+**Once a month: the probe.** `/japanese-weave:probe`, or `fw.py probe` in a terminal (one word at a time: y, n, s to
+skip, b back, q quit), asks which of about 60 words you would read without a lookup, plus 6 made-up ones, in about 3
+minutes. It measures the goal directly: the share of the words in your reading you would read in Japanese without a
+lookup, each word weighted by how often it comes up (by general frequency, among the 10,000 most frequent words, until
+your reading is counted), with a 90% interval of about plus or minus 8 points. It also shows how many made-up words you
+claimed and the share corrected for that guessing, what your word list marks known of the same words, and, for the
+words you didn't know, how often you looked them up when they were shown. Its answers never feed the model: it is the
+check on the model, whose own number moves when you get used to the glosses. A word isn't asked again within 90 days.
+`fw.py status` says when the next is due; `fw.py probe --history` lists them all. The design is in
+`scripts/probe.py`; `tools/probe_sim.py` checks it on simulated readers.
 
 ## Privacy
 

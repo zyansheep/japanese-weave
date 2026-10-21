@@ -1,0 +1,695 @@
+"""The probe (PLAN.md section 1 and row R, NEXT_STEPS step 7): about 3 minutes, once a month, that measure the goal
+directly instead of through the model, whose own number moves when you get used to the glosses or it is refitted.
+Python 3.9+, standard library only.
+
+  fw.py probe                    the words one at a time in a terminal: y known, n not, s skip, b back, q quit
+  fw.py probe --list             a numbered list for a chat, kept until --answers
+  fw.py probe --answers "1 4 7"  the numbers of the listed words you would read without a lookup
+  fw.py probe --history          every probe so far
+
+The goal is the share of the words in what you read that you would read in Japanese without a lookup, each word
+weighted by how often it comes up in your reading.
+
+Population. The dictionary's swappable entries (data/dictionary.tsv, swap 1: the words the weave can put in an
+English sentence) ranked within TOP (6,394 entries, 86% of the swappable entries' frequency weight). Past it the
+ranks rest on thin counts and a learner knows next to none of the words, so a probe would spend its words on sure
+"no"s. Left out: words that are a number and a counter (二人, 三時, 一万円: their gloss is a number and their
+written form has a numeral), which you read from their parts and which the weave leaves in digits. Katakana loanwords
+are not swappable, so they are out already: an English reader sounds them out, so a "yes" would measure kana, not
+vocabulary. Words you marked known or learning with a command stay in: they are part of what you read, and the probe
+is the check on such labels. Entries spelled alike (方 ほう and 方 かた) are one item, since the probe shows only the
+spelling; its weight is theirs added.
+
+Weights. A word's share of your reading. Until the reading counts exist (NEXT_STEPS step 13) that is its general
+frequency, 1/score (Zipf's law on the dictionary's combined rank). population(counts=...) takes counts per entry id
+instead; then every swappable entry counted at least once is in, at any rank.
+
+Bands. The population sorted by weight, cut into BANDS bands of equal weight (with Zipf weights, equal widths in log
+rank: ranks 15-50, 50-160, ... 5,500-18,000), so the words within a band are alike in frequency and, mostly, in how
+likely you are to know them. Each band gets words in proportion to its weight (10 of 60), but at most a 1/SHARE of
+its words, so three monthly probes in a row can be drawn without repeating a word (the first band, about 25 words,
+gets 6); the rest go to the other bands in proportion.
+
+Sampling. In each band, a simple random sample of the words not probed in the last REPEAT_DAYS days (when too few
+are left, the least recently probed fill in). Within a band every word is equally likely, so the words left after
+earlier probes are a random part of the band, and leaving recent ones out biases nothing. Then FAKES made-up words
+(data/fakes.tsv, tools/build_fakes.py) not used in FAKE_DAYS, and the order shuffled.
+
+Estimate. In band h, the weighted share of the answered words known: t_h = sum(w y) / sum(w) (a ratio estimator,
+Cochran 1977, 6.2), with Tin's (1965) correction, which takes its bias from order 1/n to 1/n^2 (it matters in the
+first band, 6 words whose weights differ threefold: there the plain ratio was 3 points low for a reader who knows the
+commoner half); overall, t = sum(W_h t_h) with W_h the band's share of the weight. Skipped words are left out;
+a band with no answers leaves out its weight. Variance: sum(W_h^2 v_h), with v_h = (1 - n_h/N_h) * (sum(w^2) /
+sum(w)^2) * p_h (1 - p_h), p_h = t_h with half a word known and half not added (so a band answered all yes still has
+some variance). The design effect enters there: sum(w^2)/sum(w)^2 is 1/n_h times Kish's design effect for unequal
+weights (about 1.1 within a band), the first factor is the finite population correction, and stratification takes out
+the differences between bands. deff is the variance over p(1 - p)/n, a simple random sample's (p with half a word
+known and half not added, as in the bands); the 90% interval is
+Wilson's score interval at the effective sample size n/deff (Korn and Graubard 1998). tools/probe_sim.py checks the
+bias, standard error and coverage on simulated readers.
+
+Made-up words. About 1 in 10 of the words shown. The share claimed known, f, is the over-claiming rate. The corrected
+estimate is the correction for guessing, (t - f) / (1 - f) (Anderson and Freebody 1983; Huibregtse, Admiraal and
+Meara 2002): if you say yes to a word you don't know with the chance you say yes to a made-up one, t = k + (1 - k) f,
+so k = (t - f) / (1 - f), on the same scale as the goal (detection measures such as d' measure telling words apart,
+not a share). f pools the made-up words of the probes of the last FAKE_DAYS days: over-claiming is a habit of the
+reader, and 6 a probe pin it down poorly. The interval adds f's uncertainty (binomial, half a claim added) by the
+delta method, so even 0 of 6 claimed widens it downward; its top is never above the estimate's own, since the share
+known is at most the share claimed.
+
+Lookup habit (row R). For the words answered not known, the share of their read showings in the gloss log that were
+looked up: their opens over their read chances, from the showings (knowledge.showings, knowledge.observations, with
+knowledge.reader's read chance) in the HABIT_DAYS before the probe. It is computed where the log lives (the
+collector, or this machine without one) when the probe op is applied, with a 90% interval that treats words as
+clusters. Few words a probe answers unknown have been shown, so it rests on few showings; --history pools probes.
+
+Records. A probe is a `probe` op (hub.py): its words with their entry id, band, weight and answer, its made-up words
+and answers, the bands, the estimate, how it was taken and how long it took. It is applied where the word state lives
+and kept in state["probes"] (the newest KEEP), so every machine's cache has the history the no-repeat rule and the
+due date read. The answers are never evidence for the model: the probe is its check.
+"""
+import argparse
+import datetime as dt
+import functools
+import math
+from pathlib import Path
+import random
+import re
+import sys
+import time
+
+import dictionary
+import feedback
+import fwlib
+import knowledge
+
+TOP = 10_000          # the population: swappable entries ranked within this
+WORDS = 60            # real words a probe asks about
+FAKES = 6             # made-up words among them
+BANDS = 6
+SHARE = 4             # a band gives at most 1/SHARE of its words to one probe
+REPEAT_DAYS = 90      # a word probed this recently isn't drawn again
+FAKE_DAYS = 365       # nor a made-up word
+DUE_DAYS = 30
+Z90 = 1.6449          # 90% intervals, as calibrate's
+HABIT_DAYS = 60       # the lookup habit is measured on showings this long before a probe
+KEEP = 100            # probes kept in the state
+PENDING = 'probe.json'  # a listed probe waiting for --answers (this machine only)
+PENDING_HOURS = 24    # --list shows the same list again while it is this fresh
+FAKES_PATH = Path(__file__).resolve().parent.parent / 'data' / 'fakes.tsv'
+DAY_MS = 86_400_000
+NUMERAL = re.compile('[〇一二三四五六七八九十百千万億兆0-9０-９]')
+NUMBER_WORD = re.compile(r'\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|hundreds?|'
+                         r'thousands?|first|second|third|fourth|fifth|once|twice|thrice|tens|dozens?|\d+)\b')
+RECORD = ('uid', 'at', 'day', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands', 'estimate')
+
+
+# ---- the population and the sample ----
+
+def is_number(entry):
+    """A number and a counter (二人, 三時, 第三): a numeral in the spelling and a number in the gloss. Words where
+    the numeral is part of the meaning (一緒 together, 一応 for now, 十分 enough) stay."""
+    return bool(NUMERAL.search(entry['ja'])) and bool(NUMBER_WORD.search(entry['en'].lower()))
+
+
+def population(d=None, counts=None, top=TOP):
+    """The items a probe draws from, heaviest first: [{ja, ids, rank, weight}], one per spelling. Weights are
+    1/score among the swappable entries ranked within top, or with counts ({entry id: times in your reading}) the
+    counts of every swappable entry counted."""
+    d = d or dictionary.load()
+    items = {}
+    for e in d:
+        if not e['swap'] or is_number(e):
+            continue
+        if counts is None:
+            if e['rank'] > top or not e['score']:
+                continue
+            weight = 1 / e['score']
+        else:
+            weight = counts.get(e['id'], 0)
+            if weight <= 0:
+                continue
+        item = items.setdefault(e['ja'], {'ja': e['ja'], 'ids': [], 'rank': e['rank'], 'weight': 0.0})
+        item['ids'].append(e['id'])
+        item['weight'] += weight
+    return sorted(items.values(), key=lambda it: (-it['weight'], it['rank']))
+
+
+def cut(items, n=BANDS):
+    """items (heaviest first) in n bands of equal weight, each item in the band its weight's middle falls in."""
+    total = sum(it['weight'] for it in items)
+    bands, before = [[] for _ in range(n)], 0.0
+    for it in items:
+        bands[min(n - 1, int(n * (before + it['weight'] / 2) / total))].append(it)
+        before += it['weight']
+    return [b for b in bands if b]
+
+
+def allocate(sizes, shares, n=WORDS, most=SHARE):
+    """Words per band: in proportion to its share of the weight, at most 1/most of its words (at least one), the rest
+    spread over the other bands in proportion; rounded by largest remainders."""
+    caps = [min(size, max(1, size // most)) for size in sizes]
+    fixed = {}
+    while True:
+        free = [h for h in range(len(sizes)) if h not in fixed]
+        total = sum(shares[h] for h in free)
+        rest = n - sum(fixed.values())
+        ideal = {h: rest * shares[h] / total if total > 0 else 0.0 for h in free}
+        over = [h for h in free if ideal[h] > caps[h]]
+        if not over:
+            break
+        fixed.update((h, caps[h]) for h in over)
+    exact = {**ideal, **fixed}
+    counts = {h: min(caps[h], int(x)) for h, x in exact.items()}
+    for h in sorted(free, key=lambda h: counts[h] - exact[h]):
+        if sum(counts.values()) >= n:
+            break
+        if counts[h] < caps[h]:
+            counts[h] += 1
+    return [counts[h] for h in range(len(sizes))]
+
+
+@functools.lru_cache(maxsize=None)
+def read_fakes(path=FAKES_PATH):
+    """[(made-up word, its invented reading)] from data/fakes.tsv."""
+    lines = [line for line in Path(path).read_text(encoding='utf-8').splitlines() if line and not line.startswith('#')]
+    return tuple(tuple(line.split('\t')[:2]) for line in lines[1:])
+
+
+def last_asked(probes):
+    """({word: the last day it was probed}, {made-up word: the last day it was used}) from state["probes"]."""
+    words, fakes = {}, {}
+    for p in probes or []:
+        for found, rows in ((words, p.get('words') or []), (fakes, p.get('fakes') or [])):
+            for row in rows:
+                if row and isinstance(row[0], str):
+                    found[row[0]] = max(found.get(row[0], ''), p.get('day') or '')
+    return words, fakes
+
+
+def recent(day, today, days):
+    return bool(day) and fwlib.days_between(day, today) < days
+
+
+def pick(pool, n, last, today, days, rng, key=lambda x: x):
+    """n of pool at random among those not used in the last `days` days; when too few are left, the least recently
+    used fill in."""
+    fresh = [x for x in pool if not recent(last.get(key(x)), today, days)]
+    if len(fresh) >= n:
+        return rng.sample(fresh, n)
+    stale = sorted((x for x in pool if recent(last.get(key(x)), today, days)), key=lambda x: last[key(x)])
+    return fresh + stale[:n - len(fresh)]
+
+
+def listed_share(state, items, d=None):
+    """The share of the items' weight that the word list marks known: what the labels say, to set beside the probe."""
+    d = d or dictionary.load()
+    known = set()
+    for w in (state or {}).get('words') or []:
+        if w.get('status') == 'known':
+            e = d.find(w['ja'], w.get('kana') or '', w.get('en') or '')
+            if e is not None:
+                known.add(e['ja'])
+    total = sum(it['weight'] for it in items)
+    return sum(it['weight'] for it in items if it['ja'] in known) / total if total else None
+
+
+class Frame:
+    """What a probe draws from: the population (population()) in its bands, with each band's share of the weight."""
+
+    def __init__(self, d=None, counts=None):
+        self.items = population(d, counts)
+        self.bands = cut(self.items)
+        total = sum(it['weight'] for it in self.items)
+        self.shares = [sum(it['weight'] for it in band) / total for band in self.bands]
+        self.weights, self.top = ('frequency', TOP) if counts is None else ('reading', 0)
+
+
+def sample(state=None, d=None, counts=None, rng=None, today=None, frame=None, words=WORDS, fakes=FAKES):
+    """A probe to ask: {at, day, weights, top, bands: [[share, size]], listed, questions: [{ja, id, band, weight} or
+    {ja, kana, fake: true}]} in the order to ask them. frame: a Frame to reuse (else one from d and counts)."""
+    d, rng, today = d or dictionary.load(), rng or random.Random(), today or fwlib.today()
+    frame = frame or Frame(d, counts)
+    last_word, last_fake = last_asked((state or {}).get('probes'))
+    questions = []
+    for h, (band, n) in enumerate(zip(frame.bands, allocate([len(b) for b in frame.bands], frame.shares, words))):
+        for it in pick(band, n, last_word, today, REPEAT_DAYS, rng, key=lambda it: it['ja']):
+            questions.append({'ja': it['ja'], 'id': it['ids'][0], 'band': h, 'weight': float(f'{it["weight"]:.6g}')})
+    for ja, kana in pick(read_fakes(), fakes, last_fake, today, FAKE_DAYS, rng, key=lambda f: f[0]):
+        questions.append({'ja': ja, 'kana': kana, 'fake': True})
+    rng.shuffle(questions)
+    return {'at': int(time.time() * 1000), 'day': today, 'weights': frame.weights, 'top': frame.top,
+            'bands': [[round(s, 6), len(b)] for s, b in zip(frame.shares, frame.bands)],
+            'listed': listed_share(state, frame.items, d) if state else None, 'questions': questions}
+
+
+# ---- the estimate ----
+
+def wilson(p, n, z=Z90):
+    """Wilson's score interval for a share p from n observations (n may be an effective sample size)."""
+    if n <= 0:
+        return 0.0, 1.0
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def interval(p, variance, n, z=Z90):
+    """Wilson's interval at the effective sample size p (1 - p) / variance (n when that is undefined)."""
+    effective = p * (1 - p) / variance if variance > 0 and 0 < p < 1 else n
+    return wilson(p, effective, z)
+
+
+def estimate(words, bands, z=Z90):
+    """The goal from a probe's answers. words: [(band, weight, answer)], answer 1 known, 0 not, None skipped; bands:
+    [(share of the weight, words in it)]. {known, se, low, high, deff, n} as the module docstring says, or None
+    without an answer."""
+    known = variance = missing = 0.0
+    n = 0
+    for h, (share, size) in enumerate(bands):
+        mine = [(w, a) for b, w, a in words if b == h and a is not None]
+        if not mine:
+            missing += share
+            continue
+        k, sw, sw2 = len(mine), sum(w for w, _ in mine), sum(w * w for w, _ in mine)
+        x, y = sw / k, sum(w * a for w, a in mine) / k
+        t = y / x
+        if k > 1 and y > 0:  # Tin's correction: the ratio's bias from order 1/n to 1/n^2
+            sxy = sum((w - x) * (w * a - y) for w, a in mine) / (k - 1)
+            sxx = sum((w - x) ** 2 for w, _ in mine) / (k - 1)
+            t = min(1.0, max(0.0, t * (1 + max(0.0, 1 - k / size) / k * (sxy / (x * y) - sxx / (x * x)))))
+        p = (t * k + 0.5) / (k + 1)
+        known += share * t
+        variance += share * share * max(0.0, 1 - k / size) * sw2 / (sw * sw) * p * (1 - p)
+        n += k
+    if not n or missing >= 1:
+        return None
+    known, variance = known / (1 - missing), variance / (1 - missing) ** 2
+    smooth = (known * n + 0.5) / (n + 1)
+    simple = smooth * (1 - smooth) / n
+    low, high = interval(known, variance, n, z)
+    return {'known': round(known, 4), 'se': round(math.sqrt(variance), 4), 'low': round(low, 4),
+            'high': round(high, 4), 'deff': round(variance / simple, 3) if simple > 0 else None, 'n': n}
+
+
+def corrected(found, claimed, shown, z=Z90):
+    """The estimate corrected for guessing, (t - f) / (1 - f) with f = claimed / shown made-up words, and its interval
+    (the delta method, f's variance from claimed + 1/2 of shown + 1; never above the estimate's own, since the share
+    known is at most the share claimed); None without made-up words answered or when every one was claimed."""
+    if not found or not shown or claimed >= shown:
+        return None
+    t, f = found['known'], claimed / shown
+    k = min(1.0, max(0.0, (t - f) / (1 - f)))
+    smooth = (claimed + 0.5) / (shown + 1)
+    variance = found['se'] ** 2 / (1 - f) ** 2 + smooth * (1 - smooth) / shown * (1 - t) ** 2 / (1 - f) ** 4
+    low, high = interval(k, variance, found['n'], z)
+    return {'known': round(k, 4), 'low': round(min(low, k), 4), 'high': round(max(k, min(high, found['high'])), 4)}
+
+
+def claims(probes, today, days=FAKE_DAYS):
+    """(made-up words claimed, made-up words answered) in the probes of the last `days` days."""
+    mine = [a for p in probes or [] if p.get('day') and fwlib.days_between(p['day'], today) < days
+            for _ja, a in p.get('fakes') or [] if a is not None]
+    return sum(mine), len(mine)
+
+
+def record(probe, answers, via, seconds, earlier=(0, 0)):
+    """The probe op for a probe (sample) and its answers (1 known, 0 not, None skipped, in question order). earlier:
+    (made-up words claimed, answered) in the probes of the last year (claims), pooled with this one's for the
+    correction: over-claiming is a habit of the reader, and 6 made-up words alone pin it down poorly."""
+    words, fakes = [], []
+    for q, a in zip(probe['questions'], answers):
+        if q.get('fake'):
+            fakes.append([q['ja'], a])
+        else:
+            words.append([q['ja'], q['id'], q['band'], q['weight'], a])
+    found = estimate([(b, w, a) for _ja, _id, b, w, a in words], probe['bands'])
+    answered = [a for _ja, a in fakes if a is not None]
+    claimed, shown = sum(answered) + earlier[0], len(answered) + earlier[1]
+    out = dict(found or {}, claimed=sum(answered), fakes=len(answered), claimed_year=claimed, fakes_year=shown,
+               listed=probe.get('listed'))
+    fixed = corrected(found, claimed, shown)
+    if fixed:
+        out.update(corrected=fixed['known'], corrected_low=fixed['low'], corrected_high=fixed['high'])
+    if out.get('listed') is not None:
+        out['listed'] = round(out['listed'], 4)
+    return {'kind': 'probe', 'via': via, 'seconds': max(0, int(seconds)), 'weights': probe['weights'],
+            'top': probe['top'], 'words': words, 'fakes': fakes, 'bands': probe['bands'], 'estimate': out}
+
+
+# ---- the op, where the state lives (hub.py) ----
+
+def keep(state, op):
+    """Applies a probe op to the state: kept in state["probes"] once (by uid), the newest KEEP."""
+    probes = state.setdefault('probes', [])
+    if any(p.get('uid') == op['uid'] for p in probes):
+        return {'kept': False}
+    probes.append({k: op[k] for k in RECORD if k in op})
+    del probes[:-KEEP]
+    return {'kept': True}
+
+
+def attach(state, uid, habit):
+    """Adds a probe's lookup habit (habit_here) to its record in the state; returns its summary."""
+    for p in state.get('probes') or []:
+        if p.get('uid') == uid:
+            p['habit'] = habit
+    return habit_summary([habit])
+
+
+def lookup_habit(rows, contexts, unknown, at_ms, days=HABIT_DAYS, d=None):
+    """{words: [[word, looked up, read, showings]], for each word in unknown shown in the `days` days before at_ms}:
+    looked up sums the opens (a glance counts knowledge.GLANCE_Y), read the read chances (1 when opened), as
+    knowledge.observations weighs them, over the browser passages and T3 messages shown (knowledge.showings)."""
+    d, unknown, since = d or dictionary.load(), set(unknown), at_ms - days * DAY_MS
+    if not unknown:
+        return {'words': []}
+
+    def match(written):
+        e = d.find(written)
+        return e['ja'] if e is not None and e['ja'] in unknown else None
+
+    per = {}
+    for last, (surface, _view, _context), context, items in knowledge.showings(rows, contexts,
+                                                                                at_ms + knowledge.SETTLE_MS):
+        if last < since:
+            continue
+        for ja, y, weight in knowledge.observations(surface, context, items, match, knowledge.reader(surface, context)):
+            entry = per.setdefault(ja, [0.0, 0.0, 0])
+            entry[0] += y
+            entry[1] += weight
+            entry[2] += 1
+    return {'words': [[ja, round(y, 3), round(r, 3), n] for ja, (y, r, n) in sorted(per.items())]}
+
+
+def habit_here(op):
+    """lookup_habit for a probe op's words answered not known, from the gloss log of this state dir; None without a
+    log, or when it can't be read (the probe is kept either way)."""
+    path = feedback.default_path()
+    if not path.exists():
+        return None
+    try:
+        rows, contexts = feedback.load(path)
+        return lookup_habit(rows, contexts, [w[0] for w in op['words'] if w[4] == 0], op['at'])
+    except Exception as error:  # the log or the knowledge helpers changed: no habit, but the probe stands
+        print(f'probe: no lookup habit: {error.__class__.__name__}: {error}', file=sys.stderr)
+        return None
+
+
+def habit_summary(habits, z=Z90):
+    """The lookup habit c over one or more probes' habits: {c, low, high, showings, words, read} or None when none
+    of their words was read. The interval treats words as clusters (a word's showings go together)."""
+    per = [w for h in habits if h for w in h.get('words') or []]
+    looked, read = sum(w[1] for w in per), sum(w[2] for w in per)
+    if read <= 0:
+        return None
+    c = looked / read
+    m = len(per)
+    variance = m / (m - 1) * sum((w[1] - c * w[2]) ** 2 for w in per) / read ** 2 if m > 1 else 0.0
+    effective = c * (1 - c) / variance if variance > 0 and 0 < c < 1 else read
+    low, high = wilson(c, min(effective, read), z)
+    return {'c': round(c, 3), 'low': round(low, 3), 'high': round(high, 3), 'showings': sum(w[3] for w in per),
+            'words': m, 'read': round(read, 1)}
+
+
+# ---- due, and what to print ----
+
+def latest(state):
+    probes = (state or {}).get('probes') or []
+    return probes[-1] if probes else None
+
+
+def status_line(state, today=None):
+    """fw.py status: when the next probe is due, or that one is."""
+    today, last = today or fwlib.today(), latest(state)
+    if last is None:
+        return '  probe due: none yet; fw.py probe (or /japanese-weave:probe) takes about 3 minutes'
+    est = last.get('estimate') or {}
+    found = f'{percent(est.get("known"))} known' if est.get('known') is not None else 'no estimate'
+    days = fwlib.days_between(last['day'], today)
+    if days >= DUE_DAYS:
+        return f'  probe due: the last was {days} days ago ({last["day"]}, {found}); fw.py probe takes about 3 minutes'
+    due = dt.date.fromisoformat(last['day']) + dt.timedelta(days=DUE_DAYS)
+    return f'  last probe {last["day"]}: {found}; next due {due.isoformat()}'
+
+
+def percent(x):
+    return '?' if x is None else f'{100 * x:.0f}%'
+
+
+def span(low, high):
+    return f'{100 * low:.0f}-{100 * high:.0f}%'
+
+
+def report(op, habit=None, fakes=()):
+    """What a probe found, in plain lines. fakes: the made-up words with their invented readings, to reveal."""
+    est = op['estimate']
+    words, made_up = op['words'], op['fakes']
+    answered = [w for w in words if w[4] is not None]
+    took = f'{op["seconds"] // 60} min {op["seconds"] % 60} s' if op['seconds'] < 3600 else 'over an hour'
+    lines = [f'Probe: {len(words)} words and {len(made_up)} made up, answered in {took}'
+             + (f' ({len(words) - len(answered)} skipped)' if len(answered) < len(words) else '') + '.']
+    if est.get('known') is None:
+        lines.append('  No words answered, so no estimate.')
+        return '\n'.join(lines)
+    basis = ('by general frequency, among the 10,000 most frequent words, until your reading is counted'
+             if op['weights'] == 'frequency' else 'by how often each came up in your reading')
+    lines.append(f'  You would read {percent(est["known"])} of the words in your reading without a lookup (90% '
+                 f'interval {span(est["low"], est["high"])}), each word weighted {basis}.')
+    claimed = [ja for ja, a in made_up if a == 1]
+    line = f'  Made-up words you marked known: {est["claimed"]} of {est["fakes"]}'
+    line += f' ({", ".join(claimed)})' if claimed else ''
+    if est.get('fakes_year', 0) > est['fakes']:
+        line += f'; {est["claimed_year"]} of {est["fakes_year"]} in the last year'
+    if est.get('corrected') is not None:
+        line += (f'. Corrected for guessing: {percent(est["corrected"])} '
+                 f'({span(est["corrected_low"], est["corrected_high"])}).')
+    lines.append(line)
+    by_band = []
+    for h in range(len(op['bands'])):
+        mine = [w[4] for w in words if w[2] == h and w[4] is not None]
+        by_band.append(f'{sum(mine)}/{len(mine)}')
+    lines.append(f'  Known by frequency band, most frequent first: {", ".join(by_band)}.')
+    if est.get('listed') is not None:
+        lines.append(f'  Your word list marks {percent(est["listed"])} of the same weight known.')
+    lines.append(habit_text(habit))
+    if fakes:
+        lines.append('  Made up: ' + ', '.join(f'{ja} ({kana})' for ja, kana in fakes) + '.')
+    return '\n'.join(line for line in lines if line)
+
+
+def habit_text(habit):
+    if habit is None:
+        return ('  Lookup habit: none of the words you marked not known were shown in the last '
+                f'{HABIT_DAYS} days, so nothing to measure yet.')
+    rough = ' Few, so it is rough.' if habit['showings'] < 30 or habit['words'] < 5 else ''
+    showings, words = habit['showings'], habit['words']
+    return (f'  Lookup habit: you looked up {percent(habit["c"])} of the showings you likely read of words you '
+            f'marked not known (90% interval {span(habit["low"], habit["high"])}), from {showings} '
+            f'showing{"s" if showings != 1 else ""} of {words} word{"s" if words != 1 else ""} in the {HABIT_DAYS} '
+            f'days before.{rough}')
+
+
+def history_text(state):
+    probes = (state or {}).get('probes') or []
+    if not probes:
+        return 'No probes yet: fw.py probe (or /japanese-weave:probe) takes about 3 minutes.'
+    lines = ['Probes (90% intervals): the share of your reading you would read without a lookup; made-up words '
+             'marked known; that share corrected for guessing; what your word list marks known; the lookup habit.']
+    for p in probes:
+        est = p.get('estimate') or {}
+        if est.get('known') is None:
+            lines.append(f'  {p["day"]}  no answers')
+            continue
+        parts = [f'{p["day"]}  known {percent(est["known"])} ({span(est["low"], est["high"])})',
+                 f'made up {est.get("claimed", 0)}/{est.get("fakes", 0)}'
+                 + (f' ({est["claimed_year"]}/{est["fakes_year"]} in the year)'
+                    if est.get('fakes_year', 0) > est.get('fakes', 0) else '')]
+        if est.get('corrected') is not None:
+            parts.append(f'corrected {percent(est["corrected"])} ({span(est["corrected_low"], est["corrected_high"])})')
+        if est.get('listed') is not None:
+            parts.append(f'list {percent(est["listed"])}')
+        habit = habit_summary([p.get('habit')])
+        parts.append(f'habit {percent(habit["c"])} ({span(habit["low"], habit["high"])}, {habit["showings"]} '
+                     'showings)' if habit else 'habit -')
+        lines.append('  ' + ', '.join(parts))
+    pooled = habit_summary([p.get('habit') for p in probes])
+    if pooled and len(probes) > 1:
+        lines.append(f'Lookup habit over all probes: {percent(pooled["c"])} ({span(pooled["low"], pooled["high"])}), '
+                     f'from {pooled["showings"]} showings of {pooled["words"]} words.')
+    return '\n'.join(lines)
+
+
+# ---- fw.py probe ----
+
+def parse_answers(text, n):
+    """The question numbers (1-based) known, from "1 4 7-9", "all", "none" or "all but 3 5"; ValueError when the
+    text isn't that."""
+    words = re.split(r'[\s,]+', text.strip().lower())
+    words = [w for w in words if w]
+    if words in (['none'], []):
+        return set()
+    invert = bool(words) and words[0] == 'all'
+    if invert:
+        words = words[1:]
+        if words and words[0] in ('but', 'except'):
+            words = words[1:]
+        elif words:
+            raise ValueError('after "all" put "but" or "except", then the numbers you would not read')
+    chosen = set()
+    for w in words:
+        found = re.fullmatch(r'(\d+)(?:-(\d+))?', w)
+        if not found:
+            raise ValueError(f'{w!r} is not a number or a range like 7-9')
+        low, high = int(found.group(1)), int(found.group(2) or found.group(1))
+        if not 1 <= low <= high <= n:
+            raise ValueError(f'{w} is outside 1-{n}')
+        chosen.update(range(low, high + 1))
+    return set(range(1, n + 1)) - chosen if invert else chosen
+
+
+def pending_path():
+    return fwlib.home() / PENDING
+
+
+def finish(probe, answers, via, seconds):
+    """Keeps a probe's answers where the state lives (a probe op) and prints what it found."""
+    import hub  # here, not at the top: hub imports this module
+    op = hub.stamp(record(probe, answers, via, seconds, claims(fwlib.load_state().get('probes'), fwlib.today())))
+    result = hub.submit(op)
+    if not result.get('ok', True):
+        sys.exit(f'The probe was not kept: {result.get("error")}')
+    kept = next((p for p in fwlib.load_state().get('probes') or [] if p.get('uid') == op['uid']), {})
+    habit = result.get('habit') or habit_summary([kept.get('habit')])
+    fakes = [(q['ja'], q['kana']) for q in probe['questions'] if q.get('fake')]
+    print(report(op, habit, fakes))
+    if result.get('queued'):
+        print(f'(Kept here: {fwlib.collector_url()} did not answer, so the next sync sends it.)')
+    print(f'Next probe due in {DUE_DAYS} days; fw.py probe --history lists them all.')
+
+
+def keys():
+    """Keys pressed, one at a time from a terminal (no Enter needed), else the first letter of each line."""
+    if sys.stdin.isatty():
+        try:
+            import termios
+            import tty
+        except ImportError:
+            termios = None
+        if termios is not None:
+            fd = sys.stdin.fileno()
+            saved = termios.tcgetattr(fd)
+            try:
+                tty.setcbreak(fd)
+                while True:
+                    key = sys.stdin.read(1)
+                    if not key:
+                        return
+                    yield key.lower()
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+            return
+    for line in sys.stdin:
+        yield line.strip()[:1].lower()
+
+
+ANSWERS = {'y': 1, 'n': 0, 's': None}
+SAID = {1: 'known', 0: 'not known', None: 'skipped'}
+
+
+def ask(probe, pressed=None, out=None):
+    """The questions one at a time; returns the answers, or None when quit."""
+    out = out or sys.stdout
+    if pressed is None:
+        pressed = keys()
+        try:
+            return ask(probe, pressed, out)
+        finally:
+            pressed.close()  # the terminal back as it was, before anything else is printed
+    questions, answers = probe['questions'], []
+    out.write(f'{len(questions)} words, one at a time. Would you read it without a lookup, met in an English '
+              'sentence?\n  y yes   n no   s skip (not sure)   b back   q quit (nothing kept)\n')
+    while len(answers) < len(questions):
+        i = len(answers)
+        out.write(f'{i + 1:3d}/{len(questions)}  {questions[i]["ja"]}  ')
+        out.flush()
+        for key in pressed:
+            if key in ANSWERS or key in ('b', 'q'):
+                break
+        else:
+            key = 'q'
+        if key == 'q':
+            out.write('\nStopped: nothing kept.\n')
+            return None
+        if key == 'b':
+            out.write('(back)\n')
+            if answers:
+                answers.pop()
+            continue
+        answers.append(ANSWERS[key])
+        out.write(SAID[ANSWERS[key]] + '\n')
+    return answers
+
+
+def list_text(probe):
+    scripts = Path(__file__).resolve().parent
+    lines = [f'Probe: {len(probe["questions"])} words. Which would you read without a lookup, met in an English '
+             'sentence?']
+    lines += [f'{i:3d}  {q["ja"]}' for i, q in enumerate(probe['questions'], 1)]
+    lines.append('Answer with the numbers of those you would read ("none", "all" and "all but 3 5" work too):')
+    lines.append(f'  sh {scripts / "run"} {scripts / "fw.py"} probe --answers "1 4 7-9"')
+    return '\n'.join(lines)
+
+
+def add_arguments(p):
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument('--list', action='store_true', help='print a numbered list and keep it for --answers (a chat)')
+    mode.add_argument('--answers', metavar='NUMBERS',
+                      help='the numbers from --list you would read without a lookup: "1 4 7-9", "none", "all", '
+                           '"all but 3 5"')
+    mode.add_argument('--history', action='store_true', help='every probe so far')
+    p.add_argument('--seed', type=int, help=argparse.SUPPRESS)  # a repeatable sample, for tests and trials
+
+
+def run(args):
+    import hub
+    if args.history:
+        state, error = hub.current()
+        if error:
+            print(f'({fwlib.collector_url()} did not answer: {error}. Showing the copy here from the last sync.)')
+        print(history_text(state))
+        return
+    path = pending_path()
+    if args.answers is not None:
+        probe = fwlib.read_json(path)
+        if not isinstance(probe, dict) or not probe.get('questions'):
+            sys.exit('No probe list is waiting: fw.py probe --list makes one.')
+        try:
+            known = parse_answers(args.answers, len(probe['questions']))
+        except ValueError as error:
+            sys.exit(f'Answers: {error}.')
+        answers = [1 if i in known else 0 for i in range(1, len(probe['questions']) + 1)]
+        finish(probe, answers, 'chat', (time.time() * 1000 - probe['at']) / 1000)
+        path.unlink(missing_ok=True)
+        return
+    state, _error = hub.current()
+    rng = random.Random(args.seed) if args.seed is not None else random.Random()
+    if args.list:
+        probe = fwlib.read_json(path)
+        fresh = isinstance(probe, dict) and probe.get('questions') and \
+            time.time() * 1000 - probe.get('at', 0) < PENDING_HOURS * 3_600_000 and args.seed is None
+        if not fresh:
+            probe = sample(state, rng=rng)
+            fwlib.write_json(path, probe)
+        print(list_text(probe))
+        return
+    if not sys.stdin.isatty():
+        print('(Not a terminal: one answer a line. In a chat, use fw.py probe --list, then --answers.)')
+    probe = sample(state, rng=rng)
+    started = time.time()
+    try:
+        answers = ask(probe)
+    except KeyboardInterrupt:
+        sys.exit('\nStopped: nothing kept.')
+    if answers is not None:
+        finish(probe, answers, 'terminal', time.time() - started)
