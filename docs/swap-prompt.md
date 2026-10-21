@@ -407,3 +407,239 @@ senses. The first half is built but not used yet: a matcher in `extension/src/ma
 scored on the same judged passages by `tools/prompt-lab/matcher-lab.mjs` (docs/matcher.md). With the 324 introduced
 words of 2026-10-20 it covers 379 of the 408 places (93%) at no cost, where Haiku covered 51% at normal and 80% at full,
 but 26% of its judged hits are the wrong sense (Haiku: 2.5% to 2.7%). Bringing that down is the model check's job.
+
+## Code finds the places, a model checks them (2026-10-21)
+
+The second half, built and measured in the lab but not wired into the extension: `extension/src/verify.js`, scored by
+`tools/prompt-lab/check-lab.mjs` on the same 79 judged passages with the 324 introduced words of the 2026-10-20
+snapshot. Haiku stops proposing swaps; code proposes every place, and Haiku only answers questions about them.
+
+**What code does.** For each passage, `planPassage` takes the matcher's spans and numbers them. An option flagged safe
+(`senses.js`, docs/matcher.md "Sense flags") is taken by code; a span with no safe option, and every span of
+closed-class English, goes to the model with all its options. Code also marks the dense sentences
+(`denseSentences`): 3 to 14 words, at least one span, and every word inside a span or English the grammar says without
+a listed word (articles, the prepositions particles stand for, be, do and have, will, not, and, or, because, than, the
+personal pronouns and want, `GRAMMAR_ENGLISH`). A passage with nothing doubtful and no dense sentence needs no call
+(`needsCall`), and a passage on a zero-Japanese topic gets nothing, as the extension never sends one.
+
+**What the model does.** One call per batch of passages that need one (`requestChecks`, Haiku or Gemini, with the
+fallback model as `engine.js`). The user message lists each passage, then its spans in place with a few words around
+them, lettered options where code is unsure and the sure word where it isn't, then the dense sentences:
+
+```
+[tweet-movie] Just watched it again. I really love this movie. The ending gets me every time.
+1 Just watched it [again]. I really: a また = again / also; b もう一度 = once more / again
+2 watched it again. [I] really love this: a 私 = i; b 僕 = i
+3 it again. I [really] love this movie.: a 本当に = really / truly
+4 again. I really [love] this movie. The: a 大好き = love / really like
+5 I really love [this] movie. The ending: a これ = this / this one; b この = this one
+6 really love this [movie]. The ending = 映画
+7 this movie. The [ending] gets me every: a 終わる = finish / end; b 終える = end / finish
+8 gets me every [time].: a 時間 = time / hours; b 時 = time / when
+s1 "I really love this movie."
+```
+
+Haiku's answer in the final variant's second seed: `{"id": "tweet-movie", "picks": "1a 2a 3a 4a 5b 7- 8-", "swaps":
+[{"at": "s1", "p": "私|は|本当に|この|映画|が|大好き|です|。"}, {"at": "5-6", "p": "この|映画"}]}`: また for "again", この
+for "this", nothing for the noun "ending" or for "every time", the sentence whole, and "this movie" as a phrase.
+
+The system prompt (`buildCheckSystem`, about 2,100 tokens, read from the cache after the first call) asks for a pick
+per lettered span, the letter of the one option that says exactly what the English says there or `-`, checked against
+the meaning rules of `prompt.js` that apply to choosing a word for a place; each s-numbered sentence written whole with
+only the words given in the passage's spans and the grammar list; and a short Japanese-order phrase wherever
+neighbouring spans make one. The answer (`CHECK_SCHEMA`) is compact, as above: per passage its id, the picks as one
+string, and its sentences and phrases, each naming its place by number (`s1`, or `5-6` from the start of span 5 to the
+end of span 6) with its pieces. The model never copies English: code fills in the English, its gloss (the English
+itself, since the Japanese says exactly that) and its context. Every candidate, the word swaps of safe options and
+picks included, goes through `levels.js validateSwaps`, which drops unlisted words, dangling phrases, labels read as
+numbers and the rest (`candidatesOf`). The result has `validateSwaps`' shape, so `planSwaps` picks from it as today.
+
+**How it was scored.** As `lab.mjs` scores swaps: each listed word of a candidate where it lands is right, fine,
+wrong or unjudged; a phrase or sentence not judged bad covers every place inside it. "All" is every candidate (as
+matcher-lab counts every option); "full" is what `planSwaps` shows at full (everything that can be placed, the same
+here); "normal" is what it shows at normal with the budget, averaged over 50 days without the thinning. Seeds are
+independent runs, each putting the passages into calls of 6 in its own order. Cost per 1,000 passages counts every
+judged passage, called or not.
+
+| Variant | Seeds | Coverage, all = full | At normal | Wrong (wrong / judged) | Function / content words wrong | Unjudged | Sentences whole, of 12 | Phrases valid | $ per 1,000 passages | s a call (max) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| prompt 1, prompt-1 flags of the introduced words | 1 | 86.8% | 68.8% | 3.3% | | 20 | 5 | 0 | 0.343 | 17.4 (25) |
+| prompt 1 | 3 | 85.9% (84.3-87.5) | 68.1% | 3.3% (2.8-4.1): 18/440, 12/424, 14/448 | 4.6% / 2.6% | 18-19 | 4.3 (3-5) | 0 | 0.345 (0.317-0.361) | 17.5 (26) |
+| prompt 2 | 3 | 84.4% (82.8-86.5) | 66.7% | 0.7% (0.5-0.8): 3/388, 3/410, 2/392 | 1.0% / 0.5% | 8 | 4.7 (4-5) | 0 | 0.362 (0.342-0.377) | 18.6 (29) |
+| prompt 2, thinking off | 3 | 60.3% (59.3-60.8) | 48.4% | 10.9% (9.9-11.5) | 13.1% / 10.4% | 16-19 | 5.3 (5-6) | 0-1 | 0.061 (0.056-0.066) | 3.2 (8) |
+| prompt 2, dictionary glosses too | 3 | 89.2% (88.0-91.7) | 67.8% | 2.1% (1.5-2.5) | 1.6% / 2.9% | 86-96 | 6.3 (6-7) | 0 | 0.608 (0.589-0.637) | 28.0 (48) |
+| prompt 2, calls of 12 | 3 | 86.5% (83.1-88.2) | 68.7% | 1.1% (0.7-1.4) | 1.0% / 1.3% | 6-11 | 4.3 (3-5) | 0 | 0.322 (0.316-0.327) | 31.2 (43) |
+| prompt 2, medium effort | 3 | 85.0% (82.6-87.0) | 67.4% | 0.8% (0.3-1.2) | 1.0% / 0.8% | 8-9 | 4.3 (4-5) | 0 | 0.472 (0.457-0.481) | 23.7 (41) |
+| prompt 2, phrases wherever one fits | 3 | 84.9% (81.6-87.0) | 67.4% | 0.7% (0.5-1.1) | 0.8% / 0.8% | 10-12 | 4.3 (3-5) | 16, 14, 9 | 0.426 (0.387-0.445) | 21.8 (37) |
+| **prompt 3** (the same text), final flags | 3 | **85.1% (84.6-85.8)** | 67.8% | **0.8% (0.7-0.9): 4/430, 3/427, 3/403** | 1.0% / 0.8% | 7-10 | 4.0 | 16, 16, 6 | **0.399 (0.380-0.411)** | 20.6 (36) |
+
+Flags: the first row's were prompt 1's on the introduced words alone (lost with a reboot); the next seven rows use
+prompt 2's flags where two samples agree, the last the file's, where three do. Ranges are over the seeds; within a run,
+the 90% interval of the wrong share at full from resampling passages is about 0.2% to 2%, and Wilson's 90% interval
+of the final variant's pooled 10 wrong of 1,260 judged is 0.5% to 1.3%. No passage needed no call: every one has a
+closed-class span. Haiku today, for comparison, on the same passages: 51% at normal and 80% at full, 2.7% and 2.5%
+wrong, $0.45 per 1,000 passages at normal in calls of 6 (19.8 s a call, at most 29 s; $0.52 on `eval16.json`, about
+$0.55 in calls of one as most calls go live) and $0.52 to $0.89 at full, where it rendered 10 of 24 sentences whole.
+
+The eight variants above, three seeds each, cost $0.71 in 315 calls (the single run before them about $0.03).
+
+What the variants showed:
+
+- **Prompt 1 to 2: the rules, not the format.** Prompt 1 made these in every seed: 一 for "One" in "In One Week", 時
+  for "When" in "When I entered the room" and for "time" in "every time", 行く in "go to bed", 日 in "all day", そして
+  for "and" inside a sentence (three passages: "huge and beautiful"), する for "does" in "does code review". Prompt 2
+  adds the numeral rule `prompt.js` has (一 alone only as a plain numeral), 時 to the clause joiners beside 前 and 後, a
+  rule for spans inside a longer expression, helper verbs for する and やる, and そして only between sentences. Wrong
+  fell from 3.3% to 0.7%, and coverage by about 1.5 points, inside the spread between seeds. These rules were written
+  after reading the lab's errors, on the same passages they are scored on: there is no held-out set, so expect more
+  errors on new passages. What prompt 3 still gets wrong: 小さい for "little" in "my little sister" and 開く (the door
+  opens) for "open a second store" in every seed, and once each 行く in "go to bed", する or やる for "does code
+  review" and 力 for "power" in a chip's power use.
+- **Thinking is needed.** Without it Haiku is six times cheaper and faster, but picks wrong on 11% and leaves 40% of
+  the places; it returned 19 to 30 sentences a run, of which only 6 or 7 were valid.
+- **More effort, bigger calls: no gain.** Medium effort changed nothing measurable at 30% more cost. Calls of 12 cost
+  11% less and took 31 s instead of 19; the coverage difference is inside the seeds' spread.
+- **The dictionary's glosses** find the places the listed glosses miss ("watch", "about", "mom", "little sister") and
+  raise coverage to 89%, but double the doubtful spans (986 against 571), so the call costs $0.61 per 1,000 passages,
+  over today's, and leave about 90 hits a run the oracle hasn't judged. Worth it once the oracle judges them and the
+  call is cheaper; not now.
+- **Phrases had to be asked for.** "Only where one fits well; most passages have none" got none in 9 runs. Asked for
+  wherever one fits (prompt 3), Haiku wrote 6 to 18 a run, nearly all valid: この映画, 沢山の時間, 店の前に, 今年読んだ本,
+  also some clumsy (もっと本 for "more books") or with their own subject (私はまだ待っている), which the prompt forbids
+  and validation doesn't catch. They cost about a sixth more output and don't change coverage; they are what today's
+  prompt values for teaching word order.
+- **Sentences.** The density rule marks 10 sentences, 7 of them among the oracle's 12; Haiku writes 4 to 6, all valid,
+  and leaves out those the list can't say ("I wanted to go home right then"). The oracle's other 5 sentences need a word
+  the listed glosses miss ("watched", "mom", "fish", "idea"). This is about what today's full answer does (10 of 24).
+- **At normal** the pipeline shows about 68% of the places, against 51% for today's normal answer: known words are
+  free and the candidates are all there; what is left out is `planSwaps`' one use per Japanese word.
+
+What did not reach the plan:
+
+- **No passage was spared a call.** Closed-class English is always doubtful, and every passage has some ("I", "this",
+  "and"). `needsCall` skips a passage with nothing doubtful and no dense sentence, but on these passages, and on most
+  real ones, that never happens. The saving has to come from the call being cheap: about 4,200 output tokens a call
+  of 6, nearly all of it thinking, against about 4,900 for today's normal answer (going by its cost).
+- **Cost is under today's, by little.** $0.399 against $0.45 at normal in calls of 6. It is still one call per passage,
+  as today; full no longer needs a second answer of its own ($0.52 to $0.89), so a reader at +1, +2 or full pays less.
+
+For the integration step (NEXT_STEPS step 12, second half):
+
+- Ship `data/senses.tsv` with the extension (setup copies only `extension/`) and load it with `senses.js load`; build
+  the matcher's index from the word list (`buildIndex`, 13 ms for 1,766 words) whenever the list changes.
+- Replace `engine.js requestSwaps` with: match, `planPassage`, `requestChecks` for the passages `needsCall` keeps, in
+  calls of 6 (`BATCH`, unchanged), and `candidatesOf` with no answer for the rest and for a failed call (the safe
+  options alone). Cache by `CHECK_VERSION` as by `PROMPT_VERSION`. `planSwaps` and the painting are unchanged.
+- Then one candidate set serves every level: delete the normal prompt's target, the second cache, `answerLevel`,
+  `swapLimit`, `capSwaps` and the density cap, as NEXT_STEPS step 12 says.
+- Gemini: the request is built and tested (`verify.test.js`) but was not run; measure Flash in the lab before relying
+  on it as the fallback.
+- Re-run `check-lab.mjs` when the word list grows: every new word adds spans and pairs, and the flags of words added
+  later need `sense-flags.mjs` (from the cache, free for words already flagged).
+
+```sh
+OFFLINE=1 WORDS=<copy of state.json> bun tools/prompt-lab/check-lab.mjs              # the code part: no calls
+SPEND_LOG=~/.cache/japanese-weave-build/spend/senses.jsonl ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key \
+  WORDS=<copy of state.json> SEEDS=1,2,3 SAVE=run.json VERBOSE=1 bun tools/prompt-lab/check-lab.mjs
+REPLAY=run.json WORDS=<copy of state.json> bun tools/prompt-lab/check-lab.mjs       # score saved answers again, free
+```
+
+`GLOSSES=both`, `THINKING=0`, `EFFORT=medium`, `BATCH=12`, `PHRASES=rare` and `SENTENCES=0` give the variants above.
+Every paid call's tokens and cost go to the spend log (`tools/prompt-lab/spend.mjs`), which refuses calls past
+`SPEND_CAP`.
+
+## The held-out test: fresh passages (2026-10-21)
+
+Prompt 3's rules were written after reading the lab set's errors and scored on that same set, so its 85.1% and 0.8%
+could be fitted. This is the same measurement on 30 passages nobody tuned against.
+
+**Passages** (`tools/prompt-lab/fresh.json`, each with its source URL): 5 tweets, 5 Hacker News, 5 Reddit and 5
+YouTube comments from public archives of 2026-10-19, taken in a hash order fixed before reading them; 4 news ledes
+(BBC and NPR feeds of 2026-10-21, in feed order); 3 blog and 3 technical paragraphs from pages linked on Hacker News
+that week. From each source the first items that were English prose of 15 to 120 words were kept, skipping spam,
+sexual content, party politics, health, legal, money or safety advice, quotes, code, paragraphs naming private people
+and paragraphs ending in a colon. None trips `isZeroJapanese` or shares a five-word run with the lab's sets. 930 words,
+median 23 a passage (the lab's: 19).
+
+**Judging** (`tools/prompt-lab/fresh-oracle.json`): by hand against the 324 introduced words of the 2026-10-20
+snapshot, by `oracle.json`'s rules and its majority practice, committed before any pipeline ran (f88c9ee): 125 "use"
+places, 106 "ok", 146 "not". A second pass, also before any run, with a reviewer that saw no pipeline output, moved 4
+entries from ok to not (a word inside a quoted title, 前 as a bare word swap, "photo of the day" as 日, "So" meaning
+therefore as つまり; 6be17f9). The reviewer's full report, which arrived after the runs, had more findings. Those that
+held up, and the hits no entry judged, went in afterwards (7111d9c): "it's" and "That's" swapped like "I'm", "one of
+your quilts" not 一つ (as `oracle.json`'s "one of the best books"), この for a pronoun "this", その for a relative "that".
+One finding was declined, because it would have counted Haiku's good phrase 触る感じ wrong. Numbers are given by the
+pre-registered oracle first and by the revised one after the slash. No sentence of these passages can be said whole
+with the list, and code marks no dense sentence, so sentences are untested here.
+
+**Results**, three runs of each model pipeline. The new pipeline is `check-lab.mjs` with prompt 3 and the final flags.
+Haiku today is `lab.mjs` at normal (calls of 6) and full (calls of 3). Intervals are 90%, resampling passages with
+their runs kept together.
+
+| | Coverage | Wrong: share (interval), wrong / judged | Function / content words wrong | Unjudged | $ per 1,000 passages | s a call (max) |
+|---|---|---|---|---|---|---|
+| Matcher alone, every option | 90.4% (84-95) / 90.5% | 37.2% (32-42), 120 / 323 / 40.4%, 137 / 339 | 42.4% / 26.4%; 46.8% / 26.4% | 16 / 0 | 0 | |
+| Code + safe flags | 10.4% / 10.3% | 0% (Wilson 0-15), 0 / 15 | - / 0% (0 / 15) | 0 | 0 | |
+| New pipeline, full | 81.3% (75-87) / 81.5% | 4.3% (2.0-6.9), 16 / 370 / 6.1% (2.6-10.6), 23 / 374 | 5.5% (11 / 200) / 3.0% (5 / 168); 8.8% / 3.0% | 4 / 0 | 0.374 | 19.7 (30.0) |
+| New pipeline, normal | 67.5% (62-75) / 67.7% | 3.4% (1.4-5.5) / 5.1% (2.1-8.6) | 4.7% / 2.1%; 7.8% / 2.1% | 4 / 0 | | |
+| Haiku today, normal | 49.8% (44-56) / 49.7% | 5.5% (2.8-8.3), 12 / 219 / 5.6% | 4.4% / 7.4% | 1 / 0 | 0.403 | 20.0 (35.5) |
+| Haiku today, full | 79.2% (71-86) / 79.4% | 7.8% (4.3-11.6), 28 / 361 / 8.0% (4.5-12.0) | 5.1% / 11.0% (phrases 2 / 32) | 0 | 0.636 | 16.7 (32.2) |
+
+Over the runs: new pipeline full 80.8-81.6% coverage and 4.0-5.0% wrong; Haiku full 78-81% and 6.5-8.6%, normal 47-54%
+and 3.8-7.7%. In the lab the same pipelines scored 85.1% and 0.8% (new), and 51% and 80% coverage with 2.7% and 2.5%
+wrong (Haiku). New minus Haiku, paired by passage:
+- full: coverage +2.1 points (-3.5 to +8.8); wrong -3.4 points (-7.1 to -0.5) pre-registered, -1.9 (-6.0 to +1.7)
+  revised;
+- normal: coverage +17.6 (+11.8 to +23.7); wrong -2.0 (-5.1 to +0.6), -0.5 (-3.8 to +2.4) revised.
+
+The new pipeline wrote 1 phrase in three runs (6 to 16 a run in the lab) and was asked for no sentence. All its wrong
+hits are word picks among doubtful options. The 16 pre-registered ones, with the run numbers:
+
+- "I have a black and brown cat" as ある (1, 2, 3): an animal is いる.
+- "make into a gravy" (2, 3), "I'm making this" (3), "I made this weekend" (1) as する: cooking is 作る, not する's "make".
+- "while it bakes" as 間 (1, 3): a clause joiner, like 前 and 後.
+- "all of your adult life" as 全部 (1, 2): a span of time, like "all day".
+- "start building anything" as 何でも (1, 3): 何でも is "anything at all, whatever", not this "anything".
+- "even though the texture" as だけど (2): a concessive joiner in front of its clause.
+- "My photo of the day is one of mine" as 一つ (2): the pronoun "one".
+- "the first days of the web" as 日 (3): an era, not a day.
+
+The revision adds 7 more: "That's the story" as それ (1, 2, 3), which leaves "それ's" on the page because validation
+takes the "'s" for a possessive; "one of your quilts" as 一つ (1, 2, 3); and "a slice that was soaked" as その (2).
+
+**Conclusion.** The new pipeline still beats today's Haiku on these passages. At normal it covers about 18 points more
+of the places, with a wrong share no higher, and it costs less ($0.37 against $0.40 per 1,000 passages, and $0.64 for
+Haiku's full answer). At full its coverage is the same as Haiku's and its wrong share lower: by 3.4 points
+pre-registered (the interval excludes zero), by 1.9 with the revision (the interval doesn't).
+
+It does not stay at or under 3% wrong: 4.3% (2.0-6.9%) pre-registered, 6.1% (2.6-10.6%) revised, five to eight times
+the lab's 0.8%. Haiku today also went from 2.5% to 7.8% wrong at full and from 2.7% to 5.5% at normal, so these
+passages are harder as well as untuned: real prose, more closed-class English, more idiom.
+
+The failures are mostly function words (11 of 16, 18 of 23). Most of them sit next to rules the prompt and validation
+already have: clause joiners other than 前, 後 and 時; する "make" in a sense other than the helper verb; "one" as a
+pronoun after "of" a thing; and contractions with "'s". Fixes that look general, each a class rather than a word from
+this set (but each written after reading these errors, so it needs another fresh set before it is trusted):
+- validation reads "'s" after that, it, there, what, who and here as "is", and drops a swap that leaves it, as it drops
+  "I've";
+- no listed word for a subordinating conjunction (when, while, before, after, though, until, since) as a word swap in
+  front of its clause, in the check prompt and in `misplaced`;
+- ある never for people or animals, checkable with numberTrap's list of them;
+- 一つ never for "one of" anything, not only people;
+- する's "make" doubtful by rule, or out of the index: "make" is nearly always 作る.
+
+Of the matcher's 12 missed places, 5 are "about" for について. With `hints.js`'s extras (`EXTRA=1`) the matcher covers
+94.4%; the rest need the dictionary's glosses (watching, grandma, odd, underneath, tell).
+
+The test cost $0.127 in 60 calls: $0.034 for the new pipeline's 15, $0.093 for Haiku's 45 (`lab.mjs` now takes
+`SPEND_LOG` too).
+
+```sh
+WORDS=<copy of state.json> ORACLE=tools/prompt-lab/fresh-oracle.json bun tools/prompt-lab/matcher-lab.mjs tools/prompt-lab/fresh.json
+SPEND_LOG=<log> ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=<copy of state.json> ORACLE=tools/prompt-lab/fresh-oracle.json \
+  SEEDS=1,2,3 bun tools/prompt-lab/check-lab.mjs tools/prompt-lab/fresh.json
+SPEND_LOG=<log> ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=<words.py output> ORACLE=tools/prompt-lab/fresh-oracle.json \
+  LEVELS=0,3 bun tools/prompt-lab/lab.mjs claude-haiku-5-5 tools/prompt-lab/fresh.json      # once per run
+```
+
+Keep `fresh.json` out of the lab's default sets: once a rule is written from its errors, it is no longer held out.

@@ -85,15 +85,18 @@ describe('choosing swaps', () => {
     expect(capSwaps(2, swaps, text, words).map((s) => s.f)).toEqual(['でも', '大きい']);
     expect(capSwaps(2, swaps, text, words, 25).map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
   });
-  test('planSwaps: known words wherever offered at every level but off, a new active word first, the plan', () => {
+  test('planSwaps: known words wherever offered at every level but off, the plan', () => {
     const plain = planSwaps(2, swaps, text, words);
     expect(plain.swaps.map((s) => s.f)).toEqual(['でも', 'とても', 'もう', '大きい']); // one use per word
     // candidates: every one the passage can place, both buts (in the one place "but" is); budget: normal's 0.5 lookups
-    // per 100 words; expected: three known words without estimates and the active one
+    // per 100 words; spent: the active word, over the budget but in with chance 0.065 / 0.27; expected: three known
+    // words without estimates and the active one
     expect(plain.plan).toEqual({ level: 0, intensity: 1, jitter: 1, limit: 4, candidates: 5, budget: 0.065,
-      expected: Math.round((3 * p(KNOWN_PRIOR_K) + p(1)) * 1000) / 1000, sentencePrice: SENTENCE_PRICE });
+      spent: Math.round(p(1) * 1000) / 1000, expected: Math.round((3 * p(KNOWN_PRIOR_K) + p(1)) * 1000) / 1000,
+      sentencePrice: SENTENCE_PRICE });
     for (const intensity of [-2, -1, 1, 2]) {
-      expect(planSwaps(2, swaps, text, words, { intensity }).swaps).toHaveLength(4); // lighter no longer thins known words
+      expect(planSwaps(2, swaps, text, words, { intensity }).swaps.map((s) => s.f)) // lighter no longer thins known words
+        .toEqual(expect.arrayContaining(['でも', 'とても', 'もう']));
     }
     expect(planSwaps(2, swaps, text, words, { intensity: -2 }).plan).toMatchObject({ level: -2, intensity: 0.5, budget: 0.02 });
     // shown today, the active word is one more for the budget: 0.065 lookups against its 0.27
@@ -320,7 +323,7 @@ describe('the lookup budget', () => {
     const offered = [sentence, big, day('known')];
     const words = Math.round(2 * p(4) * 1000) / 1000;
     expect(planSwaps(2, offered, text, known, { budgetPer100: 0 })).toEqual({ swaps: [big, day('known')], plan: { level: 0, intensity: 1,
-      jitter: 1, limit: 2, candidates: 3, budget: 0, expected: words, sentencePrice: SENTENCE_PRICE } });
+      jitter: 1, limit: 2, candidates: 3, budget: 0, spent: 0, expected: words, sentencePrice: SENTENCE_PRICE } });
     const enough = 100 * SENTENCE_PRICE / 13 + 1e-9; // the budget is the price
     for (let seed = 0; seed < 50; seed++) { // never thinned, and the words inside it are left out
       const r = planSwaps(2, offered, text, known, { budgetPer100: enough, seed, jitter: 0.2 });
@@ -380,11 +383,31 @@ describe('the lookup budget', () => {
     expect(pick(list, { budgetPer100: 10, density: 3 }).swaps.map((s) => s.word)).toEqual(['k0', 'l0', 'l1']);
     expect(pick(list, { budgetPer100: 10 }).swaps).toHaveLength(5); // no density: no other ceiling
   });
-  test('one active word not yet shown today goes first, outside the budget', () => {
+  test('a word whose delayed-start probe is due goes first, outside the budget, once a day; plans record the arms', () => {
     const learning = [...Array.from({ length: 10 }, (_, i) => word(`l${i}`, 0.5)), word('new', undefined, 'active')];
-    expect(pick(learning, { budgetPer100: 1e-6 }).swaps.map((s) => s.word)).toEqual(['new']);
-    expect(pick(learning, { budgetPer100: 1e-6, shownToday: ['new'] }).swaps).toEqual([]);
-    expect(pick(learning, { budgetPer100: 1e-6, density: 0.01 }).swaps).toEqual([]); // a density of none leaves none
+    expect(pick(learning, { budgetPer100: 1e-6 }).swaps).toEqual([]); // a new word alone no longer jumps the budget
+    const probed = learning.map((w) => (w.ja === 'new' ? { ...w, arm: 'held:probe' } : w));
+    const first = pick(probed, { budgetPer100: 1e-6 });
+    expect(first.swaps.map((s) => s.word)).toEqual(['new']);
+    expect(first.plan).toMatchObject({ spent: 0, arms: { new: 'held:probe' } }); // outside the budget
+    expect(pick(probed, { budgetPer100: 1e-6, shownToday: ['new'] }).swaps).toEqual([]); // shown today: the probe is had
+    expect(pick(probed, { budgetPer100: 1e-6, density: 0.01 }).swaps).toEqual([]); // a density of none leaves none
+    // free, it still goes first: thinning can't drop it
+    const free = probed.map((w) => (w.ja === 'new' ? { ...w, k: 4, sd: 0.1, free: true, arm: 'shown:probe' } : w));
+    for (let seed = 0; seed < 20; seed++) {
+      expect(pick(free, { budgetPer100: 1e-6, jitter: 0.2, seed }).swaps.map((s) => s.word)).toEqual(['new']);
+    }
+    const shown = learning.map((w) => (w.ja === 'l3' ? { ...w, arm: 'shown' } : w));
+    const budgeted = pick(shown, { budgetPer100: 50 });
+    expect(budgeted.plan.arms).toEqual({ l3: 'shown' }); // a word in its shown days: no priority, but recorded
+    expect(pick(learning, { budgetPer100: 50 }).plan.arms).toBeUndefined();
+  });
+  test('a candidate with a word the host did not send is never offered: the host leaves out the words the experiment hides', () => {
+    const list = [word('l0', 0.5), word('l1', 0.5)];
+    const offered = offer([...list, word('held', 0.5)]);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7, budgetPer100: 50 }).swaps.map((s) => s.word)).toEqual(['l0', 'l1']);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7, intensity: 3 }).swaps.map((s) => s.word)).toEqual(['l0', 'l1']);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7 }).plan.candidates).toBe(2);
   });
 });
 

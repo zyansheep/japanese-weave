@@ -2,8 +2,8 @@
 
 Japanese Weave estimates, for every word, how likely you are to open its gloss, from the gloss interaction log.
 It uses those estimates three ways: to decide which words appear on a page or in a reply, to spend each intensity
-level's lookup budget (lookups per 100 words, on words not known at a glance), and to move words between learning
-and known faster and more reliably than day counts alone. The plan behind it, the simplifications it rests on and
+level's lookup budget (lookups per 100 words, on words not known at a glance), and to label every word: known when
+it is known at a glance, learning while it is in use and not, new before that (Labels from the model, below). The plan behind it, the simplifications it rests on and
 what comes next: [PLAN.md](../PLAN.md).
 
 This is version 3: since NEXT_STEPS step 4, one penalized fit of the whole log on every refresh replaces the online
@@ -82,23 +82,27 @@ fit minimizes, over every word's k and the shared parameters:
 
 The prior mean is a regression on the word's features (knowledge.features), fitted along with everything else:
 
-- with an Anki card: a_status + b ln(1 + interval in days). The old prior, min(3, 0.5 + 0.8 ln(1 + interval)), stopped
+- with an Anki card: a_origin + b ln(1 + interval in days). The old prior, min(3, 0.5 + 0.8 ln(1 + interval)), stopped
   rising at a 21-day interval, but live lookups per read keep falling past it: about 7.6% for intervals of 20 to 57
   days, 5.0% for 58 to 89, 2.2% beyond. Here the interval is uncapped and the slope fitted;
-- without a card: c_status;
-- status is the word's on the fit's day: known, learning (active or shaky) or new (not introduced yet). The interval
-  alone mixes words that read differently: in the simulated reader, young Anki cards in the learning set and the queue
-  words chat uses topically share intervals, but are looked up about 5% and 60% of the time when read. Status is not
-  wholly outside the log (three clean days graduate a word, two peek days make it shaky), so it counts some evidence
-  twice; NEXT_STEPS step 8 makes status come from the model, and then status must leave the prior;
+- without a card: c_origin;
+- origin is how the word had come into use by the fit's day (knowledge.origin_at, the word's origin field): learning
+  (taken in to be taught), known (marked known by setup's top words or an Anki sync, or known or shaky before labels
+  came from the model) or new (neither, or not yet). The interval alone mixes words that read differently: in the
+  simulated reader, young Anki cards in the learning set and the queue words chat uses topically share intervals, but
+  are looked up about 5% and 60% of the time when read. Until NEXT_STEPS step 8 the intercepts went by status; now
+  that the model sets the status (Labels from the model, below), status in the prior would feed the fit its own output
+  (a word labeled known gets the known intercept, which keeps it known), so the prior takes the origin, which only
+  intake, setup, Anki syncs and the switch itself set, never a label. Its parameters keep the names by status ("card
+  new", "learning", ...), and knowledge.json "prior" keeps its shape;
 - each coefficient has a prior: the old Anki formula (a = 0.5, sd 0.5; b = 0.8, sd 0.25) for card words, the old
   neutral prior (1.0, sd 1) for others, and fwlib.KNOWN_PRIOR_K (2.5, sd 1) for known words without a card. A kind with
   no data keeps what the planner assumed, and the planner now takes every word's estimate from the fit, so the two no
   longer disagree about known words without history (the old replay started them at 27%, the planner at 7.6%); and a
   few observations can't swing a kind (with weak priors, one two-word episode moved the card regression by more than 1
   on the log-odds scale);
-- later word features (NEXT_STEPS step 13: frequency rank, kanji shared with known words, script, word type, length)
-  are each one more shared parameter in features() and SHARED.
+- for a word not marked known, plus its dictionary entry's word features: frequency rank, kanji known at a glance,
+  script, part of speech, length, rarity and source language (Starting values from the word itself, below).
 
 The prior's width tau is fitted per kind, Anki card or none, by EM: each word's squared distance from its prior mean
 plus its variance, averaged, held toward 1.0 (card) and 1.5 (none) by 5 words' worth of weight. On the 2026-10-20 log
@@ -107,10 +111,24 @@ the widths came out 0.75 and 1.02.
 Identification: the web's offset is fixed at 0, so the level of k is set by the prior regression; chat's offset is
 identified by the words seen on both surfaces and through the shared prior means, and held toward 0 (sd 0.5).
 
-Fitted on the 2026-10-20 log (sd in brackets): chat's offset +0.20 (0.22) and the form offset -0.04 (0.56); with an
-Anki card, a = 0.85 for new words (0.31), 0.41 for learning (0.33) and 0.60 for known (0.34), and b = 0.63 (0.08), so a
-known word's prior chance is 35% at no interval, 7.3% at 21 days, 4.0% at 60 and 2.3% at 150; without a card, 1.83 for
-new words (0.33; 14%) and 0.46 for learning (0.60); known words without a card keep 2.5, as there are none.
+Fitted on the 2026-10-20 log, by status (sd in brackets): chat's offset +0.20 (0.22) and the form offset -0.04 (0.56);
+with an Anki card, a = 0.85 for new words (0.31), 0.41 for learning (0.33) and 0.60 for known (0.34), and b = 0.63
+(0.08), so a known word's prior chance is 35% at no interval, 7.3% at 21 days, 4.0% at 60 and 2.3% at 150; without a
+card, 1.83 for new words (0.33; 14%) and 0.46 for learning (0.60); known words without a card keep 2.5, as there are
+none.
+
+Status against origin in the prior, scored by the evaluation harness (the fit refitted each day from the days before,
+log loss per observation, the difference day by day with a 90% interval from resampling days):
+
+- On that log, as of 2026-10-21 (5 days scored), the only words whose origin differs from their status are the 21 shaky
+  ones (origin known, status learning): origin minus status, all -0.0003 (-0.0006 to +0.0002), better on 4 of 5 days;
+  chat -0.0010 (-0.0017 to -0.0005); learning words -0.0013 (-0.0035 to +0.0011); known -0.0001 (-0.0008 to +0.0005).
+- On the simulated reader (3 seeds of 28 days), whose statuses come from its own day rules, origin and status are the
+  same and so is the fit. Made to look like the switch, with every word taken in keeping origin learning when it
+  graduates, origin against the old status (which knew when each word graduated): all -0.0001, +0.0001 and +0.0000 (the
+  intervals within 0.0002 of 0); with the model's own labels from the day before in the prior instead (the circular
+  choice): +0.0001, +0.0003 and +0.0002, worse on all three seeds, and on known words by +0.0002 to +0.0003. Both
+  differences are far below the fit's gain over the online model (0.0193).
 
 Commands are one-sided pseudo-observations. `known` adds 4 (3.5 - k)^2 / 2 while k is under 3.5 (a curvature of 4, an
 sd of 0.5; a lookup chance of 2.9%), `learn` 4 (k - 0)^2 / 2 while k is over 0; both fade like evidence. One command
@@ -126,9 +144,10 @@ free set after one form lookup each (PLAN.md row A); with it they stay (k 3.1 an
 
 Each word's sd is its k's entry of the inverse information at the fit (Laplace), the shared parameters' uncertainty
 included. A word without evidence has its prior: k = m_w, sd = tau. knowledge.json has every word of the word state:
-its k (long-term), sd, prior mean (mu), free flag (below), evidence weight (n), with evidence its observations, and
-read, when it was last read (Recency, below); "recency", the term's shared parameters; and "prior", the regression's
-coefficients and widths by kind, which the native host uses for a word knowledge.json hasn't seen.
+its k (long-term), sd, prior mean (mu), free flag (below), evidence weight (n), the JMdict id of its dictionary entry,
+with evidence its observations, and read, when it was last read (Recency, below); "recency", the term's shared
+parameters; and "prior", the regression's coefficients and widths by kind, which the native host uses for a word
+knowledge.json hasn't seen, and from which any dictionary entry gets its starting value (below).
 
 How it is solved: Newton's method with the expected information, which is positive definite (the observed one isn't
 everywhere: log(1 - r q) is not concave in k when q is large), with step halving. The information has one row per word,
@@ -137,9 +156,152 @@ step in time linear in the words. A word's unopened observations with the same r
 same clock (Recency, below) pool, so the work grows with the words more than with the log. The information is the
 expected one through each chance's log odds (Gauss-Newton), the recency term bending its derivative in k between -1
 and 0. A refresh starts from the last one's fit, but the day's first, which starts from nothing (from two floors, each
-fitted twice: Recency). On the 2026-10-20 log (3,396 observations, 397 words, 3,222 pooled terms) a fit takes 0.5 s
-from nothing and 0.05 s from the last one; on a simulated log of 60 days (52,000 observations, 1,244 words, 43,269
-terms), 7 s and 0.9 to 1.2 s (version 2: 1,870 and 16,563 terms; 0.07 s and 0.01 s, 0.43 s and 0.05 s).
+fitted twice: Recency). With the word features (below), on the 2026-10-20 log (3,396 observations, 397 words, 3,222
+pooled terms) a fit takes 1.1 s from nothing and 0.04 s from the last one; on a simulated log of 60 days (52,000
+observations, 1,244 words, 43,268 terms), 6.1 s and 1.1 s (version 2: 1,870 and 16,563 terms; 0.07 s and 0.01 s,
+0.43 s and 0.05 s).
+
+### Starting values from the word itself
+
+NEXT_STEPS step 13, PLAN.md row H. Once the vocabulary is the dictionary, its 27,000 entries with no history would all
+start from the intercept of a new word without an Anki card (14% on the 2026-10-20 log), so the planner could not tell
+them apart. So the prior mean of a word the reader hasn't vouched for (origin new or learning, card or not) adds its
+dictionary entry's word features (knowledge.word_features), each one more shared parameter of the fit:
+
+| Feature | Value | Why |
+|---|---|---|
+| rank | log10(rank / 1,000): +1 for each tenfold rarer | the most frequent words are met most |
+| kanji known | the share of its kanji found in words known at a glance | a compound of known kanji can be read |
+| all kanji known | 1 when it has kanji and all are known | |
+| kana, katakana, mixed | how it is written, against kanji alone (knowledge.script) | katakana gets its own baseline: an English loanword can be sounded out |
+| verb, adjective, adverb, other | the first sense's first JMdict tag, against a noun (knowledge.pos_group) | |
+| length | log2(characters / 2): +1 for each doubling | |
+| rare | JMdict marks no spelling common (common 0) | |
+| loan | JMdict names a source language other than English | |
+
+The reference word, with every feature 0, is a common two-character kanji noun of rank 1,000 none of whose kanji are
+known, so the origin intercepts keep their meaning. The loanword flag is the source language, not the loan field as
+such: JMdict's field marks every katakana word (3,890 have only "kata", no source), so a plain flag would repeat the
+katakana baseline; what it adds is a borrowing an English reader can't sound out (German アルバイト, Portuguese
+タバコ). A state word's entry is found once (dictionary.find, by spelling, reading and gloss; knowledge.word_entries)
+and kept by its JMdict id in knowledge.json, which later refreshes read back.
+
+A word marked known (setup's top words, an Anki sync) keeps its intercept and Anki interval alone: its lookup chance
+sits near its floor whatever the word is like (in the simulated reader, at the 2% checks of a recognised word), and as
+the larger part of the words with evidence (242 of 397 on the 2026-10-20 log) it would only pull the coefficients
+toward no effect.
+
+Kanji known at a glance come from the free flags of the last refresh (knowledge.json; in the harness, the day before),
+counting only free words with evidence of their own (an observation or a command), never the word itself. That closes
+three loops: a word's flag can't raise its own prior; a word free by its prior alone can't make its kanji known, so no
+chain of priors makes words free (日本 free, so 日曜日's prior rises until it is free, so 曜 is known, ...); and the fit
+never reads its own output, as the flags are from before it. What is left is that two words with evidence and a kanji
+in common raise each other's prior mean, which is what the feature is for, and each has evidence of its own to answer
+it. With no flags (a first refresh), no kanji are known and the feature is 0 until the next.
+
+Each coefficient is held toward 0, no effect, by a Gaussian prior with sd 0.5 (knowledge.WORD_SD). On these scales a
+word has about four features of size about 1, so before any data the features move its prior mean with an sd of
+about 1, the spread of words around their mean (the widths, 0.74 with a card and 1.0 without). Wider, a few words
+with much evidence swing every word without any: in a test refresh with one learning word never opened and 19 always
+opened, an sd of 1 moved the rank coefficient to +0.99 and labeled 79 unseen queue words known; 0.5 moved it to +0.29
+and labeled none. On the simulated reader 0.5 predicted first exposures best of 0.25, 0.5, 1 and 2 (below).
+
+knowledge.json "prior" carries what any entry's starting value needs: words (the coefficients), featured (the origins
+that take them), centre (the reference word's rank and length) and kanji (the kanji known at a glance the fit used).
+knowledge.prior_estimate(knowledge, origin, interval, entry) gives (k, sd) for any entry of data/dictionary.tsv (origin
+new for a word with no history); extension/src/prior.js priorOf(table, entry, {origin, interval}) gives the same in
+the extension, and tests/prior_cases.json holds cases both must agree on.
+
+The fit has 13 more shared parameters, 22 in all (the Schur complement grows with their square, but per word only with
+the features it has). On the 2026-10-20 log a fit takes 0.12 s from scratch (0.09 before) and 0.03 s from the last one
+(0.013); finding the state's 1,766 words in the dictionary takes 0.15 s once, and later refreshes read their ids back.
+A refresh that also chooses the day's reading model takes 1.9 s (1.4 before), a later one 0.3 s (as before). On the
+simulated log of 60 days, 0.62 s and 0.16 s a fit (0.50 and 0.12), a first refresh of the day 18.3 s (14.6) and a
+later one 1.9 s (1.8).
+
+On the simulated reader (`tools/sim/run.py priors`): every word has its entry in data/dictionary.tsv, 2,000 more
+entries spread over the dictionary's ranks join the queue (katakana among them), which chat's topical words follow in
+rank order, and each word not known starts at k0 = 0 + sum beta_j x_j + 0.8 z (z standard normal; beta: rank -1.2,
+kanji known +0.8, all kanji known +0.4, kana +0.3, katakana +0.8, verb -0.3, adverb -0.4, other +0.5, length -0.3, rare
+-0.5, loan -0.5, mixed and adjective 0). Its chance when read, sigmoid(-k0), held between the 2% checks of a word
+recognised and the 90% lookups of one not, sets its recall on the first day; a word at 90% was never met, any other
+was last met 10 to 100 days before. Known words are as before. Over 3 seeds of 28 days:
+
+- The word features against the flat start (the prior by origin and Anki interval alone), in log loss per observation
+  on each word's first 3 exposures while new or learning (4,183 observations), each day predicted from the days
+  before: -0.0141 (-0.0187 to -0.0100), better on 58 of 84 days: from 0.4858 to 0.4716, 14% of the way to the true
+  chances' 0.3867. With a coefficient sd of 0.25, -0.0122; 1, -0.0132; 2, -0.0108. On all observations, -0.0012.
+- The coefficients are recovered with the right sign where the data is rich and toward 0 where it is thin: rank -0.75,
+  -0.92 and -1.07 (90% intervals about +-0.3) against -1.18, -1.11 and -1.06 from least squares of the true k0 on the
+  features over the same words; kanji known +0.52, +0.22, +0.40 against +0.58 to +0.77. Most others' intervals hold the
+  truth and 0 both. They come out smaller than the truth because the fit maximizes over every word's k and the
+  coefficients together: with few observations per word its k stays near the prior mean, which then explains little
+  (the bias of penalized quasi-likelihood). With a rank slope of -1.2 and nothing else, 1,000 words with 1 observation
+  each give -0.80 to -0.86; with 10, -0.99 to -1.15; with 30, -1.11 to -1.22. The planner sees shrunken differences
+  between words, never invented ones.
+- How far the prior reaches: with the 2,000 extra entries never shown, so the coefficients come from the lexicon's
+  words (most within the first 5,000 ranks), their starting chances against the true ones: ranks 3,000 to 9,999, flat
+  26% against a true 69%, the features 48%; ranks 10,000 to 29,999, flat 26% against 76%, the features 60%. The
+  features halve the error, but rare words still start too well known: the intercepts and coefficients are learned
+  from words being shown, which reading and lookups teach, while the truth is the first day's.
+- Days of log the replay needs: of 11 simulated logs, replays of their first 5 days show the gain (the 90% interval
+  below 0) in 3, of 7 days in 7, of 21 days in 9. Over those 11 seeds of 21 days the gain is -0.0092 per observation
+  (-0.0112 to -0.0072), and after the first day (when the two start alike) -0.0109 a day with an sd of 0.0206 between
+  days: half of all logs would show it after about 10 days, 80% after about 22.
+
+On the 2026-10-20 log (`fw.py evaluate --models flat,fit`, 5 days), the coefficients barely leave 0: rank -0.31 (sd
+0.34 at the last fit), all others within 0.22 of 0; katakana, rare and loan have no featured word with evidence and
+stay at 0. On the first 3 exposures of new or learning words (338 observations, 34 opens) the features against the
+flat start are +0.0000 (-0.0031 to +0.0022), better on 2 of 5 days (the first day the two are the same by
+construction); on all first exposures -0.0000 (-0.0014 to +0.0008). The log can't show it yet: in the simulated reader 5
+days show it in 3 logs of 11, and the live gain is likely smaller than the simulated one while the coefficients sit
+this close to 0. Expect 2 to 4 weeks of log, and a gain only once words unlike the lexicon's (katakana, rare ones) are
+shown, since the coefficients for them have nothing to learn from yet.
+
+Starting chances on the web from that refresh's prior, for dictionary words with no history (origin new, no card; the
+flat start is 14% for every one):
+
+| Word | Rank | Script | Kanji known | k | Starting chance |
+|---|---|---|---|---|---|
+| 今日 | 138 | kanji | 2/2 | 2.35 | 9% |
+| 時間 | 117 | kanji | 2/2 | 2.37 | 9% |
+| 学校 | 344 | kanji | 2/2 | 2.22 | 10% |
+| 先生 | 360 | kanji | 2/2 | 2.22 | 10% |
+| 電話 | 579 | kanji | 1/2 | 1.94 | 13% |
+| 仕事 | 160 | kanji | 2/2 | 2.33 | 9% |
+| 毎日 | 534 | kanji | 2/2 | 2.17 | 10% |
+| 天気 | 3,101 | kanji | 1/2 | 1.72 | 15% |
+| 日本語 | 19,561 | kanji | 3/3 | 1.81 | 14% |
+| 大学生 | 4,962 | kanji | 3/3 | 1.99 | 12% |
+| 食べる | 165 | mixed | 0/1 | 2.11 | 11% |
+| 美しい | 628 | mixed | 0/1 | 2.36 | 9% |
+| 懐かしい | 2,103 | mixed | 0/1 | 2.29 | 9% |
+| ちょっと | 112 | kana | - | 2.35 | 9% |
+| やっぱり | 429 | kana | - | 2.17 | 10% |
+| いきなり | 1,822 | kana | - | 1.98 | 12% |
+| テレビ | 1,033 | katakana | - | 1.91 | 13% |
+| パソコン | 1,879 | katakana | - | 1.92 | 13% |
+| コンピュータ | 5,754 | katakana | - | 1.90 | 13% |
+| ストレス | 2,880 | katakana | - | 1.86 | 13% |
+| アルバイト | 4,841 | katakana | - | 1.86 | 13% |
+| インフレ | 13,866 | katakana | - | 1.65 | 16% |
+| リスク | 2,721 | katakana | - | 1.78 | 14% |
+| ワークショップ | 19,824 | katakana | - | 1.78 | 14% |
+| 概念 | 2,739 | kanji | 0/2 | 1.65 | 16% |
+| 措置 | 2,464 | kanji | 0/2 | 1.67 | 16% |
+| 憂鬱 | 6,777 | kanji | 0/2 | 1.53 | 18% |
+| 斡旋 | 9,629 | kanji | 0/2 | 1.48 | 18% |
+| 追徴 | 25,002 | kanji | 0/2 | 1.36 | 20% |
+| 範疇 | 9,790 | kanji | 0/2 | 1.48 | 19% |
+| 曖昧 | 2,987 | kanji | 0/2 | 1.85 | 14% |
+| 関数 | 10,796 | kanji | 0/2 | 1.47 | 19% |
+
+The order is right (frequent words of known kanji lowest, rare words of unknown kanji highest; 日本語 ranks 19,561
+because BCCWJ counts it as 日本 and 語), but the spread is far too narrow: 斡旋 or 追徴 would be looked up most times,
+not one in five. Until dictionary words are shown, the coefficients only know the lexicon's range, and the data says
+little even there; the simulated reader above shows the same, less so. The monthly probe (NEXT_STEPS step 7), known
+or not for words sampled across ranks, would be the evidence to pin the rank slope down before dictionary words are
+offered, once its marks feed the fit (they don't yet).
 
 ### Recency: the long-term chance and the current one
 
@@ -320,10 +482,10 @@ knowledge.json carries it per word as "free". So that one lookup doesn't flip it
 uncertainty: a free word leaves the free set only when the low end of its chance, sigmoid(-(k + 1.28 sd)), passes 8%,
 and a word that isn't free joins only when the high end, sigmoid(-(k - 1.28 sd)), falls below it, each against its flag
 at the last refresh. A word without a flag yet starts on its prior's side: free when sigmoid(-m_w) is under 8%.
-Consumers use the flag where they have it: fwlib.is_free and settled_words (the learning slots; a word the log has
-nothing on still takes its slot), knowledge.word_estimate (which keeps the chance it reports to weave.py on the flag's
-side of 8%, so the chat brief agrees), and the extension through the native host (levels.js costOf). Without a flag,
-they compare the chance with 8% as before.
+Consumers use the flag where they have it: the labels (a free word is known, fwlib.label), fwlib.is_free,
+knowledge.word_estimate (which keeps the chance it reports to weave.py on the flag's side of 8%, so the chat brief
+agrees), and the extension through the native host (levels.js costOf). Without a flag, they compare the chance with
+8% as before.
 
 On the 2026-10-20 log 354 of the 1,766 words are free, 253 of the 397 with evidence (231 by the old line): 29 joined,
 among them する, 行く and ある (a form lookup no longer outweighs the rest), and 7 left (ただ, 写真, 古い, 基本, 心配,
@@ -353,14 +515,13 @@ words * passage words / 100 (the random thinning, below, leaves it alone), and o
 1. Only the candidates the passage can place count, found as the page will find them (text.js locate), and of two
    that overlap only the first one kept. Each candidate's listed words get their estimate from the native host (k, sd
    and the free flag from knowledge.json, which has every word: a word the log has nothing on has its fitted prior,
-   and one knowledge.json hasn't seen yet the fitted prior for its status; without a host, k = 2.5, fwlib
+   and one knowledge.json hasn't seen yet the fitted prior for its origin; without a host, k = 2.5, fwlib
    KNOWN_PRIOR_K, for a known word, else the neutral prior), when it was last read (read, with the fit's floor:
    recency) and a mean lookup chance p: its long-term chance for a word known at a glance, else its current one at
    the time of planning (levels.js currentChance, as knowledge.current_chance). A word is known at a glance when its
    free flag says so (with hysteresis, above), else when its long-term chance is under 0.08 (fwlib FREE_P). A word or
-   phrase whose
-   words are all known at a glance is free: shown wherever the model offered it, bigger swaps first, at every level
-   but off, except that the random thinning keeps each with probability jitter.
+   phrase whose words are all known at a glance is free: shown wherever the model offered it, bigger swaps first, at
+   every level but off, except that the random thinning keeps each with probability jitter.
 2. The others cost the sum of p over their words not known at a glance, at their current chances; a whole sentence
    also costs its price, the chance its translation is opened if it is read (below). One with a word recency holds
    under 10% (levels.js SPACING_P, knowledge.SPACING_P), where its long-term chance isn't, waits even when budget is
@@ -370,8 +531,12 @@ words * passage words / 100 (the random thinning, below, leaves it alone), and o
    current lookup chance to the 25% target on the log-odds scale, with Thompson sampling (its current k drawn from
    N(k, var_w)) so uncertain words still get shown; for a sentence of free words, closeness of its price. A word unread
    for a while has climbed back toward its long-term chance and comes first: this is the spacing.
-3. One with an active word not yet shown today is admitted first, outside the budget (at most one per passage), so new
-   words always gather evidence; a waiting one isn't.
+3. One with a word whose delayed-start probe is due (the host sends its arm as `held:probe` or `shown:probe`) and that
+   wasn't shown today is admitted first, outside the budget, costly or free, waiting or not (at most one per passage):
+   the probe's guaranteed showing (The delayed-start experiment, below). Until NEXT_STEPS step 8 any active word not
+   yet shown that day went first like this; now a new word gathers evidence like any other learning word, by learning
+   value. A candidate with a word the host didn't send is never offered: the host leaves out the words the experiment
+   hides.
 4. B has two parts: whole sentences may spend up to SENTENCE_SHARE of it (18%), words and phrases the rest
    (levels.js, as intensity.py split says for chat). Going down the one ranking, each is admitted while its cost fits
    what is left of its part, at most PER_SENTENCE in one sentence (one up to normal, two when heavier); a whole
@@ -398,8 +563,9 @@ five, about 1.1 per 100 words (about 5.5 prose sentences in 100 words), at 0.08 
 0.18 * 0.5 / 0.08 = 1.1. (The 123 counted T3 replies held 0.73 whole sentences per 100 words, counting every word of
 the replies, code included.)
 
-The passage's plan records B, the lookups expected (the sum of p over every listed word shown, plus the price of each
-sentence shown) and the sentence price. Randomness is seeded by the passage and the day, so a page repaints the same
+The passage's plan records B, what the swaps kept within it cost (spent, from extension 0.10), the lookups expected
+(the sum of p over every listed word shown, plus the price of each sentence shown), the sentence price, and the
+delayed-start arm of each word shown that has one (arms). Randomness is seeded by the passage and the day, so a page repaints the same
 way. Changing the challenge or the level repaints open pages; new estimates apply to passages as they are painted,
 so words don't change under you while you read. Selection only chooses among the model's candidates, so a budget above
 what they can supply saturates.
@@ -452,7 +618,8 @@ for 3 learning words and, at Stage 3, one sentence in five unpriced. Learning wo
 in a sentence, where the English around each makes its meaning clear. Whole sentences, at any stage now, are short
 and plain です/ます, made of known words, particles and これ/それ only; every other sentence stays English with listed
 words as written (below Stage 3 also never conjugated and with no particles around them), and no stage may use
-Japanese outside the lists. Full is the same brief with the budget lifted: the same lists, every sentence the user
+Japanese outside the lists (the topical words below are one of them). Full is the same brief with the budget lifted:
+the same lists, every sentence the user
 could follow written whole in Japanese (learning words and common grammar allowed), and every listed word wherever the
 English has its meaning, steps included, with no cap per sentence; one line of the rules says so.
 
@@ -472,64 +639,236 @@ before it named known words was about 4,000 characters on every turn; the whole 
 1,500, and later turns stay the same, where naming every word took the whole 9,500 on every turn until all were
 named (5 turns at 1,500).
 
+Each brief also lists up to 5 topical words (weave.topical_words, TOPICAL_MAX), after the learning words: dictionary
+entries the code matcher finds in the chat's last three turns (weave.recent_turns: the prompt being sent, then the
+user's prompts and Claude's main-thread replies back to the third prompt before it, at most 8,000 characters, the
+latest kept; tool results and the hook's own text are no turns), as the reading counts find them (reading.py, under
+"Words from your reading" below), but by the main-meaning rule even with the sense flags: Claude places a topical word
+only where the English has its meaning, so it is the sense check, and the flags, strict enough for code to swap a word
+alone, call "update" as 更新 doubtful. Only words worth offering: an entry that can
+stand in for English (the dictionary's swap flag), not a number, counter or katakana word; with no spelling in use,
+known or learning, and none hidden by the delayed-start experiment (fwlib.hidden); and not known at a glance (p under
+8%: the next refresh labels it known). Each is the state's word when it has one (a word not introduced yet), else the
+entry itself, and its p is its estimate in chat when knowledge.json has one, else the starting value of a word without
+history (reading.starting_k: knowledge.prior_estimate with its dictionary entry, the prior by the word's own
+features). The ones the user's reading repeats come first (on 3 days or more of the last 30: the
+ones intake nominates), then common entries (JMdict's common flag), each by its uses in the turns, then by general
+frequency. They are listed with their odds as the learning words are, and they are costly words too: the amount of
+learning words is figured over both, and a reply may make at most half of the learning words it uses topical. At
+normal the budget buys about 2 costly words per 100 words, 6 in a 300-word reply, so 5 to choose from, at most 3 used,
+leaves the learning words, whose spacing is the plan's, most of the budget (PLAN.md row K). The line takes about 360
+characters on every turn: on the 2026-10-21 state (Stage 3, 366 known, footer glosses or `<abbr>`, with the longest
+feedback line) a whole brief went from 8,041 to 8,403 characters (8,585 to 8,948 with `<abbr>`) and a later one from
+2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is left. The hook finds them in 12 to
+49 ms on the user's chats (the reading index, below, read for the turns' words only); measured through the hook on a
+synthetic 2 MB transcript (15 runs, three times), the median hook went from 153 to 176 ms. Without the index (not
+built yet) there are none. On eight of the user's recent chats the lists were, by gloss: haiku, check, experiment,
+dictionary, wiring; environment, check, experiment, tonight, tool; check, no longer, method, science, mainly; check,
+value, fail, funds, link; check, method, secret, update, command; history, kanji, new word, check, example; together,
+history, diagnose, together with, headache; check, example, flag, normal, output. "check" (確認, a word the rules name)
+recurs as the reading repeats it; "link" as 一環 is a wrong sense Claude has to pass over, and "headache" came from a
+health chat, where the rules ask for no Japanese at all.
+
 Each brief is kept as a record of what its reply was offered: a `brief` op (hub.py), which changes nothing and goes to
 the ops table where the state lives, through the outbox with a collector. Its fields follow a web passage's plan:
 level, intensity, budget, the learning words and whole sentences asked for per 100 words (ask, sentences), the price
-of a whole sentence (sentencePrice), the costly words offered with their p, the delayed-start arms (empty until that
-experiment starts), the expected lookups (ask times their mean p, plus sentences times their price), per 100 words
+of a whole sentence (sentencePrice), the costly words offered with their p (offered: learning words; topical: the
+topical words), the delayed-start arms of the words it
+offers or asks for (arms: {word: 'shown', 'held:probe' or 'shown:probe'}), the expected lookups (ask times the mean p
+of the learning and topical words, plus sentences times their price), per 100 words
 where the web's are per passage; and the session id, the words known at a glance, whether the brief was whole, its
 length and, from Codex, the turn id. Full has no budget, ask, sentences or expected. feedback.chat_briefs reads them
 back, and feedback.brief_for finds a reply's: the last of its chat sent at or before it.
 
-The line on the last reply counts its known, learning and off-list words, its whole sentences in Japanese (a run from
-a sentence break to 。, ？ or ！ with no Latin letters in it), and its expected lookups per 100 words: p summed over the
-learning (and unlisted) words used, plus 0.27 (the neutral prior) per off-list word and the price per whole sentence,
-over its words. Known words are left out, being free, whether the brief named them or not. Japanese inside code is
+The line on the last reply counts its known, learning, topical and off-list words, its whole sentences in Japanese (a
+run from a sentence break to 。, ？ or ！ with no Latin letters in it), and its expected lookups per 100 words: p summed
+over the learning (and unlisted) words used, the p its brief offered each topical word at, plus 0.27 (the neutral
+prior) per off-list word and the price per whole sentence, over its words. The topical words are the ones the reply's
+brief offered (sessions.json keeps each chat's last list: weave.offered_topical); they are named as a class only when
+there were some, and a reply that uses more of them than learning words is told to use no more topical words than
+learning words. Known words are left out, being free, whether the brief named them or not. Japanese inside code is
 left out too: fenced blocks of backticks or tildes (an unclosed one runs to the end), code spans of any number of
 backticks, and links (fwlib.strip_code). The particles and です/ます of a whole sentence are never off the lists; other
 hiragana is, below Stage 3. Off-list Japanese gets "no Japanese outside the lists"; else over 1.5 times the budget
 asks for fewer learning words, whole sentences or both, whichever spent over 1.5 times its part, and under half of
 what the brief asks for at most for more of whichever spent under half its part.
 
-## Status from evidence
+## Labels from the model
 
-The day rules stay the main path. With a challenge set, evidence, when a word has some (an evidence weight n_w of 2
-or more), adds three moves, using an 80% bound on the fit's k and sd:
+Since NEXT_STEPS step 8 a word's status is a label the fitted model sets on each refresh (knowledge.decide,
+fwlib.label):
 
-- veto: an active word does not graduate while the lower bound of its p is above 0.3;
-- shaky -> known: when the upper bound of p is below 0.15;
-- known -> shaky: when the lower bound of p is above 0.35 and it was opened in the last 14 days.
+- known: free, known at a glance (the free flag, with its hysteresis);
+- learning (status `active`): not free, and in use: it has an added day, from being taken in, a command, or having
+  been free once;
+- new (status `queue`): neither.
 
-Safety: at most 3 evidence moves per direction per day; none within 14 days of a `known` or `learn` command for that
-word; nothing at all if the log shrank since the last refresh. Every move is recorded in knowledge.json.
+`shaky` is gone: a known word that leaves the free set is learning again. `known` and `learn` set the label at once
+(fwlib.apply_event), and the fit takes them as one-sided pseudo-observations (above), so the next refresh keeps the
+label unless the evidence outweighs the command. Seen, peek and flip events from the extension change nothing in the
+word state now: the gloss log has what the model needs, and the ops log keeps the events. The day-count rules from
+French Weave went with this: the 20 learning slots, graduation after 3 exposure days, shaky words after two peek
+days, the evidence moves that ran with a challenge set, the rule that showed a new active word first outside the
+budget, and the chat brief's recall cue.
 
-Words not introduced yet are scored but never moved. Instead, whatever the challenge, one you opened in at least 2
-messages or passages over the last 14 days (knowledge.json "recent") is introduced before the lexicon order when a
-learning slot opens, most opened first (fwlib.refill; the 20 slots and 5 new words a day stay). Two encounters, not
-two opens: opening the same word twice in one message is one look, while a chat that keeps using a word you don't
-know is worth teaching it.
+The refresh's state edit is one `labels` op (hub.py), run where the state lives (the collector with one, else this
+machine; a cache gets the result with its next pull), so the ops log keeps every label change, every word taken in
+with its draw, and every probe's outcome. A label changes only while the word's status is still the one the refresh
+saw, so a command since keeps its label; nothing changes if the log shrank since the last refresh. knowledge.json
+"moves" keeps the last 200 label changes, and "spend" what set the intake.
 
-### Rule fixes that don't need the model
+### New words: intake from the budget
 
-- A flip on a known word counts like a peek day (two such days within a week make it shaky), not instant shaky; a
-  flip on a learning word restarts its graduation clock.
-- Shaky words take learning slots: new words fill the learning set up to 20 active plus shaky words, instead of all
-  new words stopping while 5 or more are shaky. A learning or shaky word known at a glance (free in knowledge.json,
-  fwlib.settled_words) keeps its status but takes no slot; one the log has nothing on takes one, even when its prior
-  says free.
+Up to 5 new words a day (fwlib.NEW_PER_DAY) come in while the lookup budget goes unspent (knowledge.spending, unspent,
+intake_room). Unspent is read from the plans the planners logged over the last 48 hours: on the web, each passage's
+budget against what its budgeted swaps cost (the plan's spent, from extension 0.10; older plans have only expected,
+which counts every listed word shown and so overstates the spend); in chat, each brief's budget against its expected
+lookups, what its ask spends. When a surface with at least 5 such plans planned to spend under 80% of its budget, words
+come in: the planners have too few learning words to spend it on. A surface without plans says nothing, so a reader
+away for a week takes no words in. On the 2026-10-20 log the web's 174 budgeted passages planned 7.7 lookups of the
+19.9 they were allowed (39%, an upper bound), so words would come in at 5 a day: the web's pool of learning words is
+its limit (NEXT_STEPS step 9). Chat almost never leaves its budget unspent while it has learning words, since the brief
+asks for as many as spend it.
+
+Words not introduced yet are scored like any other. One you opened in at least 2 messages or passages over the last 14
+days comes in first, most opened first (fwlib.newcomers). Two encounters, not two opens: opening the same word twice
+in one message is one look, while a chat that keeps using a word you don't know is worth teaching it. Then come the
+words your reading nominates (below), and while your reading has been counted on fewer than 3 days, the lexicon order
+instead. A word the model already says is known at a glance is labeled known instead of being taken in.
+
+### Words from your reading
+
+NEXT_STEPS step 13, the chat side (reading.py). Every main-thread chat reply (Claude Code and Codex transcripts, as for
+chat exposure) is counted per dictionary entry (data/dictionary.tsv, by its JMdict id) and day, counts only:
+
+- its English through the code matcher (matcher.py, docs/matcher.md) over every entry, each with its display gloss and
+  its first sense's glosses, so the longest match wins against every word the dictionary has, verbs and set phrases
+  included ("go back" is 戻る's, so its "back" is never 奥). Code, links, `<abbr>` tags with their glosses, footer
+  gloss lines, markup and identifiers (snake_case, paths, dotted and camelCase names) are left out. A place counts for
+  at most one entry, and only where a sense check can trust it (reading.Reader.trusted): never closed-class English
+  (the matcher's function flag: "about", "one", "so"); then the most frequent option the sense flags (data/senses.tsv
+  through senses.py, NEXT_STEPS step 12) call safe for the English it matched. Without a flags file (and for the
+  chat's topical words) the most frequent option when that English is its main meaning (the first of its display
+  gloss) and no more frequent entry reaches the same English only by a rule's inflection ("used" is the past of 使う
+  before it is 中古 "used"). The index is rebuilt when the flags file appears or changes.
+- its Japanese, which Claude wrote and so is checked by a model: through its `<abbr>` tags when it has them
+  (dictionary.find on the word, its reading and its meaning, so a conjugated verb counts for its entry), else the
+  word state's words found by the script-aware matching.
+
+On the user's chats of the 30 days to 2026-10-21 (Claude Code only; a median of about 10,000 words of replies on the
+24 days with over 2,000), with the sense flags: a median of 114 entries came up a day (6 to 265), 1,101 in all and 334
+on 3 days or more, 295 of them swappable; a median of 8 swappable words not in use became eligible a day (0 to 25),
+against at most 5 taken in. Without a flags file the main-meaning rule counts about four times as many (a median of
+420 entries a day, 1,246 on 3 days or more, 725 swappable), and requiring the main meaning already halves what the
+most frequent option alone would count (a median of 1,061 entries on those 24 days against 542): mostly wrong senses
+of technical English ("script" as 本 "book / script", "data" as 資料 "materials / data", "state" as 国), and some it
+keeps ("back" as 奥, "stays", a term of this codebase, as 滞在). The English of 4,218 reply blocks is counted in 7
+seconds.
+
+The counts go where the state lives as the exposure counts do: each reply in an `exposure` op carries {entries: {entry
+id: times}}, and fwlib.fold keeps exposure.json's reading ({day: {entry id: times}}) for the last 30 days, each reply
+once (read: its digest, apart from the words' recent, so a reply counted for words before reading was counted still
+counts here once) and readingDays ({entry id: days it came up on}), which the caches get (GET /v1/state) for the
+brief's topical words; the counts by day stay where intake runs. The first scan that counts entries (scan.json has no
+"reading" yet) reads the last 30 days of transcripts again, also from before the state was created; on the user's
+chats it took 15 seconds in the background, the index's first build included, and wrote 336 KB of exposure.json, 15 KB
+of it readingDays (623 KB and 37 KB without flags). The index (reading-index.sqlite in the state dir, 17 MB) is the matcher's trie split by first word
+into SQLite, each node keeping only the hits that can decide a span; a first word whose subtree passes 2 KB (the
+forms of "be" head 60 KB each of phrases, "is wrong" and the like) is stored by its second words too, so a text reads
+only the second words it has. It is built in the background in about 5 seconds (reading.ensure), once per dictionary,
+English data and sense flags; the hook only reads it.
+
+A word is eligible once it came up on 3 different days of the last 30 (fwlib.ELIGIBLE_DAYS, READING_DAYS), can stand
+in for English (swap), isn't a number, has no spelling in use (known or learning, hidden ones included) and isn't known
+at a glance by its starting value (reading.starting_k under 8%: labeled known, not taught). The eligible ones come in
+best first (reading.nominations): by those days, most first, as in the review's simulation, where admitting words by
+the days they came up kept them coming back (PLAN.md section 6); then by their starting chance, nearest 25% first in
+steps of half a unit of log-odds, so only a real difference counts (with the prior by origin every new word ties);
+then by general frequency. A dictionary word the state doesn't have joins it when it comes in: the labels op's intake
+row carries its entry id ([ja, arm, draw, id]), and fwlib.take_in adds it after the list's words with its gloss,
+romaji, reading and id. On a copy of the 2026-10-20 snapshot with the 30 days counted with the flags, the first refresh
+took in 情報, 答え, 機械, 編集 and 削除 (information, answer, machine, edit, delete); after it 236 words were eligible
+and not in use (98 of the list's, 138 dictionary words), led by versus, experiment, wiring, together, no longer,
+history, environment, calculate, example and compare. Without the flags it took in 奥 and 滞在 among the first five,
+the wrong senses above.
+
+### The delayed-start experiment
+
+Whether being shown a word teaches it (PLAN.md section 7, row E). Each word taken in is drawn into an arm
+(fwlib.assign): held back, appearing nowhere for 21 days (fwlib.PROBE_DAY), or shown like any learning word for 14
+(SHOW_DAYS) and then paused until day 21. The draw is uniform from sha256(seed:word), the seed drawn once when the
+experiment starts (state.json "experiment"), and under one half is held. Each word's "arm" in the state has the arm,
+the draw, the day and time it came in and the day its probe is due, and later its outcome or the day the probe was
+given up. The 25 words the fixed texts name whatever the lists say (the chat brief's rules and example sentences, the
+claude.ai and ChatGPT rules: でも, だから and the like, fwlib.IN_THE_RULES) come in outside it: held back, they would
+still be named there.
+
+One predicate, fwlib.hidden (held days, or the shown arm's paused days), decides what no surface may offer.
+fwlib.introduced, which every surface's word list goes through, leaves those words out: the chat brief's lists and
+its record, the words the native host sends the browser (so neither the web model's word list nor the planner's
+candidates; levels.js planSwaps also drops any candidate with a word the host didn't send), the claude.ai and ChatGPT
+blocks (fwlib.visible), and the chat's topical words (weave.topical_words drops any entry with a spelling of a word in
+use or hidden, so a held word is never topical either). `fw.py
+status` counts hidden words without naming them, and a reply that uses one anyway counts it off the lists.
+
+From day 21 both arms are probed. On the web the host sends the word's arm as `held:probe` or `shown:probe`, and the
+first passage that can show it shows it outside the budget, once a day until one is read; in chat the brief has a
+line asking for each due word once, on top of the amounts (at most 3). The outcome is the word's first showing on or
+after its probe day that was read: opened, or a read chance from time on screen of at least 0.1
+(knowledge.probe_outcomes; episodes don't count, as they exist only because something was opened): looked up or not
+(a glance counts as looked up), with that read chance. A probe with no showing read in 14 days is given up. Then the
+word is an ordinary learning word. Every web plan and chat brief record has the arms of the words it offers.
+
+`fw.py experiment` reads it back: the words per arm and where they stand, the showings a day shown words got in their
+shown days and any showing of a hidden word (a leak) from the gloss log, the share looked up at the probe per arm
+with a two-proportion z test, and from 20 probed words a side a logistic regression of looked up on the arm with the
+read chance as a covariate; then the intake and when 80 words a side are due their probe; with `--power`, the
+simulated reader's power (tools/sim experiments.delayed_start) at the showings a day measured.
+
+A simulated check, end to end: the tools/sim reader for 7 weeks, shown only what the state offers (its visible
+learning words in chat and on the web, topical words only from words not taken in, and one web showing of each due
+probe a day), with the real refresh each morning taking 5 words a day in while the web's plans left 70% of their budget
+unspent. 245 words came in (115 held, 130 shown); over 2,482 hidden word-days no hidden word was in a chat brief's
+lists or record, the browser's words or the log. 135 probes were recorded, none before its probe day, a median of 0.43
+days after it began (at most 1.4). Shown words got 2.0 showings a day (1.1 read) in their shown days. The analysis
+read the outcome back: held words were looked up at 17 of 65 probes (26%), shown ones at 4 of 70 (6%): z -3.27, p
+0.001, and the logistic regression gives the shown arm -1.74 on the log-odds scale (se 0.59, p 0.003). At 2.0 showings
+a day the simulated power at 80 words a side is 33%, 68% and 91% as a reading strengthens memory by 0, 0.03 and 0.1
+(rho), and 4% when exposure teaches nothing: lower than PLAN.md's 73% to 95%, which assumed 4.6 showings a day. At 5
+new words a day the first 80 a side are due their probe about 8 weeks after the experiment starts.
+
+### The switch, and undoing it
+
+`fw.py relabel --dry-run` (scripts/relabel.py) computes every word's label both ways from a state dir and its log
+(`--home`), writing nothing: the old one is its status under the day rules, the new one what the next refresh would
+give it (the fit as refresh makes it, free flags carried from knowledge.json, the prior by origin). It lists the words
+that differ by kind, each with its lookup chance and the ends of its uncertainty, which way the hysteresis held it,
+and its evidence or that its prior alone decides. On a copy of the 2026-10-20 state and log, 73 of 1,766 words differ:
+49 new words would be known, all Anki cards under review with intervals of 11 to 19 days, whose prior is under 8% (35
+by their prior alone, 14 with a little evidence, such as 一番, opened 0 of 22 times shown); all 21 shaky words known
+(lookup chances 2% to 13%: the ones over 8%, such as 男 at 10%, started free on their prior's side and the hysteresis
+keeps them there); 2 known words learning (場所 and 家族, each opened once, 8% with a high end of 15 to 18%); and one
+learning word known (休む, a 20-day Anki interval, no evidence).
+
+The first refresh with the model's labels switches (fwlib.switch): each word's status, added and changed days and
+day-count fields go under its "legacy" for 30 days (fwlib.LEGACY_DAYS), and it gets its origin. To undo the switch in
+that time, `fw.py relabel --restore` (a `restore` op, where the state lives) puts them back, keeps a word taken in
+since as a learning word, and marks the state ("labels": {"from": "rules"}) so refreshes stop labeling words and
+taking new ones in; then check out the code from before the switch, which runs the day rules on the restored fields.
 
 ## Where it runs
 
 - `scripts/knowledge.py`: the model (one fit of the whole log with its recency term and clock; the online model it
   replaced, for comparison), a word's current chance, the free line, the sentence price, selection value helpers,
-  calibration, transitions.
+  calibration, and the refresh's state edit (labels, intake, probes).
 - `scripts/evaluate.py` and `tools/sim`: the evaluation harness and the simulated reader (Checking the model), run
   by hand; nothing in the live path uses them.
 - With a collector, the fit runs there, next to the log and the word state: the collector refreshes
   knowledge.json every 10 minutes, and every other machine gets it with its cached copy of the state (hub.py). The
   collector only answers requests addressed to its own host name, so a web page can't read it through DNS rebinding.
-- Without one, `fw.py refresh` fits the whole log (evaluate.extract reads it as the harness does), applies
-  transitions in a short state edit, and writes knowledge.json. It runs one at a time (a non-blocking lock). The hook
+- Without one, `fw.py refresh` fits the whole log (evaluate.extract reads it as the harness does), makes its state
+  edit (one labels op: the labels, the day's new words with their arms, the probes' outcomes), and writes
+  knowledge.json. It runs one at a time (a non-blocking lock). The hook
   starts it in the background when exposure is stale; the native host starts it in the background when knowledge.json
   is over 15 minutes old. Nothing waits on the network.
 - What a refresh costs. Calibrate's records need the model as it stood at the start of each day, so each day is
@@ -562,9 +901,8 @@ free everywhere but off. On web pages (see Choosing words) a lighter level picks
 candidates (no model call), a heavier one from the full answer (one answer and one cache for +1, +2 and full; asked for
 more on their own, the heavier levels got little more than normal, see docs/swap-prompt.md).
 
-In chat, off replaces the brief with a one-line note to reply in plain English, without the recall cue, the
-calibration line or the export notice. Full is the normal brief with the budget lifted, said in one line: a sentence
-the reader could follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in
+In chat, off replaces the brief with a one-line note to reply in plain English, without the calibration line or the
+export notice. Full is the normal brief with the budget lifted, said in one line: a sentence the reader could follow in plain Japanese (listed words plus common grammar, plain desu/masu) is written fully in
 Japanese, and the others swap in every listed word, known or learning, steps included, with no cap per sentence. The
 lists, the rules on zero-Japanese topics (health, money, safety and the like), on Japanese only in the chat reply,
 and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
@@ -602,14 +940,16 @@ further at an end restarts the clock.
 
 ## Inspecting
 
-- `fw.py knowledge`: normal's budget; the chat and form offsets and the reading model; recent evidence moves; the
-  words with the most evidence, with their lookup chance and whether they are free.
+- `fw.py knowledge`: normal's budget; the chat and form offsets and the reading model; the latest label changes; the
+  words with the most evidence, with their lookup chance and whether they are free (none the experiment hides).
 - `fw.py why WORD`: its prior mean, k and sd, its lookup chance long-term and now, whether it is known at a glance,
-  every observation with its weight, and moves. WORD may be a form of the word (なります).
-- `fw.py status`: the looked-up words lined up to come in next; `fw.py calibrate`: the model per class against what
-  happened, and the 30 words opened most in the last 30 days that the word list doesn't have, which is what chat
-  replies slip in beyond it.
-- `fw.py evaluate [--models step4,fit,today,constant]`: models scored on the log day by day (Checking the model).
+  every observation with its weight, and its label changes. WORD may be a form of the word (なります).
+- `fw.py status`: the labels' counts and where they come from, the learning words with their lookup chance and arm, how
+  many words the experiment hides (never which), the day's new words and whether the budget went unspent, and the
+  looked-up words lined up to come in next; `fw.py calibrate`: the model per class against what happened, and the 30
+  words opened most in the last 30 days that the word list doesn't have, which is what chat replies slip in beyond it.
+- `fw.py relabel --dry-run` and `fw.py experiment`: The switch, and the delayed-start experiment (above).
+- `fw.py evaluate [--models step4,fit,flat,today,constant]`: models scored on the log day by day (Checking the model).
 
 ## Checking the model
 
@@ -635,7 +975,9 @@ and seen over expected with a 90% interval from resampling days (knowledge.day_i
 bootstrap over days, given from 5 days on). Calibrated means the interval lies inside 0.83-1.2. The classes:
 
 - costly: listed words not free as the model stood (the free flag); free: the others;
-- topical: chat words found by code (NEXT_STEPS step 14); none yet;
+- topical: chat words found by code (weave.topical_words). Not sorted out yet: a topical word from the list is
+  counted as costly and one from the dictionary as off-list, until calibrate reads the brief records' topical lists
+  (NEXT_STEPS step 14's check needs it);
 - whole sentences: sentence translations (a 。 annotation, or a whole sentence glossed as one), each at its read
   chance times the surface's sentence price then;
 - off-list: words the lexicon doesn't have, at the fitted prior of a new word without an Anki card;
@@ -666,18 +1008,20 @@ score is the log loss of P(open) = read * q, with read from time on screen alone
 fixed for every model compared: the line rule depends on what was opened, so it weighs updates, never predictions.
 Chat rows count as well as web rows; episodes are fitted on but not scored. Per class (web and chat; known, learning
 and new by the word's status that day, from the word state's added and changed days; conjugated forms on their own;
-free and costly by each model's q) it gives the mean loss and seen over expected opens with an interval from
+free and costly by each model's q; first, each word's first 3 exposures, where its starting value decides most) it
+gives the mean loss and seen over expected opens with an interval from
 resampling days; for each model against the first, the paired loss difference day by day with its interval and the
 days it did better; and on a simulated log, the loss of the true chances, the floor no model can beat.
 
 A model is any object with fit(log, until), which learns from the log's events before `until`, and predict(obs),
 its P(lookup | read) for one observation; the module docstring lists what a log and an observation carry, including
 each observation's time on screen, words and depth, so a model may fit its own pace. "fit" is knowledge.Fit with its
-recency term, refitted from nothing each day, as the day's first refresh fits (evaluate.CURRENT, the model
-knowledge.py runs), each observation at its clock (the log up to its showing); "step4" is the same fit without recency
-(version 2), the first model and the reference by default; "today" is knowledge.Online, exactly the old replay's
-updates; "constant" is one chance per surface. The harness holds the reading model fixed, so the fit runs at the log's
-pace and cap there.
+recency term, refitted from nothing each day, as the day's first refresh fits, with the free flags carried from the day
+before as a refresh carries them (evaluate.CURRENT, the model knowledge.py runs), each observation at its clock (the log
+up to its showing); "step4" is the same fit without recency, the first model and the reference by default; "flat" is
+the fit without the word features, the prior by origin and Anki interval alone; "today" is knowledge.Online, exactly
+the old replay's updates; "constant" is one chance per surface. The harness holds the reading model fixed, so the fit
+runs at the log's pace and cap there.
 
 On the 2026-10-20 log (5 days scored) the fit with recency predicts as version 2 does (Recency, above). Version 2
 against today's model, in log loss per observation with a 90% interval from resampling days: all -0.0013 (-0.0035 to
@@ -690,7 +1034,7 @@ about 18 days to exclude no difference.
 
 ### The simulated reader
 
-tools/sim (`python3 tools/sim/run.py all`, about two minutes) is a reader whose memory, reading and lookup habits are
+tools/sim (`python3 tools/sim/run.py all`, about five minutes) is a reader whose memory, reading and lookup habits are
 known: each word's recall decays on an FSRS-4.5 curve and grows more after longer gaps, and a lookup lowers it; a
 word is read with the chance the replay's own formula gives (one depth per passage, so the line rule holds); a word
 read and not recognised is looked up with chance 0.9, one recognised with chance 0.02 (0.1 for a conjugated form),
@@ -702,7 +1046,9 @@ convergence of one word, recovery per class at 1, 2 and 4 weeks (and the reading
 offset against a true surface difference, the harness on a simulated log, the recency term against the truth (its
 floor, context and decay, on the reader, one whose reading refreshes recall but never strengthens it, and an inert
 one, `inert=True`, whose memory nothing changes), the calibration window, the power of the delayed-start experiment,
-and recurrence intake. `run.py log DIR` writes a simulated state dir to look at.
+recurrence intake, and starting values from the word itself (with `prior`, every word has its dictionary entry and
+words not known start from their features; Starting values from the word itself, above). `run.py log DIR` writes a
+simulated state dir to look at.
 
 tests/test_yardsticks.py holds the check every model change must pass: a word starting at 27% whose true chance is
 5%, shown 3 times a day, crosses 8% within 300 exposures. The fit passes it twice: as fitted (the prior learns from the
@@ -741,9 +1087,11 @@ What the fit does on the simulated reader (3 seeds of 28 days; `run.py recovery`
   bias; replaced by the likelihood conditioned on at least one peek.
 - Added count-only "shown" records in the browser: the peek-rate dial needs a denominator.
 - Priors no longer come from status (circular); commands are timestamped.
-- Selection ranks only learning words, explores by Thompson sampling, guarantees new words exposure, and uses a
-  stochastic budget so short passages aren't starved; candidates are not overgenerated (that hurt Gemini's fit).
-- Evidence moves use uncertainty bounds, are rate-limited, and sit on top of the day rules instead of racing them.
+- Selection ranks only learning words, explores by Thompson sampling, guarantees new words exposure (since step 8,
+  only a due delayed-start probe), and uses a stochastic budget so short passages aren't starved; candidates are not
+  overgenerated (that hurt Gemini's fit).
+- Evidence moves use uncertainty bounds, are rate-limited, and sit on top of the day rules instead of racing them
+  (until step 8, when labels came from the model and the moves and day rules went).
 - Log integrity: client ids against resends, a 7-day time window, gap-split episodes, sentence translations.
 - Deferred: retries for T3 (chat has no peek-rate dial yet), merging browser and T3 contexts. T3 shown records
   (word counts) came later, so chat messages without lookups count too.
@@ -753,13 +1101,31 @@ Version 2 (NEXT_STEPS step 4, after the review of the plan):
 - One fit of the whole log replaces the online updates and their pull toward the prior, which held a 5% word at 11%.
 - Status returns to the prior, but as a fitted feature with a prior of its own, not a fixed starting value: the Anki
   interval alone mixed learning words and the queue words chat uses (about 5% and 60% a read in simulation). It counts
-  some evidence twice (day rules use lookups too), and goes when status comes from the model (step 8).
+  some evidence twice (day rules use lookups too), and went when status came from the model (step 8): the prior takes
+  each word's origin instead, which no label sets.
+
+Step 8 (labels from the model) and step 6 (the delayed-start experiment):
+
+- Labels come from the free flag, and the prior from the origin, so the fit never reads its own output.
+- New words come in while the logged plans leave budget unspent, not into fixed slots.
+- One predicate (fwlib.hidden) gates every surface, and the words the fixed texts name stay out of the experiment.
+- The old fields stay 30 days under "legacy", and `fw.py relabel --restore` undoes the switch.
 - The reading model is chosen by the likelihood of the reading model itself (one depth a passage), on both surfaces,
   and kept at its defaults when the best pair is on the grid's edge.
 - The free line has hysteresis on each word's uncertainty, decided once per refresh and sent to every consumer.
 - The daily controller is gone: the challenge is normal's budget.
 
-Version 3 (NEXT_STEPS step 10):
+Step 13, starting values from the word itself:
+
+- The prior's word features apply to words not marked known, so known words, most of the evidence, don't flatten them.
+- Kanji known at a glance come from the last refresh's free words with evidence, never the word itself, so neither a
+  word's own flag nor a chain of priors raises a prior.
+- The coefficients are held toward no effect by an sd of 0.5, so a few words with much evidence can't move every word
+  without any.
+- The prior of any dictionary entry is computed the same way in Python and JavaScript from knowledge.json, checked on
+  shared cases.
+
+Step 10, the shared recency term:
 
 - A shared recency term, two fitted parameters (the floor and the context offset): the odds fall to the floor right
   after a read and climb back linearly to the long-term odds over a week, so how far a word falls depends on how

@@ -3,7 +3,8 @@
 
 Messages (JSON, 4-byte native-endian length prefix, one per line of conversation):
   {"type": "ping"}                      -> {"ok": true, "host": 1}
-  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status}],
+  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status,
+                                            arm?}] (none the delayed-start experiment hides: fwlib.public_state),
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
                                             (gemini_key by setup, anthropic_key by hand)}
@@ -136,12 +137,13 @@ def adaptive(state, words):
     """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
     Never waits on the network: the refresh runs in its own process. Each word gets k (its long-term knowledge), sd,
     free and read (when it was last read, for its current chance: knowledge.current_chance) from knowledge.json (fit:
-    every word of the word state), else from its fitted prior (knowledge.prior_estimate; free when that is under
-    fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors. recency: the fit's floor and
-    the days back to the long-term chance. budget: normal's lookups per 100 words, the challenge when set, else
-    intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget)."""
+    every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and origin_at;
+    free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors.
+    recency: the fit's floor and the days back to the long-term chance. budget: normal's lookups per 100 words, the
+    challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget)."""
     know = knowledge.load()
     entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    by_ja, today = {w['ja']: w for w in state['words']}, fwlib.today()
     for w in words:
         entry = entries.get(w['ja'])
         if isinstance(entry, dict) and 'k' in entry:
@@ -151,7 +153,7 @@ def adaptive(state, words):
             if isinstance(entry.get('read'), list) and entry['read']:
                 w['read'] = entry['read']
             continue
-        guess = knowledge.prior_estimate(know, w.get('status'))
+        guess = knowledge.prior_estimate(know, knowledge.origin_at(by_ja.get(w['ja']), today))
         if guess is not None:
             w['k'], w['sd'] = round(guess[0], 2), round(guess[1], 2)
             w['free'] = knowledge.sigmoid(-guess[0]) < fwlib.FREE_P

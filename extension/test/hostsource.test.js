@@ -49,6 +49,10 @@ describe('parseState', () => {
       expect(parseState({ ...REPLY, recency }).recency).toBe(null);
     }
   });
+  it('carries each word\'s delayed-start arm while it has one', () => {
+    const words = [{ ...REPLY.words[0], arm: 'held:probe' }, { ...REPLY.words[1], arm: '<b>x</b>' }];
+    expect(parseState({ ...REPLY, words }).words.map((w) => w.arm)).toEqual(['held:probe', undefined]);
+  });
   it('reads the site default setup chose; anything but "ask" means all sites', () => {
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'ask' } }).sites).toBe('ask');
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'all' } }).sites).toBe('all');
@@ -156,6 +160,12 @@ describe('interaction log', () => {
     expect(cleanInteraction({ ...shown, plan: full }, now)).toEqual({ ...shown, plan: full });
     const priced = { ...plan, sentencePrice: 0.08 }; // since whole sentences cost a price and thinning left the budget alone
     expect(cleanInteraction({ ...shown, plan: priced }, now)).toEqual({ ...shown, plan: priced });
+    // since extension 0.10: what the budgeted swaps cost, and the delayed-start arms of the words shown (none: left out)
+    const armed = { ...priced, spent: 0.1, arms: { 今: 'shown', 前: 'held:probe' } };
+    expect(cleanInteraction({ ...shown, plan: armed }, now)).toEqual({ ...shown, plan: armed });
+    expect(cleanInteraction({ ...shown, plan: { ...priced, arms: {} } }, now)).toEqual({ ...shown, plan: priced });
+    for (const arms of [[], { 今: 1 }, { 今: 'Shown!' }, null]) expect(cleanInteraction({ ...shown, plan: { ...priced, arms } }, now)).toBeNull();
+    expect(cleanInteraction({ ...shown, plan: { ...priced, spent: -1 } }, now)).toBeNull();
     for (const sentencePrice of [-0.01, 1.01, '0.08', null]) expect(cleanInteraction({ ...shown, plan: { ...plan, sentencePrice } }, now)).toBeNull();
     expect(cleanInteraction({ ...shown, plan: { ...plan, budget: 0, expected: 0 } }, now).plan).toMatchObject({ budget: 0, expected: 0 });
     for (const bad of [{ ...plan, level: 4 }, { ...plan, jitter: 1.2 }, { ...plan, limit: -1 }, { ...plan, budget: -0.1 },

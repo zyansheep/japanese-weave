@@ -2,9 +2,11 @@
 
 PLAN.md section 6 replaces the swaps a model proposes with code: an index from English to entries marks every span of
 a passage that a word could take, with all its options, and a model only settles the doubtful senses (NEXT_STEPS step
-12, not built yet). This is the first half: the index and the matcher, in JavaScript (`extension/src/matcher.js`) and
-Python (`scripts/matcher.py`), and a lab that scores it (`tools/prompt-lab/matcher-lab.mjs`). Nothing in the extension
-uses it yet; the web planner still takes the model's swaps.
+12). This is the index and the matcher, in JavaScript (`extension/src/matcher.js`) and Python (`scripts/matcher.py`),
+and a lab that scores it (`tools/prompt-lab/matcher-lab.mjs`); then the sense flags that say which of its options code
+may take alone (below). The model's check is `extension/src/verify.js`, described and measured in
+[swap-prompt.md](swap-prompt.md) ("Code finds the places, a model checks them"). Nothing in the extension uses any of it
+yet; the web planner still takes the model's swaps.
 
 ## What it does
 
@@ -52,8 +54,9 @@ A list of spans in text order:
   function }           // every word of the span is a function word ("there's" counts as "there")
 ```
 
-A span with one option and a "safe" entry can be swapped by code; the rest go to the model with their options (step
-12). The `function` flag and the shared function-word list are there for those flags.
+An option whose entry and gloss are flagged safe (below) can be swapped by code, never in a span of closed-class English;
+the rest go to the model with their options (`verify.js`). The `function` flag and the shared function-word list are
+there for those flags.
 
 The two implementations are kept the same by shared test vectors (`tests/matcher_cases.json`, run by
 `extension/test/matcher.test.js` and `tests/test_matcher.py`), and they agree on all 2,347 spans of the lab's 87
@@ -121,6 +124,68 @@ extension's own validation drops some of them when they become word swaps (`CHEC
 ("before" as 前, twice in "before bed"). 142 spans have only wrong options: there the model has to say "none". This is the work for step
 12; its bar is at most 3% wrong.
 
+## Sense flags (2026-10-21)
+
+`tools/sense-flags.mjs` marks each pair of an entry and one of its English glosses (as `glossAlternatives` writes it)
+safe or doubtful. Safe means that wherever that English appears in ordinary prose, in any of its forms, this Japanese
+word renders it correctly at least 95 times in 100, so code may take the option without a model reading the sentence.
+A gloss made only of closed-class English is doubtful by rule and never asked about. Everything else is asked of
+Claude Haiku 5.5 (low effort, thinking on) in calls of about 80 pairs, each entry once with its reading, parts of speech
+and senses, then its numbered glosses; the answer is two lists of numbers. The answers are cached
+(`~/.cache/japanese-weave-build/senses-<prompt>-<model>[-s<sample>].jsonl`), and the flags file counts as a cache too,
+so a rerun costs nothing. The flags go to `data/senses.tsv`, one line per entry with its safe and doubtful glosses;
+`extension/src/senses.js` (`senseFlag`, `safeOptions`) and `scripts/senses.py` look a span's options up, with shared
+test vectors (`tests/senses_cases.json`). A gloss the file doesn't list is doubtful.
+
+```sh
+SPEND_LOG=~/.cache/japanese-weave-build/spend/senses.jsonl ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key \
+  WORDS=<copy of state.json> ALL=1 SAMPLES=1,2,3 CONFIRM=1 bun tools/sense-flags.mjs   # DRY=1: count and estimate only
+```
+
+**One pass is not stable.** The first prompt judged each pair from the entry's senses alone. On the 1,766 words of the
+2026-10-20 snapshot (9,810 pairs: 875 closed-class, 8,935 asked) it found 2,206 safe, and in the lab the safe options
+were wrong on 17 of 140 judged hits (12.1%): 時 for "time" 7 times, 行く for "go", 日 for "day", 仕事 for "work". An
+earlier run of the same prompt on the 324 introduced words alone, in other batches, had marked those doubtful (2 wrong
+of 104). Prompt 2 adds, after each gloss, up to four other ranked entries that share that English, most frequent first
+(for 時 "time": `(also: ほど (extent; degree), 時間 (time), ころ (time; around), 際 (occasion; time) and 21 more)`), and
+says the pair is safe only where this word is the usual translation in almost every use. Two independent samples of it (the second with the entries in another order) agree on 87.8% of the
+pairs, but on only 864 of the pairs either finds safe (1,422 and 1,397). So a pair is safe only when every sample
+says so. A later sample need only ask the pairs the earlier ones found safe (`CONFIRM=1`); such a confirming pass, which
+sees only likely pairs, is somewhat more lenient than a full second sample (it kept 947 of the first sample's 1,422
+against 864), so the file uses two confirmations.
+
+The lab's check (`tools/prompt-lab/check-lab.mjs`, "Code alone"): the matcher's hits with the 324 introduced words
+whose option is flagged safe, judged against `oracle.json`, with Wilson's 90% interval:
+
+| Flags (your 1,766 words) | Safe pairs | Safe hits right / fine / wrong | Wrong | 90% interval | "use" places they cover | Cost |
+|---|---|---|---|---|---|---|
+| prompt 1, one sample | 2,206 | 114 / 9 / 17 | 12.1% | 8.3-17.4% | 109 (26.7%) | $0.145 |
+| prompt 2, sample 1 | 1,422 | 91 / 4 / 3 | 3.1% | 1.2-7.4% | 89 (21.8%) | $0.193 |
+| prompt 2, sample 2 | 1,397 | 67 / 1 / 0 | 0% | 0-3.8% | 67 (16.4%) | $0.193 |
+| prompt 2, samples 1 and 2 agree | 864 | 62 / 1 / 0 | 0% | 0-4.1% | 62 (15.2%) | |
+| prompt 2, sample 1 and a confirming pass agree | 947 | 66 / 2 / 3 | 4.2% | 1.7-10.1% | 66 (16.2%) | $0.046 |
+| **prompt 2, all three agree** (`data/senses.tsv`) | **694** | **53 / 0 / 0** | **0%** | **0-4.9%** | **53 (13.0%)** | |
+
+The check is thin: the 53 safe hits come from 20 distinct pairs (新しい "new" and 読む "read" 10 each), and every wrong
+hit above came from one or two frequent pairs (all three of the confirming pass's are 日 "day"). It shows the flags
+keep the commonest traps out; it can't show that each pair meets 95%. Read one by one, 3 of 60 random safe pairs of
+your words look doubtful to me: 時代 "epoch" (training epochs), 反応 "react" (the React framework) and 選択肢
+"options" (command-line or stock options), each a technical or proper-noun use common on the pages you read; the other
+57 hold.
+
+Safe options cover few places: 13% of the "use" places, against 80% more that only doubtful options reach, and 342 of
+the 581 doubtful spans are closed-class English. So nearly every passage still needs the model; the flags mostly spare
+it work and keep the most frequent safe words exact. Their other use is counting matches in what you read (NEXT_STEPS
+step 13), where a wrong safe flag counts a word you didn't read.
+
+**Every swappable entry.** Flagging all 17,210 swappable entries with the words in the state was estimated at $1.36
+and cost $1.69: a first sample of the 50,126 pairs beyond your words ($1.03; about 12,800 safe, a quarter, since rarer
+entries' glosses are more specific), then two confirming passes ($0.39 and $0.27), in calls of about 80 pairs, 12 s
+each. `data/senses.tsv` holds every judged pair, 59,061 of 17,297 entries, 10,583 of them safe (17.9%): 1.2 MB, 566 KB
+compressed. An extension needs only the safe glosses of the words in use. Reading 60 random safe pairs outside your
+words, 2 look doubtful to me: 速記 "shorthand", nowadays mostly "X is shorthand for Y", and 小人 "little person". Most
+are specific or several words long ("cutting board", "economic growth") and rarely turn up.
+
 ## Speed
 
 On an AMD Ryzen 5 7640U, the 79 judged passages (9 to 40 words, median 19), ranges over 3 to 6 runs:
@@ -132,7 +197,9 @@ On an AMD Ryzen 5 7640U, the 79 judged passages (9 to 40 words, median 19), rang
 | 22,000 synthetic entries | 245-295 ms | 0.05-0.10 ms; 0.10-0.42 ms | 730-830 ms | 0.16-0.24 ms; 0.46-1.55 ms |
 
 The synthetic entries (the same in both languages) draw one to three glosses of one to three words from the lexicon's
-English, so many share a word, as a dictionary's do. Python's maximum varies from run to run (with the garbage
+English, so many share a word, as a dictionary's do. On long text with the whole dictionary, Python's check of a
+candidate against the spans already taken was quadratic and took most of the time (916,000 comparisons for one
+12,000-character text); it now marks the tokens taken, which gives the same spans (49,555 on 600 replies checked). Python's maximum varies from run to run (with the garbage
 collector off as well); its slowest passage is usually the longest one, and its mean stays near 0.2 ms.
 
 ## Running it
@@ -151,8 +218,12 @@ JSON. The lab's oracle parsing is shared with `lab.mjs` (`tools/prompt-lab/oracl
 
 ## Open
 
-- Senses: the matcher marks places, not meanings; about a quarter of its judged hits are the wrong sense. Step 12's
-  flags and model check are what bring that to 3%.
+- Senses: the matcher marks places, not meanings; about a quarter of its judged hits are the wrong sense. The flags
+  (below) and the model check (swap-prompt.md) bring that under 1% in the lab.
+- Sense flags are a model's judgment, and a single pass flips on frequent pairs; three agreeing samples keep the lab's
+  safe hits right, but the lab checks only 20 distinct safe pairs. Technical and brand senses (React, epoch, options)
+  slip through; a per-site or per-topic list of such words, or a check of flags against the lookups in the log, would
+  catch them.
 - Parts of speech are guessed from the Japanese until entries carry `pos`; kanji compounds are taken as nouns, so suru
   nouns miss their verb forms (studied, explained).
 - The oracle judges only what the hints and Haiku proposed: 81 hits are unjudged (64 of them function words: "and",

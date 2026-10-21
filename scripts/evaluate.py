@@ -21,7 +21,8 @@ The interface. A model is an object with
     predict(obs)     q = P(lookup | read) for one Observation, a number in (0, 1), at obs.at on obs.surface.
 
 A Log has events (each a Command or a Group), intervals (Anki intervals by word), words (the word state's entries:
-ja, kana, status, added, changed), pace and top (the fixed reading model), and origin. knowledge.refresh fits the
+ja, kana, status, added, changed), entries (each word's dictionary entry, found when first asked for), pace and top
+(the fixed reading model), and origin. knowledge.refresh fits the
 same Log of the whole log.
 
   Command      at, word (its entry), kind: 'known' or 'learn'
@@ -34,18 +35,21 @@ same Log of the whole log.
                read; an episode has no read chance), near (the line rule alone); ms, words, share (the time on screen of
                the word's passage or paragraph, its words and how far down the word sits: read is
                knowledge._chance(ms, words, share, pace, top), for a model that fits its own pace and cap); read;
-               status (the word's that day: 'known', 'learning' or 'new', status_at)
+               status (the word's that day: 'known', 'learning' or 'new', status_at); seen (the showings and
+               episodes the word was in before this one)
 
-The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STEPS steps 4 and 10), refitted on
+The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STEPS steps 4, 10 and 13), refitted on
 everything before each day, each observation at its clock (knowledge.read_clocks: the log up to its showing); "step4",
-the same fit without recency, every observation at the word's long-term chance; "today", the online updates the fit
+the same fit without recency, every observation at the word's long-term chance; "flat", the fit with the prior by
+origin and Anki interval alone, without the word features (NEXT_STEPS step 13); "today", the online updates the fit
 replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance per surface. CURRENT names the
 model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
-the model's own q against fwlib.FREE_P), the mean log loss and seen/expected opens with a 90% interval from resampling
-days; for each other model, the paired loss difference against the first, day by day, with a 90% interval from
-resampling days (free and costly by the first model's q); on a simulated log (tools/sim), the true chances' loss too:
+the model's own q against fwlib.FREE_P; first: each word's first FIRST exposures, where its prior decides most), the
+mean log loss and seen/expected opens with a 90% interval from resampling days; for each other model, the paired loss
+difference against the first, day by day, with a 90% interval from resampling days (free and costly by the first
+model's q); on a simulated log (tools/sim), the true chances' loss too:
 the floor no model can beat.
 
   python3 scripts/evaluate.py [--home DIR] [--models step4,fit,today,constant] [--truth FILE] [--skip DAYS]
@@ -66,14 +70,15 @@ import inflection  # noqa: E402
 import knowledge  # noqa: E402
 
 READ_FLOOR = knowledge.READ_FLOOR  # the least read chance a prediction uses: an open far down still happens
-CLASSES = ('all', 'browser', 't3', 'known', 'learning', 'new', 'form', 'free', 'costly')
+FIRST = 3  # a word's first exposures, the "first" class: its showings and episodes before this many others
+CLASSES = ('all', 'browser', 't3', 'known', 'learning', 'new', 'form', 'free', 'costly', 'first')
 NAMES = {'browser': 'web', 't3': 'chat'}
 TRUTH = 'truth.jsonl'
 
 
 class Observation:
     __slots__ = ('at', 'day', 'surface', 'key', 'episode', 'word', 'written', 'form', 'y', 'weight', 'near', 'ms',
-                 'words', 'share', 'read', 'status')
+                 'words', 'share', 'read', 'status', 'seen')
 
     def __init__(self, **fields):
         for name in self.__slots__:
@@ -102,6 +107,19 @@ class Log:
         self.events, self.intervals, self.words, self.pace, self.top = events, intervals, words, pace, top
         self.origin = origin if origin is not None else self
         self._ats = [e.at for e in events]
+        self._entries = None
+
+    @property
+    def entries(self):
+        """{ja: dictionary entry or None} for the word state's words (knowledge.word_entries), found once per log
+        unless set."""
+        if self.origin._entries is None:
+            self.origin._entries = knowledge.word_entries(self.words)
+        return self.origin._entries
+
+    @entries.setter
+    def entries(self, value):
+        self.origin._entries = value
 
     def before(self, until):
         """The same log with only its events before `until` (ms)."""
@@ -138,7 +156,7 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
     lexicon word is listed, as in refresh); intervals, commands: as replay takes them."""
     match = inflection.lexicon(words).entry
     by_ja = {w['ja']: w for w in words}
-    events = []
+    events, seen = [], {}
     for at, kind, item in knowledge.timeline(rows, contexts, match, commands, now_ms):
         if kind == knowledge.COMMAND:
             events.append(Command(at, match(item['word']), item['kind']))
@@ -162,7 +180,10 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
             group.obs.append(Observation(
                 at=at, day=day, surface=surface, key=key, episode=episode, word=ja, written=written,
                 form=is_form(written, ja, by_ja.get(ja)), y=y, weight=weight, near=near, ms=ms, words=count,
-                share=share, read=knowledge._chance(ms, count, share, pace, top), status=status_at(by_ja.get(ja), day)))
+                share=share, read=knowledge._chance(ms, count, share, pace, top), status=status_at(by_ja.get(ja), day),
+                seen=seen.get(ja, 0)))
+        for o in group.obs:
+            seen[o.word] = o.seen + 1
         events.append(group)
     return Log(events, intervals, words, pace, top)
 
@@ -232,18 +253,25 @@ class Constant:
 
 
 class Fitted:
-    """The one fitter (knowledge.Fit, NEXT_STEPS steps 4 and 10): a penalized maximum-likelihood fit of every event
-    before the day, at the log's reading pace and cap. With recency each day's fit starts from nothing, from two floors,
-    as the day's first refresh does (knowledge.refresh); without, from the day before's. frozen: the shared parameters
-    and prior widths held at their priors."""
+    """The one fitter (knowledge.Fit, NEXT_STEPS steps 4, 10 and 13): a penalized maximum-likelihood fit of every
+    event before the day, at the log's reading pace and cap, with the free flags carried from the day before as a
+    refresh carries them (knowledge.free_flags, every word of the word state). With recency each day's fit starts from
+    nothing, from two floors, as the day's first refresh does (knowledge.refresh); without, from the day before's.
+    frozen: the shared parameters and prior widths held at their priors. plain: the prior without the word features
+    (by origin and Anki interval alone), the flat start the word features are compared with."""
 
-    def __init__(self, frozen=False, recency=True):
-        self.frozen, self.recency, self.last = frozen, recency, None
-        self.name = ('fit, priors held' if frozen else 'fit') + ('' if recency else ', no recency')
+    def __init__(self, frozen=False, plain=False, recency=True):
+        self.frozen, self.plain, self.recency, self.last, self.flags, self.origin = frozen, plain, recency, None, {}, None
+        self.name = ('fit, priors held' if frozen else 'flat' if plain else 'fit') + ('' if recency else ', no recency')
 
     def fit(self, log, until):
+        if log.origin is not self.origin:
+            self.origin, self.last, self.flags = log.origin, None, {}
         start = self.last.state() if self.last and not self.recency else None  # with recency, from nothing each day
-        self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, recency=self.recency)
+        self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, free=self.flags, plain=self.plain,
+                                  recency=self.recency)
+        self.flags = knowledge.free_flags(self.last, list(dict.fromkeys([w['ja'] for w in log.words] +
+                                                                         self.last.words)), self.flags)
         self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
             else {}
 
@@ -253,14 +281,15 @@ class Fitted:
 
 
 class Stale(Fitted):
-    """The one fitter without recency (NEXT_STEPS step 4's model): every observation at the word's long-term chance."""
+    """The one fitter without recency (NEXT_STEPS step 4's model, with step 13's prior): every observation at the word's
+    long-term chance."""
 
     def __init__(self):
         super().__init__(recency=False)
         self.name = 'step4'
 
 
-MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale}
+MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale, 'flat': lambda: Fitted(plain=True)}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 
@@ -322,6 +351,8 @@ def _member(obs, q, name):
         return obs.surface == name
     if name == 'form':
         return obs.form
+    if name == 'first':
+        return obs.seen is not None and obs.seen < FIRST
     if name in ('free', 'costly'):
         return (q < fwlib.FREE_P) == (name == 'free')
     return not obs.form and obs.status == name
@@ -392,7 +423,7 @@ def report_text(result, log):
              'Per class: observations, opens (a glance counts '
              f'{knowledge.GLANCE_Y}), then per model the mean log loss of P(open) = read x q and seen/expected opens '
              'with a 90% interval from resampling days. Known, learning and new: words as written; form: conjugated '
-             'forms; free and costly: by each model\'s own q.']
+             f'forms; free and costly: by each model\'s own q; first: each word\'s first {FIRST} exposures.']
     columns = names + (['truth'] if s['truth'] else [])
     header = f'  {"class":<9}{"n":>7}{"opens":>8}' + ''.join(f'  {name:<27}' for name in columns)
     lines.append(header.rstrip())

@@ -3,7 +3,6 @@ instructions. One rules source (RULES) feeds both, so the long and short version
 
 The state line keeps the format of the original word-state line: Stage | Active | Shaky | Known | Synced.
 """
-import datetime as dt
 import re
 import time
 
@@ -123,7 +122,8 @@ def state_line(state, now=None, known_max=KNOWN_LIST_MAX, dates=True, exceptions
                extras=None):
     """The word-state line: Stage | Active | Shaky | Known | Synced, in the original state-line format. Known words
     are named in the base list's order (by_lexicon), the more frequent first, or above known_max described as a band
-    (band_text: exceptions, extras)."""
+    (band_text: exceptions, extras). Words the delayed-start experiment hides read as not introduced (fwlib.visible)."""
+    state = fwlib.visible(state)
     words = state['words']
     by_added = lambda xs: sorted(xs, key=lambda w: w['added'])
     active = by_added([w for w in words if w['status'] == 'active'])
@@ -174,6 +174,7 @@ def parse_state_line(line):
 def claude_ai(state, now=None, tail=None, known_max=KNOWN_LIST_MAX, limit=CLAUDE_AI_MAX):
     """Personal preferences for claude.ai (Settings > Profile): the rules, then the state line, with as many known
     words past the band named as fit in limit characters."""
+    state = fwlib.visible(state)
     for extras in extra_counts(state) if sum(w['status'] == 'known' for w in state['words']) > known_max else [None]:
         block = rules() + '\n\n' + state_line(state, now, tail=tail, known_max=known_max, extras=extras)
         if len(block) <= limit:
@@ -184,6 +185,7 @@ def claude_ai(state, now=None, tail=None, known_max=KNOWN_LIST_MAX, limit=CLAUDE
 def chatgpt(state, now=None, limit=CHATGPT_LIMIT, tail=None):
     """Two ChatGPT custom-instructions fields, each within limit: (about you: the state line without dates, known
     words trimmed to fit; how to respond: the short rules)."""
+    state = fwlib.visible(state)
     known = sum(w['status'] == 'known' for w in state['words'])
     if known > KNOWN_LIST_MAX:  # the known words past the band, as many as fit, then fewer exceptions
         tries = ([dict(extras=e) for e in extra_counts(state)]
@@ -199,9 +201,3 @@ def chatgpt(state, now=None, limit=CHATGPT_LIMIT, tail=None):
 
 def mark_exported(state, target):
     state['exported'] = {'at': time.time(), 'version': fwlib.version(state), 'target': target}
-
-
-def log_chat_day(state, day=None):
-    """Opt-in: count today as an "assumed" exposure day for every learning word (chats that can't be scanned)."""
-    day = day or dt.date.today().isoformat()
-    return sum(fwlib.apply_event(state, w['ja'], 'assumed', day) for w in state['words'] if w['status'] in ('active', 'shaky'))
