@@ -1,6 +1,7 @@
 """What the native host gives the browser extension's web pipeline (scripts/webdata.py, fw_host.py): each word's
 glosses, safe glosses and entry id; the safe glosses of every swappable entry for counting what is read; and the web's
-reading counts, into the same daily store as chat's, here or on a collector. Run: python -m unittest discover -s tests"""
+reading counts, into the same daily store as chat's, here or on a collector.
+Run: python -m unittest discover -s tests"""
 import json
 import os
 from pathlib import Path
@@ -62,7 +63,8 @@ class WordData(Home):
         self.assertEqual(words['時']['glosses'], ['time', 'when'])  # as the matcher indexes them
         self.assertEqual(words['時']['safe'], [])  # a common trap: the model checks every one
         self.assertEqual(words[rare['ja']]['id'], rare['id'])
-        self.assertTrue(all(isinstance(w['glosses'], list) and set(w['safe']) <= set(w['glosses']) for w in words.values()))
+        self.assertTrue(all(isinstance(w['glosses'], list) and set(w['safe']) <= set(w['glosses'])
+                            for w in words.values()))
         self.assertEqual(reply['reading'], {'version': webdata.reading_version()})
         self.assertLess(len(json.dumps(reply, ensure_ascii=False).encode()), 1024 * 1024)  # a native message's limit
 
@@ -126,7 +128,8 @@ class Counts(Home):
         again = fw_host.handle({'type': 'reading', 'passages': [self.passage('web:aaaa0000aaaa0000')]})
         self.assertEqual(again, {'ok': True, 'taken': 1})  # sent again (a lost reply, another day): counted once
         index = fwlib.read_json(fwlib.home() / 'exposure.json')
-        self.assertEqual(index['reading'], {yesterday: {'1361110': 1}, today: {'1361110': 2, '1464900': 1, '1214000': 1}})
+        self.assertEqual(index['reading'], {yesterday: {'1361110': 1},
+                                            today: {'1361110': 2, '1464900': 1, '1214000': 1}})
         self.assertEqual(index['readingDays'], {'1361110': 2, '1464900': 1, '1214000': 1})
         self.assertEqual(fw_host.handle({'type': 'reading', 'passages': bad}), {'ok': True, 'taken': 0})
         self.assertFalse(fw_host.handle({'type': 'reading', 'passages': 'nope'})['ok'])
