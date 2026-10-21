@@ -304,8 +304,9 @@ class Collector(Home):
         self.server_home = self.home / 'collector-home'
         with fwlib.using_home(self.server_home):
             hub.submit({'kind': 'seed', 'n': 40})
-        handler = type('TestHandler', (collector.Handler,), {'db': self.server_home / 'interactions.sqlite',
-                                                             'home': self.server_home, 'log_message': lambda *args: None})
+        quiet = {'db': self.server_home / 'interactions.sqlite', 'home': self.server_home,
+                 'log_message': lambda *args: None}
+        handler = type('TestHandler', (collector.Handler,), quiet)
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         fwlib.home().mkdir(parents=True, exist_ok=True)

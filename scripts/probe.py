@@ -483,10 +483,11 @@ def habit_text(habit):
         return ('  Lookup habit: none of the words you marked not known were shown in the last '
                 f'{HABIT_DAYS} days, so nothing to measure yet.')
     rough = ' Few, so it is rough.' if habit['showings'] < 30 or habit['words'] < 5 else ''
+    showings, words = habit['showings'], habit['words']
     return (f'  Lookup habit: you looked up {percent(habit["c"])} of the showings you likely read of words you '
-            f'marked not known (90% interval {span(habit["low"], habit["high"])}), from {habit["showings"]} '
-            f'showing{"s" if habit["showings"] != 1 else ""} of {habit["words"]} word{"s" if habit["words"] != 1 else ""}'
-            f' in the {HABIT_DAYS} days before.{rough}')
+            f'marked not known (90% interval {span(habit["low"], habit["high"])}), from {showings} '
+            f'showing{"s" if showings != 1 else ""} of {words} word{"s" if words != 1 else ""} in the {HABIT_DAYS} '
+            f'days before.{rough}')
 
 
 def history_text(state):

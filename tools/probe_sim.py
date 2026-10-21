@@ -127,8 +127,9 @@ def main():
     p.add_argument('--state', metavar='DIR', help='also a reader who knows the known words of this state dir')
     args = p.parse_args()
     frame = probe.Frame()
-    print(f'Population: {len(frame.items)} words in {len(frame.bands)} bands of '
-          f'{", ".join(str(len(b)) for b in frame.bands)} words; {probe.WORDS} words and {probe.FAKES} made up a probe.')
+    sizes = ', '.join(str(len(b)) for b in frame.bands)
+    print(f'Population: {len(frame.items)} words in {len(frame.bands)} bands of {sizes} words; {probe.WORDS} words and '
+          f'{probe.FAKES} made up a probe.')
     for r50, guess in PROFILES:
         name = f'r50 {r50}' + (f', says yes to {100 * guess:.0f}% of unknown and made-up words' if guess else '')
         print(line(name, profile(frame, r50, guess, args.reps, args.seed)))
