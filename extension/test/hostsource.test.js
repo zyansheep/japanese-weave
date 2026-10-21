@@ -23,7 +23,7 @@ describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
     expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, rate: null,
-      intensity: null, words: REPLY.words });
+      recency: null, intensity: null, words: REPLY.words });
     const intensity = { level: -1, until: 1800000000000, at: 1799999000000 };
     expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, source: 'shortcut' } } }).intensity).toEqual(intensity);
     for (const level of [-3, 3]) { // off and full
@@ -40,6 +40,14 @@ describe('parseState', () => {
     // the web's price of a whole sentence, once knowledge.json has one: lookups per sentence read, 0 to 1 (0: none yet)
     expect(parseState({ ...REPLY, sentencePrice: 0.12 }).sentencePrice).toBe(0.12);
     for (const sentencePrice of [0, -0.1, 1.5, '0.1', NaN, null]) expect(parseState({ ...REPLY, sentencePrice }).sentencePrice).toBe(0);
+    // recency: when each word was last read, and the fit's floor, for its current chance (levels.js currentChance)
+    const read = [[1800000000000, 0.7], [1799990000000, 0.3]];
+    const timed = parseState({ ...REPLY, words: [{ ...REPLY.words[0], k: 1, sd: 1, read: [...read, [1, 2], ['x', 0.1]] }],
+      recency: { floor: -3.9, days: 7 } });
+    expect([timed.words[0].read, timed.recency]).toEqual([read, { floor: -3.9, days: 7 }]);
+    for (const recency of [{ floor: 'low', days: 7 }, { floor: -3.9, days: 0 }, null]) {
+      expect(parseState({ ...REPLY, recency }).recency).toBe(null);
+    }
   });
   it('reads the site default setup chose; anything but "ask" means all sites', () => {
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'ask' } }).sites).toBe('ask');

@@ -558,21 +558,45 @@ export function jitterFor(seed) {
 const round3 = (x) => Math.round(x * 1000) / 1000;
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 
+// Recency, as ../scripts/knowledge.py recency_log_odds and current_chance say (keep them the same): right after a word
+// is read its lookup chance falls to the fit's floor and climbs back to its long-term chance (k's) over recency.days.
+// read: [time in ms, chance that showing was the last one the word was read in] for its showings of those days, from
+// the host. A word known better than the floor keeps its long-term chance. Without recency or read, the long-term.
+export const SPACING_P = 0.10; // a costly word waits while recency holds it under this and its long-term chance isn't
+const SOFT_MIN = 8;
+const DAY_MS = 86_400_000;
+export function currentChance(k, read, now, recency) {
+  if (!recency || !Array.isArray(read) || !read.length || !Number.isFinite(now)) return peekChance(k);
+  let u = Math.max(0, 1 - sum(read.map(([, c]) => c))); // never read in those days: back at the long term
+  for (const [at, c] of read) u += c * Math.min(1, Math.max(0, (now - at) / (recency.days * DAY_MS)));
+  if (u >= 1) return peekChance(k);
+  const o = Math.exp(-Math.max(-30, Math.min(30, k)));
+  const floor = Math.exp(Math.max(-30, Math.min(30, recency.floor)));
+  const m = (floor ** -SOFT_MIN + o ** -SOFT_MIN) ** (-1 / SOFT_MIN);
+  const odds = m + (o - m) * u;
+  return odds / (1 + odds);
+}
+
 // A swap's listed words with their estimates: the host's k and sd (knowledge.json), else the prior for the word's status,
 // and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance: the
-// host's free flag (knowledge.json, with hysteresis) when it sends one, else p under FREE_P; a whole
-// sentence also costs its translation's price. expected: the lookups predicted if it is read, every word and the
-// translation.
-function costOf(s, words, price) {
+// host's free flag (knowledge.json, with hysteresis, judged on the long-term chance) when it sends one, else p under
+// FREE_P; they cost their current chance at now (currentChance), and one that recency holds under SPACING_P, where its
+// long-term chance isn't, waits (PLAN.md section 5, rule 2); a whole sentence also costs its translation's price.
+// expected: the lookups predicted if it is read, every word and the translation.
+function costOf(s, words, price, now, recency) {
   const listed = (s.words || [s.word || s.f]).map((ja) => {
     const w = words.get(ja);
     const k = Number.isFinite(w?.k) ? w.k : w?.status === 'known' ? KNOWN_PRIOR_K : PRIOR_K;
-    const p = peekChance(k);
-    return { ja, w, k, sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p, free: typeof w?.free === 'boolean' ? w.free : p < FREE_P };
+    const long = peekChance(k);
+    const free = typeof w?.free === 'boolean' ? w.free : long < FREE_P;
+    const p = free ? long : currentChance(k, w?.read, now, recency);
+    return { ja, w, k: Math.log((1 - p) / p), sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p, free,
+      waits: !free && p < SPACING_P && long >= SPACING_P };
   });
   const due = listed.filter((x) => !x.free);
   const translation = s.kind === 'sentence' ? price : 0;
-  return { s, listed, due, cost: sum(due.map((x) => x.p)) + translation, expected: sum(listed.map((x) => x.p)) + translation };
+  return { s, listed, due, waits: due.some((x) => x.waits), cost: sum(due.map((x) => x.p)) + translation,
+    expected: sum(listed.map((x) => x.p)) + translation };
 }
 
 // A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates, a
@@ -585,10 +609,13 @@ function costOf(s, words, price) {
 // is not a whole sentence, is free: kept wherever the model offered it, bigger swaps first, but for the passage's random
 // thinning (jitter, 1 for half the passages, see jitterFor), which keeps each with that chance. The others spend the
 // budget: budgetPer100 (the level's, intensityBudget) per 100 words of the passage, whatever the thinning. A word or
-// phrase costs the lookup chances of its words not known at a glance, a whole sentence sentencePrice (SENTENCE_PRICE
-// without one from the host) and the chances of its words not known at a glance. They go by learning value, a lookup
-// chance near TARGET_P: for the least-known word in them, judged on k drawn from N(k, sd) so uncertain words still get
-// shown, or for a sentence of free words, its price. One with an active word not shown today goes first, outside the
+// phrase costs the current lookup chances (at now, currentChance with the host's recency) of its words not known at a
+// glance, a whole sentence sentencePrice (SENTENCE_PRICE without one from the host) and those chances of its words. One
+// with a word read so recently that its chance is under SPACING_P, where its long-term chance isn't, waits. The others
+// go by learning value, a current lookup chance near TARGET_P: for the least-known word in them now, judged on its
+// current k drawn from N(k, sd) so uncertain words still get shown, or for a sentence of free words, its price. A word
+// unread for a while has drifted up toward its long-term chance and comes first: the spacing. One with an active word
+// not shown today goes first, outside the
 // budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
 // sentence, a whole sentence only alone in its sentence (a full sentence passes to the next candidate). Whole sentences
 // spend up to SENTENCE_SHARE of the budget and words and phrases the rest, each going down the one ranking until the
@@ -601,7 +628,7 @@ function costOf(s, words, price) {
 // per-sentence cap, density cap or thinning, and a Japanese word again where the passage says its English again, as
 // the full prompt asks.
 export function planSwaps(level, swaps, text, sharedWords, { density = 0, budgetPer100, seed = 0, shownToday = [],
-  intensity = 0, jitter = 1, sentencePrice } = {}) {
+  intensity = 0, jitter = 1, sentencePrice, now = Date.now(), recency = null } = {}) {
   const words = new Map((sharedWords || []).map((w) => [w.ja, w]));
   const full = intensity >= INTENSITY_FULL;
   const price = sentencePrice > 0 && sentencePrice <= 1 ? sentencePrice : SENTENCE_PRICE;
@@ -612,7 +639,7 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
     const key = JSON.stringify([s.kind || 'word', s.o, s.f, s.ctx || '']);
     const place = distinct.has(key) ? null : locate({ text: String(text) }, s.o, s.ctx);
     distinct.add(key);
-    if (place) items.push({ ...costOf(s, words, price), place, sentence: sentenceAt(place.start, starts) });
+    if (place) items.push({ ...costOf(s, words, price, now, recency), place, sentence: sentenceAt(place.start, starts) });
   }
   const share = full ? 1 : jitter;
   const budget = full ? Infinity : intensity <= INTENSITY_OFF ? 0
@@ -628,7 +655,7 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
   const thinning = seededRandom((seed ^ 0x85ebca6b) >>> 0);
   const shown = new Set(shownToday);
   const priceK = Math.log((1 - price) / price);
-  const ranked = full ? [] : items.filter((c) => c.cost > 0);
+  const ranked = full ? [] : items.filter((c) => c.cost > 0 && !c.waits);
   for (const c of ranked) {
     const lead = c.due.length ? c.due.reduce((a, b) => (b.k < a.k ? b : a)) : null;
     c.value = -Math.abs((lead ? lead.k + lead.sd * normal(random) : priceK) - TARGET_K);

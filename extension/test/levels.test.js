@@ -2,7 +2,8 @@ import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
   numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced, intensityLabel, intensityFactor, INTENSITY_LEVELS, INTENSITY_NAMES,
-  answerLevel, INTENSITY_FULL, intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K, SENTENCE_PRICE, SENTENCE_SHARE,
+  answerLevel, INTENSITY_FULL, intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K, SENTENCE_PRICE, SENTENCE_SHARE, SPACING_P,
+  currentChance,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -191,6 +192,34 @@ describe('the lookup budget', () => {
     expect(spent.reduce((a, b) => a + b, 0)).toBeLessThan(1 + Math.max(...spent)); // only the last may go over
     expect(pick(learning, { budgetPer100: 0.5 }).swaps).toEqual(pick(learning, { budgetPer100: 0.5 }).swaps); // same passage, same day
     expect(pick(learning, { budgetPer100: 0, intensity: -2 }).swaps.map((s) => s.word)).toEqual(['l5', 'l6', 'l7', 'l8', 'l9']);
+  });
+  test('recency: a learning word read an hour ago is neither free nor picked; one unread for its half-life is', () => {
+    // PLAN.md section 5, rules 1 and 2. 結局's long-term chance is 25% (k 1.1, not free); right after a read its chance
+    // falls to the floor (2%) and climbs back over a week, halfway (in odds above the floor) at 3.5 days.
+    const now = 1_800_000_000_000;
+    const recency = { floor: Math.log(0.02), days: 7 };
+    const hour = 3_600_000;
+    const learning = (ago) => ({ ...word('結局', 1.1, 'active'), free: false, read: [[now - ago, 1]] });
+    const known = { ...word('今', 4, 'known'), free: true, read: [[now - hour, 1]] };
+    const plan = (ago) => pick([learning(ago), known], { budgetPer100: 2, now, recency, shownToday: ['結局'] });
+    expect(currentChance(1.1, learning(hour).read, now, recency)).toBeLessThan(0.03); // near the floor
+    expect(plan(hour).swaps.map((s) => s.word)).toEqual(['今']); // waits, though the budget has room; 今 stays free
+    expect(pick([learning(hour), known], { budgetPer100: 2, now, recency }).swaps.map((s) => s.word)).toEqual(['今']); // not
+    // even as an active word not shown on the web today
+    expect(plan(hour).plan.expected).toBeCloseTo(p(4), 3); // the waiting word isn't shown, so costs nothing
+    const half = currentChance(1.1, learning(3.5 * 24 * hour).read, now, recency);
+    expect(half).toBeGreaterThan(SPACING_P);
+    expect(half / (1 - half)).toBeCloseTo((0.02 + (Math.exp(-1.1) - 0.02) / 2), 2); // halfway back, in odds
+    expect(plan(3.5 * 24 * hour).swaps.map((s) => s.word)).toEqual(['結局', '今']); // picked, at its current chance
+    expect(plan(3.5 * 24 * hour).plan.expected).toBeCloseTo(half + p(4), 3);
+    expect(currentChance(1.1, learning(8 * 24 * hour).read, now, recency)).toBeCloseTo(p(1.1), 9); // a week on: long term
+    // read probably not at all, or without the host's recency: its long-term chance
+    expect(currentChance(1.1, [[now - hour, 0]], now, recency)).toBeCloseTo(p(1.1), 9);
+    expect(currentChance(1.1, learning(hour).read, now, null)).toBeCloseTo(p(1.1), 9);
+    // a word known better than the floor has no recency; one whose long-term chance is under SPACING_P never waits
+    expect(currentChance(5, [[now - hour, 1]], now, recency)).toBeCloseTo(p(5), 3);
+    const near = { ...word('多分', 2.3, 'shaky'), free: false, read: [[now - hour, 1]] }; // 9%: cheap, not free
+    expect(pick([near], { budgetPer100: 2, now, recency, shownToday: ['多分'] }).swaps.map((s) => s.word)).toEqual(['多分']);
   });
   test('a known word without an estimate is free; a learning one, or one the word state lacks, is not', () => {
     const list = [word('k0', undefined, 'known'), word('s0', undefined, 'shaky'), word('a0', undefined, 'active')];
