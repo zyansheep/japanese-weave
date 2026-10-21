@@ -168,7 +168,10 @@ whose option is flagged safe, judged against `oracle.json`, with Wilson's 90% in
 
 The check is thin: the 53 safe hits come from 20 distinct pairs (新しい "new" and 読む "read" 10 each), and every wrong
 hit above came from one or two frequent pairs (all three of the confirming pass's are 日 "day"). It shows the flags
-keep the commonest traps out; it can't show that each pair meets 95%.
+keep the commonest traps out; it can't show that each pair meets 95%. Read one by one, 3 of 60 random safe pairs of
+your words look doubtful to me: 時代 "epoch" (training epochs), 反応 "react" (the React framework) and 選択肢
+"options" (command-line or stock options), each a technical or proper-noun use common on the pages you read; the other
+57 hold.
 
 Safe options cover few places: 13% of the "use" places, against 80% more that only doubtful options reach, and 342 of
 the 581 doubtful spans are closed-class English. So nearly every passage still needs the model; the flags mostly spare
@@ -209,6 +212,10 @@ JSON. The lab's oracle parsing is shared with `lab.mjs` (`tools/prompt-lab/oracl
 
 - Senses: the matcher marks places, not meanings; about a quarter of its judged hits are the wrong sense. The flags
   (below) and the model check (swap-prompt.md) bring that under 1% in the lab.
+- Sense flags are a model's judgment, and a single pass flips on frequent pairs; three agreeing samples keep the lab's
+  safe hits right, but the lab checks only 20 distinct safe pairs. Technical and brand senses (React, epoch, options)
+  slip through; a per-site or per-topic list of such words, or a check of flags against the lookups in the log, would
+  catch them.
 - Parts of speech are guessed from the Japanese until entries carry `pos`; kanji compounds are taken as nouns, so suru
   nouns miss their verb forms (studied, explained).
 - The oracle judges only what the hints and Haiku proposed: 81 hits are unjudged (64 of them function words: "and",
