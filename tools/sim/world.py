@@ -20,6 +20,15 @@ exp(day_sd z - day_sd^2 / 2), z one draw a day, each chance at most 1; in chat, 
 surfaces alike). So the true P(lookup | read) is (1 - R) min(1, factor habit) + R min(1, factor check).
 A whole sentence in Japanese is read in English (its translation opened) with chance `sentence_p`.
 
+Reading time (`speed`, off by default: then time on screen is drawn before the reading and nothing read changes it).
+With speed = {unknown, japanese, dwell, group}, after a passage or message is read its logged time on screen grows, per
+passage (web) or paragraph (chat), by pace times (unknown for each word read and not recognised, looked up or not, plus
+japanese for each Japanese word read), plus each lookup's gloss time when dwell is set, and the whole is scaled by
+exp(group z), z one draw per web page or chat message. The read chances were already drawn from the time before it
+grew, so the reading is the same as without speed (the same seed reads and looks up the same words); only the logged
+times differ, and the replay's read chance from them is a little high where unknown words were met. Its draws come
+from a generator of their own.
+
 The world: known words (Anki words whose intervals track their stability, and the lexicon's top words without one),
 learning words that come in from the front of the queue a day at a time and graduate after learn_days, queue words
 that chat uses with the conversation's topic, words off the list, and whole sentences. REALISTIC volumes match the
@@ -89,6 +98,10 @@ DEFAULTS = dict(
     # starting values from the word itself: None, or the true coefficients on knowledge.word_features' scale, with
     # 'base' (k0 of the reference word) and 'noise' (the SD of a word's own part); extra dictionary entries in the queue
     prior=None, extra=0,
+    # reading time (the module docstring): None, or {'unknown': words of time per word read and not recognised,
+    # 'japanese': words of time per Japanese word read, 'dwell': whether lookups' gloss time is in the time on screen,
+    # 'group': the sd of a web page's or chat message's own pace on log time}
+    speed=None,
     extra_shown=True,           # False: the extra entries are never shown (chat's topical words and intake leave them
                                 # out), to see how the prior reaches words unlike any with evidence
     # the monthly probe (scripts/probe.py): answered the evening before each of these days (logs.simulate; the number
@@ -118,7 +131,7 @@ def day_name(at):
 class TrueWord:
     """One word's true memory and what the word state says about it."""
     __slots__ = ('row', 'ja', 'kind', 'S', 'last', 'ease', 'interval', 'form', 'weight', 'status', 'added',
-                 'changed', 'born', 'reads', 'lookups', 'shown', 'frozen', 'k0')
+                 'changed', 'born', 'reads', 'lookups', 'shown', 'frozen', 'k0', 'unknown')
 
     def __init__(self, row, kind, S, last, ease, interval=None):
         self.row, self.ja, self.kind, self.S, self.last, self.ease = row, row['ja'], kind, S, last, ease
@@ -127,6 +140,7 @@ class TrueWord:
         self.reads = self.lookups = self.shown = 0
         self.frozen = None
         self.k0 = None  # with starting values from features: the true k on the first day (World._start_from_features)
+        self.unknown = 0.0  # at its last read, 1 if not recognised (an inert reader's: the chance it wasn't)
 
     def recall(self, t, cfg=None):
         """R at t; for an inert reader, R when the word was first shown, for good."""
@@ -152,8 +166,11 @@ class TrueWord:
             looked = rng.random() < (1 - R) * min(1.0, factor * cfg['habit']) + R * min(
                 1.0, factor * (cfg['form_check'] if form else cfg['check']))
             self.lookups += looked
+            self.unknown = 1 - R
             return looked
-        if rng.random() < R:
+        recognised = rng.random() < R
+        self.unknown = 0.0 if recognised else 1.0
+        if recognised:
             looked = rng.random() < min(1.0, factor * (cfg['form_check'] if form else cfg['check']))
             if cfg['rho'] > 0:
                 gain = cfg['rho'] * math.exp(W8) * (11 - DIFFICULTY) * self.S ** -W9 * (math.exp(W10 * (1 - R)) - 1)
@@ -308,6 +325,8 @@ class World:
         self.view = 0
         self.probes, self.frame, self._by_id = [], None, None
         self.probe_rng = random.Random(f'probe {c["seed"]}')  # its own draws: the reading is the same with or without
+        self.speed_rng = random.Random(f'speed {c["seed"]}')  # and the reading time's
+        self._paces = {}  # each web page's or chat message's own pace (cfg speed's group)
 
     def _introduce(self, born, day):
         """The front of the queue joins the learning set."""
@@ -572,6 +591,8 @@ class World:
         """Who read what and looked up what, at the showing's time: each mark's truth and outcome."""
         c, rng = self.cfg, self.rng
         if not s.marks:
+            if c['speed']:
+                self._slow(s)
             return
         context = s.as_context()
         line = knowledge._line_height([m.y for m in s.marks])
@@ -592,6 +613,35 @@ class World:
             m.dwell = int(math.exp(math.log(1500) + 0.5 * rng.gauss(0, 1))) if m.looked else 0
             if m.looked and m.dwell < knowledge.GLANCE_MS:
                 m.dwell = knowledge.GLANCE_MS  # a lookup is an open: glances are left out of the simulated reader
+        if c['speed']:
+            self._slow(s)
+
+    def _slow(self, s):
+        """The reading time (cfg speed, the module docstring): what was read adds to the time on screen of its
+        passage or paragraph, and a page's or message's own pace scales it."""
+        c, speed = self.cfg, self.cfg['speed']
+        extra = {}  # the passage's (None) or each paragraph's (its y) added ms
+        for m in s.marks:
+            if not m.was_read:
+                continue
+            words = 0.0 if m.kind == 'sentence' else speed.get('japanese', 0.0) + speed.get('unknown', 0.0) * \
+                m.word.unknown
+            ms = c['pace'] * words + (m.dwell if speed.get('dwell') else 0)
+            where = None if s.surface == 'browser' else next(
+                (y for y, height, _size in s.paragraphs if y <= m.y < y + height), None)
+            extra[where] = extra.get(where, 0.0) + ms
+        group = s.view if s.surface == 'browser' else (s.view, s.context)
+        if group not in self._paces:
+            self._paces[group] = math.exp(speed.get('group', 0.0) * self.speed_rng.gauss(0, 1))
+        scale = self._paces[group]
+        if s.surface == 'browser':
+            s.active = int((s.active + extra.get(None, 0.0)) * scale)
+            return
+        done = set()
+        for stay in s.stays:
+            added = extra.get(stay['y'], 0.0) if stay['y'] not in done else 0.0
+            done.add(stay['y'])
+            stay['ms'] = int((stay['ms'] + added) * scale)
 
     def state(self):
         """The word state as state.json keeps it, every word with its status and the days it was added and changed."""
