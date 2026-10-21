@@ -102,17 +102,21 @@ describe('choosing swaps', () => {
     expect(planSwaps(2, swaps, text, words, { density: 25 }).swaps.map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
     expect(planSwaps(2, swaps, text, words, { density: 25 }).plan.limit).toBe(3);
   });
-  test('the random thinning keeps each known word with chance jitter, and scales the budget', () => {
+  test('the random thinning keeps each free word with chance jitter, from JITTER_MIN (0.2) to 1, and leaves the budget', () => {
     const one = swaps.slice(0, 1); // でも, known
     const kept = Array.from({ length: 2000 }, (_, seed) => planSwaps(2, one, text, words, { seed, jitter: 0.6 }).swaps.length);
     expect(kept.reduce((a, b) => a + b, 0) / kept.length).toBeCloseTo(0.6, 1);
-    expect(planSwaps(2, one, text, words, { seed: 1, jitter: 0.6 }).plan).toMatchObject({ jitter: 0.6, budget: 0.036 });
+    expect(planSwaps(2, one, text, words, { seed: 1, jitter: 0.6 }).plan).toMatchObject({ jitter: 0.6, budget: 0.06 });
     expect(planSwaps(2, one, text, words, { seed: 1, intensity: -2 }).swaps).toHaveLength(1); // jitter 1: no thinning
-    const seeds = Array.from({ length: 2000 }, (_, i) => jitterFor(i * 7919));
+    const seeds = Array.from({ length: 4000 }, (_, i) => jitterFor(i * 7919));
     const thinned = seeds.filter((j) => j < 1);
     expect(thinned.length / seeds.length).toBeGreaterThan(0.45);
     expect(thinned.length / seeds.length).toBeLessThan(0.55);
+    expect(JITTER_MIN).toBe(0.2);
     expect(Math.min(...thinned)).toBeGreaterThanOrEqual(JITTER_MIN);
+    expect(Math.min(...thinned)).toBeLessThan(0.22); // the whole range, not just its top
+    expect(Math.max(...thinned)).toBeGreaterThan(0.97);
+    expect(thinned.reduce((a, b) => a + b, 0) / thinned.length).toBeCloseTo(0.6, 1);
     expect(jitterFor(42)).toBe(jitterFor(42)); // a passage repaints the same way
   });
 
@@ -219,11 +223,29 @@ describe('the lookup budget', () => {
     const share = counts.filter((n) => n === 1).length / counts.length; // one word 40% of the time
     expect(share).toBeGreaterThan(0.3);
     expect(share).toBeLessThan(0.5);
-    const plan = pick(halves, { budgetPer100: 0.8, intensity: 1, jitter: 0.5 }).plan; // 200 words at 0.8 per 100, halved
-    expect(plan.budget).toBe(0.8);
+    const plan = pick(halves, { budgetPer100: 0.8, intensity: 1, jitter: 0.5 }).plan; // 200 words at 0.8 per 100, thinned or not
+    expect(plan.budget).toBe(1.6);
     expect(plan.expected).toBe(plan.limit * 0.5);
-    expect(plan.limit).toBeGreaterThanOrEqual(1);
-    expect(plan.limit).toBeLessThanOrEqual(2);
+    expect(plan.limit).toBeGreaterThanOrEqual(3);
+    expect(plan.limit).toBeLessThanOrEqual(4);
+  });
+  test('the thinning takes free words only: the budget and what it pays for are the same in thinned and untouched passages', () => {
+    const learning = Array.from({ length: 6 }, (_, i) => word(`l${i}`, 0.4 + 0.3 * i)); // lookup chances 0.4 to 0.13
+    const known = Array.from({ length: 6 }, (_, i) => word(`k${i}`, 4, 'known'));
+    const list = [...learning, ...known];
+    const budgeted = (r) => r.swaps.filter((s) => s.word.startsWith('l')).map((s) => s.word);
+    let free = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const untouched = pick(list, { seed, budgetPer100: 0.6 });
+      expect(untouched.swaps.filter((s) => s.word.startsWith('k'))).toHaveLength(6);
+      for (const jitter of [0.2, 0.55]) {
+        const thinned = pick(list, { seed, budgetPer100: 0.6, jitter });
+        expect(thinned.plan.budget).toBe(untouched.plan.budget); // 0.6 per 100 words of 240
+        expect(budgeted(thinned)).toEqual(budgeted(untouched));
+        if (jitter === 0.2) free += thinned.swaps.length - budgeted(thinned).length;
+      }
+    }
+    expect(free / (300 * 6)).toBeCloseTo(0.2, 1); // each free word kept with chance jitter
   });
   test('at most perSentence budgeted swaps in one sentence; a full sentence passes to the next candidate', () => {
     // three learning words in the first sentence, the best ones, and a worse one in the second; a known word in the first

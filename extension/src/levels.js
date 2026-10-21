@@ -527,11 +527,14 @@ const FULL_PLAN_FACTOR = 5;
 // Sentences, then phrases, then words, so where a bigger swap and the smaller ones inside it are both offered, the
 // bigger one is placed (text.js applySwaps skips a swap overlapping one placed before it).
 const SIZE = { sentence: 0, phrase: 1 };
-// Random thinning, so the effect of the amount of Japanese on reading can be measured (knowledge.py calibrate): half the
-// passages are left alone, the other half keep a random share of their swaps between JITTER_MIN and 1. Seeded by the
-// passage and day like everything else here, so a passage repaints the same way.
+// Random thinning of free words, so what words known at a glance cost in reading time and lookups can be measured
+// (knowledge.py calibrate): half the passages are left alone, the other half keep each free swap with a random share
+// between JITTER_MIN and 1. The budget and the swaps it pays for are the same either way. Until 2026-10-20 the share was
+// 0.5 to 1 and scaled the budget too: 5.3% Japanese against 6.5%, too little contrast to read, and no way to tell what
+// free words cost from what the budgeted ones do. Seeded by the passage and day like everything else here, so a
+// passage repaints the same way.
 export const JITTER_SHARE = 0.5;
-export const JITTER_MIN = 0.5;
+export const JITTER_MIN = 0.2;
 export function jitterFor(seed) {
   const random = seededRandom((seed ^ 0x9e3779b9) >>> 0);
   return random() < JITTER_SHARE ? 1 : Math.round((JITTER_MIN + (1 - JITTER_MIN) * random()) * 100) / 100;
@@ -558,8 +561,8 @@ function costOf(s, words) {
 // A swap whose listed words are all known at a glance (mean lookup chance under FREE_P) is free: kept wherever the
 // model offered it, but for the passage's random thinning (jitter, the share kept: 1 for half the passages, see
 // jitterFor), which keeps each with that chance. The others spend the budget: budgetPer100 (the level's,
-// intensityBudget) times jitter per 100 words of the passage, each costing the lookup chances of its words not known
-// at a glance. They go by learning value, a lookup chance near TARGET_P for the least-known word in them, judged on k
+// intensityBudget) per 100 words of the passage, whatever the thinning, each costing the lookup chances of its words
+// not known at a glance. They go by learning value, a lookup chance near TARGET_P for the least-known word in them, judged on k
 // drawn from N(k, sd) so uncertain words still get shown. One with an active word not shown today goes first, outside
 // the budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
 // sentence (a full sentence passes to the next candidate); the first that doesn't fit gets in with probability
@@ -588,7 +591,7 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
   if (intensity <= INTENSITY_OFF) return planOf([], 0, 0);
   const cap = density > 0 ? swapTarget(text, density) : Infinity;
   const per100 = Number.isFinite(budgetPer100) ? Math.max(0, budgetPer100) : intensityBudget(intensity);
-  const budget = (per100 * jitter * wordCount(text)) / 100;
+  const budget = (per100 * wordCount(text)) / 100;
   const random = seededRandom(seed);
   const thinning = seededRandom((seed ^ 0x85ebca6b) >>> 0);
   const offered = [...new Set(swaps)];

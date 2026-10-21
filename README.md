@@ -212,9 +212,9 @@ screen while you were reading.
 **For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours,
 in the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut
 (for chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each
-press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
-default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
-down or up.
+press is logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a
+glance, so `fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed
+and opens by how much Japanese a passage had, and how often you turned it down or up.
 
 **In chat, a level is a lookup budget**: how many lookups per 100 words you put up with, spent only on words you
 don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,

@@ -135,7 +135,7 @@ candidate, so changing estimates, the budget or the level never pays for new mod
 
 A level is a lookup budget (scripts/intensity.py BUDGETS, mirrored in levels.js): the lookups per 100 words the reader
 puts up with, spent only on words not known at a glance. Per passage, with B = the level's budget per 100 words *
-jitter (the random thinning, below) * passage words / 100, and one use per Japanese word:
+passage words / 100 (the random thinning, below, leaves it alone), and one use per Japanese word:
 
 1. Each candidate's listed words get their estimate (k and sd from knowledge.json; without one, k = 2.5, fwlib
    KNOWN_PRIOR_K, for a known word, else the neutral prior) and a mean lookup chance p. A candidate whose words all
@@ -247,11 +247,13 @@ learning. The rules on zero-Japanese topics (health, money, safety and the like)
 and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
 turned off on its own (threads.py) stays off at any level.
 
-On the web, half the passages are also thinned at random by a share between 50% and 100% (levels.js jitterFor), which
-keeps each free word with that chance and scales the budget by it, and every passage's shown record carries its plan:
-the level, its factor, the share, the swaps kept, the candidates offered, the budget and the lookups expected.
-Because the thinning is random, comparing thinned and untouched passages measures what the amount
-of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
+On the web, half the passages are also thinned at random by a share between 20% and 100% (levels.js jitterFor), which
+keeps each free word with that chance; the budget and the words it pays for are the same in thinned and untouched
+passages. Every passage's shown record carries its plan: the level, its factor, the share, the swaps kept, the
+candidates offered, the budget and the lookups expected. Because the thinning is random, comparing thinned and
+untouched passages measures what words known at a glance alone do to reading time and opens (PLAN.md row F). Until
+2026-10-20 the share ran from 50% to 100% and scaled the budget too: thinned passages came to 5.3% Japanese against
+6.5%, too little contrast to read, and what free words cost was mixed with what the budgeted ones do. The comparison counts only passages with candidates (thinning can't
 change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
 `set` op, so the ops log says how often and when the default felt wrong; one into off counts as lighter and one
 into full as heavier, like any other step. Presses less than a minute apart count as one decision, judged by where
