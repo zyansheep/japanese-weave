@@ -982,3 +982,146 @@ def prior_reach(seeds=(1, 2, 3), days=28, extra=2000, truth=None, bands=(1, 3000
         if cells:
             lines.append(f'  ranks {low:,} to {high - 1:,} ({sums[(high, "flat")][0]} words): ' + '; '.join(cells))
     return '\n'.join(lines)
+
+
+# ---- reading speed as evidence ----
+
+SPEED_TRUTH = {'unknown': 10.0, 'japanese': 1.0, 'dwell': True, 'group': 0.3}  # world.py cfg speed: 10 words of time
+SPEED_WORLDS = (  # (name, cfg): the term must find nothing in the first and its effect in the others
+    ('no effect: time grows with each Japanese word read and each gloss opened, not with words not recognised',
+     {'speed': dict(SPEED_TRUTH, unknown=0.0)}),
+    ('a word read and not recognised costs 10 words of time (3 s), looked up 90% of the time',
+     {'speed': SPEED_TRUTH}),
+    ('the same, looked up 50% of the time', {'speed': SPEED_TRUTH, 'habit': 0.5}),
+    ('a word read and not recognised costs 40 words of time (12 s), looked up 90% of the time',
+     {'speed': dict(SPEED_TRUTH, unknown=40.0)}),
+)
+SPEED_CLASSES = ('all', 'known', 'learning', 'new', 'first', 'browser', 't3')
+
+
+class _SpeedOracle:
+    """The speed term's first stage (knowledge.Fit._speed_alone) with every word at its true chance when shown (the
+    truth's P(lookup | read)) instead of the fit's: the parameters the term would find if it knew every word's chance,
+    the yardstick for the fitted ones (unknown is in units of that chance: a reader who looks up half the words not
+    recognised has twice as many unknown words behind a chance as one who looks up all of them)."""
+    _speed_pass, _speed_alone = knowledge.Fit._speed_pass, knowledge.Fit._speed_alone
+    _timed, _temper = False, None
+
+    def __init__(self, log, until, truth):
+        self.names, self.priors, self.group_sd = knowledge.SPEED_NAMES, knowledge.SPEED_SHARED, knowledge.SPEED_GROUP_SD
+        self.units, groups, self.k = [], {}, []
+        for event in log.events:
+            if event.at >= until:
+                break
+            for ms, count, japanese, listed, _active, _dwell in getattr(event, 'units', ()):
+                if ms < knowledge.SPEED_THROUGH * knowledge.by_surface(log.pace, event.surface) * count:
+                    continue
+                t3 = event.surface == 't3'
+                ws = []
+                for ja in listed:
+                    q = truth.get((event.key[0], event.key[1], event.key[2], ja), (0.5, 0))[0]
+                    q = min(1 - 1e-6, max(1e-6, q))
+                    ws.append(len(self.k))
+                    self.k.append(math.log((1 - q) / q))
+                group = groups.setdefault(event.key if t3 else event.key[:2], len(groups))
+                decay = 0.5 ** ((until - event.at) / DAY / knowledge.EVIDENCE_DAYS)
+                self.units.append((t3, group, math.log(ms), math.log(count / knowledge.SPEED_WORDS), japanese / count,
+                                   1 / count, tuple(ws), decay * knowledge.SPEED_WEIGHT))
+        self.alpha = [0.0] * len(groups)
+        self.group_units = [[] for _ in groups]
+        for j, unit in enumerate(self.units):
+            self.group_units[unit[1]].append(j)
+
+    def fit(self):
+        """(theta, sd): the term's parameters and their sd."""
+        theta = self._speed_alone(self.k, [self.priors[name][0] for name in self.names])
+        return theta, [self.speed_sd[name] for name in self.names]
+
+
+def _speed_member(cls):
+    if cls == 'first':
+        return _first
+    if cls in ('browser', 't3'):
+        return lambda o: o.surface == cls
+    if cls == 'all':
+        return lambda o: True
+    return lambda o: not o.form and o.status == cls
+
+
+def speed_run(seed, days, cfg):
+    """One simulated log of a world (cfg): the fit with the speed term against the fit without it, day by day ({class:
+    [(sum of loss differences, n)] by day}), and expected lookups per class (each model's, the truth's, those seen);
+    and the term on the whole log, fitted and with every word's chance known (_SpeedOracle)."""
+    with tempfile.TemporaryDirectory() as home:
+        world, _ = logs.simulate(home, days, seed=seed, **cfg)
+        now = world.time()
+        log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
+        truth = evaluate.load_truth(Path(home) / logs.TRUTH)
+        models = [evaluate.MODELS['nospeed'](), evaluate.MODELS['speed']()]
+        result = evaluate.evaluate(log, models, truth)
+        fit = knowledge.Fit(log, now, speed=True)
+        oracle = _SpeedOracle(log, now, truth)
+        theta, sd = oracle.fit()
+        rows = result['rows']
+        return {'seed': seed, 'fit': fit.speed_summary(),
+                'seconds': (fit.seconds, knowledge.Fit(log, now, speed=False).seconds),
+                'oracle': {n: (v, s) for n, v, s in zip(oracle.names, theta, sd)}, 'oracle group': oracle.group_sd,
+                'daily': {cls: list(_daily(rows, _speed_member(cls)).values()) for cls in SPEED_CLASSES},
+                'expected': {cls: [sum(r[1][0] for r in rows if _speed_member(cls)(r[0])),
+                                   sum(r[1][1] for r in rows if _speed_member(cls)(r[0])),
+                                   sum(r[3] for r in rows if _speed_member(cls)(r[0])),
+                                   sum(r[0].y for r in rows if _speed_member(cls)(r[0]))] for cls in SPEED_CLASSES}}
+
+
+def speed(seeds=(1, 2, 3), days=28, worlds=SPEED_WORLDS, processes=1):
+    """Reading speed as evidence (NEXT_STEPS step 19; knowledge.SPEED) on the simulated reader with a true reading-time
+    process (world.py cfg speed): log ms of a passage or paragraph grows with each Japanese word read (1 word of time),
+    each word read and not recognised (`unknown` words of time, looked up or not), each gloss's time open, and a page's
+    or message's own pace (sd 0.3 on log time). For each world: the term's parameters on the whole log (unknown and
+    japanese with their sd, and the groups' sd) against the same term's with every word's true chance known (the
+    oracle); how much of the words' information came from time (most: the largest share of any word's); the speed
+    fit's log loss against the fit without it, day by day (90% interval from resampling days, days better), per class
+    and seed, then pooled, and the days a 90% interval needs to exclude no difference, from the spread of the daily
+    differences; and expected lookups over the truth's, both fits. processes: runs at once (seeds and worlds)."""
+    tasks = [(seed, days, cfg) for _name, cfg in worlds for seed in seeds]
+    if processes > 1:
+        import multiprocessing
+        with multiprocessing.Pool(processes) as pool:
+            runs = pool.starmap(speed_run, tasks)
+    else:
+        runs = [speed_run(*task) for task in tasks]
+    lines = [speed.__doc__.split(' For each world')[0].strip() + f' {len(seeds)} seeds of {days} days each.']
+    for w, (world_name, _cfg) in enumerate(worlds):
+        lines.append(f'{world_name}:')
+        mine = runs[w * len(seeds):(w + 1) * len(seeds)]
+        for run in mine:
+            f, o = run['fit'], run['oracle']
+            cell = lambda name: (f'{f["shared"][name]:+.2f} ({f["sd"][name]:.2f}), oracle {o[name][0]:+.2f} '
+                                 f'({o[name][1]:.2f})')
+            lines.append(f'  seed {run["seed"]}: unknown {cell("unknown")}; japanese {cell("japanese")}; '
+                         f'length web {f["shared"]["length web"]:.2f}, chat {f["shared"]["length chat"]:.2f}; groups\' '
+                         f'sd {f["group"]:.2f} (oracle {run["oracle group"]:.2f}); {f["units"]} passages and '
+                         f'paragraphs; time\'s share of the words\' information {f["share"]:.2%}, at most '
+                         f'{f["most"]:.0%}; a fit from nothing {run["seconds"][0]:.1f} s (without the term '
+                         f'{run["seconds"][1]:.1f} s)')
+            cells = []
+            for cls in SPEED_CLASSES:
+                mean, interval, better, n = _paired(run['daily'][cls])
+                if mean is None:
+                    continue
+                interval = f' ({interval[0]:+.4f} to {interval[1]:+.4f})' if interval else ''
+                cells.append(f'{evaluate.NAMES.get(cls, cls)} {mean:+.4f}{interval} {better}/{n}')
+            lines.append('    speed minus nospeed, log loss per observation by day: ' + '; '.join(cells))
+        lines.append('  pooled over seeds: a day\'s mean difference (sd), days better, and the days a 90% interval '
+                     'needs to exclude 0; expected lookups over the truth\'s without and with the term:')
+        for cls in SPEED_CLASSES:
+            xs = [d / n for run in mine for d, n in run['daily'][cls]]
+            sums = [sum(run['expected'][cls][i] for run in mine) for i in range(4)]
+            if len(xs) > 2:
+                m = stats.mean(xs)
+                sd = stats.mean([(x - m) ** 2 for x in xs]) ** 0.5
+                need = (1.645 * sd / m) ** 2 if m else float('inf')
+                ratio = f'{sums[0] / sums[2]:.2f} and {sums[1] / sums[2]:.2f}' if sums[2] else '-'
+                lines.append(f'    {evaluate.NAMES.get(cls, cls):<9} {m:+.5f} ({sd:.5f}) over {len(xs)} days, '
+                             f'better on {sum(1 for x in xs if x < 0)}; {need:,.0f} days; {ratio}')
+    return '\n'.join(lines)
