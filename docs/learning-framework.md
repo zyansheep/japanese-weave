@@ -1,8 +1,8 @@
 # A unified learning model, walked through
 
-Status: background, written 2026-10-16. The current plan, built from this, is [plan.md](plan.md). Since this was
-written, chat logs every reply that was on screen with its word count, the levels became lookup budgets, and the
-log holds a few hundred lookups.
+Status: background, written 2026-10-16. The current plan, built from this, is [PLAN.md](../PLAN.md). Since this
+was written, chat replies can carry their word count (so far only the backfilled ones do), the levels became lookup
+budgets, and the log holds a few hundred lookups.
 
 ## 1. Two jobs: measuring and deciding
 

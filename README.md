@@ -204,7 +204,7 @@ glance (under an 8% chance) are free and appear wherever they fit, and the budge
 chance, at most one per sentence, on web pages and in chat. A challenge (`fw.py challenge 1.5`, the command above,
 or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget until your real
 rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works this way
-and what comes next: [docs/plan.md](docs/plan.md).
+and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.

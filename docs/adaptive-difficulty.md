@@ -4,7 +4,7 @@ Japanese Weave estimates, for every word, how likely you are to open its gloss, 
 It uses those estimates three ways: to decide which words appear on a page or in a reply, to spend each intensity
 level's lookup budget (lookups per 100 words, on words not known at a glance), and to move words between learning
 and known faster and more reliably than day counts alone. The plan behind it, the simplifications it rests on and
-what comes next: [plan.md](plan.md).
+what comes next: [PLAN.md](../PLAN.md).
 
 This is version 1. A first draft was reviewed adversarially (statistics and engineering); the decisions that
 review forced are listed at the end.
