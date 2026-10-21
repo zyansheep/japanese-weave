@@ -145,11 +145,17 @@ def _slim(node, entries, kinds, safe):
             'hits': sorted(best.values(), key=lambda h: h['entry'])}
 
 
-def build(path=None, d=None):
-    """Builds the index (default: INDEX in the state dir) from the dictionary d (default data/dictionary.tsv), written
-    whole under another name and moved in place, so a reader never sees half of it. Returns its path."""
+def load_dictionary():
+    """The dictionary the counts are of (DICTIONARY), read once per process."""
     import dictionary
-    d = d or dictionary.load()
+    return dictionary.load(DICTIONARY)
+
+
+def build(path=None, d=None):
+    """Builds the index (default: INDEX in the state dir) from the dictionary d (default DICTIONARY), written whole
+    under another name and moved in place, so a reader never sees half of it. Returns its path."""
+    import dictionary
+    d = d or load_dictionary()
     path = Path(path or fwlib.home() / INDEX)
     entries = index_entries(d)
     safe = safe_pairs(entries)
@@ -256,13 +262,16 @@ class Reader:
             return None
         try:
             con = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
-            row = con.execute("SELECT value FROM meta WHERE key = 'signature'").fetchone()
-            if not row or row[0] != signature():
-                con.close()
-                return None
-            return cls(con)
-        except (sqlite3.Error, ValueError, EOFError, TypeError, KeyError):
+        except sqlite3.Error:
             return None
+        try:
+            row = con.execute("SELECT value FROM meta WHERE key = 'signature'").fetchone()
+            if row and row[0] == signature():
+                return cls(con)
+        except (sqlite3.Error, ValueError, EOFError, TypeError, KeyError):
+            pass
+        con.close()
+        return None
 
     def close(self):
         self.con.close()
@@ -357,19 +366,24 @@ class Tally:
     """Counts the entries each chat reply shows (count), for fwlib.read_replies. The index and the dictionary are
     opened on the first reply, so a scan with nothing new costs nothing."""
 
-    def __init__(self, words):
+    def __init__(self, words, reader=None, d=None):
         self.words = {w['ja']: w for w in words}
-        self.reader = self.d = None
+        self.reader, self.d = reader, d
         self.ids = {}  # a state word -> its entry id (or None)
 
     def _open(self):
         if self.reader is None:
-            import dictionary
             ensure()
             self.reader = Reader.open()
             if self.reader is None:
                 raise RuntimeError('no reading index')
-            self.d = dictionary.load()
+        if self.d is None:
+            self.d = load_dictionary()
+
+    def close(self):
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
 
     def _id(self, word, reading='', meaning=''):
         e = self.d.find(word, reading, meaning)
@@ -400,3 +414,70 @@ class Tally:
             if self.ids[ja] is not None:
                 out.append(self.ids[ja])
         return out
+
+
+# ---- intake: the words your reading nominates ----
+
+def starting_k(know, entry, word=None):
+    """A word's knowledge on the log-odds scale before it comes in (k: its lookup chance is sigmoid(offset - k)): its
+    estimate in knowledge.json when the word state has it (every word of the state is scored, new ones too), else the
+    fitted prior of a new word without an Anki card (knowledge.prior_estimate), else the neutral prior. The prior by
+    the word's own features (NEXT_STEPS step 13, first half) takes the second place once it gives any dictionary entry
+    a starting value."""
+    import knowledge
+    estimate = ((know or {}).get('words') or {}).get(word['ja'] if word else entry['ja'])
+    if word is not None and isinstance(estimate, dict) and isinstance(estimate.get('k'), (int, float)):
+        return estimate['k']
+    prior = knowledge.prior_estimate(know or {}, 'new')
+    return prior[0] if prior else knowledge.prior(None)
+
+
+def is_number(entry):
+    """A number and a counter (二人, 三時), which the weave leaves in digits (probe.is_number)."""
+    import probe
+    return probe.is_number(entry)
+
+
+STEP = 0.5  # the starting chance ranks nominations in steps of this much log-odds from knowledge.TARGET_P
+
+
+def nominations(state, exposure, know=None, today=None, d=None):
+    """The words your reading nominates for intake, best first (fwlib.newcomers), or None while the counts cover fewer
+    than fwlib.ELIGIBLE_DAYS days, when no word could be eligible yet (intake keeps the word list's order).
+
+    Eligible: a dictionary entry that can stand in for English (swap), not a number, that came up on ELIGIBLE_DAYS
+    different days of the last READING_DAYS (exposure: the exposure index, fwlib.reading_days), with no spelling in
+    use (a known or learning word of the state, hidden ones included) and not known at a glance by its starting chance
+    (starting_k under fwlib.FREE_P: such a word is labeled known, not taught). Ranked by those days, most first (as in
+    the simulation behind PLAN.md section 6, where days ranked first kept the admitted words coming back), then its
+    starting chance, nearest knowledge.TARGET_P first in steps of STEP log-odds (so only a real difference counts:
+    with the prior by origin every new word ties), then general frequency (the dictionary's rank). Each is the state's
+    word when it has one (in the queue), else the entry as a word with its id (fwlib.take_in adds it)."""
+    import knowledge
+    today = today or fwlib.today()
+    first = fwlib.add_days(today, 1 - fwlib.READING_DAYS)
+    counted = [day for day in (exposure.get('reading') or {}) if first <= day <= today]
+    if len(counted) < fwlib.ELIGIBLE_DAYS:
+        return None
+    d = d or load_dictionary()
+    by_key = {}
+    for w in state['words']:
+        by_key.setdefault(fwlib.key(w['ja']), w)
+    ranked, seen = [], set()
+    for id_, days in fwlib.reading_days(exposure, today).items():
+        e = d.get(int(id_)) if days >= fwlib.ELIGIBLE_DAYS and str(id_).isdigit() else None
+        if e is None or not e['swap'] or e['ja'] in seen or is_number(e):
+            continue
+        mine = [w for w in (by_key.get(fwlib.key(s)) for s in [e['ja']] + e['forms']) if w is not None]
+        if any(w['status'] != 'queue' for w in mine):
+            continue
+        word = mine[0] if mine else {'ja': e['ja'], 'en': e['en'], 'hint': e['romaji'], 'kana': e['kana'],
+                                     'id': e['id']}
+        p = knowledge.sigmoid(-starting_k(know, e, mine[0] if mine else None))
+        if p < fwlib.FREE_P:
+            continue
+        seen.add(e['ja'])
+        band = round(abs(knowledge.logit(p) - knowledge.logit(knowledge.TARGET_P)) / STEP)
+        ranked.append((-days, band, e['rank'], word))
+    ranked.sort(key=lambda r: r[:3])
+    return [r[3] for r in ranked]

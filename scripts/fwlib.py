@@ -40,6 +40,10 @@ ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Ank
 # The day-count rules from French Weave (learning slots, exposure days, shaky words) are gone; their fields stay under
 # each word's "legacy" for LEGACY_DAYS after the switch, so it can be undone (restore).
 NEW_PER_DAY = 5         # new words a day at most, taken in while the lookup budget goes unspent (knowledge.intake_room)
+# Words from your reading (reading.py): a dictionary entry is eligible to come in once it came up on ELIGIBLE_DAYS
+# different days of the last READING_DAYS (reading.nominations).
+READING_DAYS = 30
+ELIGIBLE_DAYS = 3
 LOOKED_UP = 2           # a word not introduced yet, opened in this many messages or passages in 14 days, comes first
 STATUSES = ('queue', 'active', 'known')  # the labels: new, learning, known ('shaky' is from before the switch)
 LEGACY_FIELDS = ('days', 'assumed', 'peeks', 'last_bad')  # the day-count rules' fields, kept under "legacy"
@@ -553,13 +557,18 @@ def restore(state, day):
 
 # ---- intake ----
 
-def newcomers(state, looked=None, free=()):
+def newcomers(state, looked=None, free=(), nominated=None):
     """The words that may be taken in next, in order: not introduced yet (queue) and not known at a glance (free:
-    those are labeled known instead), the ones you looked up first (looked_up: most opened first), then the word
-    list's order."""
+    those are labeled known instead), the ones you looked up first (looked_up: most opened first), then the words
+    your reading nominates (nominated, reading.nominations: best first, each a queue word of the state or a dictionary
+    entry with its id), else, while your reading isn't counted (nominated None), the word list's order."""
     looked = looked_up() if looked is None else looked
     queue = [w for w in state['words'] if w['status'] == 'queue' and w['ja'] not in free]
-    return sorted(queue, key=lambda w: -looked.get(w['ja'], 0))
+    if nominated is None:
+        return sorted(queue, key=lambda w: -looked.get(w['ja'], 0))
+    first = sorted((w for w in queue if looked.get(w['ja'])), key=lambda w: -looked[w['ja']])
+    taken = {w['ja'] for w in first}
+    return first + [w for w in nominated if w['ja'] not in taken and w['ja'] not in free]
 
 
 def taken_today(state, day):
@@ -569,13 +578,20 @@ def taken_today(state, day):
 
 
 def take_in(state, entries, day, at=None):
-    """Takes words in, [[ja, arm, draw]]: each a learning word from today, its origin learning, and in the delayed-start
-    experiment with its arm, draw, day and time (at, ms) and the day its probe is due (assign; arm None: outside it).
-    Counts toward the day's NEW_PER_DAY (state["intake"]). Returns the words taken in."""
+    """Takes words in, [[ja, arm, draw]] or [[ja, arm, draw, entry id]]: each a learning word from today, its origin
+    learning, and in the delayed-start experiment with its arm, draw, day and time (at, ms) and the day its probe is
+    due (assign; arm None: outside it). A word the state doesn't have yet comes from the dictionary by its entry id
+    (dictionary_word), after the list's words. Counts toward the day's NEW_PER_DAY (state["intake"]). Returns the
+    words taken in."""
     by_ja = {w['ja']: w for w in state['words']}
     done = []
-    for ja, arm, u in entries:
+    for ja, arm, u, *rest in entries:
         w = by_ja.get(ja)
+        if w is None and rest:
+            w = dictionary_word(rest[0], ja)
+            if w is not None:
+                state['words'].append(w)
+                by_ja[ja] = w
         if w is None or w['status'] != 'queue':
             continue
         set_status(w, 'active', day)
@@ -586,6 +602,16 @@ def take_in(state, entries, day, at=None):
         done.append(ja)
     state['intake'] = [day, taken_today(state, day) + len(done)]
     return done
+
+
+def dictionary_word(id_, ja=None):
+    """A dictionary entry (data/dictionary.tsv, as reading.py counts it) as a word not introduced yet, with its entry id,
+    or None when there is no such entry (or it is written otherwise than ja)."""
+    import reading
+    e = reading.load_dictionary().get(id_)
+    if e is None or (ja is not None and e['ja'] != ja):
+        return None
+    return dict(blank({'ja': e['ja'], 'en': e['en'], 'hint': e['romaji'], 'kana': e['kana']}), origin='new', id=e['id'])
 
 
 # ---- the delayed-start experiment (PLAN.md section 7) ----
@@ -851,9 +877,13 @@ def local_day(stamp):
         return str(stamp)[:10]
 
 
-def read_replies(words, offsets, roots=None, start='0000-00-00'):
+def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, since=None):
     """New transcript lines since offsets (path -> byte offset, mutated): [{d: digest, day, words: [ja]}] for the
-    main-thread replies that use any of the words. Code, links and replies about the plugin itself don't count."""
+    main-thread replies from `start` on that use any of the words. Code, links and replies about the plugin itself
+    don't count. With a tally (reading.Tally), each reply from `since` on (default start) also carries the dictionary
+    entries it shows, {entries: {id: times}}, and comes with them even when it uses none of the words (then from before
+    `start`, with words empty)."""
+    since = start if since is None else since
     roots = [Path(r) for r in ([roots] if isinstance(roots, (str, Path)) else roots)] if roots else transcript_roots()
     words = [w if isinstance(w, dict) else {'ja': w} for w in words]
     written = {w['ja']: forms(w['ja'], w.get('kana', '')) for w in words}
@@ -866,12 +896,13 @@ def read_replies(words, offsets, roots=None, start='0000-00-00'):
             compiled[w['ja']] = pattern(w['ja'], w.get('kana', ''))
         return bool(compiled[w['ja']].search(prose))
 
-    since = time.mktime(time.strptime(start, '%Y-%m-%d')) if start > '0000-00-00' else 0
+    first = min(start, since) if tally is not None else start
+    oldest = time.mktime(time.strptime(first, '%Y-%m-%d')) if first > '0000-00-00' else 0
     out = []
     for path in (p for root in roots if root.exists() for p in root.rglob('*.jsonl')):
         name = str(path)
         try:
-            if 'subagents' in path.parts or path.stat().st_mtime < since:
+            if 'subagents' in path.parts or path.stat().st_mtime < oldest:
                 continue
             offset = offsets.get(name, 0)
             if path.stat().st_size < offset:
@@ -880,12 +911,16 @@ def read_replies(words, offsets, roots=None, start='0000-00-00'):
             continue
         lines = Lines(path, offset)
         for day, text in replies(lines):
-            if day < start or 'Japanese Weave' in text:
+            counted = tally is not None and day >= since
+            if (day < start and not counted) or 'Japanese Weave' in text:
                 continue
             prose = norm(CODE.sub(' ', text))
             used = [w['ja'] for w in words if uses(w, prose)]
-            if used:
-                out.append({'d': hashlib.sha1(text.encode()).hexdigest()[:16], 'day': day, 'words': used})
+            entries = tally.count(text, used) if counted else {}
+            if (used and day >= start) or entries:
+                reply = {'d': hashlib.sha1(text.encode()).hexdigest()[:16], 'day': day,
+                         'words': used if day >= start else []}
+                out.append(dict(reply, entries=entries) if entries else reply)
         offsets[name] = lines.offset
     for name in [k for k in offsets if not os.path.exists(k)]:
         del offsets[name]
@@ -894,12 +929,21 @@ def read_replies(words, offsets, roots=None, start='0000-00-00'):
 
 def fold(index, found, words=()):
     """Adds replies (read_replies) to the exposure index (mutated and returned): {words: {ja: {n, days}}, recent:
-    {digest: day}}. A reply already counted (same digest: forked and resumed chats copy old replies, and two machines
-    may send the same one) counts once. words: entries to create at zero, so every listed word has a count."""
+    {digest: day}, reading: {day: {entry id: times}}, read: {digest: day}, readingDays: {entry id: days}}. A reply
+    already counted (same digest: forked and resumed chats copy old replies, and two machines may send the same one)
+    counts once: in words by recent, in reading by read, so a reply counted for words before reading was counted still
+    counts there once. reading keeps the last READING_DAYS days, and readingDays is how many of them each entry came up
+    on (reading_days). words: entries to create at zero, so every listed word has a count."""
     counts, recent = index.setdefault('words', {}), index.setdefault('recent', {})
+    reading, read = index.setdefault('reading', {}), index.setdefault('read', {})
     for ja in words:
         counts.setdefault(ja, {'n': 0, 'days': []})
     for reply in found:
+        if reply.get('entries') and reply['d'] not in read:
+            read[reply['d']] = reply['day']
+            day = reading.setdefault(reply['day'], {})
+            for id_, n in reply['entries'].items():
+                day[id_] = day.get(id_, 0) + n
         if reply['d'] in recent:
             continue
         recent[reply['d']] = reply['day']
@@ -910,8 +954,25 @@ def fold(index, found, words=()):
                 entry['days'] = sorted(entry['days'] + [reply['day']])[-60:]
     cutoff = (dt.date.today() - dt.timedelta(days=DEDUPE_DAYS)).isoformat()
     index['recent'] = {k: v for k, v in recent.items() if v >= cutoff}
+    first = add_days(today(), 1 - READING_DAYS)
+    index['reading'] = {day: n for day, n in sorted(reading.items()) if day >= first}
+    index['read'] = {k: v for k, v in read.items() if v >= first}
+    index['readingDays'] = reading_days(index)
     index['updated'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     return index
+
+
+def reading_days(index, day=None):
+    """{entry id: days it came up on} over the READING_DAYS days to `day` (default today), from an exposure index's
+    reading counts (fold)."""
+    day = day or today()
+    first = add_days(day, 1 - READING_DAYS)
+    out = {}
+    for d, counts in (index.get('reading') or {}).items():
+        if first <= d <= day and isinstance(counts, dict):
+            for id_ in counts:
+                out[id_] = out.get(id_, 0) + 1
+    return out
 
 
 def scan(words, index, roots=None, start='0000-00-00'):
@@ -933,14 +994,38 @@ def scan_cursor():
 
 
 def refresh_exposure():
-    """Scan this machine's new transcript lines and count them. With a collector set, the replies go to it (hub.py).
-    Skips if another refresh is running."""
+    """Scan this machine's new transcript lines and count them: the word state's words each reply uses, and the
+    dictionary entries it shows (reading.Tally). With a collector set, the replies go to it (hub.py). Skips if another
+    refresh is running. The first scan that counts entries reads the last READING_DAYS days again (scan.json "reading"
+    marks it done): the replies already counted for words count once more only in reading (fold). When the entries
+    can't be counted (no dictionary index yet, say) the words still are."""
     with locked('exposure.lock', blocking=False) as got:
         if not got:
             return False
         state = load_state()
         cursor = scan_cursor()
-        found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'))
+        start = state.get('created', '0000-00-00')
+        try:
+            import reading
+            tally = reading.Tally(state['words'])
+        except Exception as error:  # the words are still counted
+            print(f'Japanese Weave: reading not counted ({error.__class__.__name__}: {error})', file=sys.stderr)
+            tally = None
+        since = add_days(today(), 1 - READING_DAYS)
+        if tally is not None and not cursor.get('reading'):  # again from the start: each reply counts once (fold)
+            cursor = {'offsets': {}, 'reading': 1}
+            start = max(start, add_days(today(), 1 - DEDUPE_DAYS))  # older replies' digests are gone
+        try:
+            found = read_replies(state['words'], cursor['offsets'], start=start, tally=tally, since=since)
+        except Exception as error:  # the entries can't be counted: the words still are, next time from here
+            if tally is None:
+                raise
+            print(f'Japanese Weave: reading not counted ({error.__class__.__name__}: {error})', file=sys.stderr)
+            cursor = scan_cursor()
+            found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'))
+        finally:
+            if tally is not None:
+                tally.close()
         import hub
         if collector_url():
             if found and not hub.send_exposure(found):

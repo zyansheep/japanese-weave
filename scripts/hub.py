@@ -15,19 +15,22 @@ Ops (each also carries uid, day, at and machine; see stamp):
              "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
-  exposure  {"replies": [{"d": digest, "day", "words": [ja]}]}   chat replies scanned on some machine
+  exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
+                                                       on some machine: the listed words each uses, and the
+                                                       dictionary entries it shows (reading.py)
   chat_day  {}                                         from before the switch (log-chat-day): changes nothing now
   exported  {"target": "claude-ai"|"chatgpt", "log_day"?: bool}   log_day changes nothing now
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
-  labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null]], "probes": [[ja, outcome]],
+  labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
-                                                       delayed-start arms, the probes' outcomes (fwlib.apply_labels)
+                                                       delayed-start arms (a dictionary word the state doesn't have
+                                                       yet with its entry id), the probes' outcomes (fwlib.apply_labels)
   restore   {}                                         undo the switch to the model's labels (fwlib.restore; fw.py
                                                        relabel --restore)
   brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {ja: arm}, "known", "whole", "chars",
-             "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "turn"?}
+             "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "topical"?: [[ja, p]], "turn"?}
                                                        what one chat reply was offered (weave.compose); a record only
   probe     {"via", "seconds", "weights", "top", "words": [[ja, id, band, weight, answer]], "fakes": [[ja, answer]],
              "bands": [[share, words]], "estimate"}   a probe of the goal (probe.py), kept in state["probes"]; where
@@ -147,10 +150,12 @@ def validate(op):
             return 'anki: known is a list of words'
     elif kind == 'exposure':
         replies = op.get('replies')
+        counts = lambda x: x is None or isinstance(x, dict) and len(x) <= 5000 and all(
+            k.isdigit() and len(k) <= 12 and integer(n, 1, 100_000) for k, n in x.items())
         if not isinstance(replies, list) or len(replies) > 5000 or not all(
                 isinstance(r, dict) and text(r.get('d'), 64) and day(r.get('day')) and texts(r.get('words'), 2000)
-                for r in replies):
-            return 'exposure: replies are {"d", "day", "words": [...]}'
+                and counts(r.get('entries')) for r in replies):
+            return 'exposure: replies are {"d", "day", "words": [...], "entries"?: {entry id: times}}'
     elif kind == 'exported':
         if op.get('target') not in ('claude-ai', 'chatgpt') or not isinstance(op.get('log_day', False), bool):
             return 'exported: {"target": "claude-ai"|"chatgpt", "log_day"?: bool}'
@@ -173,24 +178,25 @@ def validate(op):
 
 
 BRIEF_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'session', 'level', 'intensity', 'offered', 'arms', 'known',
-                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'turn'}
+                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'topical', 'turn'}
 
 
 def brief_error(op):
     """What is wrong with a brief record, as feedback._plan_ok checks a web passage's plan, or None. Amounts are per
     100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
-    a web plan; briefs from before sentences were priced have none."""
+    a web plan; briefs from before sentences were priced have none. topical: the topical words offered with their
+    lookup chances (weave.topical_words), like offered."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
     word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
     offered, arms = op.get('offered'), op.get('arms')
+    pairs = lambda xs: isinstance(xs, list) and len(xs) <= 200 and all(
+        isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1 for o in xs)
     good = (set(op) <= BRIEF_FIELDS and threads.valid_session(op.get('session'))
             and isinstance(op.get('level'), int) and not isinstance(op['level'], bool) and op['level'] in intensity.LEVELS
             and number(op.get('intensity')) and 0 < op['intensity'] <= 5
-            and isinstance(offered, list) and len(offered) <= 200
-            and all(isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1
-                    for o in offered)
+            and pairs(offered) and ('topical' not in op or pairs(op['topical']))
             and isinstance(arms, dict) and len(arms) <= 200
             and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())
             and count(op.get('known'), 100_000) and isinstance(op.get('whole'), bool) and count(op.get('chars'), 100_000)
@@ -199,7 +205,7 @@ def brief_error(op):
             and ('turn' not in op or threads.valid_session(op['turn'])))
     return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
                               '"known", "whole", "chars", "budget"?, "ask"?, "sentences"?, "sentencePrice"?, '
-                              '"expected"?, "turn"?}')
+                              '"expected"?, "topical"?: [[word, p]], "turn"?}')
 
 
 LABELS_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'labels', 'intake', 'probes', 'experiment'}
@@ -215,8 +221,10 @@ def labels_error(op):
                                                     and all(isinstance(r, list) and ok(r) for r in op[key]))
     label = lambda r: (len(r) == 3 and word(r[0]) and r[1] in fwlib.STATUSES + ('shaky',)
                        and r[2] in fwlib.STATUSES)
-    intake = lambda r: (len(r) == 3 and word(r[0]) and (r[1] is None and r[2] is None
-                                                         or r[1] in fwlib.ARMS and number(r[2]) and 0 <= r[2] < 1))
+    entry = lambda r: len(r) == 3 or (len(r) == 4 and isinstance(r[3], int) and not isinstance(r[3], bool)
+                                      and 0 < r[3] < 10 ** 9)
+    intake = lambda r: (entry(r) and word(r[0]) and (r[1] is None and r[2] is None
+                                                     or r[1] in fwlib.ARMS and number(r[2]) and 0 <= r[2] < 1))
     outcome = lambda o: o == 'missed' or (isinstance(o, dict) and set(o) == {'at', 'surface', 'y', 'read'}
                                           and isinstance(o['at'], int) and o['surface'] in feedback.SURFACES
                                           and number(o['y']) and 0 <= o['y'] <= 1
@@ -227,8 +235,8 @@ def labels_error(op):
             and rows('probes', 10_000, lambda r: len(r) == 2 and word(r[0]) and outcome(r[1]))
             and (seed is None or isinstance(seed, dict) and set(seed) == {'seed'} and isinstance(seed['seed'], int)
                  and not isinstance(seed['seed'], bool) and 0 <= seed['seed'] < 2 ** 32))
-    return None if good else ('labels: {"labels": [[word, from, to]], "intake": [[word, arm, draw]], "probes": '
-                              '[[word, outcome]], "experiment"?: {"seed"}}')
+    return None if good else ('labels: {"labels": [[word, from, to]], "intake": [[word, arm, draw, entry id?]], '
+                              '"probes": [[word, outcome]], "experiment"?: {"seed"}}')
 
 
 PROBE_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands',
@@ -703,7 +711,8 @@ def snapshot(rev=''):
     exposure = fwlib.read_json(home / 'exposure.json', {}) or {}
     return 200, {'ok': True, 'rev': now, 'state': fwlib.load_state(create=False),
                  'knowledge': fwlib.read_json(home / 'knowledge.json', {}) or {},
-                 'exposure': {'words': exposure.get('words') or {}, 'updated': exposure.get('updated')}}
+                 'exposure': {'words': exposure.get('words') or {}, 'updated': exposure.get('updated'),
+                              'readingDays': exposure.get('readingDays') or {}}}
 
 
 def receive(body, db=None):
