@@ -308,7 +308,7 @@ divides lookups by those words read.
 `fw.py calibrate` prints, from replay's record of every passage and message as the model stood before it
 (shown_record), per surface: the passages or messages with Japanese (blank ones have nothing to look up and don't
 count), words shown and read, lookups, and the budget in the same unit (a web passage's plan; for a chat message, the
-chat level in effect when it was replayed, with the challenge as normal's; full has none). Then per class, the
+chat level in effect when it was shown, with the challenge as normal's; full has none). Then per class, the
 lookups expected (each word's best read chance times its P(peek)) and seen (a glance counts 0.6), per 100 words read,
 and seen over expected with a 90% interval from resampling days (knowledge.day_interval, a seeded percentile
 bootstrap over days, given from 5 days on). Calibrated means the interval lies inside 0.83-1.2. The classes:

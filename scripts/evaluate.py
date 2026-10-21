@@ -367,7 +367,7 @@ def report_text(result, log):
     episodes = sum(len(e.obs) for e in log.events if isinstance(e, Group) and e.episode)
     surfaces = {surface: sum(1 for r in rows if r[0].surface == surface) for surface in ('browser', 't3')}
     lines = [f'Prequential by day: {len(days)} days ({days[0]} to {days[-1]}), each predicted from the days before; '
-             f'reading pace {log.pace} ms a word, cap {log.top}, for every model.',
+             f'reading pace {log.pace:g} ms a word, cap {log.top:g}, for every model.',
              f'{len(rows)} scored observations ({surfaces["browser"]} web, {surfaces["t3"]} chat); {episodes} more '
              'in episodes, fitted on only.',
              'Per class: observations, opens (a glance counts '

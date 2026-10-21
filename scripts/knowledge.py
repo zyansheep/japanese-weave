@@ -543,7 +543,8 @@ CLASSES = ('costly', 'free', 'topical', 'sentences', 'offlist')  # calibrate's c
 
 
 def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX):
-    """One passage or message for calibrate, as the model stood before it: {at, surface, words (shown), japanese (its
+    """One passage or message for calibrate, as the model stood before it: {at, shown (when it was shown: its shown
+    record, else at), surface, words (shown), japanese (its
     annotations: none in a blank passage), read (words_read), lookups (its opens; T3 peeks under T3_NOISE_MS left
     out), budget (a browser plan's, per 100 words; else None), classes: {class: [expected, seen]}}. Expected is the
     read chance from time on screen times P(peek), each word at its best annotation, and seen its opens (a glance
@@ -574,7 +575,8 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     plan = context.get('plan') or {}
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
-    return {'at': at, 'surface': surface, 'words': words, 'japanese': len(notes),
+    return {'at': at, 'shown': context.get('shown_at') or at, 'surface': surface, 'words': words,
+            'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
             'budget': 100 * budget / words if isinstance(budget, (int, float)) and words else None,
@@ -735,11 +737,11 @@ def ratio(days):
 
 def lookup_classes(records, changes=(), challenge=0):
     """Per surface ('browser', 't3'), from shown records (shown_record) of passages and messages with Japanese (blank
-    passages have nothing to look up and don't count, as in peek_rate), in
-    lookups per 100 words read (per_100): {n, words (shown), read (words_read), lookups, none (with no lookup), days,
-    budget (the level's budget per 100 words read: a browser passage's plan, a chat message's level then; weighted by
-    words read; full has none), classes: {class: {expected, seen, ratio: seen / expected, interval: its 90% interval
-    from resampling days}}}, for each of CLASSES and "all"."""
+    passages have nothing to look up and don't count, as in peek_rate), in lookups per 100 words read (per_100): {n,
+    words (shown), read (words_read), lookups, none (with no lookup), days, budget (the level's budget per 100 words
+    read, weighted by words read: a browser passage's plan, a chat message's level when shown; full has none),
+    classes: {class: {expected, seen, ratio: seen / expected, interval: its 90% interval from resampling days}}}, for
+    each of CLASSES and "all"."""
     out = {}
     for surface in ('browser', 't3'):
         mine = [r for r in records if r['surface'] == surface and r['japanese']]
@@ -752,7 +754,7 @@ def lookup_classes(records, changes=(), challenge=0):
                 for key in (name, 'all'):
                     day[key][0] += expected
                     day[key][1] += seen
-            budget = r['budget'] if surface == 'browser' else chat_budget(changes, r['at'], challenge)
+            budget = r['budget'] if surface == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge)
             if budget is not None:
                 budgets.append((budget, r['read']))
         classes = {}
