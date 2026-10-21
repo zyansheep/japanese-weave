@@ -1,6 +1,5 @@
-// Check lab: runs the new web pipeline on the judged passages with your words and scores it against oracle.json, as
-// matcher-lab.mjs scores the matcher and lab.mjs a model's swaps (docs/swap-prompt.md, "Code finds the places, a model
-// checks them"). Code finds the spans (matcher.js), takes the options flagged safe (senses.js), and a model checks the
+// Check lab: runs the web pipeline on the judged passages with your words and scores it against oracle.json, as
+// matcher-lab.mjs scores the matcher (docs/swap-prompt.md, "Code finds the places, a model checks them"). Code finds the spans (matcher.js), takes the options flagged safe (senses.js), and a model checks the
 // doubtful ones and writes the dense sentences and some phrases (verify.js), in calls of BATCH passages; only passages
 // with something doubtful or dense get a call.
 //
@@ -19,7 +18,7 @@
 // VERBOSE=1: the wrong, unjudged and missed, and every sentence and phrase. SUMMARY: a file for the numbers as JSON.
 // Every call's tokens and cost go to SPEND_LOG (spend.mjs), which holds the cap.
 //
-// Scored as lab.mjs scores swaps: each listed word of a swap where it lands is right (it covers a "use" place), fine
+// Scored as the old swap prompt's lab (lab.mjs) scored swaps: each listed word of a swap where it lands is right (it covers a "use" place), fine
 // ("ok"), wrong ("not"; or the whole swap is in "bad") or unjudged; a phrase or sentence not judged bad covers every
 // "use" place inside it; coverage is the share of "use" places covered; the wrong share is wrong / (right + fine +
 // wrong). Three ways: every candidate (as matcher-lab counts every option), what planSwaps shows at full (no budget:
@@ -129,7 +128,7 @@ async function run(seed) {
 // A passage's candidates from a run's answer (none for a passage that needed no call: its safe options alone).
 const candidates = (id, answer) => candidatesOf(plans.get(id), answer && { picks: new Map(answer.picks), swaps: answer.swaps }, words);
 
-// Where swaps land, as lab.mjs places them: text.js on the passage as a page element, the first that fits wins.
+// Where swaps land, as the page places them: text.js on the passage as a page element, the first that fits wins.
 const doc = new Window().document;
 const flats = new Map();
 function placed(p, swaps, all = false) {
@@ -151,7 +150,7 @@ function placed(p, swaps, all = false) {
   return out;
 }
 
-// lab.mjs's judge, with each word swap's kind (function or content, from the span it sits on) and the words of phrases
+// The judge, with each word swap's kind (function or content, from the span it sits on) and the words of phrases
 // and sentences apart ("group").
 const wordsOf = (s) => s.words || [s.word || s.f];
 function judge(p, j, shown) {

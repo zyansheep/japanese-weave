@@ -1,18 +1,22 @@
 import { test, expect } from 'bun:test';
 import { hashKey } from '../src/hash.js';
 import { costUsd } from '../src/usage.js';
+import { buildCheckSystem } from '../src/verify.js';
+import { passagesOf, checkAnswer, modelReply, userOf } from './checkmodel.js';
 
-// The worker on its own: passages that arrive while a model call runs share the next call, a passage that came back
-// meanwhile isn't asked for again, and Claude Haiku is called with the key the native host passed along, in smaller
-// calls that run at the same time. Then the intensity: lighter picks from the cache, heavier from the full answer.
-test('background: misses from every tab share one call; Haiku with the host key, three calls at once; intensity', async () => {
+// The worker on its own, with the web pipeline: the swaps code is sure of come at once and the model's check after;
+// passages that arrive while a call runs share the next call, a passage in a call isn't asked for again, and Claude
+// Haiku is called with the key the native host passed along, in smaller calls that run at the same time. One answer
+// serves every level; answers are cached by what was asked, so a new word list asks again only where it changed.
+test('background: sure swaps at once, then the check; shared calls; Haiku with the host key; one answer for every level', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
   const listeners = [];
-  const calls = []; // { url, init, ids }
+  const calls = []; // { url, body, ids, user }
   const natives = []; // messages to the native host
   const opened = () => { let open; const promise = new Promise((r) => { open = r; }); return { promise, open }; };
   let gate = null; // while set, model calls wait until it opens
+  let failing = 0; // calls that fail before an answer
   const listener = (arr) => ({ addListener: (fn) => arr.push(fn) });
   const area = {
     async setAccessLevel() {},
@@ -20,8 +24,10 @@ test('background: misses from every tab share one call; Haiku with the host key,
     async set(values) { for (const [k, v] of Object.entries(values)) local[k] = structuredClone(v); },
     async remove(keys) { for (const k of keys) delete local[k]; },
   };
-  const words = [{ ja: 'でも', en: 'but', hint: 'demo', kana: 'でも', status: 'active' }, { ja: '犬', en: 'dog', hint: 'inu', kana: 'いぬ', status: 'known' }];
-  const answer = (ids) => ids.map((id) => ({ id, swaps: [{ k: 'w', o: 'but', f: 'でも', p: '', g: '', c: 'but' }] }));
+  // でも for "but" is closed-class English: always the model's to check. 犬 for "dog" is safe: code takes it.
+  let words = [{ ja: 'でも', en: 'but', hint: 'demo', kana: 'でも', status: 'known', glosses: ['but'], safe: [], id: 1008460 },
+    { ja: '犬', en: 'dog', hint: 'inu', kana: 'いぬ', status: 'known', glosses: ['dog'], safe: ['dog'], id: 1166340 }];
+  let version = 'b.1';
   Object.assign(globalThis, {
     chrome: {
       storage: { local: area },
@@ -29,7 +35,7 @@ test('background: misses from every tab share one call; Haiku with the host key,
         id: 'fw-test', getURL: (path) => `chrome-extension://fw-test/${path}`,
         onMessage: listener(listeners), onInstalled: listener([]), onStartup: listener([]),
         sendNativeMessage: async (_host, msg) => (natives.push(msg), msg.type === 'state'
-          ? { ok: true, version: 'b.1', stage: 3, paused: false, prefs: {}, words, anthropicKey: 'synthetic-anthropic' } : { ok: true }),
+          ? { ok: true, version, stage: 3, paused: false, prefs: {}, words, anthropicKey: 'synthetic-anthropic' } : { ok: true }),
       },
       tabs: { query: async () => [], sendMessage: async () => {} },
       alarms: { create: async () => {}, clear: async () => {}, onAlarm: listener([]) },
@@ -38,18 +44,12 @@ test('background: misses from every tab share one call; Haiku with the host key,
       scripting: { getRegisteredContentScripts: async () => [], updateContentScripts: async () => {}, unregisterContentScripts: async () => {}, registerContentScripts: async () => {} },
     },
     fetch: async (url, init) => {
-      const body = JSON.parse(init.body);
-      const user = url.includes('anthropic') ? body.messages[0].content : body.contents[0].parts[0].text;
-      const ids = JSON.parse(user.replace(/^Passages:\n/, '')).map((p) => p.id);
-      calls.push({ url, init, body, ids });
+      const user = userOf(url, init);
+      calls.push({ url, init, body: JSON.parse(init.body), user, ids: passagesOf(user).map((p) => p.id) });
       const held = gate;
       if (held) await held.promise;
-      const text = JSON.stringify({ passages: answer(ids) });
-      if (url.includes('anthropic')) {
-        return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn',
-          usage: { input_tokens: 300, cache_read_input_tokens: 3000, cache_creation_input_tokens: 200, output_tokens: 400 } }) };
-      }
-      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 3500, candidatesTokenCount: 500 } }) };
+      if (failing > 0) { failing--; return { ok: false, status: 500, text: async () => '' }; }
+      return modelReply(url, checkAnswer(user));
     },
   });
   const dispatch = (msg, sender) => new Promise((done) => {
@@ -60,117 +60,135 @@ test('background: misses from every tab share one call; Haiku with the host key,
   const tab = (id) => ({ id: 'fw-test', tab: { id }, url: `https://example.com/${id}` });
   const popup = { id: 'fw-test', url: 'chrome-extension://fw-test/src/popup.html' };
   const until = async (ok) => { for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); };
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const text = (n) => `Passage ${n} has a dog in it, but it says very little at all.`;
   try {
     await import('../src/background.js?batch');
     expect((await dispatch({ type: 'syncWords' }, popup)).ok).toBe(true);
     expect(local.hostAnthropicKey).toBe('synthetic-anthropic');
-    const { revision } = await dispatch({ type: 'config' }, tab(1));
-    const item = (n) => { const text = `Passage ${n} is long enough, but it says very little at all.`; return { key: `${revision}:${hashKey(text)}`, text }; };
-    const ask = (id, ns) => dispatch({ type: 'swaps', revision, items: ns.map(item) }, tab(id));
+    let { revision } = await dispatch({ type: 'config' }, tab(1));
+    const item = (n) => ({ key: `${revision}:${hashKey(text(n))}`, text: text(n) });
+    const ask = (id, ns, wait = true) => dispatch({ type: 'swaps', revision, items: ns.map(item), wait }, tab(id));
+    // what a passage's candidates are (planSwaps' plan counts them; which it shows depends on the day's thinning)
+    const cands = (r, n) => r.plans[item(n).key].candidates;
+    const offered = (r, n) => (r.results[item(n).key].every((s) => ['でも', '犬', 'とても'].includes(s.f)) ? cands(r, n) : -1);
 
+    // At once: the dog, which code is sure of; the check of "but" starts, and the page is told to ask again for it.
+    gate = opened();
+    const now = await ask(1, [0], false);
+    expect(now.waiting).toEqual([item(0).key]);
+    expect(offered(now, 0)).toBe(1); // the dog
+    expect(now.results[item(0).key].every((s) => s.f === '犬')).toBe(true);
+    await until(() => calls.length === 1);
+    // asking again waits for that call, which isn't made twice
+    const later = ask(1, [0]);
+    await settle();
+    expect(calls).toHaveLength(1);
+    gate.open(); gate = null;
+    const full = await later;
+    expect(full.waiting).toBeUndefined();
+    expect(offered(full, 0)).toBe(2); // and でも for "but"
+    // cached: a later page gets both at once, no call
+    expect(offered(await ask(2, [0], false), 0)).toBe(2);
+    expect(calls).toHaveLength(1);
+
+    // Passages from every tab wait for the running call and share the next one; one already in a call isn't asked twice.
     gate = opened();
     const first = ask(1, [1]);
-    await until(() => calls.length === 1);
+    await until(() => calls.length === 2);
     const second = ask(2, [2, 3]);
     const third = ask(3, [1, 4, 5]); // 1 is in the call that is running
-    await new Promise((r) => setTimeout(r, 30));
-    expect(calls).toHaveLength(1);
-    gate.open();
-    gate = null;
-    const results = await Promise.all([first, second, third]);
+    await settle();
     expect(calls).toHaveLength(2);
-    expect(calls[1].ids).toHaveLength(4); // 2, 3, 4, 5 together; 1 came from the first call's answer
-    // each passage has one candidate; about a quarter are randomly thinned to none (levels.js jitterFor)
-    const shownAsPlanned = (r) => Object.entries(r.results).every(([key, swaps]) => r.plans[key].candidates === 1
-      && swaps.length === r.plans[key].limit && swaps.every((s) => s.f === 'でも'));
-    for (const r of results) expect(shownAsPlanned(r)).toBe(true);
-    expect(Object.keys(results[2].results)).toHaveLength(3);
+    gate.open(); gate = null;
+    const results = await Promise.all([first, second, third]);
+    expect(calls).toHaveLength(3);
+    expect(calls[2].ids).toHaveLength(4); // 2, 3, 4, 5 together; 1 came from the first call's answer
+    for (const r of results) for (const plan of Object.values(r.plans)) expect(plan.candidates).toBe(2);
+    // the check prompt, and only the doubtful span lettered: the dog is given as sure
+    expect(calls[2].body.systemInstruction.parts[0].text).toBe(buildCheckSystem());
+    expect(calls[2].user).toContain('[but] it says very: a でも = but');
+    expect(calls[2].user).toContain('[dog] in it, but = 犬');
 
-    // Haiku, with the key from ~/.japanese-weave/anthropic_key: light thinking, JSON schema, the prompt in two cached parts.
+    // Haiku, with the key from ~/.japanese-weave/anthropic_key: light thinking, JSON schema, the prompt cached.
     await dispatch({ type: 'save', settings: { model: 'claude-haiku-5-5' } }, popup);
     const status = await dispatch({ type: 'status' }, popup);
     expect(status.hostAnthropicKey).toBe(true);
     expect(JSON.stringify(status)).not.toContain('synthetic-');
-    const fresh = await dispatch({ type: 'config' }, tab(1));
-    const text = 'Another passage, but this one is for Claude to read today.';
-    const r = await dispatch({ type: 'swaps', revision: fresh.revision, items: [{ key: `${fresh.revision}:${hashKey(text)}`, text }] }, tab(1));
-    expect(shownAsPlanned(r)).toBe(true);
+    ({ revision } = await dispatch({ type: 'config' }, tab(1)));
+    expect(offered(await ask(1, [6]), 6)).toBe(2);
     const claude = calls.at(-1);
     expect(claude.url).toBe('https://api.anthropic.com/v1/messages');
     expect(claude.init.headers['x-api-key']).toBe('synthetic-anthropic');
     expect(claude.body).toMatchObject({ model: 'claude-haiku-5-5', thinking: { type: 'adaptive' }, output_config: { effort: 'low', format: { type: 'json_schema' } } });
-    expect(claude.body.system).toHaveLength(2);
-    expect(claude.body.system.every((b) => b.cache_control?.type === 'ephemeral')).toBe(true);
-    expect(claude.body.output_config.format.schema.properties.passages.items.additionalProperties).toBe(false);
+    expect(claude.body.system).toEqual([{ type: 'text', text: buildCheckSystem(), cache_control: { type: 'ephemeral' } }]);
     const usage = (await dispatch({ type: 'status' }, popup)).usage.today;
-    expect(usage.calls).toBe(3);
-    // Haiku: 3500 in, of which 3000 read from the cache and 200 written to it
-    expect(usage.input).toBe(3 * 3500);
-    expect(usage.usd).toBeCloseTo(costUsd('claude-haiku-5-5', 3500, 400, undefined, 3000, 200) + 2 * costUsd('gemini-3.8-flash', 3500, 500), 9);
+    expect(usage.calls).toBe(4);
+    expect(usage.input).toBe(4 * 3500);
+    expect(usage.usd).toBeCloseTo(costUsd('claude-haiku-5-5', 3500, 400, undefined, 3000, 200) + 3 * costUsd('gemini-3.8-flash', 3500, 400), 9);
 
     // 14 passages from one tab go to Haiku as calls of 6, 6 and 2, all three out before any answer comes back.
     gate = opened();
     const before = calls.length;
-    const texts = Array.from({ length: 14 }, (_, n) => `Passage ${n} for Haiku is long enough, but it says very little.`);
-    const many = dispatch({ type: 'swaps', revision: fresh.revision, items: texts.map((t) => ({ key: `${fresh.revision}:${hashKey(t)}`, text: t })) }, tab(2));
+    const many = ask(2, Array.from({ length: 14 }, (_, n) => 100 + n));
     await until(() => calls.length === before + 3);
-    await new Promise((r) => setTimeout(r, 30));
+    await settle();
     expect(calls.slice(before).map((c) => c.ids.length)).toEqual([6, 6, 2]);
-    gate.open();
-    gate = null;
+    gate.open(); gate = null;
     expect(Object.keys((await many).results)).toHaveLength(14);
 
-    // Lighter: picked from the cached candidates, no model call; the press goes to the host for the log.
-    const t = 'A passage for the intensity test, but it has enough words to be woven.';
-    const one = (cfg) => ({ key: `${cfg.revision}:${hashKey(t)}`, text: t });
-    const normal = await dispatch({ type: 'config' }, tab(1));
-    await dispatch({ type: 'swaps', revision: normal.revision, items: [one(normal)] }, tab(1));
+    // Every level picks from the same answer: no call when stepping lighter, heavier or to full; full shows every
+    // candidate. The press goes to the host for the log.
     const made = calls.length;
-    expect((await dispatch({ type: 'intensity', step: -1 }, popup)).intensity.level).toBe(-1);
-    expect(natives.at(-1)).toMatchObject({ type: 'intensity', surface: 'browser', set: { level: -1, source: 'popup' } });
-    const light = await dispatch({ type: 'config' }, tab(1));
-    expect(light.revision).not.toBe(normal.revision);
-    expect(light.intensity.level).toBe(-1);
-    const lighter = await dispatch({ type: 'swaps', revision: light.revision, items: [one(light)] }, tab(1));
+    for (const [step, level] of [[-1, -1], [-1, -2], [1, -1], [1, 0], [1, 1], [1, 2], [1, 3]]) {
+      expect((await dispatch({ type: 'intensity', step }, popup)).intensity.level).toBe(level);
+      ({ revision } = await dispatch({ type: 'config' }, tab(1)));
+      const r = await ask(1, [6], false);
+      expect(r.waiting).toBeUndefined();
+      expect(r.plans[item(6).key]).toMatchObject({ level, candidates: 2 });
+      if (level === 3) expect(r.results[item(6).key].map((s) => s.f).sort()).toEqual(['でも', '犬']); // full: every candidate
+    }
+    expect(natives.filter((m) => m.type === 'intensity').map((m) => m.set.level)).toEqual([-1, -2, -1, 0, 1, 2, 3]);
     expect(calls.length).toBe(made);
-    expect(Object.values(lighter.plans)[0]).toMatchObject({ level: -1, intensity: 0.7, candidates: 1 });
     expect(await dispatch({ type: 'intensity', step: 2 }, popup)).toEqual({ error: 'step is 1, -1 or 0' });
     expect(await dispatch({ type: 'intensity', step: 1 }, tab(1))).toBe(undefined); // pages can't change it
-    // Heavier: picked from the full answer, which has its own cache; +2 and full pick from the same one.
-    await dispatch({ type: 'intensity', step: 1 }, popup);
-    expect((await dispatch({ type: 'intensity', step: 1 }, popup)).intensity.level).toBe(1);
-    const heavy = await dispatch({ type: 'config' }, tab(1));
-    const heavier = await dispatch({ type: 'swaps', revision: heavy.revision, items: [one(heavy)] }, tab(1));
-    expect(calls.length).toBe(made + 1);
-    expect(Object.values(heavier.plans)[0]).toMatchObject({ level: 1, intensity: 1.4 });
-    // no target in the full answer, and its prompt
-    const passage = (call) => JSON.parse(call.body.messages[0].content.replace(/^Passages:\n/, ''))[0];
-    expect(passage(calls.at(-1)).target).toBeUndefined();
-    expect(passage(calls[made - 1]).target).toBe(2);
-    expect(JSON.stringify(calls.at(-1).body.system)).toContain('The reader asked for FULL Japanese');
-    expect(JSON.stringify(calls[0].body)).not.toContain('FULL Japanese');
-    for (const level of [2, 3]) {
-      expect((await dispatch({ type: 'intensity', step: 1 }, popup)).intensity.level).toBe(level);
-      const cfg = await dispatch({ type: 'config' }, tab(1));
-      expect(cfg.revision).not.toBe(heavy.revision);
-      const picked = await dispatch({ type: 'swaps', revision: cfg.revision, items: [one(cfg)] }, tab(1));
-      expect(Object.values(picked.plans)[0]).toMatchObject({ level });
-    }
-    expect(calls.length).toBe(made + 1);
-    // At full, Haiku gets calls of 3 (models.js FULL_BATCH): the full answer is about twice as long.
-    const top = await dispatch({ type: 'config' }, tab(1));
-    gate = opened();
-    const seven = Array.from({ length: 7 }, (_, n) => `Passage ${n} at full for Haiku is long enough, but it says very little.`);
-    const asked = dispatch({ type: 'swaps', revision: top.revision, items: seven.map((t) => ({ key: `${top.revision}:${hashKey(t)}`, text: t })) }, tab(2));
-    await until(() => calls.length === made + 4);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(calls.slice(made + 1).map((c) => c.ids.length)).toEqual([3, 3, 1]);
-    gate.open();
-    gate = null;
-    expect(Object.keys((await asked).results)).toHaveLength(7);
-    await dispatch({ type: 'intensity', step: -1 }, popup);
-    await dispatch({ type: 'intensity', step: -1 }, popup);
-    expect((await dispatch({ type: 'status' }, popup)).intensity.level).toBe(1);
+    await dispatch({ type: 'intensity', step: 0 }, popup);
+
+    // A new word list: passages whose doubtful spans are the same keep their answer; one with a new doubtful span is
+    // asked again. Here "very" gets a word: every passage above says it, so each is asked again, and only those.
+    version = 'b.2';
+    words = [...words, { ja: 'とても', en: 'very', hint: 'totemo', kana: 'とても', status: 'known', glosses: ['very'], safe: [], id: 1008630 }];
+    await dispatch({ type: 'syncWords' }, popup);
+    ({ revision } = await dispatch({ type: 'config' }, tab(1)));
+    const asked = calls.length;
+    expect(offered(await ask(1, [6]), 6)).toBe(3);
+    expect(calls.length).toBe(asked + 1);
+    version = 'b.3';
+    words = words.map((w) => (w.ja === '犬' ? { ...w, status: 'active' } : w)); // a new label: nothing new to ask
+    await dispatch({ type: 'syncWords' }, popup);
+    ({ revision } = await dispatch({ type: 'config' }, tab(1)));
+    expect((await ask(1, [6], false)).waiting).toBeUndefined();
+    expect(calls.length).toBe(asked + 1);
+
+    // A failed call: the wait says so, and the sure swaps are what the page keeps; the next ask tries again.
+    failing = 2; // Haiku, then its fallback Flash
+    const fail = await ask(1, [200]);
+    expect(fail.error).toContain('HTTP 500');
+    expect(fail.results[item(200).key]).toBeUndefined();
+    expect(offered(await ask(1, [200], false), 200)).toBe(1);
+    expect(offered(await ask(1, [200]), 200)).toBe(3);
+
+    // Without a key: the sure swaps, at once and final; no call.
+    delete local.hostAnthropicKey;
+    delete local.apiKey;
+    const cfg = await dispatch({ type: 'config' }, tab(1));
+    expect(cfg.hasKey).toBe(false);
+    revision = cfg.revision;
+    const none = calls.length;
+    const bare = await ask(1, [300], false);
+    expect(bare.waiting).toBeUndefined();
+    expect(offered(bare, 300)).toBe(1);
+    expect(calls.length).toBe(none);
   } finally {
     Object.assign(globalThis, saved);
   }

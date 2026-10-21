@@ -22,8 +22,6 @@ export function reasonText(reason, until = 0) {
     'switched-off': 'switched off (turn it on in the popup)',
     paused: 'paused from Claude Code',
     'intensity-off': `off until ${clock(until)} (Alt+Shift+Period or the popup turns it back on)`,
-    'no-gemini-key': 'needs a Gemini key (add one in the popup)',
-    'no-anthropic-key': 'needs an Anthropic key (add one in the popup)',
     unsupported: "can't run on this page",
     hidden: 'no access to this page (if it is a website, allow it in the popup)',
     'site-off': 'turned off on this site',

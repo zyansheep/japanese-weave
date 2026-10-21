@@ -1,8 +1,6 @@
 // Anthropic Messages API call (Claude Haiku). No chrome APIs; fetch is injectable for tests.
 // https://platform.claude.com/docs/en/api/messages: JSON output via output_config.format, light thinking (adaptive at low
 // effort), and the system prompt in two cached blocks.
-import { parseSwapsResponse } from './gemini.js';
-
 export const API_URL = 'https://api.anthropic.com/v1/messages';
 export const API_VERSION = '2023-06-01';
 const MAX_TOKENS = 16000;
@@ -17,9 +15,9 @@ export function closed(schema) {
   return schema;
 }
 
-// system: the prompt in parts (prompt.js buildSystemParts). Each part ends a cache breakpoint, so the rules and known
-// words are read from the cache even when the learning words' order has changed. thinking: false turns thinking off
-// (Haiku 5.5 accepts that at effort low to high), for a job simple enough not to need it (verify.js measures both).
+// system: the prompt, whole or in parts; each part ends a cache breakpoint, so a stable first part is read from the
+// cache even when a later one changes. thinking: false turns thinking off (Haiku 5.5 accepts that at effort low to
+// high), for a job simple enough not to need it (verify.js measures both).
 export function buildClaudeRequest({ model, system, user, schema, thinking = true, effort }) {
   const parts = [].concat(system).filter(Boolean);
   return {
@@ -36,8 +34,8 @@ export function buildClaudeRequest({ model, system, user, schema, thinking = tru
 
 // Returns { byId, usage: { input, cached, written, output } }: input counts every prompt token, of which cached were read
 // from the cache and written went into it. Throws on HTTP error, timeout, a refusal or a cut-off answer. parse: the
-// answer's text to byId, the swaps of each passage unless another job's parser is given (verify.js).
-export async function callClaude({ fetchImpl = globalThis.fetch, apiKey, body, timeoutMs = 20000, parse = parseSwapsResponse }) {
+// answer's text to byId (verify.js parseCheckResponse).
+export async function callClaude({ fetchImpl = globalThis.fetch, apiKey, body, timeoutMs = 20000, parse }) {
   const res = await fetchImpl(API_URL, {
     method: 'POST',
     headers: {

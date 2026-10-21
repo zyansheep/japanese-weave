@@ -9,6 +9,7 @@ export const PENDING_KEY = 'pendingEvents';
 export const SENT_KEY = 'seenSent';
 export const LOG_KEY = 'pendingLog';
 const LOG_MAX = 500;
+
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
@@ -19,8 +20,12 @@ const ANNOTATIONS_MAX = 200;
 // sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and levels.js
 // SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
 // 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
-// the experiment hides.
+// the experiment hides. For the web pipeline (pipeline.js) each word comes with its glosses as the matcher indexes them,
+// those of them code may swap alone (safe: data/senses.tsv), and its dictionary entry id (the reading counts' key), and
+// the reply says which version of the reading index (readingIndex) goes with it.
 const READS_MAX = 50;
+const GLOSSES_MAX = 60;
+const gloss = (x) => typeof x === 'string' && x.length > 0 && x.length <= 200;
 const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
@@ -34,10 +39,13 @@ export function parseState(data) {
     const en = w.en.trim();
     if (!ja || !en || seen.has(ja)) continue;
     seen.add(ja);
+    const glosses = Array.isArray(w.glosses) ? w.glosses.filter(gloss).slice(0, GLOSSES_MAX) : [];
+    const safe = Array.isArray(w.safe) ? w.safe.filter((g) => glosses.includes(g)) : [];
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
       status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
       ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(reads(w.read).length ? { read: reads(w.read) } : {}),
-      ...(armOk(w.arm) ? { arm: w.arm } : {}) });
+      ...(armOk(w.arm) ? { arm: w.arm } : {}), ...(glosses.length ? { glosses, safe } : {}),
+      ...(Number.isInteger(w.id) && w.id > 0 ? { id: w.id } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -52,8 +60,7 @@ export function parseState(data) {
     sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
     recency: num(data?.recency?.floor) && num(data?.recency?.days) && data.recency.days > 0
       ? { floor: data.recency.floor, days: data.recency.days } : null,
-    rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
-      shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
+    reading: typeof data?.reading?.version === 'string' && /^[\w.-]{1,64}$/.test(data.reading.version) ? data.reading.version : '',
     words,
   };
 }

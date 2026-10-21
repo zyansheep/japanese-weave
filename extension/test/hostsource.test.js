@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, describeStats, STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
+import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, describeStats,
+  STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
 import { memoryStorage } from '../src/cache.js';
 import { validateSwaps } from '../src/levels.js';
-import { buildSystemPrompt } from '../src/prompt.js';
+import { pipelineFor, planText } from '../src/pipeline.js';
 
 // Shape the native host sends (scripts/fw_host.py "state").
 const REPLY = {
@@ -22,7 +23,7 @@ const host = (reply) => async () => reply;
 describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
-    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, rate: null,
+    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, reading: '',
       recency: null, intensity: null, words: REPLY.words });
     const intensity = { level: -1, until: 1800000000000, at: 1799999000000 };
     expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, source: 'shortcut' } } }).intensity).toEqual(intensity);
@@ -35,8 +36,9 @@ describe('parseState', () => {
     const words = [{ ...REPLY.words[0], k: 0.4, sd: 0.8, free: false }, { ...REPLY.words[1], k: 'high', sd: 1, free: 'yes' }];
     const s = parseState({ ...REPLY, words, challenge: 1.5, budget: 2.1, rate: { per100: 1.2, peeks: 6, shownWords: 500, days: 3 } });
     expect(s.words.map((w) => [w.k, w.sd, w.free])).toEqual([[0.4, 0.8, false], [undefined, undefined, undefined]]);
-    expect([s.challenge, s.budget, s.rate]).toEqual([1.5, 2.1, { per100: 1.2, peeks: 6, shownWords: 500, days: 3 }]);
-    expect(parseState({ ...REPLY, challenge: -1, rate: { per100: null } })).toMatchObject({ challenge: 0, rate: null });
+    expect([s.challenge, s.budget]).toEqual([1.5, 2.1]);
+    expect(s).not.toHaveProperty('rate'); // the daily controller is gone, and its rate with it
+    expect(parseState({ ...REPLY, challenge: -1 })).toMatchObject({ challenge: 0 });
     // the web's price of a whole sentence, once knowledge.json has one: lookups per sentence read, 0 to 1 (0: none yet)
     expect(parseState({ ...REPLY, sentencePrice: 0.12 }).sentencePrice).toBe(0.12);
     for (const sentencePrice of [0, -0.1, 1.5, '0.1', NaN, null]) expect(parseState({ ...REPLY, sentencePrice }).sentencePrice).toBe(0);
@@ -48,6 +50,15 @@ describe('parseState', () => {
     for (const recency of [{ floor: 'low', days: 7 }, { floor: -3.9, days: 0 }, null]) {
       expect(parseState({ ...REPLY, recency }).recency).toBe(null);
     }
+  });
+  it('carries each word\'s glosses, the safe ones among them and its entry id, and the reading index\'s version', () => {
+    const words = [{ ...REPLY.words[0], glosses: ['so', 'therefore', '', 7], safe: ['therefore', 'nope'], id: 1007310 },
+      { ...REPLY.words[1], glosses: 'maybe', safe: ['maybe'], id: -1 }, { ...REPLY.words[2], glosses: ['but'], id: 1.5 }];
+    const s = parseState({ ...REPLY, words, reading: { version: 'a1b2c3' } });
+    expect(s.words.map((w) => [w.glosses, w.safe, w.id])).toEqual([[['so', 'therefore'], ['therefore'], 1007310],
+      [undefined, undefined, undefined], [['but'], [], undefined]]);
+    expect(s.reading).toBe('a1b2c3');
+    expect(parseState({ ...REPLY, reading: { version: 'has spaces' } }).reading).toBe('');
   });
   it('carries each word\'s delayed-start arm while it has one', () => {
     const words = [{ ...REPLY.words[0], arm: 'held:probe' }, { ...REPLY.words[1], arm: '<b>x</b>' }];
@@ -89,14 +100,17 @@ describe('refresh', () => {
     expect(bad.error).toBeTruthy();
     expect((await readCached(storage)).words).toHaveLength(3);
   });
-  it('a synced list drives validation and the prompt', () => {
-    const s = parseState(REPLY);
+  it('a synced list drives validation and the matcher, its safe glosses what code takes alone', () => {
+    const s = parseState({ ...REPLY, words: [{ ...REPLY.words[0], glosses: ['so', 'therefore'], safe: [] },
+      { ...REPLY.words[1], glosses: ['maybe'], safe: ['maybe'] }, REPLY.words[2],
+      { ja: '犬', en: 'dog', hint: 'inu', kana: 'いぬ', status: 'known', glosses: ['dog'], safe: ['dog'] }] });
     expect(validateSwaps(1, [{ o: 'so', f: 'だから', ctx: 'so then' }], s.words)[0].f).toBe('だから');
     expect(validateSwaps(1, [{ o: 'maybe', f: 'たぶん', ctx: 'maybe' }], s.words)[0].f).toBe('多分');
     expect(validateSwaps(1, [{ o: 'already', f: 'もう', ctx: 'x' }], s.words)).toEqual([]);
-    const prompt = buildSystemPrompt(1, s.words);
-    expect(prompt).toContain('だから = so / therefore; 多分 = maybe');
-    expect(prompt).toContain('KNOWN words:\nでも = ');
+    // closed-class English is never safe, whatever the flags say ("maybe")
+    const plan = planText(pipelineFor(s.words), 'Maybe it rains, but so what, the dog goes out anyway.');
+    expect(plan.spans.map((m) => [m.span.english, m.safe.map((o) => o.ja), m.doubtful.map((o) => o.ja)]))
+      .toEqual([['Maybe', [], ['多分']], ['but', [], ['でも']], ['so', [], ['だから']], ['dog', ['犬'], []]]);
   });
 });
 

@@ -14,9 +14,9 @@ export function buildRequest({ system, user, schema, thinkingLevel = THINKING_LE
   };
 }
 
-// Returns { byId: Map<id, swaps[]>, usage: { input, output } } (tokens; thinking counts as output). Throws on HTTP
-// error, timeout, or unparseable output. parse: as anthropic.js callClaude's.
-export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, body, timeoutMs = 20000, parse = parseSwapsResponse }) {
+// Returns { byId (parse's answer: verify.js parseCheckResponse), usage: { input, output } } (tokens; thinking counts as
+// output). Throws on HTTP error, timeout, or unparseable output.
+export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, body, timeoutMs = 20000, parse }) {
   const res = await fetchImpl(`${API_BASE}${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
@@ -47,16 +47,8 @@ export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, 
   }
 }
 
-// The engine's provider call: system is the prompt in parts (sent joined), user the passages.
+// The provider call verify.js requestChecks makes: system is the prompt, whole or in parts (sent joined), user the
+// passages.
 export function askGemini({ fetchImpl, apiKey, model, system, user, schema, timeoutMs, parse }) {
   return callGemini({ fetchImpl, apiKey, model, timeoutMs, parse, body: buildRequest({ system: [].concat(system).join(''), user, schema }) });
-}
-
-export function parseSwapsResponse(text) {
-  const data = JSON.parse(text);
-  const out = new Map();
-  for (const t of data?.passages || data?.tweets || []) {
-    if (t && typeof t.id === 'string') out.set(t.id, Array.isArray(t.swaps) ? t.swaps : []);
-  }
-  return out;
 }

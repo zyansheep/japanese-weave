@@ -1,8 +1,16 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
 // handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks and selections in passages with
 // glossed words, and when passages are shown and their on-screen time, also for planned passages left without Japanese
-// (blank). Once the page settles it tells the background whether it found anything to weave, for the toolbar icon.
-// Every async reply belongs to one config generation.
+// (blank). Once the page settles it tells the background whether it found anything to weave, for the toolbar icon. Every
+// async reply belongs to one config generation.
+//
+// Two paintings at most (docs/swap-prompt.md, "The web pipeline"). The swaps code is sure of come at once; a passage
+// whose model check is still on its way is awaiting, and the page asks again for what the answer adds. When it comes,
+// a passage the reader has not had on screen yet is painted afresh from the full plan, as if the answer had come
+// first; one they have had on screen keeps every swap it shows, as it is, and only gains the rest (the plan redone
+// around them), so Japanese the reader saw never moves or turns back into English. A passage with nothing to show yet
+// is painted when the answer comes. Until its last painting a passage logs no shown record and no stays, so each
+// record describes the Japanese that was on the page; its peeks and flips are logged as they happen.
 import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEnglish, SWAP_CLASS } from './text.js';
 import { hashKey } from './hash.js';
 import { offReason } from './settings.js';
@@ -23,6 +31,8 @@ const memo = new Map();
 const plans = new Map(); // text key -> how its amount was chosen (levels.js planSwaps), for its shown record
 const keys = new WeakMap(); // element -> revision:text hash, kept off the DOM so pages can't read it
 const sizes = new WeakMap(); // element -> its word count, for shown records
+const awaiting = new Set(); // text keys painted with the sure swaps while the model's answer is on its way
+let sighted = new WeakSet(); // passages that have been on screen, even partly, since their painting
 const shownContexts = new Set(); // passages already logged as shown in this view
 const pending = new Map();
 const inflight = new Set();
@@ -133,7 +143,7 @@ const blank = (passage) => plans.has(keys.get(passage)) && ![...passage.querySel
 function logShown(passage) {
   const key = passage && keys.get(passage);
   const context = key && key.slice(key.indexOf(':') + 1);
-  if (!key || !on() || !sizes.get(passage) || document.visibilityState === 'hidden' || shownContexts.has(context)) return;
+  if (!key || !on() || !sizes.get(passage) || document.visibilityState === 'hidden' || shownContexts.has(context) || awaiting.has(key)) return;
   shownContexts.add(context);
   const { annotations, box } = describe(passage);
   if (!annotations.length && !blank(passage)) return; // Japanese, but no listed word in it (the bundled lists)
@@ -225,12 +235,15 @@ function tickStays() {
   for (const passage of full) { endStay(passage); startStay(passage); }
   for (const passage of left) endStay(passage);
 }
+// A stay begun before the passage's last painting (no answer yet, or awaiting the model's) counts for the reading counts
+// only: endStay doesn't log it.
+const painted = (key) => memo.has(key) && !awaiting.has(key);
 function startStay(passage) {
   if (stays.has(passage) || document.visibilityState === 'hidden' || !keys.has(passage)) return;
   const now = Date.now();
   const desc = describe(passage);
   const empty = blank(passage); // kept with the stay: stop() forgets the plans before it ends stays
-  stays.set(passage, { ...newStay(now), desc, blank: empty });
+  stays.set(passage, { ...newStay(now), desc, blank: empty, early: !painted(keys.get(passage)) });
   if (empty) logShown(passage); // no Japanese word to wait for
   if (!stayTimer) stayTimer = setInterval(tickStays, 1000);
 }
@@ -244,7 +257,8 @@ function endStay(passage) {
   stays.delete(passage);
   if (!stays.size) { clearInterval(stayTimer); stayTimer = null; }
   const key = keys.get(passage);
-  if (stay.ms < STAY_MIN_MS || staysLogged >= STAYS_MAX || !key || !on()) return;
+  if (stay.ms < STAY_MIN_MS || !key || !on()) return;
+  if (stay.early || staysLogged >= STAYS_MAX) return;
   const { spans, annotations, box } = passage.isConnected ? describe(passage) : stay.desc;
   if (!spans.length && !stay.blank) return;
   staysLogged++;
@@ -252,9 +266,15 @@ function endStay(passage) {
     context: key.slice(key.indexOf(':') + 1), box, annotations, y: 0, height: box[3], ms: stay.ms, wall: stay.wall,
     away: stay.away, media: stay.media, idle: stay.idle }).catch(() => {});
 }
+// After a passage's painting changes: a stay under way ends there, and a new one starts if it is still on screen.
+function restay(passage) {
+  if (stays.has(passage)) endStay(passage);
+  if (inView.has(passage)) startStay(passage);
+}
 function forget(passage) {
   endStay(passage);
   inView.delete(passage);
+  sighted.delete(passage);
   onscreen?.unobserve(passage);
 }
 function staysOnVisibility() {
@@ -312,6 +332,7 @@ function consider(el) {
   const key = `${config.revision}:${hashKey(text)}`;
   keys.set(el, key);
   sizes.set(el, wordCount(text));
+  onscreen?.observe(el); // on screen before its last painting: those stays aren't logged (startStay)
   if (memo.has(key)) { paint(el, key); return; }
   let p = pending.get(key);
   if (!p) { p = { text, els: new Set() }; pending.set(key, p); }
@@ -325,6 +346,7 @@ async function flush() {
   const items = [...pending].filter(([key]) => !inflight.has(key)).slice(0, MAX_BATCH).map(([key, p]) => ({ key, text: p.text }));
   if (!items.length) return;
   for (const i of items) inflight.add(i.key);
+  const waiting = [];
   let result;
   try { result = await send({ type: 'swaps', revision: config.revision, items }); }
   catch { result = { error: 'Extension unavailable' }; }
@@ -346,12 +368,71 @@ async function flush() {
     }
     failures.delete(i.key);
     memo.set(i.key, swaps);
-    if (result?.plans?.[i.key]) plans.set(i.key, result.plans[i.key]);
-    if (p) for (const el of p.els) paint(el, i.key);
+    const later = result?.waiting?.includes(i.key); // the model's answer is on its way: these are the sure swaps
+    if (later) {
+      awaiting.add(i.key);
+      waiting.push({ key: i.key, text: i.text, keep: swaps });
+    }
+    // an awaiting passage with nothing sure to show has no plan yet: it isn't blank, it waits
+    if (result?.plans?.[i.key] && (!later || swaps.length)) plans.set(i.key, result.plans[i.key]);
+    if (p) for (const el of p.els) { paint(el, i.key); if (!later) restay(el); }
   }
   settle();
+  if (waiting.length) void awaitAnswers(gen, waiting);
   if (result?.stale) { try { update(await send({ type: 'config' })); } catch { /* reloaded or gone */ } return; }
   if ([...pending.keys()].some((k) => !inflight.has(k))) timer = setTimeout(flush, 50);
+}
+// The page asks again for passages awaiting the model's answer; the reply waits for the call. A failed call is retried
+// with a backoff, and after the last try the sure swaps are all the passage gets.
+async function awaitAnswers(gen, items, tries = 0) {
+  let result;
+  try { result = await send({ type: 'swaps', revision: config.revision, items, wait: true }); }
+  catch { result = { error: 'Extension unavailable' }; }
+  if (gen !== generation || !on()) return;
+  const retry = [];
+  for (const i of items) {
+    const swaps = result?.results?.[i.key];
+    if (Array.isArray(swaps)) answered(i.key, { swaps, plan: result.plans?.[i.key], appended: result.appended?.[i.key] });
+    else if (awaiting.has(i.key)) retry.push(i);
+  }
+  if (retry.length && !result?.stale) {
+    if (tries < MAX_RETRIES) {
+      const wait = Math.max(result?.retryAfterMs || 0, 5000 * (tries + 1));
+      setTimeout(() => { if (gen === generation) void awaitAnswers(gen, retry, tries + 1); }, wait);
+    } else for (const i of retry) answered(i.key, null);
+  }
+  settle();
+  if (result?.stale) { try { update(await send({ type: 'config' })); } catch { /* reloaded or gone */ } }
+}
+const sameSwap = (a, b) => (a.kind || 'word') === (b.kind || 'word') && a.o === b.o && a.f === b.f && (a.ctx || '') === (b.ctx || '');
+// A passage's last painting: the answer's plan, or appended (the swaps on the page kept as they are, the rest planned
+// around them) where the reader has had it on screen with Japanese; null: no answer, the sure swaps stay as they are.
+function answered(key, result) {
+  if (!awaiting.delete(key)) return;
+  const els = [...tracked].filter((el) => keys.get(el) === key && el.isConnected);
+  const shown = memo.get(key) || [];
+  const keep = shown.length > 0 && els.some((el) => sighted.has(el) || shownContexts.has(key.slice(key.indexOf(':') + 1)));
+  const chosen = !result ? null : keep && result.appended ? result.appended : result;
+  if (chosen) {
+    memo.set(key, chosen.swaps);
+    if (chosen.plan) plans.set(key, chosen.plan); else plans.delete(key);
+  }
+  for (const el of els) {
+    if (stays.has(el)) endStay(el); // a stay of the painting before: counted as reading, not logged
+    if (chosen && keep) {
+      const added = chosen.swaps.filter((s) => !shown.some((x) => sameSwap(x, s)));
+      if (added.length && applySwaps(el, added, skip()) && reported) report('');
+      for (const span of el.querySelectorAll(`.${SWAP_CLASS}`)) if (isSwap(span)) visible.observe(span);
+      onscreen?.observe(el);
+      observer?.takeRecords();
+    } else if (chosen) {
+      if (el.querySelector(`.${SWAP_CLASS}`)) revert(el);
+      observer?.takeRecords();
+      paint(el, key);
+    }
+    if (inView.has(el)) startStay(el);
+  }
+  seenVisible(); // Japanese already on screen is shown now, with its last plan
 }
 // The toolbar's "nothing to weave" state (toolbar.js): once no passage waits for the model and none has turned up or
 // changed for SETTLE_MS (or SETTLE_MAX_MS on a page that never goes quiet), the background hears 'none' when the page
@@ -384,7 +465,7 @@ const woven = (el) => [...el.querySelectorAll(`span.${SWAP_CLASS}`)].some(isSwap
 function settled() {
   const now = Date.now();
   if (!on()) { calm(); return; }
-  if ((now - stirred < SETTLE_MS && now - unsettled < SETTLE_MAX_MS) || pending.size || inflight.size || timer) return;
+  if ((now - stirred < SETTLE_MS && now - unsettled < SETTLE_MAX_MS) || pending.size || inflight.size || awaiting.size || timer) return;
   calm();
   const live = [...tracked].filter((el) => el.isConnected);
   if (live.some(woven)) { report(''); return; }
@@ -437,6 +518,7 @@ function start() {
   }, { threshold: [0, 0.5] });
   onscreen = new IntersectionObserver((entries) => {
     for (const e of entries) {
+      if (e.isIntersecting) sighted.add(e.target);
       if (enoughOnScreen(e)) { inView.add(e.target); startStay(e.target); } else { inView.delete(e.target); endStay(e.target); }
     }
   }, { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] });
@@ -456,7 +538,8 @@ function stop() {
   observer?.disconnect(); observer = null;
   near?.disconnect(); visible?.disconnect();
   clearTimeout(timer); timer = null;
-  pending.clear(); inflight.clear(); memo.clear(); plans.clear(); failures.clear(); hideTip();
+  pending.clear(); inflight.clear(); memo.clear(); plans.clear(); failures.clear(); awaiting.clear(); hideTip();
+  sighted = new WeakSet();
   for (const passage of [...stays.keys()]) endStay(passage);
   onscreen?.disconnect(); inView.clear();
   for (const el of tracked) { revert(el); keys.delete(el); }

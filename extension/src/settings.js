@@ -1,18 +1,16 @@
 // Preferences, stored under chrome.storage.local["settings"]. The model keys are stored apart from these, so
 // the config pages get never carries them.
-import { MODELS, DEFAULT_MODEL, providerOf } from './models.js';
+import { MODELS, DEFAULT_MODEL } from './models.js';
 import { INTENSITY_OFF } from './levels.js';
 
 export const DEFAULT_SETTINGS = {
   enabled: true,
   model: DEFAULT_MODEL,
   levelOverride: 0, // 0 = follow the Claude Code stage (Level 1 without the plugin)
-  density: 0, // percent of a passage's words to swap; 0 = the level's per-sentence rule
   newSitesEnabled: null, // null = what setup chose (prefs.extension_sites), else on
   siteOverrides: {}, // hostname -> true/false, set from the popup
 };
 
-export const DENSITIES = [0, 3, 5, 8, 10, 15, 20, 25, 30, 40];
 // The challenge: normal's lookup budget per 100 words read, 0 for the default. Kept by the native host (knowledge.py
 // CHALLENGES).
 export const CHALLENGES = [0, 0.5, 1, 1.5, 2, 3];
@@ -23,7 +21,6 @@ export function cleanSettings(s = {}) {
   if (typeof s.newSitesEnabled === 'boolean') d.newSitesEnabled = s.newSitesEnabled;
   if (Object.hasOwn(MODELS, s.model)) d.model = s.model;
   if (Number.isInteger(s.levelOverride) && s.levelOverride >= 0 && s.levelOverride <= 4) d.levelOverride = s.levelOverride;
-  if (DENSITIES.includes(s.density)) d.density = s.density;
   for (const [host, enabled] of Object.entries(s.siteOverrides || {})) {
     if (/^(?=.{1,253}$)[a-z0-9]+(?:[a-z0-9.-]*[a-z0-9])?$/.test(host) && typeof enabled === 'boolean') d.siteOverrides[host] = enabled;
   }
@@ -87,16 +84,16 @@ export function siteEnabled(settings, url) {
 }
 
 // Why a page gets no Japanese, '' when it does: the one test for the worker, the content script and the toolbar icon.
-// ctx is a page config (background.js context): settings with newSitesEnabled resolved, hasKey, paused, origins and
-// intensity. Global reasons come first, in the order a reader would fix them. url undefined: the browser didn't tell
-// (no access to the tab without the "tabs" permission), which with every site allowed means a page that isn't a website.
-// 'switched-off' | 'paused' | 'intensity-off' | 'no-gemini-key' | 'no-anthropic-key' | 'unsupported' | 'hidden' |
-// 'site-off' | 'not-on' | 'private' | 'no-access'.
+// ctx is a page config (background.js context): settings with newSitesEnabled resolved, paused, origins and intensity.
+// Global reasons come first, in the order a reader would fix them. url undefined: the browser didn't tell (no access to
+// the tab without the "tabs" permission), which with every site allowed means a page that isn't a website. A missing
+// model key is no reason: pages get the swaps code is sure of without a model (background.js), and no text leaves the
+// browser. 'switched-off' | 'paused' | 'intensity-off' | 'unsupported' | 'hidden' | 'site-off' | 'not-on' | 'private' |
+// 'no-access'.
 export function globalOffReason(ctx) {
   if (!ctx.settings.enabled) return 'switched-off';
   if (ctx.paused) return 'paused';
   if (ctx.intensity?.level === INTENSITY_OFF) return 'intensity-off';
-  if (!ctx.hasKey) return providerOf(ctx.settings.model) === 'anthropic' ? 'no-anthropic-key' : 'no-gemini-key';
   return '';
 }
 export function offReason(ctx, url) {

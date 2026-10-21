@@ -48,11 +48,10 @@ describe('appearance', () => {
     // the level still runs elsewhere, so the badge keeps it and the title says both
     expect(appearance({ level: 1, until, reason: 'paused' })).toMatchObject({ icon: 'off', text: '+1',
       title: `Japanese Weave: paused from Claude Code · heavier (+1) until ${clock(until)}` });
-    for (const reason of ['switched-off', 'paused', 'no-gemini-key', 'no-anthropic-key', 'unsupported', 'hidden', 'site-off', 'not-on',
-      'private', 'no-access']) {
+    for (const reason of ['switched-off', 'paused', 'unsupported', 'hidden', 'site-off', 'not-on', 'private', 'no-access']) {
       expect(reasonText(reason)).not.toBe(reasonText('something else'));
     }
-    expect(reasonText('no-anthropic-key')).toContain('Anthropic key');
+    expect(reasonText('no-anthropic-key')).toBe(reasonText('something else')); // a missing key turns no page off
     expect(reasonText('unsupported')).toBe("can't run on this page");
   });
   test('a model at work shows over the level, never over a reason', () => {
