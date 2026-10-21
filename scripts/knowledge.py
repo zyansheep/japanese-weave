@@ -564,9 +564,56 @@ def _y_of(context, ja, match):
 
 
 CLASSES = ('costly', 'free', 'topical', 'sentences', 'offlist')  # calibrate's classes of lookups
+# A word in a T3 message is topical when a chat brief offered it as topical (weave.topical_words) in this long before
+# the message was shown. Nothing links a T3 message to the chat its brief was for: T3 logs a window (view) and a
+# message id (context), the brief op the Claude Code session id and the time, so the link is the word and the time.
+# The hook writes a brief as each prompt is sent, and on the user's 2,995 prompts with a reply (2026-10-21) the
+# reply's last text came within 30 minutes of the prompt for 90% and within an hour for 95%; a topical word comes from
+# the conversation's own turns, so one offered in another chat within the hour and used off the lists here is rare.
+TOPICAL_WINDOW_MS = 3_600_000
 
 
-def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX):
+class Offers:
+    """The topical words chat briefs offered (feedback.chat_briefs' topical, [[ja, p]]), for calibrate's topical class
+    (shown_record): price(keys, at) is (ja, p) of the latest brief in the TOPICAL_WINDOW_MS before `at` that offered
+    one of keys (spellings of the word as written), else None; p is the brief's own price, the chat's lookup chance it
+    offered the word at. entry(written): the dictionary entry's spelling of a word as written (dictionary.find, the
+    dictionary loaded on first use), so a conjugated form or another spelling of an offered entry counts."""
+
+    def __init__(self, briefs, window=TOPICAL_WINDOW_MS):
+        number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        self.window, self.by_word, self.times, self._d = window, {}, [], None
+        for b in briefs or ():
+            for row in b.get('topical') or ():
+                if isinstance(row, list) and len(row) == 2 and isinstance(row[0], str) and number(row[1]) \
+                        and number(b.get('at')):
+                    self.by_word.setdefault(row[0], []).append((b['at'], row[1]))
+                    self.times.append(b['at'])
+        self.times.sort()
+
+    def active(self, at):
+        """Whether any brief offered a topical word in the window before `at`."""
+        import bisect
+        i = bisect.bisect_right(self.times, at)
+        return i > 0 and self.times[i - 1] >= at - self.window
+
+    def entry(self, written):
+        if self._d is None:
+            import dictionary  # here: only a T3 message shown after a topical offer needs it
+            self._d = dictionary.load() if dictionary.PATH.exists() else False
+        e = self._d.find(written) if self._d else None
+        return e['ja'] if e else None
+
+    def price(self, keys, at):
+        best = None
+        for ja in keys:
+            for t, p in self.by_word.get(ja, ()):
+                if at - self.window <= t <= at and (best is None or t > best[0]):
+                    best = (t, ja, p)
+        return best[1:] if best else None
+
+
+def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX, offers=None):
     """One passage or message for calibrate, as the model stood before it: {at, shown (when it was shown: its shown
     record, else at), surface, words (shown), japanese (its annotations: none in a blank passage), read (words_read),
     lookups (its opens; T3 peeks under T3_NOISE_MS left out), budget (a browser plan's, per 100 words; else None),
@@ -574,19 +621,28 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     its best annotation, and seen its opens (a glance counts GLANCE_Y): listed words are free when the model says so
     (model.is_free, the free flag; without one, P(peek) under fwlib.FREE_P), else costly; a sentence translation
     (is_sentence) costs the model's price of a whole sentence (model.sentence_price, a chance per sentence read; without
-    one it isn't priced); a word off the list costs its prior's P(peek). Topical words (chat words found by code,
-    planned) have none yet. model: chance(word, surface, at), and maybe is_free(word) and sentence_price(surface)."""
+    one it isn't priced); a word off the list costs its prior's P(peek). In a T3 message, a word a chat brief offered
+    as topical in the TOPICAL_WINDOW_MS before it was shown (offers: an Offers, by the word as written, its listed
+    word or its dictionary entry) is topical whether listed or not, at the price the brief offered it at. model:
+    chance(word, surface, at), and maybe is_free(word) and sentence_price(surface)."""
     notes = context['annotations']
     line = _line_height([n[2] for n in notes])
     read = reader(surface, context, pace, top)
     opened = _opened(surface, notes, items)
-    units = {}  # (kind, word or sentence index) -> [best read chance, seen]
+    shown = context.get('shown_at') or at
+    topical = offers if surface == 't3' and offers is not None and offers.active(shown) else None
+    units, prices = {}, {}  # (kind, word or sentence index) -> [best read chance, seen]; topical word -> price
     for index, (written, _x, y) in enumerate(notes):
         if is_sentence(written):
             unit = ('sentences', index)
         else:
             ja = match(written)
-            unit = ('listed', ja) if ja is not None else ('offlist', written)
+            found = topical.price({written, ja, topical.entry(written)} - {None}, shown) if topical else None
+            if found:
+                unit = ('topical', found[0])
+                prices[found[0]] = found[1]
+            else:
+                unit = ('listed', ja) if ja is not None else ('offlist', written)
         best = units.setdefault(unit, [0.0, 0.0])
         best[0] = max(best[0], read(y, line))
         best[1] = max(best[1], opened.get(index, 0.0))
@@ -594,7 +650,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     price = getattr(model, 'sentence_price', lambda _surface: 0.0)(surface) or 0.0
     classes = {name: [0.0, 0.0] for name in CLASSES}
     for (kind, word), (chance, seen) in units.items():
-        p = price if kind == 'sentences' else model.chance(word, surface, at)
+        p = price if kind == 'sentences' else prices[word] if kind == 'topical' else model.chance(word, surface, at)
         if kind == 'listed':
             kind = 'free' if (is_free(word) if is_free else p < fwlib.FREE_P) else 'costly'
         classes[kind][0] += chance * p
@@ -603,7 +659,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     plan = context.get('plan') or {}
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
-    return {'at': at, 'shown': context.get('shown_at') or at, 'surface': surface, 'words': words,
+    return {'at': at, 'shown': shown, 'surface': surface, 'words': words,
             'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
@@ -1438,14 +1494,15 @@ class Standing:
 
 
 def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags=None, start=None,
-                   done=()):
+                   done=(), offers=None):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
     fit before: start, a fit's state, for the first; refresh passes its fit's, which is from nothing once a day, so the
     floor's basin is the whole log's; with the free flags of the day before), each word at its clock in the passage or
     message (read_clocks: its current chance), the free flags carried from day to day (free_flags, from flags, else the
     priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events). done: days to
-    skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    skip (their sums are known); offers: the chat briefs' topical words (Offers), for the topical class. Returns
+    (records, {day: the free flags at its start})."""
     out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
     for at, key, context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:
@@ -1461,14 +1518,14 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
                       if hasattr(event, 'obs') and day_of(event.at) == day for o in event.obs}
             standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)), clocks)
         standing.key = key
-        out.append(shown_record(at, key[0], context, items, standing, match, pace, top))
+        out.append(shown_record(at, key[0], context, items, standing, match, pace, top, offers))
     return out, starts
 
 
-def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
+def day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers=None):
     """{day: key} for the days from `since` to yesterday: what their records depend on (the model, the reading model,
-    the challenge, and how much of the log, its interactions and intensity changes came before the day's end), so a
-    day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
+    the challenge, and how much of the log, its interactions, intensity changes and topical offers (offers: Offers)
+    came before the day's end), so a day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
     import bisect
     ats, row_ats = [e.at for e in log.events], sorted(r['at'] for r in rows)
     counts, total = [], 0
@@ -1481,7 +1538,8 @@ def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
         end = day_start(day_of(end))
         n = bisect.bisect_left(ats, end)
         out[day] = (f'{MODEL} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
-                    f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}')
+                    f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}'
+                    + (f' {bisect.bisect_left(offers.times, end)}' if offers is not None and offers.times else ''))
         day = day_of(end)
     return out
 
@@ -1800,7 +1858,8 @@ def classes_text(classes, days):
             k = c['classes'][key]
             label = f'    {CLASS_NAMES[key] + ":":<17}'
             if key == 'topical' and not k['expected'] and not k['seen']:
-                lines.append(f'{label}none yet (chat has no topical words before the dictionary)')
+                lines.append(f'{label}none yet (no word a brief offered as topical was shown in the hour after)'
+                             if surface == 't3' else f'{label}none (chat only)')
                 continue
             if k['ratio'] is None:
                 verdict = ': not priced yet' if key == 'sentences' else ''
@@ -2061,8 +2120,10 @@ def refresh(now=None):
         sentences = sentence_events(rows, contexts, now_ms, pace, top)
         prices = sentence_prices(sentences, now_ms)
         changes, challenge = feedback.intensity_changes(feedback.default_path()), challenge_of(state)
+        briefs = feedback.chat_briefs(feedback.default_path())
+        offers = Offers(briefs)
         since = now_ms - CALIBRATION_DAYS * DAY_MS
-        keys = day_keys(log, rows, changes, since, now_ms, pace, top, challenge)
+        keys = day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers)
         cached = previous.get('daily') if isinstance(previous.get('daily'), dict) else {}
         done = {day: cached[day]['totals'] for day, key in keys.items()
                 if isinstance(cached.get(day), dict) and cached[day].get('key') == key}
@@ -2071,7 +2132,7 @@ def refresh(now=None):
         flags_then = carried.get('free') if carried.get('day') in done and isinstance(carried.get('free'), dict) else \
             before
         records, starts = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags_then,
-                                         fit.state(), set(done))
+                                         fit.state(), set(done), offers)
         totals = dict(done, **day_totals(records, changes, challenge))
         daily = {day: {'key': key, 'totals': totals[day]} for day, key in keys.items() if day in totals}
         last = max((day for day in starts if day in daily), default=None)
@@ -2094,7 +2155,7 @@ def refresh(now=None):
             if read:  # when it was last read, for its current chance (current_chance)
                 words[ja]['read'] = read
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
-        spend = spending(contexts, feedback.chat_briefs(feedback.default_path()), now_ms)
+        spend = spending(contexts, briefs, now_ms)
         looked = {ja: len(st['recent']) for ja, st in stats.items() if len(st['recent']) >= fwlib.LOOKED_UP}
         try:  # words from your reading (reading.py); without its counts, the list's order
             import reading as counts  # refresh's `reading` is the reading model
