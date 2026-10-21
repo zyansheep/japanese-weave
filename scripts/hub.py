@@ -24,6 +24,8 @@ Ops (each also carries uid, day, at and machine; see stamp):
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
                                                        delayed-start arms, the probes' outcomes (fwlib.apply_labels)
+  restore   {}                                         undo the switch to the model's labels (fwlib.restore; fw.py
+                                                       relabel --restore)
   brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {ja: arm}, "known", "whole", "chars",
              "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "turn"?}
                                                        what one chat reply was offered (weave.compose); a record only
@@ -162,6 +164,9 @@ def validate(op):
         return brief_error(op)
     elif kind == 'probe':
         return probe_error(op)
+    elif kind == 'restore':
+        if set(op) - {'uid', 'day', 'at', 'machine', 'kind'}:
+            return 'restore: {}'
     elif kind not in ('chat_day', 'noticed'):
         return f'unknown op {kind!r}'
     return None
@@ -301,6 +306,8 @@ def apply(state, op):
         return {'logged': 0}
     if kind == 'labels':
         return fwlib.apply_labels(state, op, day)
+    if kind == 'restore':
+        return {'restored': fwlib.restore(state, day)}
     if kind == 'noticed':
         state.setdefault('exported', {})['noticed'] = True
         return {}

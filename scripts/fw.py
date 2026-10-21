@@ -58,6 +58,11 @@
                                                      without a lookup: about 60 words sampled by frequency and 6
                                                      made-up ones, one at a time in a terminal, y or n (--list and
                                                      --answers: the same in a chat); monthly (scripts/probe.py)
+  fw.py relabel [--dry-run] [--home DIR] [--examples N]
+                                                     the words whose labels the fitted model would change from
+                                                     the day-count rules', grouped and explained; writes nothing
+  fw.py relabel --restore                            undo the switch to the model's labels within 30 days
+                                                     (then check out the code from before it)
   fw.py refresh                                      rescan chat transcripts, refit the model and label the
                                                      words from it (with a collector: send them and anything
                                                      queued, and refresh the cached state)
@@ -90,6 +95,7 @@ import intensity  # noqa: E402
 import evaluate  # noqa: E402
 import knowledge  # noqa: E402
 import probe  # noqa: E402
+import relabel  # noqa: E402
 import threads  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
@@ -933,6 +939,9 @@ def main(argv=None):
     p = sub.add_parser('evaluate')
     evaluate.add_arguments(p)
     p.set_defaults(run=evaluate.run)
+    p = sub.add_parser('relabel')
+    relabel.add_arguments(p)
+    p.set_defaults(run=relabel.run)
     p = sub.add_parser('collector')
     p.add_argument('action', choices=['run', 'install'])
     p.add_argument('--listen', required=True, metavar='HOST:PORT')
