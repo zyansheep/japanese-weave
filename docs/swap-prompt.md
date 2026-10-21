@@ -685,17 +685,17 @@ measured them.
 Each has tests (`levels.test.js`, `verify.test.js`) whose sentences are not from either fresh set.
 
 **Fresh2** (`tools/prompt-lab/fresh2.json`, each with its source URL), collected as `fresh.json` was, a day later and in
-another hash order, by rules written down before any candidate was read: 5 tweets (2026-10-20, English, no retweets),
-5 Hacker News and 5 Reddit comments (2026-10-20, any subreddit) and 5 YouTube comments (over 60 characters, video ids
-from `fR`, since the archive has no dates), each source in the order `cityHash64(id, 'fresh2')` from public archives, keeping the first
-items of English prose of 15 to 120 words with `fresh.json`'s skips and at most one per thread; 4 news ledes, BBC and
-NPR feeds of 2026-10-21 in feed order (3 from BBC, since only one NPR item was neither party politics, health, legal or
-money advice nor a story `fresh.json` used); and 3 blog and 3 technical first paragraphs from pages linked from Hacker News
-stories of 2026-10-20 with 50 or more points, in hash order (pages without such a paragraph skipped). One HN comment
-tripped `isZeroJapanese` ("investors") and the next that qualified took its place. To test sentences, 4 more: in each comment order
-past those picks, the first item with a sentence the list can say whole (found with a spelling finder that is not the
-pipeline's code, confirmed by reading). 34 passages, 1,331 words, median 32 a passage; none shares a five-word run with
-the lab's sets or `fresh.json`.
+another hash order, by rules written down before any candidate was read: 5 tweets (2026-10-20, English, no retweets), 5
+Hacker News and 5 Reddit comments (2026-10-20, any subreddit) and 5 YouTube comments (over 60 characters, video ids from
+`fR`, since the archive has no dates), each source in the order `cityHash64(id, 'fresh2')` from public archives, keeping
+the first items of English prose of 15 to 120 words with `fresh.json`'s skips and at most one per thread; 4 news ledes,
+BBC and NPR feeds of 2026-10-21 in feed order (3 from BBC, since only one NPR item was neither party politics, health,
+legal or money advice nor a story `fresh.json` used); and 3 blog and 3 technical first paragraphs from pages linked from
+Hacker News stories of 2026-10-20 with 50 or more points, in hash order (pages without such a paragraph skipped). One HN
+comment tripped `isZeroJapanese` ("investors") and the next that qualified took its place. To test sentences, 4 more: in
+each comment order past those picks, the first item with a sentence the list can say whole (found with a spelling finder
+that is not the pipeline's code, confirmed by reading). 34 passages, 1,331 words, median 32 a passage; none shares a
+five-word run with the lab's sets or `fresh.json`.
 
 **Judging** (`tools/prompt-lab/fresh2-oracle.json`): by hand against the 324 introduced words of the 2026-10-20
 snapshot, by `oracle.json`'s rules and `fresh-oracle.json`'s practice, committed before any run (1c7dea8): 184 "use",
@@ -721,9 +721,10 @@ with today's prompt and validation at normal (calls of 6) and full (calls of 3).
 
 Wilson's 90% interval of the fixed pipeline's 3 wrong of 531 is 0.2% to 1.4%. The 30 passages sampled by the rules
 alone: after 81.0% and 0.7% (3 / 418), before 81.4% and 3.5%, Haiku today 71.0% and 4.3% at full, 46.1% and 4.3% at
-normal. The 4 passages of the sentence stratum: no wrong hit for the check pipeline before or after, one for Haiku at full;
-sentences whole 9 of 12 after, 7 before, 9 for Haiku at full and 3.4 at normal. The fifth sentence ("We get it", in a passage of the main sample) says "get" by
-分かる, which no gloss matches: code never marks it dense, and Haiku never wrote it.
+normal. The 4 passages of the sentence stratum: no wrong hit for the check pipeline before or after, one for Haiku at
+full; sentences whole 9 of 12 after, 7 before, 9 for Haiku at full and 3.4 at normal. The fifth sentence ("We get it",
+in a passage of the main sample) says "get" by 分かる, which no gloss matches: code never marks it dense, and Haiku never
+wrote it.
 
 New minus Haiku today, paired by passage: at full, coverage +10.3 points (+6.0 to +14.5) and wrong -3.0 (-5.2 to
 -1.2); at normal, +15.5 (+11.3 to +19.8) and -2.6 (-4.8 to -0.9). After minus before: coverage -0.5 (-3.2 to +2.0) at
