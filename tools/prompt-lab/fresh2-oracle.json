@@ -26,7 +26,7 @@
   },
   "hn2-bolt": {
     "use": ["People=人|人間", "always=いつも", "this=これ", "change=変える", "saying=言う", "we=私たち", "know=知る|分かる", "but=でも|だけど", "interesting=面白い", "he=彼"],
-    "ok": ["change=変更", "whatever=何でも", "It=それ", "usually=いつも", "his=彼", "like=まるで", "Yes=はい|ええ"],
+    "ok": ["change=変更", "whatever=何でも", "It#0,1=それ", "usually=いつも", "his=彼", "like=まるで", "Yes=はい|ええ"],
     "not": ["this=この", "Just=さっき", "just=さっき", "it’s=それ", "like=好き|こう", "that’s=それ|その", "way=方", "how=いかが"]
   },
   "hn2-nixos": {
@@ -46,8 +46,8 @@
   },
   "hn2-civilisation": {
     "use": ["I=私|僕", "think=思う|考える", "this=これ", "we=私たち", "thought=思う|考える", "problems=問題", "world=世界", "becoming=なる", "problem=問題", "everyone=みんな"],
-    "ok": ["And=そして", "and#2=そして", "all=みんな", "actually=実は"],
-    "not": ["this=この", "just=さっき", "one=一つ|一", "more=もっと|多く", "and#0=そして", "all=全部", "how=いかが", "that=それ|その", "stand=立つ"]
+    "ok": ["and#1,2=そして", "all=みんな", "actually=実は"],
+    "not": ["this=この", "just=さっき", "one=一つ|一", "more=もっと|多く", "and#0=そして", "all=全部", "how=いかが", "that=それ|その", "stand=立つ", "differences=違う"]
   },
   "rd2-deadlock": {
     "use": ["feel=感じる", "issue=問題", "talked=話す", "about=について", "I=私|僕", "like#0=好き"],
@@ -72,17 +72,17 @@
   },
   "rd2-look": {
     "use": ["I=私|僕", "think=思う|考える", "peoples=人|人間", "minds=心", "This=これ", "a lot=沢山|多い|いっぱい|多く", "people=人|人間", "but=でも|だけど", "also=また", "If=もし", "you=あなた|君", "good=いい", "yourself=自分", "there are=いる", "like=好き"],
-    "ok": ["male=男", "it=それ", "too=また", "look#0=見える", "look#1=見える", "feel=感じる", "what=どんな", "that=その", "undesirable=嫌"],
+    "ok": ["male=男", "it#1=それ", "too=また", "look#0=見える", "look#1=見える", "feel=感じる", "what=どんな", "that=その", "undesirable=嫌"],
     "not": ["it’s=それ", "younger=妹", "and=そして", "This=この", "back=帰る", "too=あまり", "look=見る", "look#2=見える", "there are=ある", "there=そこ", "who=誰", "how=いかが", "what=どれ", "that=それ"]
   },
   "yt2-novelkeys": {
     "use": ["This#0=これ", "This#1=この", "really=本当に", "I=私|僕", "bought=買う", "now=今", "watching=見る"],
     "ok": ["more=もっと"],
-    "not": ["This#0=この", "This#1=これ", "that=それ|その", "have=ある|いる", "more=多く|多い", "after=後"]
+    "not": ["This#0=この", "This#1=これ", "that=それ|その", "have=ある|いる", "more=多く|多い", "after=後", "enjoy=楽しい"]
   },
   "yt2-carpet": {
     "use": ["you=あなた|君", "about=について", "I=私|僕", "him=彼", "we=私たち", "have=ある", "same=同じ"],
-    "ok": ["day=日", "my=私|僕", "got=買う", "stuff=物"],
+    "ok": ["day=日", "my=私|僕", "got=買う", "stuff=物", "nasty=悪い"],
     "not": ["one=一つ|一", "someone=誰", "about=くらい", "like=好き|こう|まるで", "what=どれ", "have=いる", "got=もらう", "Sis=妹"]
   },
   "yt2-roadside": {
@@ -128,12 +128,12 @@
   "blog2-writing": {
     "use": ["thesis=論文", "about=について", "word=単語", "this=この", "simple=簡単", "well=よく", "feel=感じる"],
     "ok": ["My=私|僕", "more=もっと", "telling=話す", "It=それ", "easier=簡単"],
-    "not": ["about=くらい", "this=これ", "worked=仕事", "well=じゃ|まあ|元気", "more=多く|多い", "telling=言う", "makes=する", "style=風"]
+    "not": ["about=くらい", "this=これ", "worked=仕事", "well=じゃ|まあ|元気", "more=多く|多い", "telling=言う", "makes=する", "style=風", "Readers=読む"]
   },
   "blog2-taste": {
     "use": ["car=車", "cars=車", "about=について", "But=でも|だけど", "become=なる", "important=大切"],
     "ok": ["more=もっと"],
-    "not": ["When=時|いつ", "came=来る", "about=くらい", "now=今", "that=それ|その", "have=ある|いる", "and=そして", "more=多く|多い"]
+    "not": ["When=時|いつ", "care=気", "came=来る", "about=くらい", "now=今", "that=それ|その", "have=ある|いる", "and=そして", "more=多く|多い"]
   },
   "docs2-tor": {
     "use": ["Friday=金曜日", "started=始める"],
@@ -148,7 +148,7 @@
   "docs2-microg": {
     "use": ["sometimes=時々", "you=あなた|君", "still=まだ"],
     "ok": ["It=それ", "like=例えば", "more=もっと", "your=あなた|君", "actual=本当"],
-    "not": ["like=好き|こう|まるで", "as=まるで", "more=多く|多い", "and=そして", "while=間", "that=それ|その", "do=する|やる", "when=時|いつ"]
+    "not": ["like=好き|こう|まるで", "as=まるで", "more=多く|多い", "and=そして", "while=間", "that=それ|その", "do=する|やる", "when=時|いつ", "powerful=力"]
   },
   "x2-ideas": {
     "use": ["We=私たち", "talked=話す", "about=について", "But=でも|だけど", "there are=ある", "still=まだ"],
@@ -158,7 +158,7 @@
   },
   "hn2-flowchart": {
     "use": ["also=また", "good=いい", "If=もし", "all=全部", "still=まだ", "exist=ある", "We=私たち", "have=ある", "But=でも|だけど", "considered=考える", "real=本当"],
-    "ok": ["It=それ", "and=そして", "today=今日", "that=それ"],
+    "ok": ["It=それ", "and=そして", "today=今日", "that=それ", "reminded=思い出す"],
     "not": ["can=出来る", "very=あまり", "planning=つもり", "all=みんな", "then=じゃ|では|そして", "language=日本語", "as=まるで", "I'm=私|僕", "Does=する|やる", "exist=いる", "have=いる", "much=多く", "like=好き|こう|まるで", "kind=こう|こんな|どんな", "that=その"],
     "sentences": ["Does it still exist?"]
   },
