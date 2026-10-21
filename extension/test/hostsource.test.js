@@ -32,9 +32,9 @@ describe('parseState', () => {
     for (const level of [4, -4, 1.5, '1']) expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, level } } }).intensity).toBe(null);
   });
   it('carries per-word estimates and the dial', () => {
-    const words = [{ ...REPLY.words[0], k: 0.4, sd: 0.8 }, { ...REPLY.words[1], k: 'high', sd: 1 }];
+    const words = [{ ...REPLY.words[0], k: 0.4, sd: 0.8, free: false }, { ...REPLY.words[1], k: 'high', sd: 1, free: 'yes' }];
     const s = parseState({ ...REPLY, words, challenge: 1.5, budget: 2.1, rate: { per100: 1.2, peeks: 6, shownWords: 500, days: 3 } });
-    expect(s.words.map((w) => [w.k, w.sd])).toEqual([[0.4, 0.8], [undefined, undefined]]);
+    expect(s.words.map((w) => [w.k, w.sd, w.free])).toEqual([[0.4, 0.8, false], [undefined, undefined, undefined]]);
     expect([s.challenge, s.budget, s.rate]).toEqual([1.5, 2.1, { per100: 1.2, peeks: 6, shownWords: 500, days: 3 }]);
     expect(parseState({ ...REPLY, challenge: -1, rate: { per100: null } })).toMatchObject({ challenge: 0, rate: null });
     // the web's price of a whole sentence, once knowledge.json has one: lookups per sentence read, 0 to 1 (0: none yet)

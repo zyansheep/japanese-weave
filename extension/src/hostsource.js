@@ -12,8 +12,8 @@ const LOG_MAX = 500;
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
-// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k and its uncertainty sd when the
-// gloss log has evidence; the dial (challenge, peeks per 100 words), its budget, the realized peek rate, and the web's
+// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k, its uncertainty sd and whether
+// it is known at a glance (free, with hysteresis); the challenge (normal's lookup budget), the budget, and the web's
 // price of a whole sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and
 // levels.js SENTENCE_PRICE stands in).
 export function parseState(data) {
@@ -27,7 +27,8 @@ export function parseState(data) {
     if (!ja || !en || seen.has(ja)) continue;
     seen.add(ja);
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
-      status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}) });
+      status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
+      ...(typeof w.free === 'boolean' ? { free: w.free } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));

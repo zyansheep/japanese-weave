@@ -238,7 +238,7 @@ async function callModel(ctx, batch) {
 }
 
 // Picks each passage's swaps from its cached candidates (planSwaps): the level's lookup budget (normal's from the host:
-// the challenge when set, steered, else intensity.py's), the host's per-word estimates and price of a whole sentence
+// the challenge when set, else intensity.py's), the host's per-word estimates and price of a whole sentence
 // (else levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage
 // and the day so a passage repaints the same way. Returns { swaps, plan }.
 async function chooser(ctx) {
