@@ -18,8 +18,9 @@ export function closed(schema) {
 }
 
 // system: the prompt in parts (prompt.js buildSystemParts). Each part ends a cache breakpoint, so the rules and known
-// words are read from the cache even when the learning words' order has changed.
-export function buildClaudeRequest({ model, system, user, schema }) {
+// words are read from the cache even when the learning words' order has changed. thinking: false turns thinking off
+// (Haiku 5.5 accepts that at effort low to high), for a job simple enough not to need it (verify.js measures both).
+export function buildClaudeRequest({ model, system, user, schema, thinking = true, effort }) {
   const parts = [].concat(system).filter(Boolean);
   return {
     model,
@@ -28,14 +29,15 @@ export function buildClaudeRequest({ model, system, user, schema }) {
     messages: [{ role: 'user', content: user }],
     // With thinking off, Haiku broke the rules: 15-21 dropped swaps in 16 test passages, unlisted words, almost no
     // phrases. A little thinking brought it close to Argon (docs/swap-prompt.md) at about 4x the cost.
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: closed(schema) } },
+    thinking: { type: thinking ? 'adaptive' : 'disabled' },
+    output_config: { effort: effort || 'low', format: { type: 'json_schema', schema: closed(schema) } },
   };
 }
 
 // Returns { byId, usage: { input, cached, written, output } }: input counts every prompt token, of which cached were read
-// from the cache and written went into it. Throws on HTTP error, timeout, a refusal or a cut-off answer.
-export async function callClaude({ fetchImpl = globalThis.fetch, apiKey, body, timeoutMs = 20000 }) {
+// from the cache and written went into it. Throws on HTTP error, timeout, a refusal or a cut-off answer. parse: the
+// answer's text to byId, the swaps of each passage unless another job's parser is given (verify.js).
+export async function callClaude({ fetchImpl = globalThis.fetch, apiKey, body, timeoutMs = 20000, parse = parseSwapsResponse }) {
   const res = await fetchImpl(API_URL, {
     method: 'POST',
     headers: {
@@ -67,13 +69,13 @@ export async function callClaude({ fetchImpl = globalThis.fetch, apiKey, body, t
   try {
     if (data?.stop_reason === 'refusal' || data?.stop_reason === 'max_tokens') throw new Error(`Answer ended: ${data.stop_reason}`);
     const text = (data?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-    return { byId: parseSwapsResponse(text), usage };
+    return { byId: parse(text), usage };
   } catch (e) {
     e.usage = usage; // an unusable answer is still billed
     throw e;
   }
 }
 
-export function askClaude({ fetchImpl, apiKey, model, system, user, schema, timeoutMs }) {
-  return callClaude({ fetchImpl, apiKey, timeoutMs, body: buildClaudeRequest({ model, system, user, schema }) });
+export function askClaude({ fetchImpl, apiKey, model, system, user, schema, timeoutMs, parse, thinking, effort }) {
+  return callClaude({ fetchImpl, apiKey, timeoutMs, parse, body: buildClaudeRequest({ model, system, user, schema, thinking, effort }) });
 }
