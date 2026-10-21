@@ -126,10 +126,13 @@ class NoPull(evaluate.Today):
 def convergence(words=200, checkpoints=(10, 30, 100, 300, 1000), cases=((1.0, 0.05), (1.0, 0.60), (3.0, 0.025),
                                                                          (3.0, 0.25))):
     """How many exposures a model needs to move a word from its prior to its true chance (the review's q1)."""
-    models = [evaluate.MODELS[evaluate.CURRENT]] + ([NoPull] if evaluate.CURRENT == 'today' else [])
+    models = [evaluate.MODELS[evaluate.CURRENT]] + ([lambda: evaluate.Fitted(frozen=True)]
+                                                   if evaluate.CURRENT == 'fit' else []) + [evaluate.Today, NoPull]
     lines = [f'Convergence of one word: {words} words per case, each shown 3 times a day and read with chance '
              '0.7 Beta(2.5, 1.5); median estimate [10th-90th percentile] after n exposures. PLAN.md: a word starting '
-             'at 27% whose true chance is 5% must cross 8% within 300 exposures.']
+             'at 27% whose true chance is 5% must cross 8% within 300 exposures. The fit learns its prior from the '
+             'words, which here are all alike; "priors held" keeps the prior where it started, as for one word among '
+             'many others.']
     for mu, p_true in cases:
         log = convergence_log(words, max(checkpoints), mu, p_true)
         for make in models:
@@ -159,77 +162,108 @@ def _replay_at(home, at):
     return knowledge.replay(rows, contexts, inflection.lexicon(state['words']).entry, intervals, [], at)
 
 
+def _estimates(name, home, log, at):
+    """{word: P(lookup | read) on the web} for every word with evidence before `at`, by today's model or the fit."""
+    if name == 'today':
+        words, offset = _replay_at(home, at)
+        return {ja: knowledge.sigmoid(offset['browser'] - w.k) for ja, w in words.items()}
+    fit = knowledge.Fit(log, at)
+    return {ja: fit.q(ja, 'browser') for ja in fit.words}
+
+
 def recovery(seeds=(1, 2, 3), weeks=(1, 2, 4)):
-    """Today's model on the simulated reader's log: its estimates per class at 1, 2 and 4 weeks against the truth, and
-    its expected lookups per class against those seen and the truth's (the review's q1)."""
+    """The current model (evaluate.CURRENT) and today's on the simulated reader's log: their estimates per class at 1,
+    2 and 4 weeks against the truth; their expected lookups per class against the truth's, each day predicted from the
+    days before, over days 8-28 and the last week; and the reading model the profile likelihood picks (knowledge.tune)
+    against the reader's true pace and cap (the review's q1)."""
     days = 7 * max(weeks)
-    est = {}      # (week, class) -> [per seed summary]
-    calib = {}    # class -> [expected, seen, truth]
+    names = (evaluate.CURRENT, 'today') if evaluate.CURRENT != 'today' else ('today',)
+    est = {}      # (name, week, class) -> [per seed summary]
+    calib = {}    # (name or 'truth' or 'seen', span, class) -> sum
+    reading = []
     for seed in seeds:
         with tempfile.TemporaryDirectory() as home:
             world, snapshots = logs.simulate(home, days, checkpoints=[7 * w for w in weeks], seed=seed)
+            log = evaluate.load(home, world.time() + DAY, knowledge.PACE_MS, knowledge.READ_MAX)
             for week in weeks:
                 at, snapshot = snapshots[7 * week]
-                words, offset = _replay_at(home, at)
-                for cls in STATUS:
-                    pairs = [(knowledge.sigmoid(offset['browser'] - w.k), snapshot[ja][0]) for ja, w in words.items()
-                             if ja in snapshot and snapshot[ja][1] == cls]
-                    if len(pairs) >= 5:
-                        est.setdefault((week, cls), []).append({
-                            'n': len(pairs), 'est': stats.mean(e for e, _t in pairs),
-                            'true': stats.mean(t for _e, t in pairs),
-                            'bias': stats.mean(stats.logit(e) - stats.logit(t) for e, t in pairs),
-                            'rho': stats.spearman([e for e, _t in pairs], [t for _e, t in pairs])})
-            log = evaluate.load(home, world.time() + DAY, knowledge.PACE_MS, knowledge.READ_MAX)
-            result = evaluate.evaluate(log, [evaluate.Today()], evaluate.load_truth(Path(home) / logs.TRUTH), skip=7)
+                for name in names:
+                    found = _estimates(name, home, log, at)
+                    for cls in STATUS:
+                        pairs = [(e, snapshot[ja][0]) for ja, e in found.items()
+                                 if ja in snapshot and snapshot[ja][1] == cls]
+                        if len(pairs) >= 5:
+                            est.setdefault((name, week, cls), []).append({
+                                'n': len(pairs), 'est': stats.mean(e for e, _t in pairs),
+                                'true': stats.mean(t for _e, t in pairs),
+                                'bias': stats.mean(stats.logit(e) - stats.logit(t) for e, t in pairs),
+                                'rho': stats.spearman([e for e, _t in pairs], [t for _e, t in pairs])})
+            models = [evaluate.MODELS[name]() for name in names]
+            result = evaluate.evaluate(log, models, evaluate.load_truth(Path(home) / logs.TRUTH))
+            last = result['days'][-7:]
             for o, p, _q, true in result['rows']:
+                if o.day not in result['days'][7:]:
+                    continue
                 cls = 'form' if o.form else o.status
-                c = calib.setdefault(cls, [0.0, 0.0, 0.0])
-                c[0] += p[0]
-                c[1] += o.y
-                c[2] += true
-    lines = [f"Recovery of today's model (knowledge.replay on the simulated reader's log, {len(seeds)} seeds): "
-             'P(lookup | read) of every word with evidence, at 08:59 after each week, against the true chance then '
-             '(means over seeds; logit bias: mean of logit(estimate) - logit(truth)).',
-             f'  {"week":>4} {"class":<9} {"words":>6} {"estimate":>9} {"true":>6} {"logit bias":>11} {"Spearman":>9}']
-    for week in weeks:
-        for cls in STATUS:
-            rows = est.get((week, cls))
-            if rows:
-                m = lambda key: stats.mean(r[key] for r in rows)
-                lines.append(f'  {week:>4} {cls:<9} {m("n"):6.0f} {m("est"):9.3f} {m("true"):6.3f} '
-                             f'{m("bias"):+11.2f} {m("rho"):9.2f}')
-    lines.append(f'Expected against seen lookups, days 8-{days} (the harness: each day predicted from the days before; '
-                 'truth: the true read chance times the true chance):')
-    lines.append(f'  {"class":<9} {"expected":>9} {"seen":>7} {"truth":>7} {"expected/seen":>14}')
-    total = [0.0, 0.0, 0.0]
-    for cls in STATUS + ('form',):
-        if cls in calib:
-            e, s, t = calib[cls]
-            total = [a + b for a, b in zip(total, calib[cls])]
-            lines.append(f'  {cls:<9} {e:9.0f} {s:7.0f} {t:7.0f} {e / s if s else float("nan"):14.2f}')
-    lines.append(f'  {"all":<9} {total[0]:9.0f} {total[1]:7.0f} {total[2]:7.0f} {total[0] / total[1]:14.2f}')
+                for span in ('all', 'last') if o.day in last else ('all',):
+                    for name, value in list(zip(names, p)) + [('truth', true), ('seen', o.y)]:
+                        calib[(name, span, cls)] = calib.get((name, span, cls), 0.0) + value
+            tuned = knowledge.tune(log, world.time() + DAY)
+            reading.append((seed, tuned['best'], tuned['tuned'], world.cfg['pace'], world.cfg['top']))
+    lines = [f"Recovery on the simulated reader's log ({len(seeds)} seeds): P(lookup | read) of every word with "
+             'evidence, at 08:59 after each week, against the true chance then (means over seeds; logit bias: mean of '
+             'logit(estimate) - logit(truth)).',
+             f'  {"model":<6} {"week":>4} {"class":<9} {"words":>6} {"estimate":>9} {"true":>6} {"logit bias":>11} '
+             f'{"Spearman":>9}']
+    for name in names:
+        for week in weeks:
+            for cls in STATUS:
+                rows = est.get((name, week, cls))
+                if rows:
+                    m = lambda key: stats.mean(r[key] for r in rows)
+                    lines.append(f'  {name:<6} {week:>4} {cls:<9} {m("n"):6.0f} {m("est"):9.3f} {m("true"):6.3f} '
+                                 f'{m("bias"):+11.2f} {m("rho"):9.2f}')
+    lines.append(f'Expected lookups against the truth\'s (true read chance times true chance) and those seen, each day '
+                 f'predicted from the days before: days 8-{days}, and the last 7 days (in brackets). Within 20%: 0.8 to '
+                 '1.2.')
+    lines.append(f'  {"class":<9} {"truth":>13}' + ''.join(f' {name + "/truth":>15}' for name in names)
+                 + f' {"seen/truth":>15}')
+    for cls in STATUS + ('form', 'all'):
+        get = lambda name, span: (sum(v for (n, s, c), v in calib.items() if n == name and s == span) if cls == 'all'
+                                  else calib.get((name, span, cls), 0.0))
+        if not get('truth', 'all'):
+            continue
+        ratio = lambda name: (f'{get(name, "all") / get("truth", "all"):.2f} '
+                              f'({get(name, "last") / get("truth", "last"):.2f})' if get('truth', 'last') else '')
+        lines.append(f'  {cls:<9} {get("truth", "all"):6.0f} ({get("truth", "last"):4.0f})'
+                     + ''.join(f' {ratio(name):>15}' for name in names) + f' {ratio("seen"):>15}')
+    lines.append('The reading model the profile likelihood picks on each whole log (knowledge.tune; it replaces the '
+                 'defaults only when inside the grid and 3 log-likelihood units better):')
+    for seed, best, tuned, pace, top in reading:
+        lines.append(f'  seed {seed}: best {best["pace"]} ms, cap {best["top"]} ({"used" if tuned else "defaults kept"}); '
+                     f'the reader\'s true {pace} ms, cap {top}')
     return '\n'.join(lines)
 
 
 # ---- the harness on a simulated log ----
 
 def harness(seed=1, days=28):
-    """The evaluation harness on a simulated log: today's model against a constant, with the true chances' floor; and
-    what calibrate prints for it."""
+    """The evaluation harness on a simulated log: today's model against the current one (evaluate.CURRENT) and a
+    constant, with the true chances' floor; and what calibrate prints for it."""
     with tempfile.TemporaryDirectory() as home:
         world, _ = logs.simulate(home, days, seed=seed)
         now = world.time() + DAY
         log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
-        result = evaluate.evaluate(log, [evaluate.Today(), evaluate.Constant()],
+        result = evaluate.evaluate(log, [evaluate.Today(), evaluate.current(), evaluate.Constant()],
                                    evaluate.load_truth(Path(home) / logs.TRUTH))
         lines = [f'The harness on a simulated log (seed {seed}, {days} days; reading at the true pace and cap):',
                  evaluate.report_text(result, log)]
         with fwlib.using_home(Path(home)):
             know = knowledge.refresh(now / 1000)
         reading = know['reading']
-        lines.append(f'calibrate on the same log (its reading model tuned by knowledge.tune: pace {reading["pace"]} '
-                     f'ms, cap {reading["top"]}; the reader\'s true pace is {world.cfg["pace"]} ms, cap '
+        lines.append(f'calibrate on the same log, by knowledge.json\'s model (reading model by profile likelihood, '
+                     f'knowledge.tune: pace {reading["pace"]} ms, cap {reading["top"]}, best {reading["best"]["pace"]} '
+                     f'ms and {reading["best"]["top"]}; the reader\'s true pace is {world.cfg["pace"]} ms, cap '
                      f'{world.cfg["top"]}):')
         lines += knowledge.classes_text(know['calibration']['classes'], know['calibration']['days'])
     return '\n'.join(lines)

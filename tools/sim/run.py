@@ -6,9 +6,11 @@ models and designs against the truth (experiments.py). Python 3.9+, standard lib
   python3 tools/sim/run.py all                 every experiment below, in about a minute
   python3 tools/sim/run.py volumes             words shown and lookups a day, against the live log's
   python3 tools/sim/run.py convergence         exposures needed to move one word from its prior to its true chance
-  python3 tools/sim/run.py recovery            today's model per class (known, learning, new) at 1, 2 and 4 weeks
-  python3 tools/sim/run.py harness             scripts/evaluate.py on a simulated log: today's model against a
-                                               constant, with the true chances' floor; and calibrate's classes
+  python3 tools/sim/run.py recovery            the fit and today's model per class (known, learning, new) at 1, 2
+                                               and 4 weeks, and the reading model the fit picks
+  python3 tools/sim/run.py harness             scripts/evaluate.py on a simulated log: today's model against the
+                                               fit and a constant, with the true chances' floor; and calibrate's
+                                               classes
   python3 tools/sim/run.py calibration-days    days calibrate needs to tell a calibrated model from one off by 20%
   python3 tools/sim/run.py delayed-start       power of the delayed-start experiment (PLAN.md section 7)
   python3 tools/sim/run.py recurrence          whether words nominated by the reader's text come back (section 6)
