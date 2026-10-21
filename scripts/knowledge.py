@@ -17,11 +17,12 @@ updates and their pull toward the prior. Each word's k is held toward its prior 
 fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by origin
 and card, the uncapped ln(1 + Anki interval), and for a word not marked known its dictionary entry's frequency rank,
 kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
-13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as much every EVIDENCE_DAYS; known and learn
-commands are one-sided pseudo-observations; a lookup of a conjugated form counts FORM_WEIGHT. Each word's uncertainty
-is the fit's curvature (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a
-grid, on both surfaces. The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the
-online updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
+13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as
+much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
+counts FORM_WEIGHT. Each word's uncertainty is the fit's curvature (Laplace). The reading model (pace and cap) is
+chosen once a day by profile likelihood over a grid, on both surfaces. The fit is the Fit class, which evaluate.py's
+"fit" model (evaluate.CURRENT) runs too; the online updates it replaced are the Online class, kept as evaluate.py's
+"today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
@@ -723,8 +724,8 @@ def kanji_counts(words):
 
 
 def word_features(entry, known=None, own=False, centre=(RANK_CENTRE, LENGTH_CENTRE)):
-    """A dictionary entry's word features, {name: value} (WORD_FEATURES; zeros left out), from its fields (dictionary.py:
-    ja, rank, common, loan, pos, kanji):
+    """A dictionary entry's word features, {name: value} (WORD_FEATURES; zeros left out), from its fields
+    (dictionary.py: ja, rank, common, loan, pos, kanji):
       rank             log10(rank / RANK_CENTRE): +1 for each tenfold rarer (centre: the reference word's rank and
                        length, RANK_CENTRE and LENGTH_CENTRE)
       kanji known      the share of its kanji in words known at a glance (known: {kanji: words}, kanji_counts of the
@@ -1198,7 +1199,8 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
     fit before: start, a fit's state, for the first; with the free flags of the day before), the free flags carried
     from day to day (free_flags, from flags, else the priors'), and the sentence prices from the sentence ends before
-    (sentence_prices of sentence_events). done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    (sentence_prices of sentence_events). done: days to skip (their sums are known). Returns (records, {day: the free
+    flags at its start})."""
     out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
     for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:

@@ -12,7 +12,9 @@ const KANJI_LIKE = '々〆ヶヵ';
 // some hiragana) or 'katakana' (no kanji, no hiragana: katakana, letters or digits).
 export function script(ja) {
   const chars = [...ja];
-  if (chars.some((c) => KANJI.test(c))) return chars.every((c) => KANJI.test(c) || KANJI_LIKE.includes(c)) ? 'kanji' : 'mixed';
+  if (chars.some((c) => KANJI.test(c))) {
+    return chars.every((c) => KANJI.test(c) || KANJI_LIKE.includes(c)) ? 'kanji' : 'mixed';
+  }
   return chars.some((c) => (c >= 'ぁ' && c <= 'ゖ') || c === 'ゝ' || c === 'ゞ') ? 'kana' : 'katakana';
 }
 

@@ -2,7 +2,8 @@
 
 `data/dictionary.tsv` holds every common JMdict entry (22,647) and the 4,322 other entries whose frequency rank is
 as good as a typical common entry's, 26,969 in all, for the plan's vocabulary ([PLAN.md](../PLAN.md) section 6,
-[NEXT_STEPS.md](../NEXT_STEPS.md) step 11). Nothing reads it at run time yet: the word list is still
+[NEXT_STEPS.md](../NEXT_STEPS.md) step 11). A refresh reads it for the starting values of words (each word's entry
+gives its prior's word features: [adaptive-difficulty.md](adaptive-difficulty.md)); the word list is still
 `data/lexicon.csv`.
 
 ## Building it

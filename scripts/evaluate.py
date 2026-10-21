@@ -44,8 +44,9 @@ per surface. CURRENT names the model knowledge.py runs, which the convergence te
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
 the model's own q against fwlib.FREE_P; first: each word's first FIRST exposures, where its prior decides most), the
-mean log loss and seen/expected opens with a 90% interval from resampling days; for each other model, the paired loss difference against the first, day by day, with a 90% interval from
-resampling days (free and costly by the first model's q); on a simulated log (tools/sim), the true chances' loss too:
+mean log loss and seen/expected opens with a 90% interval from resampling days; for each other model, the paired loss
+difference against the first, day by day, with a 90% interval from resampling days (free and costly by the first
+model's q); on a simulated log (tools/sim), the true chances' loss too:
 the floor no model can beat.
 
   python3 scripts/evaluate.py [--home DIR] [--models today,fit,constant] [--truth FILE] [--skip DAYS]

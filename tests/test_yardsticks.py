@@ -336,7 +336,8 @@ class Refresh(Home):
         self.assertEqual(len(words), len(world.state()['words']))  # every word, with its fitted prior if nothing else
         self.assertTrue(all(isinstance(e['free'], bool) and e['sd'] > 0 for e in words.values()))
         self.assertEqual(second['offset']['browser'], 0.0)
-        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd', 'words', 'featured', 'centre', 'kanji'})
+        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd', 'words', 'featured', 'centre',
+                                                'kanji'})
         for origin in fwlib.ORIGINS:
             k, sd = knowledge.prior_estimate(second, origin)
             self.assertEqual((k, sd), (second['prior']['none'][origin], second['prior']['sd']['none']))
