@@ -18,7 +18,7 @@ import inflection  # noqa: E402
 import knowledge  # noqa: E402
 import logs  # noqa: E402
 import stats  # noqa: E402
-from world import DAY, HOUR, MINUTE, World, TrueWord, local_midnight, day_name  # noqa: E402
+from world import DAY, HOUR, MINUTE, World, TrueWord, local_midnight, day_name, retention  # noqa: E402
 
 START = '2026-09-01'
 STATUS = ('known', 'learning', 'new')
@@ -167,17 +167,23 @@ def _estimates(name, home, log, at):
     if name == 'today':
         words, offset = _replay_at(home, at)
         return {ja: knowledge.sigmoid(offset['browser'] - w.k) for ja, w in words.items()}
-    fit = knowledge.Fit(log, at)
-    return {ja: fit.q(ja, 'browser') for ja in fit.words}
+    fit = knowledge.Fit(log, at, recency=name != 'step4')
+    if name == 'step4':
+        return {ja: fit.q(ja, 'browser') for ja in fit.words}
+    reads = knowledge.word_reads(log, fit, at)  # the current chance, as the planner would price it then
+    return {ja: knowledge.sigmoid(knowledge.recency_log_odds(
+        fit.estimate(ja)[0], knowledge.since_read(*reads.get(ja, ((), 1.0)), at)[0], fit.theta[knowledge.FLOOR]))
+        for ja in fit.words}
 
 
 def recovery(seeds=(1, 2, 3), weeks=(1, 2, 4)):
-    """The current model (evaluate.CURRENT) and today's on the simulated reader's log: their estimates per class at 1,
-    2 and 4 weeks against the truth; their expected lookups per class against the truth's, each day predicted from the
-    days before, over days 8-28 and the last week; and the reading model the profile likelihood picks (knowledge.tune)
-    against the reader's true pace and cap (the review's q1)."""
+    """The current model (evaluate.CURRENT), NEXT_STEPS step 4's (the fit without recency) and today's on the simulated
+    reader's log: their estimates per class at 1, 2 and 4 weeks against the truth (the current model's at its current
+    chance then: the clock at 08:59); their expected lookups per class against the truth's, each day predicted from
+    the days before, over days 8-28 and the last week; and the reading model the profile likelihood picks
+    (knowledge.tune) against the reader's true pace and cap (the review's q1)."""
     days = 7 * max(weeks)
-    names = (evaluate.CURRENT, 'today') if evaluate.CURRENT != 'today' else ('today',)
+    names = (evaluate.CURRENT, 'step4', 'today') if evaluate.CURRENT != 'today' else ('today',)
     est = {}      # (name, week, class) -> [per seed summary]
     calib = {}    # (name or 'truth' or 'seen', span, class) -> sum
     reading = []
@@ -270,15 +276,16 @@ def offset(factors=(0.5, 1.0, 2.0), seeds=(1, 2), days=28):
 # ---- the harness on a simulated log ----
 
 def harness(seed=1, days=28):
-    """The evaluation harness on a simulated log: today's model against the current one (evaluate.CURRENT) and a
-    constant, with the true chances' floor; and what calibrate prints for it."""
+    """The evaluation harness on a simulated log: the fit without recency (step 4's) against the current model
+    (evaluate.CURRENT), today's and a constant, with the true chances' floor; and what calibrate prints for it."""
     with tempfile.TemporaryDirectory() as home:
         world, _ = logs.simulate(home, days, seed=seed)
         now = world.time() + DAY
         log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
-        result = evaluate.evaluate(log, [evaluate.Today(), evaluate.current(), evaluate.Constant()],
+        result = evaluate.evaluate(log, [evaluate.Stale(), evaluate.current(), evaluate.Today(), evaluate.Constant()],
                                    evaluate.load_truth(Path(home) / logs.TRUTH))
-        lines = [f'The harness on a simulated log (seed {seed}, {days} days; reading at the true pace and cap):',
+        lines = [f'The harness on a simulated log (seed {seed}, {days} days; reading at the true pace and cap; step4 is '
+                 'the fit without recency, NEXT_STEPS step 4\'s model):',
                  evaluate.report_text(result, log)]
         with fwlib.using_home(Path(home)):
             know = knowledge.refresh(now / 1000)
@@ -288,6 +295,119 @@ def harness(seed=1, days=28):
                      f'ms and {reading["best"]["top"]}; the reader\'s true pace is {world.cfg["pace"]} ms, cap '
                      f'{world.cfg["top"]}):')
         lines += knowledge.classes_text(know['calibration']['classes'], know['calibration']['days'])
+    return '\n'.join(lines)
+
+
+# ---- the recency term ----
+
+HOUR_U = 1 / (24 * knowledge.LONG_DAYS)  # u an hour after a read
+
+
+def true_decay(word, cfg):
+    """How much a word's true P(lookup | read) rises, in log odds, from an hour after a read to a week after, as written
+    and at a mood of 1: from the FSRS recall at its stability now. None for a word never learned (recall 0 at any gap)
+    or an inert reader's (recall stays)."""
+    if cfg['inert'] or word.S <= 0:
+        return 0.0
+    q = lambda days: (1 - retention(word.S, days)) * cfg['habit'] + retention(word.S, days) * cfg['check']
+    return stats.logit(q(knowledge.LONG_DAYS)) - stats.logit(q(1 / 24))
+
+
+def fitted_decay(fit, ja):
+    """The same rise by the fit: its recency term for the word, from an hour after a read to its long-term chance."""
+    k = fit.estimate(ja)[0]
+    return -k - knowledge.recency_log_odds(k, HOUR_U, fit.theta[knowledge.FLOOR])
+
+
+def _daily(rows, i, j, member):
+    """Per day, the mean of model j's loss minus model i's over the rows that member takes."""
+    days = {}
+    for o, p, _q, _t in rows:
+        if member(o):
+            d = days.setdefault(o.day, [0.0, 0])
+            d[0] += evaluate.loss(p[j], o.y) - evaluate.loss(p[i], o.y)
+            d[1] += 1
+    return [d / n for d, n in days.values()]
+
+
+def recency(seeds=(1, 2, 3), days=28, worlds=(('the reader', {}), ('reading refreshes, never strengthens (rho 0)',
+                                                                   {'rho': 0.0}), ('an inert reader', {'inert': True}))):
+    """The shared recency term (NEXT_STEPS step 10) on the simulated reader, against the fit without it (step4) and the
+    truth. Its floor and context offset against the truth's (a recognised word is looked up 2% of the time, odds
+    0.0204; no context effect); the decay, how much a word's chance rises from an hour after a read to a week after,
+    fitted (the term, for the word's k) against true (FSRS at the word's stability at the end), weighted by the word's
+    observations; each class's expected lookups against the truth's, each day predicted from the days before (days
+    8-28); the log loss and the fit's paired difference with step4 by day (90% interval, resampling days); and the
+    days of held-out log a 90% interval needs to exclude no difference on learning words, from the spread of the daily
+    differences. Worlds: the reader; one whose reading refreshes recall but never strengthens it (rho 0); and an inert
+    one, whose memory nothing changes, where the term must vanish."""
+    lines = [recency.__doc__.split('(NEXT_STEPS')[0].strip() + f' ({len(seeds)} seeds of {days} days each):']
+    true_floor = 0.02 / 0.98
+    for world_name, cfg in worlds:
+        floors, contexts, decay, calib, losses, paired, learning = [], [], {}, {}, {}, [], []
+        for seed in seeds:
+            with tempfile.TemporaryDirectory() as home:
+                world, _ = logs.simulate(home, days, seed=seed, **cfg)
+                now = world.time()
+                log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
+                result = evaluate.evaluate(log, [evaluate.Stale(), evaluate.current()],
+                                           evaluate.load_truth(Path(home) / logs.TRUTH))
+                fit = knowledge.Fit(log, now)
+                floors.append(math.exp(fit.theta[knowledge.FLOOR]))
+                contexts.append((fit.theta[knowledge.CONTEXT], fit.theta_sd[knowledge.CONTEXT]))
+                counts = {}
+                for o in log.scored():
+                    counts[o.word] = counts.get(o.word, 0) + 1
+                for w in world.words:
+                    if w.ja in fit.index and counts.get(w.ja):
+                        cls = {'active': 'learning', 'queue': 'new'}.get(w.status, w.status)
+                        for c in (cls, 'all'):
+                            d = decay.setdefault(c, [0.0, 0.0, 0, 0])
+                            d[0] += counts[w.ja] * true_decay(w, world.cfg)
+                            d[1] += counts[w.ja] * fitted_decay(fit, w.ja)
+                            d[2] += 1
+                            d[3] += counts[w.ja]
+                late = result['days'][7:]
+                for o, p, _q, true in result['rows']:
+                    if o.day in late:
+                        for c in ('form' if o.form else o.status, 'all'):
+                            for name, value in (('step4', p[0]), ('fit', p[1]), ('truth', true)):
+                                calib[(name, c)] = calib.get((name, c), 0.0) + value
+                                losses[(name, c)] = losses.get((name, c), 0.0) + evaluate.loss(value, o.y)
+                            calib[('n', c)] = calib.get(('n', c), 0) + 1
+                summary = evaluate.summary(result)['paired']['fit']
+                paired.append((seed, {c: summary[c] for c in ('all', 'known', 'learning', 'new', 'browser', 't3')}))
+                learning += _daily(result['rows'], 0, 1, lambda o: not o.form and o.status == 'learning')
+        lines.append(f'{world_name}:')
+        lines.append(f'  floor (odds) {", ".join(f"{f:.4f}" for f in floors)} (truth {true_floor:.4f}); context '
+                     + ', '.join(f'{c:+.2f} ({sd:.2f})' for c, sd in contexts) + ' (truth 0)')
+        lines.append('  decay from an hour after a read to a week after, in log odds (observation-weighted means):')
+        for c in ('known', 'learning', 'new', 'all'):
+            if c in decay:
+                t, f, n, weight = decay[c]
+                ratio = f'{f / t:.2f}' if abs(t) > 1e-9 else '-'
+                lines.append(f'    {c:<9} {n:5d} words  true {t / weight:+.2f}  fitted {f / weight:+.2f}  fitted/true '
+                             f'{ratio}')
+        lines.append('  expected lookups over the truth\'s and log loss (days 8-28; truth\'s loss is the floor):')
+        lines.append(f'    {"class":<9}{"n":>7}{"truth":>8}{"step4":>14}{"fit":>14}{"truth loss":>12}')
+        for c in ('known', 'learning', 'new', 'form', 'all'):
+            n = calib.get(('n', c), 0)
+            if n:
+                t = calib[('truth', c)]
+                cell = lambda name: f'{calib[(name, c)] / t:6.2f} {losses[(name, c)] / n:.4f}'
+                lines.append(f'    {c:<9}{n:>7}{t:>8.0f}  {cell("step4")}  {cell("fit")}  {losses[("truth", c)] / n:10.4f}')
+        lines.append('  fit minus step4, log loss per observation by day (90% interval), days better:')
+        for seed, table in paired:
+            cells = []
+            for c, k in table.items():
+                interval = f' ({k["interval"][0]:+.4f} to {k["interval"][1]:+.4f})' if k['interval'] else ''
+                cells.append(f'{evaluate.NAMES.get(c, c)} {k["diff"]:+.4f}{interval} {k["better"]}/{k["days"]}')
+            lines.append(f'    seed {seed}: ' + '; '.join(cells))
+        if len(learning) > 2:
+            m, sd = stats.mean(learning), stats.mean([(x - stats.mean(learning)) ** 2 for x in learning]) ** 0.5
+            need = (1.645 * sd / m) ** 2 if m else float('inf')
+            lines.append(f'  learning words, fit minus step4 a day: mean {m:+.4f}, sd {sd:.4f} over {len(learning)} days; '
+                         f'a 90% interval excludes 0 after about {need:.0f} days (if the mean were half: {4 * need:.0f})')
     return '\n'.join(lines)
 
 
