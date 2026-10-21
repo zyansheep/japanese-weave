@@ -245,6 +245,28 @@ def recovery(seeds=(1, 2, 3), weeks=(1, 2, 4)):
     return '\n'.join(lines)
 
 
+# ---- a surface difference ----
+
+def offset(factors=(0.5, 1.0, 2.0), seeds=(1, 2), days=28):
+    """The fitted chat offset when chat's lookup chances are a factor apart from the web's (the world's chat_factor; a
+    factor of 2 is about +0.69 on the log-odds scale for small chances), for the current model (its offset, with its
+    sd) and today's (PLAN.md row M: today's moves 0.02 a message)."""
+    lines = [f'The chat offset against a true surface difference ({days} days, seeds {", ".join(map(str, seeds))}): '
+             'the fit\'s offset (sd) and today\'s.']
+    for factor in factors:
+        cells = []
+        for seed in seeds:
+            with tempfile.TemporaryDirectory() as home:
+                world, _ = logs.simulate(home, days, seed=seed, chat_factor=factor)
+                now = world.time() + DAY
+                fit = knowledge.Fit(evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX), now)
+                _words, today = _replay_at(home, now)
+                cells.append(f'{fit.theta[knowledge.T3]:+.2f} ({fit.theta_sd[knowledge.T3]:.2f}) and '
+                             f'{today["t3"]:+.2f}')
+        lines.append(f'  chat chances x {factor:g} (log {math.log(factor):+.2f}): ' + '; '.join(cells))
+    return '\n'.join(lines)
+
+
 # ---- the harness on a simulated log ----
 
 def harness(seed=1, days=28):
