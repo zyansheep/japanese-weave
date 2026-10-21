@@ -151,13 +151,13 @@ unless your lookups say otherwise.
 - **Words from your reading**: each chat reply is counted per dictionary entry and day (`data/dictionary.tsv`, 26,969
   entries; counts only, never text): its English through the code matcher, which marks every place an entry could
   go, and its Japanese through the `<abbr>` tags where it has them, else the listed words. An English place counts
-  only where a later sense check can trust it: never closed-class words ("about", "one", "so"), and for now only the
-  most frequent entry the matcher finds there, when that English is its main meaning ("state" counts for no word,
-  since 国 "country / state" is more frequent than 状態); once the sense flags exist (`data/senses.tsv`), only the
-  options flagged safe. A word is eligible once it came up on 3 different days in 30, can stand in for English, isn't
-  a number and isn't in use; the eligible words come in by the days they came up (most first), then the predicted
-  chance you'd look one up (nearest 25% first), then general frequency. A dictionary word the list doesn't have joins
-  the word state when it comes in. The first scan after an update counts the last 30 days of chats again.
+  only where a sense check can trust it: never closed-class words ("about", "one", "so"), and only the most frequent
+  option the sense flags (`data/senses.tsv`) call safe for that English (without that file, the most frequent entry
+  there when that English is its main meaning). A word is eligible once it came up on 3 different days in 30, can
+  stand in for English, isn't a number and isn't in use; the eligible words come in by the days they came up (most
+  first), then the predicted chance you'd look one up (nearest 25% first), then general frequency. A dictionary word
+  the list doesn't have joins the word state when it comes in. The first scan after an update counts the last 30 days
+  of chats again.
 - **The delayed-start experiment** (PLAN.md section 7) tests whether being shown a word teaches it. Each new word is
   drawn into one of two arms: held back, appearing nowhere for 3 weeks, or shown like any learning word for 2 weeks
   and then paused for 1. At week 3 both are probed: the first web passage that can show the word shows it outside the
@@ -190,8 +190,9 @@ mark it in the transcript) and every 20 turns. Below Stage 3 every other sentenc
 words never conjugated and no particles around them.
 
 Each brief also offers up to 5 **topical words**: dictionary entries the code matcher finds in the chat's last three
-turns (your prompts and Claude's replies, the prompt being sent included), counted as above. Only words worth
-offering: ones that can stand in for English, not numbers or katakana, not in use, never one the delayed-start
+turns (your prompts and Claude's replies, the prompt being sent included), the most frequent entry at each place when
+the English there is its main meaning (not only the safe ones: Claude checks the sense as it places them). Only words
+worth offering: ones that can stand in for English, not numbers or katakana, not in use, never one the delayed-start
 experiment holds back, and not ones you know at a glance; the ones your reading keeps repeating first, then common
 ones. Each comes with its odds, like a learning word, and counts toward the learning words' amount, at most half of
 it. The feedback line on the next reply counts them as their own class, not as Japanese outside the lists, and the

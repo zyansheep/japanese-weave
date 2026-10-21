@@ -7,13 +7,17 @@ gloss and its first sense's glosses, so the longest match wins against every wor
 phrases included: in "go back" the span is 戻る's, so "back" there is never 奥. A span counts for at most one entry, and
 only where a sense check can trust it (Reader.trusted):
 - never a span of closed-class English ("about", "one", "so": the matcher's function flag);
-- with sense flags (data/senses.tsv, read through senses.py; NEXT_STEPS step 12), the most frequent option flagged
+- with the sense flags (data/senses.tsv, read through senses.py; NEXT_STEPS step 12), the most frequent option flagged
   safe for the English it matched; the index is rebuilt when the flags file appears or changes (signature);
-- until then, the most frequent option, when this English is its main meaning (the first of its display gloss:
-  "state" is not 国 "country / state", and no option counts) and no more frequent entry reaches the same English
-  only by a rule's inflection, which the matcher's lexical rule drops ("used" is the past of 使う before it is 中古
-  "used"). Measured on the user's chats, this halves the entries counted, mostly wrong senses ("script" as 本 "book
-  / script", "data" as 資料), and some remain ("back" as 奥): the sense flags are what bring them down.
+- without a flags file, the most frequent option, when this English is its main meaning (the first of its display
+  gloss: "state" is not 国 "country / state", and no option counts) and no more frequent entry reaches the same
+  English only by a rule's inflection, which the matcher's lexical rule drops ("used" is the past of 使う before it
+  is 中古 "used"). On the user's chats this halves what the most frequent option alone counts, mostly wrong senses
+  ("script" as 本 "book / script", "data" as 資料), but some remain ("back" as 奥); the flags count about a quarter
+  as many entries a day again.
+The chat's topical words take the main-meaning rule even with the flags (found(flags=False)): Claude places each one
+only where the English has its meaning, so it is the sense check there, and the flags, strict enough for code to
+swap alone, would leave out most words a conversation is about ("update" as 更新 is doubtful).
 Model-confirmed matches come through the Japanese a model wrote: in chat, Claude's own Japanese (japanese), through
 its <abbr> tags where a reply has them (dictionary.find on the word, its reading and its meaning), else the word
 state's words found by the script-aware matching (fwlib.pattern). A model's check of the doubtful spans in chat would

@@ -519,14 +519,16 @@ named (5 turns at 1,500).
 Each brief also lists up to 5 topical words (weave.topical_words, TOPICAL_MAX), after the learning words: dictionary
 entries the code matcher finds in the chat's last three turns (weave.recent_turns: the prompt being sent, then the
 user's prompts and Claude's main-thread replies back to the third prompt before it, at most 8,000 characters, the
-latest kept; tool results and the hook's own text are no turns), counted as the reading counts are (reading.py, under
-"Words from your reading" below: only places a sense check can trust). Only words worth offering: an entry that can
+latest kept; tool results and the hook's own text are no turns), as the reading counts find them (reading.py, under
+"Words from your reading" below), but by the main-meaning rule even with the sense flags: Claude places a topical word
+only where the English has its meaning, so it is the sense check, and the flags, strict enough for code to swap a word
+alone, call "update" as 更新 doubtful. Only words worth offering: an entry that can
 stand in for English (the dictionary's swap flag), not a number, counter or katakana word; with no spelling in use,
 known or learning, and none hidden by the delayed-start experiment (fwlib.hidden); and not known at a glance (p under
 8%: the next refresh labels it known). Each is the state's word when it has one (a word not introduced yet), else the
 entry itself, and its p is its estimate in chat when knowledge.json has one, else the starting value of a word without
-history (reading.starting_k: the fitted prior of a new word without an Anki card, until the prior by the word's own
-features gives one per entry). The ones the user's reading repeats come first (on 3 days or more of the last 30: the
+history (reading.starting_k: knowledge.prior_estimate with its dictionary entry, the prior by the word's own
+features). The ones the user's reading repeats come first (on 3 days or more of the last 30: the
 ones intake nominates), then common entries (JMdict's common flag), each by its uses in the turns, then by general
 frequency. They are listed with their odds as the learning words are, and they are costly words too: the amount of
 learning words is figured over both, and a reply may make at most half of the learning words it uses topical. At
@@ -534,9 +536,15 @@ normal the budget buys about 2 costly words per 100 words, 6 in a 300-word reply
 leaves the learning words, whose spacing is the plan's, most of the budget (PLAN.md row K). The line takes about 360
 characters on every turn: on the 2026-10-21 state (Stage 3, 366 known, footer glosses or `<abbr>`, with the longest
 feedback line) a whole brief went from 8,041 to 8,403 characters (8,585 to 8,948 with `<abbr>`) and a later one from
-2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is left. The hook finds them in 15 to
-41 ms on the user's chats (the reading index, below, read for the turns' words only); measured through the hook on a
-synthetic 2 MB transcript, the median hook went from 148 to 174 ms. Without the index (not built yet) there are none.
+2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is left. The hook finds them in 12 to
+49 ms on the user's chats (the reading index, below, read for the turns' words only); measured through the hook on a
+synthetic 2 MB transcript (15 runs, three times), the median hook went from 153 to 176 ms. Without the index (not
+built yet) there are none. On eight of the user's recent chats the lists were, by gloss: haiku, check, experiment,
+dictionary, wiring; environment, check, experiment, tonight, tool; check, no longer, method, science, mainly; check,
+value, fail, funds, link; check, method, secret, update, command; history, kanji, new word, check, example; together,
+history, diagnose, together with, headache; check, example, flag, normal, output. "check" (確認, a word the rules name)
+recurs as the reading repeats it; "link" as 一環 is a wrong sense Claude has to pass over, and "headache" came from a
+health chat, where the rules ask for no Japanese at all.
 
 Each brief is kept as a record of what its reply was offered: a `brief` op (hub.py), which changes nothing and goes to
 the ops table where the state lives, through the outbox with a collector. Its fields follow a web passage's plan:
@@ -625,12 +633,14 @@ chat exposure) is counted per dictionary entry (data/dictionary.tsv, by its JMdi
   word state's words found by the script-aware matching.
 
 On the user's chats of the 30 days to 2026-10-21 (Claude Code only; a median of about 10,000 words of replies on the
-24 days with over 2,000), without sense flags: the English of 4,218 reply blocks was counted in 7 seconds; a median
-of 420 entries came up a day (35 to 932); 2,686 entries came up at all, and 1,246 on 3 days or more, 725 of them
-swappable. Requiring the main meaning halves what the most frequent option alone would count (a median of 1,061
-entries on those 24 days against 542), mostly wrong senses of technical English ("script" as 本 "book / script",
-"data" as 資料 "materials / data", "state" as 国); some remain, "back" as 奥 and "stays" (a term of this codebase) as
-滞在 among the most frequent, and they are what the sense flags are for.
+24 days with over 2,000), with the sense flags: a median of 114 entries came up a day (6 to 265), 1,101 in all and 334
+on 3 days or more, 295 of them swappable; a median of 8 swappable words not in use became eligible a day (0 to 25),
+against at most 5 taken in. Without a flags file the main-meaning rule counts about four times as many (a median of
+420 entries a day, 1,246 on 3 days or more, 725 swappable), and requiring the main meaning already halves what the
+most frequent option alone would count (a median of 1,061 entries on those 24 days against 542): mostly wrong senses
+of technical English ("script" as 本 "book / script", "data" as 資料 "materials / data", "state" as 国), and some it
+keeps ("back" as 奥, "stays", a term of this codebase, as 滞在). The English of 4,218 reply blocks is counted in 7
+seconds.
 
 The counts go where the state lives as the exposure counts do: each reply in an `exposure` op carries {entries: {entry
 id: times}}, and fwlib.fold keeps exposure.json's reading ({day: {entry id: times}}) for the last 30 days, each reply
@@ -638,8 +648,8 @@ once (read: its digest, apart from the words' recent, so a reply counted for wor
 counts here once) and readingDays ({entry id: days it came up on}), which the caches get (GET /v1/state) for the
 brief's topical words; the counts by day stay where intake runs. The first scan that counts entries (scan.json has no
 "reading" yet) reads the last 30 days of transcripts again, also from before the state was created; on the user's
-chats it took 16 seconds in the background, the index's first build included, and wrote 623 KB of exposure.json, 37 KB
-of it readingDays. The index (reading-index.sqlite in the state dir, 17 MB) is the matcher's trie split by first word
+chats it took 15 seconds in the background, the index's first build included, and wrote 336 KB of exposure.json, 15 KB
+of it readingDays (623 KB and 37 KB without flags). The index (reading-index.sqlite in the state dir, 17 MB) is the matcher's trie split by first word
 into SQLite, each node keeping only the hits that can decide a span; a first word whose subtree passes 2 KB (the
 forms of "be" head 60 KB each of phrases, "is wrong" and the like) is stored by its second words too, so a text reads
 only the second words it has. It is built in the background in about 5 seconds (reading.ensure), once per dictionary,
@@ -653,10 +663,11 @@ the days they came up kept them coming back (PLAN.md section 6); then by their s
 steps of half a unit of log-odds, so only a real difference counts (with the prior by origin every new word ties);
 then by general frequency. A dictionary word the state doesn't have joins it when it comes in: the labels op's intake
 row carries its entry id ([ja, arm, draw, id]), and fwlib.take_in adds it after the list's words with its gloss,
-romaji, reading and id. On a copy of the 2026-10-20 snapshot with the 30 days counted, the first refresh took in
-情報, 答え, 奥, 滞在 (a dictionary word) and 確認 (named by the rules, outside the experiment), two of them wrong
-senses until the flags land; after it 616 words were eligible and not in use (316 of the list's, 300 dictionary
-words).
+romaji, reading and id. On a copy of the 2026-10-20 snapshot with the 30 days counted with the flags, the first refresh
+took in 情報, 答え, 機械, 編集 and 削除 (information, answer, machine, edit, delete); after it 236 words were eligible
+and not in use (98 of the list's, 138 dictionary words), led by versus, experiment, wiring, together, no longer,
+history, environment, calculate, example and compare. Without the flags it took in 奥 and 滞在 among the first five,
+the wrong senses above.
 
 ### The delayed-start experiment
 
