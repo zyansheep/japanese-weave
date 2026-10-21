@@ -6,7 +6,10 @@
 // lookups as scripts/senses.py; tests/senses_cases.json holds the vectors both run. Pure.
 import { ENGLISH } from './english.js';
 
-export const SENSES_FIELDS = ['id', 'ja', 'kana', 'gloss', 'flag'];
+// One line per entry: its JMdict id (empty for a word that is not an entry), its written form and reading as the word
+// state or the dictionary writes them, then its safe and its doubtful glosses (as matcher.js glossAlternatives writes
+// them), separated by ;.
+export const SENSES_FIELDS = ['id', 'ja', 'kana', 'safe', 'doubtful'];
 const FUNCTION = new Set(ENGLISH.function);
 
 export const toHiragana = (s) => String(s ?? '').replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
@@ -28,10 +31,14 @@ export function parseSenses(text) {
   const flags = new Map();
   for (const line of lines.slice(start + 1)) {
     if (!line) continue;
-    const [id, ja, kana, gloss, flag] = line.split('\t');
-    const key = `${ja}\t${gloss}`;
-    if (!flags.has(key)) flags.set(key, []);
-    flags.get(key).push({ kana, flag, id: id ? Number(id) : null });
+    const [id, ja, kana, safe = '', doubtful = ''] = line.split('\t');
+    for (const [flag, list] of [['s', safe], ['d', doubtful]]) {
+      for (const gloss of list ? list.split(';') : []) {
+        const key = `${ja}\t${gloss}`;
+        if (!flags.has(key)) flags.set(key, []);
+        flags.get(key).push({ kana, flag, id: id ? Number(id) : null });
+      }
+    }
   }
   return flags;
 }
@@ -54,19 +61,26 @@ export function safeOptions(flags, span) {
   return span.options.map((o, i) => !span.function && senseFlag(flags, o, span.glosses[i]) === 's');
 }
 
-// The file's text from rows { id, ja, kana, gloss, flag, rank }: in the dictionary's rank order (words that aren't
-// entries last), then by Japanese and gloss.
-export function formatSenses(rows, { version, model, thinking, samples = 1 } = {}) {
+// The file's text from rows of pairs { id, ja, kana, gloss, flag, rank }, one line per entry: in the dictionary's rank
+// order (words that aren't entries last), then by Japanese and reading; each list of glosses in alphabetical order.
+export function formatSenses(rows, { version, model, thinking, samples = 1, confirm = false } = {}) {
+  const entries = new Map();
+  for (const r of rows) {
+    const key = `${r.id ?? ''}\t${r.ja}\t${r.kana}`;
+    if (!entries.has(key)) entries.set(key, { ...r, s: [], d: [] });
+    entries.get(key)[r.flag === 's' ? 's' : 'd'].push(r.gloss);
+  }
   // Infinity - Infinity is NaN, which falls through to the next key like 0
-  const sorted = [...rows].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
-    a.ja.localeCompare(b.ja) || a.kana.localeCompare(b.kana) || a.gloss.localeCompare(b.gloss));
+  const sorted = [...entries.values()].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.ja.localeCompare(b.ja) ||
+    a.kana.localeCompare(b.kana));
   const safe = rows.filter((r) => r.flag === 's').length;
+  const how = samples > 1 ? `, safe in all of ${samples} samples${confirm ? ', the later ones asking only what the earlier found safe' : ''}` : '';
   return [
-    `# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt ${version}, ${model}${thinking === false ? ', no thinking' : ''}${samples > 1 ? `, safe in all of ${samples} samples` : ''}), described in docs/matcher.md.`,
-    '# A pair of an entry (id: JMdict sequence number, empty for a word that is not one; ja and kana as the word state or the dictionary writes them) and one English gloss (as matcher.js glossAlternatives writes it):',
-    `# s safe, d doubtful. A pair not listed, and any gloss of closed-class English, is doubtful. ${rows.length} pairs, ${safe} safe.`,
+    `# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt ${version}, ${model}${thinking === false ? ', no thinking' : ''}${how}), described in docs/matcher.md.`,
+    '# One line per entry (id: JMdict sequence number, empty for a word that is not one; ja and kana as the word state or the dictionary writes them): its safe and its doubtful English glosses, as matcher.js glossAlternatives writes them,',
+    `# separated by ;. A gloss not listed, and any gloss of closed-class English, is doubtful. ${rows.length} pairs of ${entries.size} entries, ${safe} safe.`,
     SENSES_FIELDS.join('\t'),
-    ...sorted.map((r) => [r.id ?? '', r.ja, r.kana, r.gloss, r.flag].join('\t')),
+    ...sorted.map((e) => [e.id ?? '', e.ja, e.kana, e.s.sort().join(';'), e.d.sort().join(';')].join('\t')),
     '',
   ].join('\n');
 }

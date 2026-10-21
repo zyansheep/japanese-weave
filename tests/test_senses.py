@@ -31,7 +31,7 @@ class SharedVectors(unittest.TestCase):
 
     def test_a_file_with_other_fields_is_refused(self):
         with self.assertRaises(ValueError):
-            senses.parse('# x\nja\tgloss\tflag\n')
+            senses.parse('# x\nid\tja\tkana\tgloss\tflag\n')
 
 
 class TheFile(unittest.TestCase):

@@ -18,7 +18,7 @@ import re
 import matcher
 
 PATH = Path(__file__).resolve().parent.parent / 'data' / 'senses.tsv'
-FIELDS = ('id', 'ja', 'kana', 'gloss', 'flag')
+FIELDS = ('id', 'ja', 'kana', 'safe', 'doubtful')  # one line per entry; glosses separated by ;
 _WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 _KATAKANA = {c: c - 0x60 for c in range(ord('ァ'), ord('ヶ') + 1)}
 
@@ -43,8 +43,10 @@ def parse(text):
     for line in lines[start + 1:]:
         if not line:
             continue
-        id_, ja, kana, gloss, flag = line.split('\t')
-        flags.setdefault((ja, gloss), []).append((kana, flag, int(id_) if id_ else None))
+        id_, ja, kana, safe, doubtful = (line.split('\t') + ['', ''])[:5]
+        for flag, glosses in (('s', safe), ('d', doubtful)):
+            for gloss in glosses.split(';') if glosses else ():
+                flags.setdefault((ja, gloss), []).append((kana, flag, int(id_) if id_ else None))
     return flags
 
 

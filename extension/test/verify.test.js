@@ -16,8 +16,8 @@ const words = [
   { ja: '一つ', en: 'one', hint: 'hitotsu', kana: 'ひとつ', status: 'known' },
   { ja: '日', en: 'day', hint: 'hi', kana: 'ひ', status: 'known' },
 ];
-const flags = parseSenses('id\tja\tkana\tgloss\tflag\n1\t映画\tえいが\tmovie\ts\n2\t本当に\tほんとうに\treally\ts\n' +
-  '3\t大好き\tだいすき\tlove\td\n4\t時間\tじかん\ttime\td\n5\t日\tひ\tday\ts\n');
+const flags = parseSenses('id\tja\tkana\tsafe\tdoubtful\n1\t映画\tえいが\tmovie\t\n2\t本当に\tほんとうに\treally\t\n' +
+  '3\t大好き\tだいすき\t\tlove\n4\t時間\tじかん\t\ttime\n5\t日\tひ\tday\t\n');
 const index = buildIndex(words);
 const TEXT = 'I really love this movie. It took a lot of time. Day one was fine.';
 const planOf = (text, options) => planPassage(text, matchText(index, text), flags, options);

@@ -17,7 +17,7 @@ describe('sense flags, shared vectors', () => {
     for (const c of vectors.spans) expect(safeOptions(flags, c.span)).toEqual(c.safe);
   });
   test('a file with other fields is refused', () => {
-    expect(() => parseSenses('# x\nja\tgloss\tflag\n')).toThrow();
+    expect(() => parseSenses('# x\nid\tja\tkana\tgloss\tflag\n')).toThrow();
   });
 });
 
@@ -27,8 +27,9 @@ describe('the flags file', () => {
       { id: 1, ja: '犬', kana: 'いぬ', gloss: 'spy', flag: 'd', rank: 3 }, { id: 1, ja: '犬', kana: 'いぬ', gloss: 'dog', flag: 's', rank: 3 }];
     const text = formatSenses(rows, { version: 2, model: 'claude-haiku-5-5', samples: 2 });
     expect(text).toContain('prompt 2, claude-haiku-5-5, safe in all of 2 samples');
+    expect(text).toContain('4 pairs of 3 entries, 3 safe.');
     const body = text.split('\n').filter((l) => l && !l.startsWith('#'));
-    expect(body).toEqual([SENSES_FIELDS.join('\t'), '1\t犬\tいぬ\tdog\ts', '1\t犬\tいぬ\tspy\td', '2\t猫\tねこ\tcat\ts', '\t路\tろ\troad\ts']);
+    expect(body).toEqual([SENSES_FIELDS.join('\t'), '1\t犬\tいぬ\tdog\tspy', '2\t猫\tねこ\tcat\t', '\t路\tろ\troad\t']);
     const back = parseSenses(text);
     expect(senseFlag(back, { ja: '猫' }, 'cat')).toBe('s');
     expect(senseFlag(back, { ja: '犬', kana: 'いぬ' }, 'spy')).toBe('d');
