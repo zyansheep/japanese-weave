@@ -213,6 +213,65 @@ def recent_turns(lines, prompt='', turns=TOPICAL_TURNS, most=TOPICAL_CHARS):
     return text if len(text) <= most else text[len(text) - most:].split(None, 1)[-1]  # from a whole word
 
 
+# The topics the brief keeps free of Japanese (its rules: health, medication, legal, money, safety, emergency, driving
+# and anything urgent), for the topical words: a conversation about them gets none (zero_japanese). The extension's
+# page guard (extension/src/levels.js isZeroJapanese) has the same topics, but on chat its word families fire on the
+# talk of code: of the user's 381 chats on 2026-10-21, "investigate" or its family (invest\w*) came up in 162,
+# "diagnosis" and its family in about 100, "driving" in 32 and "surgery" in 26, nearly all of them about code. So a
+# term an English reply about code uses another way ("eviction", "side effect", "technical debt") counts only beside
+# terms of two other such families (WEAK); every other term (STRONG) counts alone. tests/zero_japanese_cases.json holds cases for both guards (page: the extension's, chat:
+# this one); a page passage is short and one-topic, so the extension keeps its single list.
+ZERO_STRONG = re.compile(r'\b(?:' + '|'.join((
+    # health and medication
+    r'doctors?|hospitals?|nurses?|physicians?|medications?|medical|meds|ibuprofen|tylenol|acetaminophen|paracetamol|'
+    r'aspirin|overdosed?|vaccines?|vaccinated|chemo\w*|pregnan\w*|therapists?|antidepressants?|ssris?|'
+    r'adderall|headaches?|migraines?|fever|nausea|nauseous|vomit\w*|dizzy|dizziness|diarrh\w*|insomnia|'
+    r'allerg(?:y|ies|ic)|asthma|diabet(?:es|ic)|blood pressure|heart rate|heart attack|cardiac|arrhythmias?|'
+    r'palpitations?|seizures?|concussions?|illness(?:es)?|autis\w*|schizophreni\w*|bipolar|adhd|ptsd|painkillers?|'
+    r'dos(?:es?|age|ing)|drugs?|sore throat|chest pain|back pain|stomach ?ache|toothache|symptoms of|suicid\w*|'
+    r'self-harm',
+    # legal
+    r'lawsuits?|attorneys?|lawyers?|sued|suing|court order|legal advice|subpoenas?|litigation|divorce|'
+    r'landlord|police officers?|called the police|arrested|immigration',
+    # money
+    r'stock market|bitcoin|mortgages?|tax return|income tax|salary|bank account|financial advice|credit card|'
+    r'student debt|retirement (?:account|savings)|401k|roth ira|pension|health insurance|'
+    r'insurance (?:claim|policy|premium|company)|paycheck|savings account',
+    # safety, emergency and driving
+    r'911|emergency room|evacuat\w*|wildfires?|earthquakes?|hurricanes?|tornado(?:es)?|active shooter|gas leak|carbon monoxide|'
+    r'drunk driv\w*|car crash|dui|seat ?belts?|traffic ticket',
+)) + r')\b', re.I | re.A)
+ZERO_STRONG_CASE = re.compile(r'\bIRS\b')  # the tax office, not IRs (a compiler's intermediate representations)
+# each a family of terms, one group of the pattern: two of one family ("diagnose", "diagnosed") are one term
+ZERO_WEAK_FAMILIES = 3  # with two, half the turns it caught were about code ("the diagnosis", "the stock parser")
+ZERO_WEAK = re.compile(r'\b(?:' + '|'.join(f'({family})' for family in (
+    r'diagnos(?:is|es|e|ed|ing|tics?)', r'symptoms?', r'surgery', r'emergency', r'shooting', r'driving', r'crypto',
+    r'stimulants?', r'pain', r'pills?', r'infections?', r'diseases?', r'side effects?', r'taxes', r'stocks?', r'visa',
+    r'criminal', r'injur(?:y|ies|ed)', r'invest(?:ing|ment|ments|or|ors|ed)', r'insurance', r'debts?',
+    r'prescri(?:ption|ptions|bed)', r'medicines?', r'cancer', r'clinics?', r'loans?', r'indict\w*', r'tumou?rs?',
+    r'custody', r'speed limits?')) + r')\b', re.I | re.A)
+
+
+def zero_japanese(text):
+    """Whether a chat's latest turns (prose: code left out) are about a topic the brief keeps free of Japanese: a
+    term of ZERO_STRONG (or the IRS), or terms of ZERO_WEAK_FAMILIES families of ZERO_WEAK."""
+    if ZERO_STRONG.search(text) or ZERO_STRONG_CASE.search(text):
+        return True
+    families = set()
+    for found in ZERO_WEAK.finditer(text):
+        families.add(found.lastindex)
+        if len(families) >= ZERO_WEAK_FAMILIES:
+            return True
+    return False
+
+
+# JMdict field tags (data/dictionary.tsv field, the first sense's) of the medical, legal and financial entries, which
+# are never topical words: a word for a diagnosis, a drug or a contract belongs to the topics the brief keeps free of
+# Japanese, whatever the conversation. Anatomy and physiology count as medical (心臓 heart, 神経 nerve).
+SENSITIVE_FIELDS = frozenset(('med', 'pharm', 'dent', 'vet', 'psy', 'anat', 'physiol', 'embryo', 'law', 'finc',
+                              'stockm'))
+
+
 def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     """The topical words for a chat's next reply, at most `most`, best first: dictionary entries code finds in the
     chat's latest turns (text: recent_turns; reading.Reader.found, so only spans a sense check can trust and never
@@ -221,8 +280,10 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     reading.starting_k; one read so recently that it waits, as in lists, is left out), n (uses in text) and days (the
     days of the last fwlib.READING_DAYS it came up on in the user's reading; days: exposure's).
 
+    None at all when the turns are about a topic the brief keeps free of Japanese (zero_japanese, on their prose).
     Only words worth offering: an entry that can stand in for English (swap), not a number, counter or katakana word
-    (the brief asks for neither); with no spelling in use (known or learning: listed already) or hidden by the
+    (the brief asks for neither), nor a medical, legal or financial one (its field, SENSITIVE_FIELDS); with no
+    spelling in use (known or learning: listed already) or hidden by the
     delayed-start experiment (fwlib.hidden: a held or paused word appears nowhere, here included); and not known at a
     glance (a chance under fwlib.FREE_P: free, and the next refresh labels it known). The ones the user's reading
     repeats come first (on fwlib.ELIGIBLE_DAYS days or more: they will come back, and are the ones intake nominates),
@@ -230,9 +291,11 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     text, then general frequency. reader: an open reading.Reader (default: the state dir's; none built yet, no
     words)."""
     import reading
+    if not text or zero_japanese(reading.prose(text)):
+        return []
     own = reader is None
     reader = reading.Reader.open() if own else reader
-    if reader is None or not text:
+    if reader is None:
         return []
     try:
         found = reader.found(text, flags=False)  # Claude checks the sense as it places one
@@ -252,7 +315,8 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
         e = entries.get(i)
         spellings = [fwlib.key(x) for x in [e['ja']] + e['forms']] if e else []
         if (not e or not e['swap'] or any(x in blocked for x in spellings) or NUMBER.match(e['ja'])
-                or KATAKANA.match(e['ja']) or e['en'].startswith('counter') or reading.is_number(e)):
+                or KATAKANA.match(e['ja']) or e['en'].startswith('counter') or reading.is_number(e)
+                or SENSITIVE_FIELDS.intersection(e.get('field') or ())):
             continue
         mine = next((queue[x] for x in spellings if x in queue), None)
         estimate = knowledge.word_estimate(know or {}, mine['ja'], 't3', now_ms) if mine else None

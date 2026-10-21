@@ -51,7 +51,7 @@ DICTIONARY = ROOT / 'data' / 'dictionary.tsv'
 SENSES = ROOT / 'data' / 'senses.tsv'
 INDEX = 'reading-index.sqlite'
 INDEX_LOCK = 'reading-index.lock'
-VERSION = 2  # of the index's layout and the counting rule: a change rebuilds the index
+VERSION = 3  # of the index's layout and the counting rule: a change rebuilds the index (3: entries keep their field)
 # A first word whose subtree is larger than this many bytes is stored by its second words too: the 9 forms of "be"
 # head 60 KB each of phrases ("is wrong", "was born") and any text has some of them, so a text reads only the
 # second words it has. 335 first words, 17,638 second ones.
@@ -177,7 +177,8 @@ def build(path=None, d=None):
     for i in range(len(d)):
         e = d.entry(i)
         rows.append((i, e['id'], e['ja'], e['kana'], e['en'], e['romaji'], e['rank'], e['common'], int(e['swap']),
-                     ','.join(e['forms']), ','.join(e['pos']), e['loan'], ''.join(e['kanji'])))
+                     ','.join(e['forms']), ','.join(e['pos']), e['loan'], ''.join(e['kanji']),
+                     ','.join(e.get('field') or ())))
     meta = {'signature': signature(), 'flags': marshal.dumps(safe is not None), 'kinds': marshal.dumps(index.kinds),
             'ids': marshal.dumps([r[1] for r in rows]), 'swap': bytes(r[8] for r in rows)}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,11 +192,11 @@ def build(path=None, d=None):
             con.execute('CREATE TABLE second (key TEXT PRIMARY KEY, tree BLOB)')
             con.execute('CREATE TABLE entry (i INTEGER PRIMARY KEY, id INTEGER, ja TEXT, kana TEXT, en TEXT, '
                         'romaji TEXT, rank INTEGER, common INTEGER, swap INTEGER, forms TEXT, pos TEXT, loan TEXT, '
-                        'kanji TEXT)')
+                        'kanji TEXT, field TEXT)')
             con.executemany('INSERT INTO meta VALUES (?, ?)', meta.items())
             con.executemany('INSERT INTO first VALUES (?, ?)', trees)
             con.executemany('INSERT INTO second VALUES (?, ?)', children)
-            con.executemany('INSERT INTO entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+            con.executemany('INSERT INTO entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
         con.close()
         os.replace(temporary, path)
         temporary = None
@@ -354,20 +355,21 @@ class Reader:
         return out
 
     def entries(self, positions):
-        """{position: {id, ja, kana, en, hint (romaji), rank, common, swap, forms, pos, loan, kanji}} for entries by
-        position: the dictionary's fields (dictionary.py) the brief and the starting values (knowledge.word_features)
-        read."""
+        """{position: {id, ja, kana, en, hint (romaji), rank, common, swap, forms, pos, loan, kanji, field}} for
+        entries by position: the dictionary's fields (dictionary.py) the brief, the topical words and the starting
+        values (knowledge.word_features) read."""
         positions = list(positions)
         out = {}
         for start in range(0, len(positions), 500):
             chunk = positions[start:start + 500]
-            query = ('SELECT i, id, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji FROM entry '
+            query = ('SELECT i, id, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji, field FROM entry '
                      f'WHERE i IN ({",".join("?" * len(chunk))})')
-            for i, id_, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji in self.con.execute(query,
-                                                                                                         chunk):
+            for i, id_, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji, field in self.con.execute(
+                    query, chunk):
                 out[i] = {'id': id_, 'ja': ja, 'kana': kana, 'en': en, 'hint': romaji, 'rank': rank, 'common': common,
                           'swap': bool(swap), 'forms': forms.split(',') if forms else [],
-                          'pos': pos.split(',') if pos else [], 'loan': loan or '', 'kanji': list(kanji or '')}
+                          'pos': pos.split(',') if pos else [], 'loan': loan or '', 'kanji': list(kanji or ''),
+                          'field': field.split(',') if field else []}
         return out
 
 

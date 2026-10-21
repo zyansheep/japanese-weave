@@ -2268,5 +2268,22 @@ class Examples(unittest.TestCase):
         self.assertEqual(weave.examples({}), 'like "問題は設定です。" or "これは簡単です。"')
 
 
+class ZeroJapanese(unittest.TestCase):
+    def test_the_shared_cases(self):
+        # extension/test/zero.test.js checks the page guard on the same cases
+        cases = json.loads((Path(__file__).resolve().parent / 'zero_japanese_cases.json').read_text(encoding='utf-8'))
+        self.assertGreater(len(cases['cases']), 10)
+        for case in cases['cases']:
+            self.assertEqual((case['text'], weave.zero_japanese(case['text'])), (case['text'], case['chat']))
+
+    def test_one_strong_term_or_three_families_of_weak_ones(self):
+        self.assertTrue(weave.zero_japanese('my doctor said so'))
+        self.assertFalse(weave.zero_japanese('let me diagnose it: it was diagnosed as a race'))  # one family
+        self.assertFalse(weave.zero_japanese('the symptom and the diagnosis'))  # two: the talk of a bug, often
+        self.assertTrue(weave.zero_japanese('the symptom, the pain and the diagnosis'))
+        self.assertTrue(weave.zero_japanese('the IRS sent a letter'))
+        self.assertFalse(weave.zero_japanese('lower the IRs to bytecode'))  # a compiler's, not the tax office
+
+
 if __name__ == '__main__':
     unittest.main()

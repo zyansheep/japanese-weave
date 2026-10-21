@@ -346,6 +346,19 @@ class Topical(Home):
         with mock.patch.object(reading, 'INDEX', 'missing.sqlite'):
             self.assertEqual(weave.topical_words(state, know, {}, text), [])  # no index yet: none
 
+    def test_none_in_a_conversation_the_brief_keeps_free_of_japanese_nor_a_legal_medical_or_money_entry(self):
+        reading.ensure()
+        state = {'words': [word('削除')]}
+        know = {'offset': {'t3': 0.2}, 'words': {}}
+        text = 'Please update the build, then delete the old build and sign the contract.'
+        self.assertEqual([w['ja'] for w in weave.topical_words(state, know, {}, text)], ['構築', '更新', '削除'])
+        self.assertEqual(reading.Reader.open().entries([16])[16]['field'], ['law'])  # 契約: legal, never offered
+        for health in ('I have had a headache all day. ', 'Which dose is right? ',
+                       'The symptom, the pain and the diagnosis. '):
+            self.assertEqual(weave.topical_words(state, know, {}, health + text), [], health)
+        self.assertEqual(len(weave.topical_words(state, know, {}, 'Investigate why the build fails. ' + text)), 3)
+        self.assertEqual(len(weave.topical_words(state, know, {}, text + '\n```\nmy headache.py\n```')), 3)  # code
+
     def test_the_brief_offers_them_with_odds_and_prices_them_with_the_learning_words(self):
         state = {'stage': 2, 'stage_pinned': True, 'paused': False,
                  'words': [word('でも', 'known'), word('今', 'active', added='2026-10-01')]}
