@@ -2,10 +2,11 @@
 
 Status: 2026-10-21. Revised on 2026-10-20 after an adversarial review by three independent reviewers (the model's
 assumptions, the design's simplicity, and a simulated reader with known ground truth), then implemented on the
-integration branch `plan`; sections 4 to 9 say what was built and where results departed from the plan. Why the system works the way it does, where it
-is going, and why each shortcut is acceptable. What to do next, in order: [NEXT_STEPS.md](NEXT_STEPS.md). Background
-and the longer argument: [docs/learning-framework.md](docs/learning-framework.md). How the current model works in
-detail: [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md). How the web prompt was tuned:
+integration branch `plan`; sections 4 to 9 say what was built and where results departed from the plan. Why the system
+works the way it does, where it is going, and why each shortcut is acceptable. What to do next, in order:
+[NEXT_STEPS.md](NEXT_STEPS.md). Background and the longer argument:
+[docs/learning-framework.md](docs/learning-framework.md). How the current model works in detail:
+[docs/adaptive-difficulty.md](docs/adaptive-difficulty.md). How the web prompt was tuned:
 [docs/swap-prompt.md](docs/swap-prompt.md).
 
 Parts of this are built and parts are planned; section 9 says which.

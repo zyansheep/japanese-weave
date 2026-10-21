@@ -1,7 +1,7 @@
 # Next steps
 
-Status: 2026-10-21; the steps were written on 2026-10-20, after the adversarial review. In order, each with what "done" means. Why each one
-matters is in [PLAN.md](PLAN.md); the letters in brackets are its simplifications (section 8).
+Status: 2026-10-21; the steps were written on 2026-10-20, after the adversarial review. In order, each with what "done"
+means. Why each one matters is in [PLAN.md](PLAN.md); the letters in brackets are its simplifications (section 8).
 
 The order follows one rule: build the yardsticks before changing what they measure. Every model change is checked on
 a simulated reader with known truth, then on the replayed log, so the measuring tools come first.
