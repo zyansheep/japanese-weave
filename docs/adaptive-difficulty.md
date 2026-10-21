@@ -495,7 +495,8 @@ for 3 learning words and, at Stage 3, one sentence in five unpriced. Learning wo
 in a sentence, where the English around each makes its meaning clear. Whole sentences, at any stage now, are short
 and plain です/ます, made of known words, particles and これ/それ only; every other sentence stays English with listed
 words as written (below Stage 3 also never conjugated and with no particles around them), and no stage may use
-Japanese outside the lists. Full is the same brief with the budget lifted: the same lists, every sentence the user
+Japanese outside the lists (the topical words below are one of them). Full is the same brief with the budget lifted:
+the same lists, every sentence the user
 could follow written whole in Japanese (learning words and common grammar allowed), and every listed word wherever the
 English has its meaning, steps included, with no cap per sentence; one line of the rules says so.
 
@@ -515,19 +516,54 @@ before it named known words was about 4,000 characters on every turn; the whole 
 1,500, and later turns stay the same, where naming every word took the whole 9,500 on every turn until all were
 named (5 turns at 1,500).
 
+Each brief also lists up to 5 topical words (weave.topical_words, TOPICAL_MAX), after the learning words: dictionary
+entries the code matcher finds in the chat's last three turns (weave.recent_turns: the prompt being sent, then the
+user's prompts and Claude's main-thread replies back to the third prompt before it, at most 8,000 characters, the
+latest kept; tool results and the hook's own text are no turns), as the reading counts find them (reading.py, under
+"Words from your reading" below), but by the main-meaning rule even with the sense flags: Claude places a topical word
+only where the English has its meaning, so it is the sense check, and the flags, strict enough for code to swap a word
+alone, call "update" as 更新 doubtful. Only words worth offering: an entry that can
+stand in for English (the dictionary's swap flag), not a number, counter or katakana word; with no spelling in use,
+known or learning, and none hidden by the delayed-start experiment (fwlib.hidden); and not known at a glance (p under
+8%: the next refresh labels it known). Each is the state's word when it has one (a word not introduced yet), else the
+entry itself, and its p is its estimate in chat when knowledge.json has one, else the starting value of a word without
+history (reading.starting_k: knowledge.prior_estimate with its dictionary entry, the prior by the word's own
+features). The ones the user's reading repeats come first (on 3 days or more of the last 30: the
+ones intake nominates), then common entries (JMdict's common flag), each by its uses in the turns, then by general
+frequency. They are listed with their odds as the learning words are, and they are costly words too: the amount of
+learning words is figured over both, and a reply may make at most half of the learning words it uses topical. At
+normal the budget buys about 2 costly words per 100 words, 6 in a 300-word reply, so 5 to choose from, at most 3 used,
+leaves the learning words, whose spacing is the plan's, most of the budget (PLAN.md row K). The line takes about 360
+characters on every turn: on the 2026-10-21 state (Stage 3, 366 known, footer glosses or `<abbr>`, with the longest
+feedback line) a whole brief went from 8,041 to 8,403 characters (8,585 to 8,948 with `<abbr>`) and a later one from
+2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is left. The hook finds them in 12 to
+49 ms on the user's chats (the reading index, below, read for the turns' words only); measured through the hook on a
+synthetic 2 MB transcript (15 runs, three times), the median hook went from 153 to 176 ms. Without the index (not
+built yet) there are none. On eight of the user's recent chats the lists were, by gloss: haiku, check, experiment,
+dictionary, wiring; environment, check, experiment, tonight, tool; check, no longer, method, science, mainly; check,
+value, fail, funds, link; check, method, secret, update, command; history, kanji, new word, check, example; together,
+history, diagnose, together with, headache; check, example, flag, normal, output. "check" (確認, a word the rules name)
+recurs as the reading repeats it; "link" as 一環 is a wrong sense Claude has to pass over, and "headache" came from a
+health chat, where the rules ask for no Japanese at all.
+
 Each brief is kept as a record of what its reply was offered: a `brief` op (hub.py), which changes nothing and goes to
 the ops table where the state lives, through the outbox with a collector. Its fields follow a web passage's plan:
 level, intensity, budget, the learning words and whole sentences asked for per 100 words (ask, sentences), the price
-of a whole sentence (sentencePrice), the costly words offered with their p, the delayed-start arms of the words it
-offers or asks for (arms: {word: 'shown', 'held:probe' or 'shown:probe'}), the expected lookups (ask times their mean p, plus sentences times their price), per 100 words
+of a whole sentence (sentencePrice), the costly words offered with their p (offered: learning words; topical: the
+topical words), the delayed-start arms of the words it
+offers or asks for (arms: {word: 'shown', 'held:probe' or 'shown:probe'}), the expected lookups (ask times the mean p
+of the learning and topical words, plus sentences times their price), per 100 words
 where the web's are per passage; and the session id, the words known at a glance, whether the brief was whole, its
 length and, from Codex, the turn id. Full has no budget, ask, sentences or expected. feedback.chat_briefs reads them
 back, and feedback.brief_for finds a reply's: the last of its chat sent at or before it.
 
-The line on the last reply counts its known, learning and off-list words, its whole sentences in Japanese (a run from
-a sentence break to 。, ？ or ！ with no Latin letters in it), and its expected lookups per 100 words: p summed over the
-learning (and unlisted) words used, plus 0.27 (the neutral prior) per off-list word and the price per whole sentence,
-over its words. Known words are left out, being free, whether the brief named them or not. Japanese inside code is
+The line on the last reply counts its known, learning, topical and off-list words, its whole sentences in Japanese (a
+run from a sentence break to 。, ？ or ！ with no Latin letters in it), and its expected lookups per 100 words: p summed
+over the learning (and unlisted) words used, the p its brief offered each topical word at, plus 0.27 (the neutral
+prior) per off-list word and the price per whole sentence, over its words. The topical words are the ones the reply's
+brief offered (sessions.json keeps each chat's last list: weave.offered_topical); they are named as a class only when
+there were some, and a reply that uses more of them than learning words is told to use no more topical words than
+learning words. Known words are left out, being free, whether the brief named them or not. Japanese inside code is
 left out too: fenced blocks of backticks or tildes (an unclosed one runs to the end), code spans of any number of
 backticks, and links (fwlib.strip_code). The particles and です/ます of a whole sentence are never off the lists; other
 hiragana is, below Stage 3. Off-list Japanese gets "no Japanese outside the lists"; else over 1.5 times the budget
@@ -572,9 +608,66 @@ its limit (NEXT_STEPS step 9). Chat almost never leaves its budget unspent while
 asks for as many as spend it.
 
 Words not introduced yet are scored like any other. One you opened in at least 2 messages or passages over the last 14
-days comes in before the lexicon order, most opened first (fwlib.newcomers). Two encounters, not two opens: opening
-the same word twice in one message is one look, while a chat that keeps using a word you don't know is worth teaching
-it. A word the model already says is known at a glance is labeled known instead of being taken in.
+days comes in first, most opened first (fwlib.newcomers). Two encounters, not two opens: opening the same word twice
+in one message is one look, while a chat that keeps using a word you don't know is worth teaching it. Then come the
+words your reading nominates (below), and while your reading has been counted on fewer than 3 days, the lexicon order
+instead. A word the model already says is known at a glance is labeled known instead of being taken in.
+
+### Words from your reading
+
+NEXT_STEPS step 13, the chat side (reading.py). Every main-thread chat reply (Claude Code and Codex transcripts, as for
+chat exposure) is counted per dictionary entry (data/dictionary.tsv, by its JMdict id) and day, counts only:
+
+- its English through the code matcher (matcher.py, docs/matcher.md) over every entry, each with its display gloss and
+  its first sense's glosses, so the longest match wins against every word the dictionary has, verbs and set phrases
+  included ("go back" is 戻る's, so its "back" is never 奥). Code, links, `<abbr>` tags with their glosses, footer
+  gloss lines, markup and identifiers (snake_case, paths, dotted and camelCase names) are left out. A place counts for
+  at most one entry, and only where a sense check can trust it (reading.Reader.trusted): never closed-class English
+  (the matcher's function flag: "about", "one", "so"); then the most frequent option the sense flags (data/senses.tsv
+  through senses.py, NEXT_STEPS step 12) call safe for the English it matched. Without a flags file (and for the
+  chat's topical words) the most frequent option when that English is its main meaning (the first of its display
+  gloss) and no more frequent entry reaches the same English only by a rule's inflection ("used" is the past of 使う
+  before it is 中古 "used"). The index is rebuilt when the flags file appears or changes.
+- its Japanese, which Claude wrote and so is checked by a model: through its `<abbr>` tags when it has them
+  (dictionary.find on the word, its reading and its meaning, so a conjugated verb counts for its entry), else the
+  word state's words found by the script-aware matching.
+
+On the user's chats of the 30 days to 2026-10-21 (Claude Code only; a median of about 10,000 words of replies on the
+24 days with over 2,000), with the sense flags: a median of 114 entries came up a day (6 to 265), 1,101 in all and 334
+on 3 days or more, 295 of them swappable; a median of 8 swappable words not in use became eligible a day (0 to 25),
+against at most 5 taken in. Without a flags file the main-meaning rule counts about four times as many (a median of
+420 entries a day, 1,246 on 3 days or more, 725 swappable), and requiring the main meaning already halves what the
+most frequent option alone would count (a median of 1,061 entries on those 24 days against 542): mostly wrong senses
+of technical English ("script" as 本 "book / script", "data" as 資料 "materials / data", "state" as 国), and some it
+keeps ("back" as 奥, "stays", a term of this codebase, as 滞在). The English of 4,218 reply blocks is counted in 7
+seconds.
+
+The counts go where the state lives as the exposure counts do: each reply in an `exposure` op carries {entries: {entry
+id: times}}, and fwlib.fold keeps exposure.json's reading ({day: {entry id: times}}) for the last 30 days, each reply
+once (read: its digest, apart from the words' recent, so a reply counted for words before reading was counted still
+counts here once) and readingDays ({entry id: days it came up on}), which the caches get (GET /v1/state) for the
+brief's topical words; the counts by day stay where intake runs. The first scan that counts entries (scan.json has no
+"reading" yet) reads the last 30 days of transcripts again, also from before the state was created; on the user's
+chats it took 15 seconds in the background, the index's first build included, and wrote 336 KB of exposure.json, 15 KB
+of it readingDays (623 KB and 37 KB without flags). The index (reading-index.sqlite in the state dir, 17 MB) is the matcher's trie split by first word
+into SQLite, each node keeping only the hits that can decide a span; a first word whose subtree passes 2 KB (the
+forms of "be" head 60 KB each of phrases, "is wrong" and the like) is stored by its second words too, so a text reads
+only the second words it has. It is built in the background in about 5 seconds (reading.ensure), once per dictionary,
+English data and sense flags; the hook only reads it.
+
+A word is eligible once it came up on 3 different days of the last 30 (fwlib.ELIGIBLE_DAYS, READING_DAYS), can stand
+in for English (swap), isn't a number, has no spelling in use (known or learning, hidden ones included) and isn't known
+at a glance by its starting value (reading.starting_k under 8%: labeled known, not taught). The eligible ones come in
+best first (reading.nominations): by those days, most first, as in the review's simulation, where admitting words by
+the days they came up kept them coming back (PLAN.md section 6); then by their starting chance, nearest 25% first in
+steps of half a unit of log-odds, so only a real difference counts (with the prior by origin every new word ties);
+then by general frequency. A dictionary word the state doesn't have joins it when it comes in: the labels op's intake
+row carries its entry id ([ja, arm, draw, id]), and fwlib.take_in adds it after the list's words with its gloss,
+romaji, reading and id. On a copy of the 2026-10-20 snapshot with the 30 days counted with the flags, the first refresh
+took in 情報, 答え, 機械, 編集 and 削除 (information, answer, machine, edit, delete); after it 236 words were eligible
+and not in use (98 of the list's, 138 dictionary words), led by versus, experiment, wiring, together, no longer,
+history, environment, calculate, example and compare. Without the flags it took in 奥 and 滞在 among the first five,
+the wrong senses above.
 
 ### The delayed-start experiment
 
@@ -591,7 +684,8 @@ One predicate, fwlib.hidden (held days, or the shown arm's paused days), decides
 fwlib.introduced, which every surface's word list goes through, leaves those words out: the chat brief's lists and
 its record, the words the native host sends the browser (so neither the web model's word list nor the planner's
 candidates; levels.js planSwaps also drops any candidate with a word the host didn't send), the claude.ai and ChatGPT
-blocks (fwlib.visible), and the topical words NEXT_STEPS step 14 will add, which must go through it too. `fw.py
+blocks (fwlib.visible), and the chat's topical words (weave.topical_words drops any entry with a spelling of a word in
+use or hidden, so a held word is never topical either). `fw.py
 status` counts hidden words without naming them, and a reply that uses one anyway counts it off the lists.
 
 From day 21 both arms are probed. On the web the host sends the word's arm as `held:probe` or `shown:probe`, and the
@@ -756,7 +850,9 @@ and seen over expected with a 90% interval from resampling days (knowledge.day_i
 bootstrap over days, given from 5 days on). Calibrated means the interval lies inside 0.83-1.2. The classes:
 
 - costly: listed words not free as the model stood (the free flag); free: the others;
-- topical: chat words found by code (NEXT_STEPS step 14); none yet;
+- topical: chat words found by code (weave.topical_words). Not sorted out yet: a topical word from the list is
+  counted as costly and one from the dictionary as off-list, until calibrate reads the brief records' topical lists
+  (NEXT_STEPS step 14's check needs it);
 - whole sentences: sentence translations (a 。 annotation, or a whole sentence glossed as one), each at its read
   chance times the surface's sentence price then;
 - off-list: words the lexicon doesn't have, at the fitted prior of a new word without an Anki card;

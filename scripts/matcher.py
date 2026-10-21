@@ -322,9 +322,12 @@ def match_text(index, text):
                 add(i, j, t['end'], t['word'], child['hits'])
             node = child
     candidates.sort(key=lambda c: (-(c['end'] - c['start']), c['start']))
-    taken = []
+    # Spans cover whole tokens (a possessive's stem lies inside its token), so two overlap exactly when their tokens
+    # do: marking the tokens taken finds that in linear time, where comparing with every span taken was quadratic.
+    taken, used = [], bytearray(len(tokens))
     for c in candidates:
-        if not any(c['start'] < t['end'] and t['start'] < c['end'] for t in taken):
+        if not any(used[c['i']:c['j'] + 1]):
+            used[c['i']:c['j'] + 1] = b'\x01' * (c['j'] + 1 - c['i'])
             taken.append(c)
     taken.sort(key=lambda c: c['start'])
     spans = []

@@ -145,8 +145,19 @@ unless your lookups say otherwise.
 - **New words**: up to 5 a day come in, and only while the lookup budget goes unspent: when, over the last 48 hours,
   the web's passages or the chat's briefs (at least 5 of either) planned to spend under 80% of their budget, so there
   aren't enough learning words to spend it on. Words you looked up before they were introduced (opened in 2 different
-  messages or passages within 14 days) come first, most opened first; then the list order. A word the model already
-  says you know at a glance is labeled known instead.
+  messages or passages within 14 days) come first, most opened first; then the words your reading nominates (below).
+  Until your chats have been counted on 3 days, the list order instead. A word the model already says you know at a
+  glance is labeled known instead.
+- **Words from your reading**: each chat reply is counted per dictionary entry and day (`data/dictionary.tsv`, 26,969
+  entries; counts only, never text): its English through the code matcher, which marks every place an entry could
+  go, and its Japanese through the `<abbr>` tags where it has them, else the listed words. An English place counts
+  only where a sense check can trust it: never closed-class words ("about", "one", "so"), and only the most frequent
+  option the sense flags (`data/senses.tsv`) call safe for that English (without that file, the most frequent entry
+  there when that English is its main meaning). A word is eligible once it came up on 3 different days in 30, can
+  stand in for English, isn't a number and isn't in use; the eligible words come in by the days they came up (most
+  first), then the predicted chance you'd look one up (nearest 25% first), then general frequency. A dictionary word
+  the list doesn't have joins the word state when it comes in. The first scan after an update counts the last 30 days
+  of chats again.
 - **The delayed-start experiment** (PLAN.md section 7) tests whether being shown a word teaches it. Each new word is
   drawn into one of two arms: held back, appearing nowhere for 3 weeks, or shown like any learning word for 2 weeks
   and then paused for 1. At week 3 both are probed: the first web passage that can show the word shows it outside the
@@ -178,6 +189,15 @@ became known or stopped being known. The whole brief comes back after the chat i
 mark it in the transcript) and every 20 turns. Below Stage 3 every other sentence keeps English grammar, with listed
 words never conjugated and no particles around them.
 
+Each brief also offers up to 5 **topical words**: dictionary entries the code matcher finds in the chat's last three
+turns (your prompts and Claude's replies, the prompt being sent included), the most frequent entry at each place when
+the English there is its main meaning (not only the safe ones: Claude checks the sense as it places them). Only words
+worth offering: ones that can stand in for English, not numbers or katakana, not in use, never one the delayed-start
+experiment holds back, and not ones you know at a glance; the ones your reading keeps repeating first, then common
+ones. Each comes with its odds, like a learning word, and counts toward the learning words' amount, at most half of
+it. The feedback line on the next reply counts them as their own class, not as Japanese outside the lists, and the
+brief record lists them.
+
 The claude.ai and ChatGPT blocks (`/japanese-weave:export`) can't see your lookups, so they still ask for a share
 of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4. They describe your known words as the most
 common words up to a rank in the base list, then name the known words past it, the more common first, as many as fit
@@ -185,7 +205,10 @@ common words up to a rank in the base list, then name the known words past it, t
 
 Japanese has no spaces, so chat exposure is counted with script-aware matching: a kanji word can't sit inside a
 longer kanji run (今 isn't counted in 今日), a kana word can't sit inside a kana run, and readings of three or more
-kana count for their word.
+kana count for their word. With a collector, each machine counts its own transcripts and sends the counts (never the
+text) with its chat exposure; the collector keeps the counts by day where intake runs, and the caches get how many
+days each entry came up on. The index the matcher reads (`reading-index.sqlite` in the state dir, about 17 MB) is
+built in the background on first use, in about 5 seconds.
 
 `JAPANESE_WEAVE_OFF=1` turns the hook off anywhere; `JAPANESE_WEAVE_FORCE=1` weaves in a script. Health,
 medication, legal, money, safety, emergency and driving topics get no Japanese at all.
@@ -307,7 +330,8 @@ check on the model, whose own number moves when you get used to the glosses. A w
 ## Privacy
 
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your
-local Claude Code and Codex transcripts to count exposure and never sends them anywhere. The extension sends
+local Claude Code and Codex transcripts to count exposure and words from your reading, and sends only counts (to your
+collector, if you set one), never the text. The extension sends
 readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
 (free-tier Gemini keys allow Google to train on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
 managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;

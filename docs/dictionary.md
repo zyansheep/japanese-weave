@@ -3,7 +3,9 @@
 `data/dictionary.tsv` holds every common JMdict entry (22,647) and the 4,322 other entries whose frequency rank is
 as good as a typical common entry's, 26,969 in all, for the plan's vocabulary ([PLAN.md](../PLAN.md) section 6,
 [NEXT_STEPS.md](../NEXT_STEPS.md) step 11). A refresh reads it for the starting values of words (each word's entry
-gives its prior's word features: [adaptive-difficulty.md](adaptive-difficulty.md)); the word list is still
+gives its prior's word features: [adaptive-difficulty.md](adaptive-difficulty.md)), and your reading is counted in it
+(`scripts/reading.py`): intake adds a dictionary word to the word state when your reading nominates it
+([adaptive-difficulty.md](adaptive-difficulty.md), "Words from your reading"). The word list is still
 `data/lexicon.csv`.
 
 ## Building it
@@ -79,8 +81,8 @@ spelling over a kanji spelling, the given gloss's English words, then rank.
 
 Loading reads the lines and nothing more; indexes are built when first used. In a fresh process: import 10 ms, load
 28 ms, the first `get` 6 ms, the first `find` 63 ms (the spelling index), later finds 0.1 ms, the first `romaji` 70 ms,
-all of `english()` 26 ms. The chat hook takes about 90 ms today, so a hook that resolves words on every prompt would
-want the spelling index cached (a `marshal` copy loads in a third of the time).
+all of `english()` 26 ms. The chat hook doesn't load it: what it needs on every prompt (the topical words) it reads
+from the reading index, an SQLite file built from the dictionary in the background (`scripts/reading.py`).
 
 JavaScript, `extension/src/dictionary.js`: `parse(text)` gives the same entries (115 ms and about 24 MB of heap in
 Bun for the whole file); `load(url)` fetches it. The extension doesn't ship the file yet: setup copies only

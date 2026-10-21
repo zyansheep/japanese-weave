@@ -197,7 +197,9 @@ On an AMD Ryzen 5 7640U, the 79 judged passages (9 to 40 words, median 19), rang
 | 22,000 synthetic entries | 245-295 ms | 0.05-0.10 ms; 0.10-0.42 ms | 730-830 ms | 0.16-0.24 ms; 0.46-1.55 ms |
 
 The synthetic entries (the same in both languages) draw one to three glosses of one to three words from the lexicon's
-English, so many share a word, as a dictionary's do. Python's maximum varies from run to run (with the garbage
+English, so many share a word, as a dictionary's do. On long text with the whole dictionary, Python's check of a
+candidate against the spans already taken was quadratic and took most of the time (916,000 comparisons for one
+12,000-character text); it now marks the tokens taken, which gives the same spans (49,555 on 600 replies checked). Python's maximum varies from run to run (with the garbage
 collector off as well); its slowest passage is usually the longest one, and its mean stays near 0.2 ms.
 
 ## Running it

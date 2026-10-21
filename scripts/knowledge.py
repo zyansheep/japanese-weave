@@ -1668,13 +1668,14 @@ def probe_outcomes(state, log, today):
     return out
 
 
-def decide(state, flags, looked, spend, log, today, seed=None):
+def decide(state, flags, looked, spend, log, today, seed=None, nominated=None):
     """The refresh's state edit, as a labels op (hub.py, fwlib.apply_labels): every word's label from its free flag
-    (fwlib.label) where it changes, up to intake_room new words (fwlib.newcomers: looked up first, then the list's
-    order; never one known at a glance) each with its delayed-start arm (fwlib.assign, from the experiment's seed, or
-    a new seed when it starts; none for a word the fixed texts name, fwlib.IN_THE_RULES), and the due probes' outcomes
-    (probe_outcomes). flags: {ja: free}; looked: {ja: messages
-    opened in} (fwlib.looked_up's). Nothing when labels come from the rules (fwlib.restore)."""
+    (fwlib.label) where it changes, up to intake_room new words (fwlib.newcomers: looked up first, then the words your
+    reading nominates, else the list's order; never one known at a glance) each with its delayed-start arm
+    (fwlib.assign, from the experiment's seed, or a new seed when it starts; none for a word the fixed texts name,
+    fwlib.IN_THE_RULES) and, for a dictionary word the state doesn't have yet, its entry id, and the due probes'
+    outcomes (probe_outcomes). flags: {ja: free}; looked: {ja: messages opened in} (fwlib.looked_up's); nominated:
+    the words from your reading (reading.nominations). Nothing when labels come from the rules (fwlib.restore)."""
     op = {'kind': 'labels', 'labels': [], 'intake': [], 'probes': []}
     if (state.get('labels') or {}).get('from') == 'rules':
         return op
@@ -1691,9 +1692,11 @@ def decide(state, flags, looked, spend, log, today, seed=None):
         else:
             seed = experiment['seed']
         free = {ja for ja, f in flags.items() if f}
-        for w in fwlib.newcomers(state, looked, free)[:room]:  # a word the fixed texts name can't be held back
-            outside = w['ja'] in fwlib.IN_THE_RULES
-            op['intake'].append([w['ja'], *((None, None) if outside else fwlib.assign(seed, w['ja']))])
+        have = {w['ja'] for w in state['words']}
+        for w in fwlib.newcomers(state, looked, free, nominated)[:room]:
+            outside = w['ja'] in fwlib.IN_THE_RULES  # a word the fixed texts name can't be held back
+            op['intake'].append([w['ja'], *((None, None) if outside else fwlib.assign(seed, w['ja']))]
+                                + ([w['id']] if w['ja'] not in have and w.get('id') else []))
     op['probes'] = probe_outcomes(state, log, today)
     return op
 
@@ -1835,7 +1838,15 @@ def refresh(now=None):
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
         spend = spending(contexts, feedback.chat_briefs(feedback.default_path()), now_ms)
         looked = {ja: len(st['recent']) for ja, st in stats.items() if len(st['recent']) >= fwlib.LOOKED_UP}
-        op = decide(state, flags, looked, spend, log, today) if not shrank else {}
+        try:  # words from your reading (reading.py); without its counts, the list's order
+            import reading as counts  # refresh's `reading` is the reading model
+            nominated = counts.nominations(state, fwlib.read_json(fwlib.home() / 'exposure.json', {}) or {},
+                                            {'words': words, 'prior': prior_table(fit)}, today) \
+                if intake_room(state, spend, today) else None
+        except Exception as error:
+            print(f'Japanese Weave: no words from your reading ({error.__class__.__name__}: {error})', file=sys.stderr)
+            nominated = None
+        op = decide(state, flags, looked, spend, log, today, nominated=nominated) if not shrank else {}
         applied = []
         if op.get('labels') or op.get('intake') or op.get('probes') or (op and not state.get('labels')):
             import hub  # here: hub imports this module
