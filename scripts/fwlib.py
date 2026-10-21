@@ -51,6 +51,10 @@ STAGES = [(400, 4), (150, 3), (40, 2)]  # (known words, stage): first match wins
 # Anki card (knowledge.SHARED).
 FREE_P = 0.08
 KNOWN_PRIOR_K = 2.5
+# How a word came into use, its "origin": the fit's prior has an intercept for each (knowledge.origin_at). Unlike its
+# status, nothing the model says sets it: intake ('learning'), setup's top words and Anki syncs ('known'), and once,
+# the statuses from before labels came from the model (legacy_origin). 'new': none of these.
+ORIGINS = ('new', 'learning', 'known')
 
 
 KANJI = '\u3005\u3006\u4e00-\u9fff\uf900-\ufaff'   # 々 〆 and CJK ideographs
@@ -412,6 +416,13 @@ def set_status(word, status, day):
     word['changed'] = day
     if not word['added']:
         word['added'] = day
+
+
+def legacy_origin(word):
+    """A word's origin (ORIGINS) from its status under the day-count rules (before labels came from the model): a queue
+    word new, an active one learning, a known or shaky one known (shaky words were known words opened again)."""
+    status = (word or {}).get('status')
+    return 'learning' if status == 'active' else 'known' if status in ('known', 'shaky') else 'new'
 
 
 def stage_for(state):

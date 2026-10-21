@@ -135,12 +135,13 @@ def handle(message):
 def adaptive(state, words):
     """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
     Never waits on the network: the refresh runs in its own process. Each word gets k, sd and free from knowledge.json
-    (fit: every word of the word state), else from its fitted prior (knowledge.prior_estimate; free when that is under
-    fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors. budget: normal's lookups per 100
-    words, the challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it
-    (intensity.budget)."""
+    (fit: every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and
+    origin_at; free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own
+    priors. budget: normal's lookups per 100 words, the challenge when set, else intensity.BUDGETS[0]; the extension
+    scales the other levels from it (intensity.budget)."""
     know = knowledge.load()
     entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    by_ja, today = {w['ja']: w for w in state['words']}, fwlib.today()
     for w in words:
         entry = entries.get(w['ja'])
         if isinstance(entry, dict) and 'k' in entry:
@@ -148,7 +149,7 @@ def adaptive(state, words):
             if isinstance(entry.get('free'), bool):
                 w['free'] = entry['free']
             continue
-        guess = knowledge.prior_estimate(know, w.get('status'))
+        guess = knowledge.prior_estimate(know, knowledge.origin_at(by_ja.get(w['ja']), today))
         if guess is not None:
             w['k'], w['sd'] = round(guess[0], 2), round(guess[1], 2)
             w['free'] = knowledge.sigmoid(-guess[0]) < fwlib.FREE_P

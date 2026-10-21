@@ -613,15 +613,16 @@ WIDTH_TOLERANCE = 1e-3     # nor a prior width
 FIT_ITERATIONS = 60
 # The shared parameters, each with the prior that holds it while the data is thin: (mean, sd). The offsets: chat's
 # (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. Then a word's prior mean, a
-# regression on its features (features): with an Anki card, an intercept by status plus a slope on ln(1 + interval),
-# centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on the old neutral
-# prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
+# regression on its features (features): with an Anki card, an intercept by origin (origin_at; the names say new,
+# learning and known) plus a slope on ln(1 + interval), centred on the old prior 0.5 + 0.8 ln(1 + interval); without
+# one, an intercept by origin, centred on the old neutral prior (1.0) and, for words marked known, the planner's
+# fwlib.KNOWN_PRIOR_K.
 SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 SHARED_NAMES = tuple(SHARED)
 T3, FORM = SHARED_NAMES.index('t3'), SHARED_NAMES.index('form')
-STATUSES = ('new', 'learning', 'known')
+ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
 
@@ -651,15 +652,35 @@ def status_at(word, day):
     return 'known' if status == 'shaky' else 'learning'
 
 
-def features(interval, status):
+def origin_at(word, day):
+    """How a word had come into use by `day` ('YYYY-MM-DD'), the prior's stand-in for its status, which now comes from
+    the model (fwlib.relabel) and would feed the fit its own output: 'learning' (taken in to be taught), 'known' (marked
+    known: setup's top words, an Anki sync, or known before labels came from the model) or 'new' (neither, or not yet
+    on that day). The word's origin field (fwlib.ORIGINS), which only intake, setup, Anki syncs and the switch to the
+    model's labels set; a word state from before the switch (and the simulated reader's) has none, and its statuses
+    say it (fwlib.legacy_origin), with a known word learning before its last change, as status_at has it. None for a
+    word the state doesn't have."""
+    if word is None:
+        return None
+    if not word.get('added') or day < word['added']:
+        return 'new'
+    explicit = word.get('origin') if word.get('origin') in fwlib.ORIGINS else None
+    old = word.get('legacy') if isinstance(word.get('legacy'), dict) else None if explicit else word
+    origin = explicit or fwlib.legacy_origin(old)
+    if old and origin == 'known' and old.get('status') == 'known' and day < (old.get('changed') or ''):
+        return 'learning'  # it graduated by the day rules after that day
+    return origin
+
+
+def features(interval, origin):
     """A word's prior features, {shared parameter: value}, and the kind whose prior width it takes: with an Anki card,
-    its status's card intercept and ln(1 + interval in days), uncapped; without one, its status's intercept. The hook
-    for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words, script, word type,
-    length): each is one more shared parameter, with its prior in SHARED."""
-    status = status if status in STATUSES else 'new'
+    its origin's card intercept (origin_at) and ln(1 + interval in days), uncapped; without one, its origin's
+    intercept. The hook for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words,
+    script, word type, length): each is one more shared parameter, with its prior in SHARED."""
+    origin = origin if origin in fwlib.ORIGINS else 'new'
     if interval is not None:
-        return {f'card {status}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
-    return {status: 1.0}, 'none'
+        return {f'card {origin}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
+    return {origin: 1.0}, 'none'
 
 
 def _solve(a, b):
@@ -725,7 +746,7 @@ class Fit:
         return i
 
     def features(self, ja):
-        return features(self.intervals.get(ja), status_at(self.by_ja.get(ja), self.day))
+        return features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day))
 
     def _terms(self, log):
         pooled, self.episodes, self.commands = {}, [], []
@@ -1529,11 +1550,11 @@ def word_stats(log, now_ms):
 
 
 def prior_table(fit):
-    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by status,
-    plus interval times ln(1 + days); without one, by status; and the sd of each kind (prior_estimate)."""
+    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by origin
+    (origin_at), plus interval times ln(1 + days); without one, by origin; and the sd of each kind (prior_estimate)."""
     shared = fit.shared()
-    return {'card': {s: shared[f'card {s}'] for s in STATUSES}, 'interval': shared['interval'],
-            'none': {s: shared[s] for s in STATUSES}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
+    return {'card': {s: shared[f'card {s}'] for s in ORIGINS}, 'interval': shared['interval'],
+            'none': {s: shared[s] for s in ORIGINS}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
 
 
 def refresh(now=None):
@@ -1673,14 +1694,13 @@ def word_estimate(knowledge, ja, surface='browser'):
     return p, entry['k'], entry['sd']
 
 
-def prior_estimate(knowledge, status, interval=None):
+def prior_estimate(knowledge, origin, interval=None):
     """(k, sd) a word without an estimate in knowledge.json assumes, from its "prior" (prior_table): by its Anki
-    interval and status, else its status. None when knowledge.json has no prior."""
+    interval and origin (origin_at: new, learning or known), else its origin. None when knowledge.json has no prior."""
     table = knowledge.get('prior')
     if not isinstance(table, dict):
         return None
-    x, kind = features(interval, 'learning' if status in ('active', 'shaky') else
-                       'known' if status == 'known' else 'new')
+    x, kind = features(interval, origin)
     try:
         mean = sum(value * (table['interval'] if name == 'interval' else
                             table['card'][name[5:]] if name.startswith('card ') else table['none'][name])

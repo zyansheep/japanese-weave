@@ -178,6 +178,19 @@ class Harness(Home):
         self.assertEqual(evaluate.status_at(dict(word, status='shaky'), '2026-09-21'), 'learning')
         self.assertEqual(evaluate.status_at(dict(word, status='queue'), '2026-09-21'), 'new')
         self.assertIsNone(evaluate.status_at(None, '2026-09-21'))
+        # the prior's origin: from the statuses before the switch, then only from the origin field, which the
+        # model's labels never set (a known label on a word taken in to be taught leaves it learning)
+        origin = knowledge.origin_at
+        self.assertEqual([origin(word, d) for d in ('2026-09-01', '2026-09-03', '2026-09-20')],
+                         ['new', 'learning', 'known'])
+        self.assertEqual([origin(dict(word, status=s), '2026-09-21') for s in ('shaky', 'active', 'queue')],
+                         ['known', 'learning', 'new'])
+        self.assertEqual(origin(dict(word, origin='learning'), '2026-09-21'), 'learning')
+        self.assertEqual(origin(dict(word, status='active', origin='known'), '2026-09-21'), 'known')
+        self.assertEqual(origin(dict(word, origin='new'), '2026-09-21'), 'new')
+        self.assertEqual(origin(dict(word, origin='known', legacy=dict(word)), '2026-09-10'), 'learning')
+        self.assertEqual(origin(dict(word, origin='learning'), '2026-09-01'), 'new')  # before it came in
+        self.assertIsNone(origin(None, '2026-09-21'))
         self.assertTrue(evaluate.is_form('行きます', '行く', word))
         self.assertFalse(evaluate.is_form('いく', '行く', word))  # its reading is the word, not a form
         self.assertFalse(evaluate.is_form('行く', '行く'))
@@ -324,10 +337,9 @@ class Refresh(Home):
         self.assertTrue(all(isinstance(e['free'], bool) and e['sd'] > 0 for e in words.values()))
         self.assertEqual(second['offset']['browser'], 0.0)
         self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd'})
-        for status in ('active', 'known', 'queue'):
-            k, sd = knowledge.prior_estimate(second, status)
-            self.assertEqual((k, sd), (second['prior']['none'][{'active': 'learning', 'queue': 'new'}.get(status, status)],
-                                       second['prior']['sd']['none']))
+        for origin in fwlib.ORIGINS:
+            k, sd = knowledge.prior_estimate(second, origin)
+            self.assertEqual((k, sd), (second['prior']['none'][origin], second['prior']['sd']['none']))
         self.assertIsNone(knowledge.prior_estimate({}, 'known'))
         chat = second['calibration']['classes']['t3']['classes']['sentences']
         self.assertGreater(chat['expected'], 0)  # whole sentences are priced
