@@ -833,22 +833,27 @@ use per word and the day's thinning draw again over more candidates. So when the
 
 - a passage that has not been on screen since its first painting is painted afresh from the full plan, as if the
   answer had come first;
-- a passage that has been on screen, even partly, keeps every swap it shows, the very spans (an open gloss stays open,
-  a flipped word stays flipped), and only gains: the worker plans the passage again with those swaps taken first, in
-  the budget as they were planned (`planSwaps` keep), and the page paints the rest around them, which `text.js` only
-  ever places in English text;
+- a passage on screen, even partly, or seen only in part, keeps every swap it shows, the very spans (an open gloss
+  stays open, a flipped word stays flipped), and only gains: the worker plans the passage again with those swaps taken
+  first, in the budget as they were planned (a probe among them stays the probe, outside it: `planSwaps` keep), and
+  the page paints the rest around them, which `text.js` only ever places in English text;
+- a passage whose Japanese the reader saw and then scrolled away from keeps that painting for this page view;
 - a passage with nothing sure to show gets its first painting when the answer comes, on screen or not, as every
   passage did before.
 
 English may turn into Japanese once; Japanese never moves or turns back. Painting the additions only to passages not
 yet on screen was the other choice: it would leave the first screen of every page, and a fast-scrolled timeline,
-with only the safe swaps (a sixth or less of the Japanese) while it is read. Until its last painting a passage logs no
-shown record and no stays, so each record describes the Japanese that was on the page (the log keeps one plan and one
-set of words per passage and view); its peeks and flips are logged as they happen, and the time it was read still
-counts for the reading counts. The cost: the fit gets no stays from a page's first 20 to 30 s.
+with only the safe swaps (a sixth or less of the Japanese) while it is read. The log keeps one plan and one set of
+words per passage and view, so a passage's shown record and stays are those of its last painting: while it awaits the
+answer they are held (its peeks and flips are logged as they happen, and its reading still counts for the reading
+counts). If its sure painting turns out to be the last (the reader left it, the call failed for good, or the view
+ended: a new level, say), they go out, the record with the time it was first seen; if the answer paints it again,
+they are dropped and the new painting's are logged from then. The cost: the fit gets no stays from a passage's time on
+screen before an answer that changed it.
 
 **The cache.** One answer per passage, keyed by `CHECK_VERSION`, the passage's text, each doubtful span with its options
-as the model sees them (place, Japanese and gloss) and the dense sentences' places (`pipeline.js answerKey`). Safe spans
+as the model sees them (place, Japanese and gloss) and the dense sentences' places (`pipeline.js answerKey`), after the
+epoch Clear cache changes, so an answer still on its way when the cache is cleared is never read. Safe spans
 are left out, since the model only reads them. The answer is kept by place (each pick as the span's start, end and the
 Japanese picked or none; sentences and phrases by their places: `storeAnswer`), so it still fits when a new word
 renumbers the spans. A new word list asks again only for passages whose doubtful spans or dense sentences changed; a
@@ -921,7 +926,7 @@ the host stopped sending a rate with the daily controller.
   reader, as every answer did before; a passage with something sure only gains, but that also reflows its lines.
 - A word's safe flag is a model's judgment (docs/matcher.md, "Sense flags"); technical senses (React, epoch) can slip
   through, and are now shown without a check and counted toward intake.
-- The fit gets no stays from a passage until its last painting; on a page read only in its first 20 s, none.
+- The fit gets no stays from a passage's time on screen before an answer that changed its painting.
 - A host older than this extension sends no glosses or flags: every span goes to the model, nothing shows before its
   answer or without a key, and the reading counts wait in the extension's queue (up to 500 passages) until the host
   is updated. An older extension with this host ignores what it adds. The collector needs no update: the counts come
