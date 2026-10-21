@@ -101,11 +101,12 @@ def exposure():
     return data.get('words', {})
 
 
-def chance(word, know=None):
+def chance(word, know=None, now_ms=None):
     """The chance the user looks a word up in chat: its estimate (knowledge.json, T3 offset) when the gloss log has
-    one, else from its status, known words at fwlib.KNOWN_PRIOR_K and the rest at the neutral prior."""
+    one, at now_ms its current chance if it isn't free (knowledge.word_estimate), else from its status, known words at
+    fwlib.KNOWN_PRIOR_K and the rest at the neutral prior."""
     know = know or {}
-    estimate = knowledge.word_estimate(know, word['ja'], 't3')
+    estimate = knowledge.word_estimate(know, word['ja'], 't3', now_ms)
     if estimate:
         return estimate[0]
     offset = (know.get('offset') or {}).get('t3', 0.0)
@@ -125,14 +126,18 @@ def examples(chances):
     return f'like "{a}" or "{b}"'
 
 
-def lists(state, seen=None, know=None, most=LEARN_MAX):
+def lists(state, seen=None, know=None, most=LEARN_MAX, now_ms=None, wait=True):
     """The word lists: (known at a glance, in list order; learning, best learning value first, at most `most` (None:
-    all); {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
-    whatever the status; every other word in use is learning, known ones too."""
+    all); {ja: lookup chance} for every word in use). Known at a glance means a long-term lookup chance under
+    fwlib.FREE_P (the free flag), whatever the status; every other word in use is learning, known ones too, at its
+    current chance at now_ms (default: now). With wait, a learning word read so recently that its chance is under
+    knowledge.SPACING_P, where its long-term chance isn't, waits, in neither list (PLAN.md section 5, rule 2)."""
     seen = seen or {}
-    p = {w['ja']: chance(w, know) for w in fwlib.introduced(state)}
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    p = {w['ja']: chance(w, know, now_ms) for w in fwlib.introduced(state)}
+    waits = lambda w: wait and p[w['ja']] < knowledge.SPACING_P <= chance(w, know)
     free = [w for w in state['words'] if w['ja'] in p and p[w['ja']] < fwlib.FREE_P]
-    learning = sorted((w for w in fwlib.introduced(state) if p[w['ja']] >= fwlib.FREE_P),
+    learning = sorted((w for w in fwlib.introduced(state) if p[w['ja']] >= fwlib.FREE_P and not waits(w)),
                       key=lambda w: (-knowledge.learning_value(p[w['ja']]), w['status'] != 'shaky',
                                      -seen.get(w['ja'], {}).get('n', 0)))
     return free, learning[:most], p
@@ -570,7 +575,7 @@ def calibration(text, state, level=0, know=None, seen=None):
     total = english_words(rest) + sum(found.values()) + max(stray, len(fwlib.JAPANESE.findall(rest)) // 2)
     if total < SHORT:
         return ''
-    free_words, learning_words, p = lists(state, seen, know)
+    free_words, learning_words, p = lists(state, seen, know, wait=False)  # a word the reply used now waits
     free, learning = {w['ja'] for w in free_words}, {w['ja'] for w in learning_words}
     known = sum(n for ja, n in found.items() if ja in free)
     learned = sum(n for ja, n in found.items() if ja in learning)
