@@ -112,9 +112,10 @@ words and counters dropped, romaji fixed at morpheme boundaries (場合 baai, �
 technical chat uses come first. `tools/` has the pipeline (`build_candidates.py`, the reviews in `curation/`,
 `assemble_lexicon.py`).
 
-**The dictionary.** [`data/dictionary.tsv`](data/dictionary.tsv) has every common JMdict entry (22,647) with its
-frequency rank, built by the same pipeline without the review (`tools/build_dictionary.py`). It is planned to become
-the vocabulary and isn't used at run time yet; [docs/dictionary.md](docs/dictionary.md) describes it.
+**The dictionary.** [`data/dictionary.tsv`](data/dictionary.tsv) has every common JMdict entry (22,647) and the
+4,322 others ranked as well as a typical common one, with their frequency ranks, built by the same pipeline without
+the review (`tools/build_dictionary.py`). It is planned to become the vocabulary and isn't used at run time yet;
+[docs/dictionary.md](docs/dictionary.md) describes it.
 
 **Anki.** `fw.py anki <collection.anki2>` reads your collection (a temporary copy, so Anki can stay open) and puts
 every word on a card in learning or review (not new, not suspended) at the front of the list, most familiar first.
