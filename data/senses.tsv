@@ -1,4 +1,4 @@
-# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt 2, claude-haiku-5-5, safe in all of 3 samples), described in docs/matcher.md.
+# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt 2, claude-haiku-5-5, safe in all of 3 samples, the later ones asking only what the earlier found safe), described in docs/matcher.md.
 # One line per entry (id: JMdict sequence number, empty for a word that is not one; ja and kana as the word state or the dictionary writes them): its safe and its doubtful English glosses, as matcher.js glossAlternatives writes them,
 # separated by ;. A gloss not listed, and any gloss of closed-class English, is doubtful. 59061 pairs of 17297 entries, 10583 safe.
 id	ja	kana	safe	doubtful

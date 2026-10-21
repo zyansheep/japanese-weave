@@ -3,12 +3,14 @@
 // forms, this Japanese word renders it correctly almost always (at least 95 times in 100), so code may swap it without
 // reading the sentence. Doubtful: anything else; a model reads the sentence first (extension/src/verify.js). A gloss
 // made only of closed-class English (data/english.json "function": I, you, so, about, one...) is always doubtful and
-// never asked about. Everything else is asked of a model once, in calls of about BATCH pairs, and the answers are kept
-// in a cache, so a rerun costs nothing; the flags go to data/senses.tsv, read by extension/src/senses.js and
+// never asked about. Everything else is asked of a model in calls of about BATCH pairs, in independent samples: a pair
+// is safe only if every sample finds it safe, since one pass flips on frequent pairs. data/senses.tsv was made with one
+// full sample and two that asked only what the earlier ones found safe (the command below). The answers are kept in a
+// cache, so a rerun costs nothing; the flags go to data/senses.tsv, read by extension/src/senses.js and
 // scripts/senses.py. A pair the file doesn't have is doubtful.
 //
-//   SPEND_LOG=/tmp/spend.jsonl ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=/tmp/state.json \
-//     bun tools/sense-flags.mjs
+//   SPEND_LOG=~/.cache/japanese-weave-build/spend/senses.jsonl ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key \
+//     WORDS=<copy of state.json> ALL=1 SAMPLES=1,2,3 CONFIRM=1 bun tools/sense-flags.mjs
 //
 // WORDS: a copy of a word state: its words' glosses as listed and their dictionary entries' glosses (INTRODUCED=1:
 // only known, active and shaky words). ALL=1: also every swappable dictionary entry. DRY=1: count the pairs and
@@ -196,7 +198,7 @@ async function main() {
   const base = env.CACHE || `${homedir()}/.cache/japanese-weave-build/senses-${version}-${model}${thinking ? '' : '-nothink'}`;
   const cachePath = (sample) => `${base}${sample > 1 ? `-s${sample}` : ''}.jsonl`;
   const outPath = env.OUT || here('../data/senses.tsv');
-  const header = { version, model, thinking, samples: samples.length };
+  const header = { version, model, thinking, samples: samples.length, confirm: !!env.CONFIRM && samples.length > 1 };
   const dictionary = parseDictionary(readFileSync(here('../data/dictionary.tsv'), 'utf8'));
   const state = env.WORDS ? JSON.parse(readFileSync(env.WORDS, 'utf8')) : { words: [] };
   const words = (state.words || []).filter((w) => !env.INTRODUCED || ['known', 'active', 'shaky'].includes(w.status));

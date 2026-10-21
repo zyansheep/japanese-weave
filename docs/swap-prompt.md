@@ -481,6 +481,8 @@ closed-class span. Haiku today, for comparison, on the same passages: 51% at nor
 wrong, $0.45 per 1,000 passages at normal in calls of 6 (19.8 s a call, at most 29 s; $0.52 on `eval16.json`, about
 $0.55 in calls of one as most calls go live) and $0.52 to $0.89 at full, where it rendered 10 of 24 sentences whole.
 
+The 24 runs of three seeds above cost $0.71 in 315 calls (the single run before them about $0.03).
+
 What the variants showed:
 
 - **Prompt 1 to 2: the rules, not the format.** Prompt 1 made these in every seed: 一 for "One" in "In One Week", 時

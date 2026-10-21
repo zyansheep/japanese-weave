@@ -9,7 +9,6 @@
 // (gemini.js). Not wired into the extension yet: the integration step does that. Pure but for requestChecks' fetch.
 import { PARTICLES, validateSwaps, isZeroJapanese } from './levels.js';
 import { safeOptions } from './senses.js';
-import { ENGLISH } from './english.js';
 import { askClaude } from './anthropic.js';
 import { askGemini } from './gemini.js';
 import { candidatesFor as modelsFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from './models.js';
