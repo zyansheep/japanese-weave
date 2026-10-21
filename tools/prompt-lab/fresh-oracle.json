@@ -12,7 +12,7 @@
   "x-hrtwt": {
     "use": ["i=私|僕", "people=人|人間"],
     "ok": ["getting=もらう", "me=私|僕"],
-    "not": ["like=好き|こう|まるで", "i'm=私|僕", "go=行く", "likes=好き", "that=それ", "so=つまり"]
+    "not": ["like=好き|こう|まるで", "i'm=私|僕", "go=行く", "likes=好き", "that=それ|その", "so=つまり"]
   },
   "x-scorsese": {
     "use": ["I=私|僕", "received=もらう", "book=本", "buy=買う"],
@@ -31,23 +31,23 @@
   },
   "hn-crime": {
     "use": ["Why=なぜ|どうして", "we=私たち"],
-    "ok": ["that=それ", "it=それ"],
-    "not": ["way=方", "less=少し|小さい|ちょっと"]
+    "ok": ["that=それ"],
+    "not": ["way=方", "less=少し|小さい|ちょっと", "it's=それ", "that=その"]
   },
   "hn-illegal": {
     "use": ["I=私|僕", "think=思う|考える", "ok=大丈夫"],
     "ok": ["it=それ", "ok=いい"],
-    "not": ["that=それ", "anyone=誰", "not being=無い", "make=する"]
+    "not": ["that=それ|その", "anyone=誰", "not being=無い", "make=する"]
   },
   "hn-slop": {
     "use": ["likes=好き", "watching=見る"],
     "ok": ["majority=ほとんど", "your=あなた|君"],
-    "not": ["all=全部|みんな", "day=日", "and=そして", "death=死ぬ", "something=物", "that=それ", "like=好き|こう|まるで"]
+    "not": ["all=全部|みんな", "day=日", "and=そして", "death=死ぬ", "something=物", "that=それ|その", "like=好き|こう|まるで"]
   },
   "hn-copyright": {
     "use": ["if=もし", "we=私たち", "bad=悪い"],
-    "ok": ["continued=続ける", "years=年", "it=それ", "Until then=それ", "sucks=悪い", "and=そして"],
-    "not": ["has=ある|いる", "then=じゃ|では|そして"]
+    "ok": ["continued=続ける", "years=年", "it#1=それ", "Until then=それ", "sucks=悪い", "and=そして"],
+    "not": ["has=ある|いる", "then=じゃ|では|そして", "It's=それ"]
   },
   "reddit-sauce": {
     "use": ["I=私|僕", "this#0=これ", "this#1=この"],
@@ -71,8 +71,8 @@
   },
   "reddit-thighs": {
     "use": ["favorite=好き", "I=私|僕", "go=行く", "outside=外", "smell=匂い", "a lot=沢山|多い|いっぱい|多く", "easy=簡単", "you=あなた|君", "this week=今週", "this#1=これ"],
-    "ok": ["my=私|僕", "favorite=大好き", "and#0=そして", "it=それ", "Essentially=つまり", "me=私|僕", "In fact=実は", "this#0=この"],
-    "not": ["Hands=手", "what=どれ", "made=する", "making=する", "make=する", "as=まるで", "I'm=私|僕", "have=ある|いる", "while=間", "and#1=そして", "how=いかが", "this#0=これ"]
+    "ok": ["my=私|僕", "favorite=大好き", "and#0=そして", "it=それ", "Essentially=つまり", "me=私|僕", "In fact=実は", "this#0=この", "this#0=これ"],
+    "not": ["Hands=手", "what=どれ", "made=する", "making=する", "make=する", "as=まるで", "I'm=私|僕", "have=ある|いる", "while=間", "and#1=そして", "how=いかが", "this#1=この", "that=それ|その"]
   },
   "yt-cars": {
     "use": ["understand=分かる", "cars=車", "expensive=高い"],
@@ -81,8 +81,8 @@
   },
   "yt-lampard": {
     "use": ["world=世界"],
-    "ok": ["best=いい", "Sunday=日曜日", "it=それ"],
-    "not": ["no=いいえ", "best=よく|元気|まあ|じゃ"]
+    "ok": ["best=いい", "Sunday=日曜日"],
+    "not": ["no=いいえ", "best=よく|元気|まあ|じゃ", "it's=それ"]
   },
   "yt-foreigner": {
     "use": ["I=私|僕", "still=まだ", "this=これ", "odd=変|おかしい", "about=について"],
@@ -97,7 +97,7 @@
   "yt-meow": {
     "use": ["I=私|僕", "have=いる", "Funny=面白い|おかしい", "same=同じ"],
     "ok": ["just like=まるで", "that=それ", "sound=聞こえる"],
-    "not": ["have=ある", "and=そして", "when=時|いつ"]
+    "not": ["have=ある", "and=そして", "when=時|いつ", "like=好き", "that=その"]
   },
   "news-jackdaw": {
     "use": ["about=について"],
@@ -111,27 +111,27 @@
   },
   "news-glee": {
     "use": ["We=私たち", "stopped=止める", "now=今"],
-    "ok": ["school=学校", "it=それ"],
-    "not": ["stopped=しまう", "high=高い", "return=帰る"]
+    "ok": ["school=学校"],
+    "not": ["stopped=しまう", "high=高い", "return=帰る", "it's=それ"]
   },
   "news-quilt": {
     "use": ["you=あなた|君", "also=また", "now=今"],
-    "ok": ["your=あなた|君", "and#1=そして", "and#2=そして", "one=一つ", "his=彼", "acquired=買う"],
-    "not": ["all=全部|みんな", "murder=殺す", "You're=あなた|君", "and#0=そして", "has=ある|いる", "one=一"]
+    "ok": ["your=あなた|君", "and#1=そして", "and#2=そして", "his=彼", "acquired=買う"],
+    "not": ["all=全部|みんな", "murder=殺す", "You're=あなた|君", "and#0=そして", "has=ある|いる", "one=一つ|一", "That's=それ|その"]
   },
   "blog-tartrazine": {
     "use": ["We=私たち", "But=でも|だけど", "I=私|僕", "this#0=この", "this#1=これ", "paper=論文", "below=下", "approximately=くらい", "hours=時間", "You=あなた|君", "see=見る|見える", "underneath=下", "same=同じ"],
-    "ok": ["do=する|やる", "more=もっと", "this#0=これ", "breast=胸", "can=出来る", "touch=触る", "has=ある", "like=まるで", "that#1=それ"],
-    "not": ["more=多く|多い", "as=まるで", "that#0=それ", "hours=〜時", "light=光", "though=だけど", "has=いる", "like=好き|こう", "this#1=この"]
+    "ok": ["do=する|やる", "more=もっと", "this#0=これ", "breast=胸", "can=出来る", "touch=触る", "has=ある", "like=まるで", "that#1=それ", "to the touch=感じ"],
+    "not": ["more=多く|多い", "as=まるで", "that#0=それ|その", "hours=〜時", "light=光", "though=だけど", "has=いる", "like=好き|こう", "this#1=この", "that#1=その"]
   },
   "blog-cyberspace": {
     "use": ["people=人|人間"],
     "ok": ["and=そして"],
-    "not": ["days=日", "have=ある|いる", "that=それ"]
+    "not": ["days=日", "have=ある|いる", "that=それ|その"]
   },
   "blog-brain": {
-    "use": ["you=あなた|君", "tell=言う", "there=そこ", "read=読む", "understand=分かる"],
-    "ok": ["start=始める", "go=行く", "it=それ"],
+    "use": ["you=あなた|君", "tell=言う", "there=そこ", "read=読む", "understand=分かる", "go=行く"],
+    "ok": ["start=始める", "it=それ"],
     "not": ["Before=前", "anything=何でも", "and=そして"]
   },
   "docs-parser": {
@@ -142,11 +142,11 @@
   "docs-bloom": {
     "use": ["you=あなた|君", "answer=答える", "this=この"],
     "ok": ["this=これ"],
-    "not": ["that=それ", "and=そして", "question=問題", "definitely=きっと", "probably=きっと"]
+    "not": ["that=それ|その", "and=そして", "question=問題", "definitely=きっと", "probably=きっと"]
   },
   "docs-sealed": {
     "use": ["This=これ", "you=あなた|君", "all=全部", "but=でも|だけど", "new=新しい", "change=変更", "For example=例えば", "if=もし"],
     "ok": ["great=いい", "that#1=その", "it=それ", "our=私たち", "your=あなた|君"],
-    "not": ["This=この", "So=つまり", "when=時|いつ", "that#0=それ", "that#1=それ", "that#2=それ", "all=みんな", "do=する|やる", "does=する|やる", "change=変える", "example#1=例えば", "then=じゃ|では|そして", "you’re=あなた|君"]
+    "not": ["This=この", "So=つまり", "when=時|いつ", "that#0=それ|その", "that#1=それ", "that#2=それ|その", "all=みんな", "do=する|やる", "does=する|やる", "change=変える", "example#1=例えば", "then=じゃ|では|そして", "you’re=あなた|君"]
   }
 }
