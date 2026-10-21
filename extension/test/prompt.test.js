@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildSystemPrompt, buildSystemParts, buildUserContent, RESPONSE_SCHEMA } from '../src/prompt.js';
+import { buildSystemPrompt, buildSystemParts, buildUserContent, RESPONSE_SCHEMA, PROMPT_VERSION } from '../src/prompt.js';
 import { L1_WORDS, L2_WORDS } from '../src/levels.js';
 
 const katakana = (ja) => /^[゠-ヿ〜]+$/.test(ja);
@@ -14,7 +14,7 @@ describe('prompt', () => {
     expect(p).toContain('Zero Japanese in passages that give or ask for health');
     expect(p).toContain('A passing mention (a parked car');
     expect(p).toContain('Default is to swap');
-    expect(p).toContain('No sentence swaps yet');
+    expect(p).toContain('Also return a sentence swap for every sentence'); // at every level and stage
   });
   test('number words that name a rank, an order or a label are never swapped; counters count things only', () => {
     const p = buildSystemPrompt(2);
@@ -26,7 +26,6 @@ describe('prompt', () => {
     expect(p).toContain('Level 2');
     for (const w of L2_WORDS) if (!katakana(w.ja)) expect(p).toContain(w.ja);
     expect(buildSystemPrompt(4)).toBe(p);
-    expect(p).toContain('about one sentence in ten');
   });
   test('user content and schema shape', () => {
     expect(buildUserContent([{ id: 'a', text: 'hi', extra: 1 }])).toBe('Passages:\n[{"id":"a","text":"hi","target":2}]');
@@ -55,28 +54,30 @@ describe('prompt', () => {
   });
   test('two parts: everything through the known words, then the learning words that change during the day', () => {
     const words = [{ ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' }, { ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
-    const [stable, learning] = buildSystemParts(2, words, [], 0, 3);
+    const [stable, learning] = buildSystemParts(2, words, [], 0);
     expect(stable).toContain('THREE KINDS OF SWAP');
     expect(stable.endsWith('KNOWN words:\nでも = but\n')).toBe(true);
     expect(learning).toBe('LEARNING words (the reason this extension exists; most needed first):\n大きい = big');
-    expect(buildSystemPrompt(2, words, [], 0, 3)).toBe(stable + learning);
-    expect(buildSystemParts(2, words, ['大きい'], 0, 3)[0]).toBe(stable);
+    expect(buildSystemPrompt(2, words, [], 0)).toBe(stable + learning);
+    expect(buildSystemParts(2, words, ['大きい'], 0)[0]).toBe(stable);
   });
-  test('the full answer asks for every swap the list allows, sentences at any stage, with no target; normal is unchanged', () => {
+  test('the full answer asks for every swap the list allows, sentences and the words inside them, with no target', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }, { ja: '犬', en: 'dog', hint: 'inu', status: 'active' },
       { ja: '私', en: 'i', hint: 'watashi', status: 'known' }];
-    const full = buildSystemPrompt(1, words, [], 0, 1, true);
+    const full = buildSystemPrompt(1, words, [], 0, true);
     expect(full).toContain('The reader asked for FULL Japanese');
     expect(full).toContain('LEARNING and KNOWN');
     expect(full).toContain('becomes a sentence swap, however plain or short');
+    // +1 and +2 pick from this answer and price whole sentences, so the words inside them are asked for too
+    expect(full).toContain('Then in every sentence, those you made sentence swaps too');
     expect(full).toContain('every one of those places is owed a swap');
-    for (const gone of ['No sentence swaps yet', 'Each passage comes with a "target"', 'Skip a passage entirely']) expect(full).not.toContain(gone);
-    expect(buildSystemPrompt(2, words, [], 15, 3, true)).toBe(buildSystemPrompt(2, words, [], 0, 3, true)); // no density at full
-    expect(buildSystemPrompt(2, words, [], 0, 3, true)).toBe(full); // nor a stage
-    expect(buildSystemPrompt(2, words, [], 0, 3, false)).toBe(buildSystemPrompt(2, words, [], 0, 3));
-    expect(buildSystemPrompt(2, words, [], 0, 3)).not.toContain('FULL');
-    expect(buildSystemPrompt(2, words, [], 0, 3)).toContain('Skip a passage entirely if a swap would make it hard to follow.');
-    expect(buildSystemPrompt(2, words, [], 0, 3, 3)).toBe(buildSystemPrompt(2, words, [], 0, 3)); // only true asks for full
+    for (const gone of ['Also return a sentence swap', 'Each passage comes with a "target"', 'Skip a passage entirely']) expect(full).not.toContain(gone);
+    expect(buildSystemPrompt(2, words, [], 15, true)).toBe(buildSystemPrompt(2, words, [], 0, true)); // no density at full
+    expect(buildSystemPrompt(2, words, [], 0, true)).toBe(full);
+    expect(buildSystemPrompt(2, words, [], 0, false)).toBe(buildSystemPrompt(2, words, [], 0));
+    expect(buildSystemPrompt(2, words, [], 0)).not.toContain('FULL');
+    expect(buildSystemPrompt(2, words, [], 0)).toContain('Skip a passage entirely if a swap would make it hard to follow.');
+    expect(buildSystemPrompt(2, words, [], 0, 3)).toBe(buildSystemPrompt(2, words, [], 0)); // only true asks for full
     // at full each hint names every spelling and how many places it is owed
     const text = 'But I think the dog ran home, and I saw the dogs. I did.';
     const [p] = JSON.parse(buildUserContent([{ id: 'a', text }], 0, { words, full: true }).slice('Passages:\n'.length));
@@ -108,11 +109,19 @@ describe('prompt', () => {
     expect(buildUserContent([{ id: 'a', text: 'But the rain stopped.' }], 0, { level: 1 })).toContain('"learning":["でも = but');
     expect(buildSystemPrompt(2, words)).toContain('"listed" names the KNOWN words');
   });
-  test('the stage sets how many sentences go fully into Japanese', () => {
+  test('every sentence the list can say is asked for, with the words inside it; the extension\'s budget picks, not the stage', () => {
     const words = [{ ja: 'でも', en: 'but', hint: 'demo', status: 'known' }];
-    expect(buildSystemPrompt(2, words, [], 0, 3)).toContain('about one sentence in five');
-    expect(buildSystemPrompt(2, words, [], 0, 2)).toContain('about one sentence in ten');
-    expect(buildSystemPrompt(1, words, [], 0, 1)).toContain('No sentence swaps yet');
-    expect(buildSystemPrompt(2, words, [], 15, 3)).toContain('Put about one sentence in five fully into Japanese');
+    const p = buildSystemPrompt(2, words, [], 0);
+    expect(p).toContain('Also return a sentence swap for every sentence that listed words and the grammar below can say completely');
+    expect(p).toContain("sentence swaps don't count toward the target");
+    expect(p).toContain('also return the word and phrase swaps inside each such sentence');
+    expect(p).toContain('give the sentence swap as well as the word and phrase swaps in it');
+    for (const gone of ['one sentence in five', 'one sentence in ten', 'No sentence swaps yet', 'prefer the sentence swap']) {
+      expect(p).not.toContain(gone);
+    }
+    expect(buildSystemPrompt(1, words, [], 0)).toBe(p); // with the word state the level changes nothing here
+    expect(buildSystemPrompt(2, words, [], 15)).toContain('Swap about 15% of the words. Each passage comes with a "target"');
+    expect(buildSystemPrompt(2, words, [], 15)).toContain('Also return a sentence swap for every sentence');
+    expect(PROMPT_VERSION).toBe(6); // cached answers from the stage-rated prompt aren't reused
   });
 });

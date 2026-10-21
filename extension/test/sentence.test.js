@@ -1,9 +1,10 @@
 import { test, expect } from 'bun:test';
 import { Window } from 'happy-dom';
 
-// The content script with a woven sentence: a hover on one of its words is a peek at that word, a click flips the whole
+// The content script with a woven sentence: a hover on one of its words is a peek at that word, a hover on its 。 a
+// look at its translation, logged as the 。 (as T3 logs it) but nothing for the word state; a click flips the whole
 // sentence to English and is logged, but tells the word state nothing about the word clicked.
-test('a sentence swap: peeks are per word, a click flips the sentence whole', async () => {
+test('a sentence swap: peeks are per word, its translation on its 。, a click flips the sentence whole', async () => {
   const win = new Window({ url: 'https://example.com/diary' });
   const keys = ['chrome', 'document', 'window', 'location', 'MutationObserver', 'IntersectionObserver', 'setInterval'];
   const saved = Object.fromEntries(keys.map((k) => [k, globalThis[k]]));
@@ -51,7 +52,17 @@ test('a sentence swap: peeks are per word, a click flips the sentence whole', as
     await wait(50);
     expect(sent.filter((m) => m.type === 'event').map((m) => `${m.event}:${m.word}`)).toContain('peek:日');
     const peek = sent.find((m) => m.type === 'interaction' && m.kind === 'peek');
-    expect(peek).toMatchObject({ word: '日', position: 1, annotations: [['楽しい', expect.any(Number), expect.any(Number)], ['日', expect.any(Number), expect.any(Number)]] });
+    const at = [expect.any(Number), expect.any(Number)];
+    expect(peek).toMatchObject({ word: '日', position: 1, annotations: [['楽しい', ...at], ['日', ...at], ['。', ...at]] });
+
+    const end = p.querySelector('.fw-end');
+    end.dispatchEvent(user(new win.MouseEvent('mouseover', { bubbles: true })));
+    await wait(800);
+    expect(end.classList.contains('fw-tip')).toBe(true); // the translation
+    end.dispatchEvent(user(new win.MouseEvent('mouseout', { bubbles: true })));
+    await wait(50);
+    expect(sent.filter((m) => m.type === 'interaction' && m.kind === 'peek').at(-1)).toMatchObject({ word: '。', position: 2 });
+    expect(sent.filter((m) => m.type === 'event').map((m) => m.word)).not.toContain('。');
 
     day.dispatchEvent(user(new win.MouseEvent('click', { bubbles: true, cancelable: true })));
     await wait(50);

@@ -7,7 +7,7 @@ import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEng
 import { hashKey } from './hash.js';
 import { offReason } from './settings.js';
 import { selector, readable, skipped, revealing } from './page.js';
-import { wordCount, intensityLabel, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
+import { wordCount, intensityLabel, isSentenceMark, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
 import { MAX_BATCH } from './models.js';
 import { readingState, account, newStay, paused } from './attention.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -94,7 +94,7 @@ const swapFor = (e) => {
 
 function record(span, event) {
   const word = swapWord(span);
-  if (!word || !on()) return;
+  if (!word || isSentenceMark(word) || !on()) return; // a sentence's translation says nothing about one word
   const id = new Date().toISOString().slice(0, 10) + ':' + event + ':' + word;
   const daily = event === 'seen' || event === 'peek';
   if (daily && seen.has(id)) return;

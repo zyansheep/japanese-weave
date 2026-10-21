@@ -57,18 +57,17 @@ level from [blocks/](blocks/level-01.md).
   romaji, and every third reply opens with a recall cue. Never in code, files, commits or anything meant to be
   shared, and never in scripted runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK
   sessions too, so the hook checks for a `t3 serve` parent and weaves there.
-- **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
-  word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
-  only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
-  item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google results a snippet,
-  the knowledge panel's description and AI answers (the overview, and People also ask once opened), never titles,
-  links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or opened,
-  never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。
-  for its translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by
-  default, Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys
-  only), or Claude Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s
-  for a page's first passages. Passages from every tab share calls, up to 16 a call
-  ([docs/swap-prompt.md](docs/swap-prompt.md)).
+- **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
+  order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
+  all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a
+  paragraph, list item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google
+  results a snippet, the knowledge panel's description and AI answers (the overview, and People also ask once opened),
+  never titles, links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or
+  opened, never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。 for its
+  translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by default,
+  Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys only), or Claude
+  Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s for a page's first
+  passages. Passages from every tab share calls, up to 16 a call ([docs/swap-prompt.md](docs/swap-prompt.md)).
 - **From off to full on pages** (extension): Alt+Shift+Comma and Alt+Shift+Period (or the popup's Less and More) step
   the Japanese on pages from **Off** to **Full** for 3 hours after the last press: off (−3), much lighter, lighter,
   normal, heavier, much heavier, full (+3). Off puts every woven page back in English at once, sends nothing to the
@@ -198,13 +197,14 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 
 ## Adaptive difficulty
 
-From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each
-intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a
-glance (under an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25%
-chance, at most one per sentence, on web pages and in chat. A challenge (`fw.py challenge 1.5`, the command above,
-or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget until your real
-rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works this way
-and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
+From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each intensity
+level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a glance (under
+an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most
+one per sentence, on web pages and in chat. On web pages a whole sentence in Japanese costs too, about 0.08 lookups (how
+often a sentence's translation gets opened), and takes its sentence's one place. A challenge (`fw.py challenge 1.5`, the
+command above, or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget
+until your real rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works
+this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.
@@ -212,9 +212,9 @@ screen while you were reading.
 **For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours,
 in the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut
 (for chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each
-press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
-default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
-down or up.
+press is logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a
+glance, so `fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed
+and opens by how much Japanese a passage had, and how often you turned it down or up.
 
 **In chat, a level is a lookup budget**: how many lookups per 100 words you put up with, spent only on words you
 don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,

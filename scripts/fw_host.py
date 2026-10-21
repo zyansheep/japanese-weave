@@ -19,7 +19,8 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             read); level -3 is off, 3 full
 
 The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
-evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
+evidence for it, the dial (challenge), the peek budget per 100 words, the realized peek rate, and the web's price of a
+whole sentence in Japanese (sentencePrice, its translation lookups per sentence read) once knowledge.json has one.
 
 With a collector set, the state lives on the collector: replies come from this machine's cache and changes are queued
 here and shown in it at once; a background sync (refreshed when the cache is over STATE_MAX_AGE seconds old) sends
@@ -144,7 +145,14 @@ def adaptive(state, words):
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
     scale = (know.get('controller') or {}).get('scale', 1.0) if challenge else 1.0
-    return {'challenge': challenge, 'budget': round((challenge or intensity.BUDGETS[0]) * scale, 3), 'rate': know.get('rate')}
+    reply = {'challenge': challenge, 'budget': round((challenge or intensity.BUDGETS[0]) * scale, 3), 'rate': know.get('rate')}
+    # knowledge.json sentencePrice: {surface: lookups per sentence read}, from the fit; without one the extension uses
+    # its own default (levels.js SENTENCE_PRICE)
+    prices = know.get('sentencePrice')
+    price = prices.get('browser') if isinstance(prices, dict) else None
+    if isinstance(price, (int, float)) and not isinstance(price, bool) and 0 < price <= 1:
+        reply['sentencePrice'] = round(price, 4)
+    return reply
 
 
 def main():

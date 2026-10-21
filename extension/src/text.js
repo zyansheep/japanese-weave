@@ -9,7 +9,8 @@ export const SWAP_CLASS = 'fw-word';
 // Remember synthetic siblings so a framework replacing its original text node wins.
 const splitGroups = new WeakMap();
 const spanGroups = new WeakMap();
-// Spans this extension made -> their learning word ('' if none). Kept out of the DOM, so a page can neither read the
+// Spans this extension made -> their learning word, or for a sentence's end span its closing mark (。), so opening a
+// sentence's translation is logged as T3 logs it ('' if none). Kept out of the DOM, so a page can neither read the
 // word list from attributes nor pass off its own span as a swap.
 const owned = new WeakMap();
 // A phrase or sentence swap is one group span (flipped as a whole) holding a span per listed word, each with its own
@@ -144,7 +145,7 @@ function fill(span, swap) {
     piece.setAttribute('data-tip', end ? swap.g : tipFor(part));
     if (part.status) piece.dataset.fwStatus = part.status;
     piece.textContent = part.t;
-    owned.set(piece, part.word || '');
+    owned.set(piece, part.word || (end ? part.t.slice(-1) : ''));
     span.appendChild(piece);
   });
 }

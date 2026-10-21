@@ -7,8 +7,8 @@ import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
 import { candidatesFor, MAX_BATCH, BATCH, FULL_BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, INTENSITY_OFF,
-  INTENSITY_FULL } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, isSentenceMark,
+  INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
@@ -218,8 +218,8 @@ async function callModel(ctx, batch) {
     if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
     const data = await store.get(['wordState', ...KEY_NAMES]);
     const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
-    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, stage: data.wordState?.stage,
-      words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
+    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, words: data.wordState?.words,
+      fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
       full: answerLevel(ctx.intensity.level) === INTENSITY_FULL });
   } catch (e) {
     await locked(async () => {
@@ -238,9 +238,9 @@ async function callModel(ctx, batch) {
 }
 
 // Picks each passage's swaps from its cached candidates (planSwaps): the level's lookup budget (normal's from the host:
-// the challenge when set, steered, else intensity.py's), the host's per-word estimates, the intensity and the
-// passage's random thinning, seeded by the passage and the day so a passage repaints the same way. Returns
-// { swaps, plan }.
+// the challenge when set, steered, else intensity.py's), the host's per-word estimates and price of a whole sentence
+// (else levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage
+// and the day so a passage repaints the same way. Returns { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
@@ -249,7 +249,7 @@ async function chooser(ctx) {
   return (text, swaps) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
     return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
-      shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
+      sentencePrice: wordState?.sentencePrice, shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
   };
 }
 
@@ -280,12 +280,13 @@ async function record(msg, sender) {
   return { ok: true };
 }
 
-// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state.
+// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state and a
+// sentence's closing mark (its translation opened).
 async function logInteraction(msg, sender) {
   const ctx = await context();
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
   const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
-  if (!item || (item.word !== undefined && !(await listed(item.word)))) return { ok: false };
+  if (!item || (item.word !== undefined && !isSentenceMark(item.word) && !(await listed(item.word)))) return { ok: false };
   const queued = await locked(() => queueLog(chromeStorage, [item]));
   if (queued >= FLUSH_AT) void flush();
   else scheduleFlush();

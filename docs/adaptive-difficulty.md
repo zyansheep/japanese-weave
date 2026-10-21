@@ -92,8 +92,9 @@ candidate the fewest steps back, then the earliest entry; a form is matched only
   alone would overstate each; without a message height, the summed height of the distinct bands is used); share is
   how far down the band the word sits. A word whose paragraph has no stay gets 0 from this, so only the line rule from the
   words opened can weigh it.
-- Unopened words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in
-  English. Words opened in that sentence still count as opened.
+- Unopened words in a sentence whose whole-sentence translation was opened (its 。 is among the annotations; in T3,
+  and on the web since 2026-10-20) get no observation: you read it in English. Words opened in that sentence still
+  count as opened.
 
 ### Passages and messages shown: the chance it was read
 
@@ -134,28 +135,42 @@ Selection happens when results are read from the cache, not when the model is ca
 candidate, so changing estimates, the budget or the level never pays for new model calls.
 
 A level is a lookup budget (scripts/intensity.py BUDGETS, mirrored in levels.js): the lookups per 100 words the reader
-puts up with, spent only on words not known at a glance. Per passage, with B = the level's budget per 100 words *
-jitter (the random thinning, below) * passage words / 100, and one use per Japanese word:
+puts up with, spent only on words not known at a glance and on whole sentences in Japanese. Planning assumes the
+passage is read: B and every cost below are lookups if it is read. Per passage, with B = the level's budget per 100
+words * passage words / 100 (the random thinning, below, leaves it alone), and one use per Japanese word:
 
-1. Each candidate's listed words get their estimate (k and sd from knowledge.json; without one, k = 2.5, fwlib
-   KNOWN_PRIOR_K, for a known word, else the neutral prior) and a mean lookup chance p. A candidate whose words all
-   have p < 0.08 (fwlib FREE_P) is free: shown wherever the model offered it, at every level but off, except that the
-   random thinning keeps each with probability jitter.
-2. The others cost the sum of p over their words not known at a glance, and are ordered by learning value: closeness
-   of the least-known word's predicted lookup chance to the 25% target on the log-odds scale, with Thompson sampling (k
-   drawn from N(k_w, var_w)) so uncertain words still get shown.
+1. Only the candidates the passage can place count, found as the page will find them (text.js locate), and of two
+   that overlap only the first one kept. Each candidate's listed words get their estimate (k and sd from
+   knowledge.json; without one, k = 2.5, fwlib KNOWN_PRIOR_K, for a known word, else the neutral prior) and a mean
+   lookup chance p. A word or phrase whose words all have p < 0.08 (fwlib FREE_P) is free: shown wherever the model
+   offered it, bigger swaps first, at every level but off, except that the random thinning keeps each with
+   probability jitter.
+2. The others cost the sum of p over their words not known at a glance; a whole sentence also costs its price, the
+   chance its translation is opened if it is read (below). They are ordered by learning value: closeness of the
+   least-known word's predicted lookup chance to the 25% target on the log-odds scale, with Thompson sampling (k drawn
+   from N(k_w, var_w)) so uncertain words still get shown; for a sentence of free words, closeness of its price.
 3. One with an active word not yet shown today is admitted first, outside the budget (at most one per passage), so new
    words always gather evidence.
 4. Each next one is admitted while its cost fits the remaining budget, at most PER_SENTENCE in one sentence (one up to
-   normal, two when heavier; a full sentence passes to the next candidate); the first that doesn't fit is admitted
-   with probability remaining / cost (so short passages still get learning words in expectation), then it stops.
+   normal, two when heavier); a whole sentence only in a sentence with nothing budgeted yet, and then nothing more
+   there (a full sentence passes to the next candidate). The first that doesn't fit is admitted with probability
+   remaining / cost (so short passages still get learning words in expectation), then it stops. A sentence left
+   English keeps the free words the model offered inside it.
 5. The popup's density, when set, caps the total, budgeted candidates first; without it there is no other ceiling.
 
-The passage's plan records B and the lookups expected (the sum of p over every listed word shown). Randomness is seeded
-by the passage and the day, so a page repaints the same way. Changing the challenge or the level repaints open pages;
-new estimates and the controller's daily budget apply to passages as they are painted, so words don't change under you
-while you read. Selection only chooses among the model's candidates, so a budget above what they can supply saturates
-(the controller's scale stops at 4).
+The price of a whole sentence comes from the native host (`sentencePrice`, from knowledge.json once the fit makes one
+per surface); until then it is levels.js SENTENCE_PRICE, 0.08. That number is from chat, because the web did not log
+a sentence's translation being opened until 2026-10-20: of 439 sentence ends in the 123 T3 replies with a word count
+(2026-10-15 to 20), 24 were opened, 5.5% a sentence shown, and 8.4% a sentence read when each is weighed by its read
+chance as the replay weighs words (90% interval 5.4% to 11.4%, resampling replies). Before, how many sentences a
+passage got followed the stage (the prompt asked for one in five from Stage 3, one in ten at Stage 2, none at Stage
+1) and they were free when their words were.
+
+The passage's plan records B, the lookups expected (the sum of p over every listed word shown, plus the price of each
+sentence shown) and the sentence price. Randomness is seeded by the passage and the day, so a page repaints the same
+way. Changing the challenge or the level repaints open pages; new estimates and the controller's daily budget apply to
+passages as they are painted, so words don't change under you while you read. Selection only chooses among the model's
+candidates, so a budget above what they can supply saturates (the controller's scale stops at 4).
 
 ### The dial and the budget
 
@@ -247,33 +262,35 @@ learning. The rules on zero-Japanese topics (health, money, safety and the like)
 and on glosses stay as at every other level; there is no calibration line (no budget to correct toward). A chat
 turned off on its own (threads.py) stays off at any level.
 
-On the web, half the passages are also thinned at random by a share between 50% and 100% (levels.js jitterFor), which
-keeps each free word with that chance and scales the budget by it, and every passage's shown record carries its plan:
-the level, its factor, the share, the swaps kept, the candidates offered, the budget and the lookups expected.
-Because the thinning is random, comparing thinned and untouched passages measures what the amount
-of Japanese alone does to reading time and opens. The comparison counts only passages with candidates (thinning can't
-change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
-`set` op, so the ops log says how often and when the default felt wrong; one into off counts as lighter and one
-into full as heavier, like any other step. Presses less than a minute apart count as one decision, judged by where
-they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level that ran out counts as
-normal before the next press. `fw.py calibrate` reports both
-(knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
-starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
-from the 0.5 points it needs), the chat side (T3 messages with a word count: lookups per 100 words, how many
-messages had none, and the lookups of listed words the model expected, read chance from the stays times p before
-each message's update, against those seen: how well calibrated the model is on chat), and per surface the presses
-and hours spent away from normal. Many lighter presses mean the default is too heavy, and the slowdown curve says how
-much each extra point of Japanese costs.
+On the web, half the passages are also thinned at random by a share between 20% and 100% (levels.js jitterFor), which
+keeps each free word with that chance; the budget and the words it pays for are the same in thinned and untouched
+passages. Every passage's shown record carries its plan: the level, its factor, the share, the swaps kept, the
+candidates offered, the budget and the lookups expected. Because the thinning is random, comparing thinned and untouched
+passages measures what words known at a glance alone do to reading time and opens (PLAN.md row F). Until 2026-10-20 the
+share ran from 50% to 100% and scaled the budget too: thinned passages came to 5.3% Japanese against 6.5%, too little
+contrast to read, and what free words cost was mixed with what the budgeted ones do. The comparison counts only passages
+with candidates (thinning can't change the others) and includes those thinned to no Japanese at all, which are logged
+like the rest. Every press is a `set` op, so the ops log says how often and when the default felt wrong; one into off
+counts as lighter and one into full as heavier, like any other step. Presses less than a minute apart count as one
+decision, judged by where they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level
+that ran out counts as normal before the next press. `fw.py calibrate` reports both (knowledge.json "calibration"):
+screen time per word and opens per 100 words by the share of Japanese in a passage, starting with passages that got
+none, the thinned-versus-untouched effect (or how far the two groups' shares are from the 0.5 points it needs), the chat
+side (T3 messages with a word count: lookups per 100 words, how many messages had none, and the lookups of listed words
+the model expected, read chance from the stays times p before each message's update, against those seen: how well
+calibrated the model is on chat), and per surface the presses and hours spent away from normal. Many lighter presses
+mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
 interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt, which the
-heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known,
-the passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words
-and the allowed grammar can say completely, at any stage. planSwaps shows every validated candidate, sentences before
-the word swaps inside them, with no ceiling, budget or random thinning (the plan says level 3, intensity 5, jitter 1,
-and has no budget). Both ends last 3 hours after the last press like the other levels; a press further at an end
-restarts the clock.
+heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known, the
+passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words and
+the allowed grammar can say completely. planSwaps plans it the same way as the other levels with no budget, so nothing
+costs anything: every candidate the passage can place is shown, a sentence rather than the word swaps inside it, with no
+per-sentence cap, density cap or random thinning, and a word again where its English comes again (the plan says level 3,
+intensity 5, jitter 1, and has no budget). Both ends last 3 hours after the last press like the other levels; a press
+further at an end restarts the clock.
 
 ## Inspecting
 

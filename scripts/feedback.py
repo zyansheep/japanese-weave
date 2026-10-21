@@ -14,8 +14,11 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 how the amount was chosen ("plan", JSON {level: the reader's intensity -3..3, intensity: its factor,
                 jitter: the passage's random factor (1: none), limit: swaps kept (before 2026-10-20: allowed),
                 candidates: swaps the model offered, and since then budget: lookups the passage could spend on words
-                not known at a glance (none at full), expected: lookups predicted if it is read}); seq orders changes
-                for export
+                not known at a glance (none at full), expected: lookups predicted if it is read; plans with
+                sentencePrice, the lookups a whole sentence was priced at, are later still: their jitter is the share
+                of free swaps kept and leaves the budget alone (before, it thinned every swap and scaled the budget),
+                and candidates counts those the passage can place}); seq orders changes for export. A sentence's
+                closing mark (。) among the glossed words stands for its translation (in the browser since then too)
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -220,15 +223,17 @@ def _clean(item, now):
 
 
 def _plan_ok(plan, num):
-    """As the extension's cleanPlan (hostsource.js) checks it; budget and expected are optional, as plans from before
-    levels meant a lookup budget have neither (and full's has no budget)."""
+    """As the extension's cleanPlan (hostsource.js) checks it; budget, expected and sentencePrice are optional, as plans
+    from before levels meant a lookup budget have none of them (and full's has no budget), and plans from before whole
+    sentences were priced have no sentencePrice (their thinning also scaled the budget)."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
-    amount = lambda key: key not in plan or (num(plan[key]) and 0 <= plan[key] <= 1000)
+    amount = lambda key, top=1000: key not in plan or (num(plan[key]) and 0 <= plan[key] <= top)
     return (isinstance(plan, dict)
-            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected'}
+            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected', 'sentencePrice'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
-            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected'))
+            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected')
+            and amount('sentencePrice', 1))
 
 
 MAX_TRACE_POINTS = 200

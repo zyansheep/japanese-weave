@@ -4,7 +4,7 @@ import { wordsForLevel, swapTarget, swapLimit, PARTICLES } from './levels.js';
 import { wordHints } from './hints.js';
 
 // Bumped whenever the prompt or the response changes shape, so cached answers from an older prompt aren't reused.
-export const PROMPT_VERSION = 5;
+export const PROMPT_VERSION = 6;
 
 // The compact answer: short keys, and a phrase or sentence's pieces as one "a|b|c" string; levels.js looks up which
 // listed word each piece is and fills every gloss from the list, so a word swap carries no gloss. About 40% less output
@@ -44,32 +44,31 @@ export const RESPONSE_SCHEMA = {
 const entry = ({ ja, en }) => `${ja} = ${en}`;
 const KATAKANA_ONLY = /^[゠-ヿ〜]+$/;
 
-// How often a whole sentence goes into Japanese: from the plugin's stage, else from the level.
-function sentenceRate(level, stage) {
-  if (stage >= 3) return 'about one sentence in five';
-  if (stage === 2 || (!stage && level >= 2)) return 'about one sentence in ten';
-  return '';
-}
 // Haiku at low effort settled on one "safe" swap a passage, or none, against "one or two per sentence"; a number per
 // passage, with the reason, got it to return what the extension can show (docs/swap-prompt.md).
-const TARGET = 'Each passage comes with a "target": how many swaps the extension may show in it (a phrase or sentence swap counts as one). Return about that many, spread across its sentences, and fewer only when nothing else fits the rules: the extension picks from what you return, LEARNING words first, so a passage held to one safe swap teaches little. Every LEARNING word that fits goes in, even past the target.';
+const TARGET = 'Each passage comes with a "target": how many word and phrase swaps the extension may show in it (a phrase counts as one). Return about that many, spread across its sentences, and fewer only when nothing else fits the rules: the extension picks from what you return, LEARNING words first, so a passage held to one safe swap teaches little. Every LEARNING word that fits goes in, even past the target.';
+// Sentences at every stage: the extension prices each whole sentence as a lookup and decides how many to show
+// (levels.js planSwaps), so the model offers every one it can say, and the word and phrase swaps inside it for when it
+// stays English. Until prompt 6 the stage set a rate instead (one sentence in five from Stage 3, one in ten at Stage 2,
+// none at Stage 1).
+const SENTENCES = 'Also return a sentence swap for every sentence that listed words and the grammar below can say completely, however plain or short; sentence swaps don\'t count toward the target. Look for short ones in replies, captions, dialogue and diaries. The extension shows only some of them, so also return the word and phrase swaps inside each such sentence, as if it stayed English.';
 // Full: no target, every swap the rules allow, sentence swaps at any stage, and the passage's hints as places owed a swap
 // (buildUserContent lists each spelling and how often it occurs). Asked only for "every listed word", Haiku returned
 // about what it did at +2 then: 58-76% of the places a listed word fits, skipping a pronoun's second place, "this" before
 // a noun, most sentences it could have said whole; this way 71-91% (docs/swap-prompt.md). The heavier levels (+1, +2)
-// are picked from this answer too (levels.js answerLevel), which has its own cache (background.js cacheRevision).
-const FULL = 'The reader asked for FULL Japanese: everything the list can say, with no target. Go through each passage sentence by sentence. First, every sentence that listed words and the grammar below can say completely becomes a sentence swap, however plain or short: "I watched a movie with my family." -> 家族と一緒に映画を見ました。 "My father is busy today." -> 今日お父さんは忙しいです。 "It is cold this morning." -> 今朝は寒いです。 In every other sentence, swap every English word or expression a listed word says in that sense, LEARNING and KNOWN alike, as a phrase where one fits, else as a word: pronouns too ("I" -> 私, "we" -> 私たち, "this" before a noun -> この), "there is" and "has" where something exists or is owned (ある; not "had a meeting" or "had fun"), verbs, adjectives, adverbs and nouns, in every place the passage says them (the same word may be swapped in several places, each with its own "c" around that place). A passage\'s "learning" and "listed" name the listed words its English says, each spelling found and in how many places: every one of those places is owed a swap, in a word, phrase or sentence, unless the MEANING RULES forbid it there. Leave the English where the sense differs, a rule forbids the swap, or you are unsure.';
+// are picked from this answer too (levels.js answerLevel), which has its own cache (background.js cacheRevision). They
+// price whole sentences, so since prompt 6 the words inside a sentence swap are asked for too, for when it stays English.
+const FULL = 'The reader asked for FULL Japanese: everything the list can say, with no target. Go through each passage sentence by sentence. First, every sentence that listed words and the grammar below can say completely becomes a sentence swap, however plain or short: "I watched a movie with my family." -> 家族と一緒に映画を見ました。 "My father is busy today." -> 今日お父さんは忙しいです。 "It is cold this morning." -> 今朝は寒いです。 Then in every sentence, those you made sentence swaps too (the extension may show their words instead), swap every English word or expression a listed word says in that sense, LEARNING and KNOWN alike, as a phrase where one fits, else as a word: pronouns too ("I" -> 私, "we" -> 私たち, "this" before a noun -> この), "there is" and "has" where something exists or is owned (ある; not "had a meeting" or "had fun"), verbs, adjectives, adverbs and nouns, in every place the passage says them (the same word may be swapped in several places, each with its own "c" around that place). A passage\'s "learning" and "listed" name the listed words its English says, each spelling found and in how many places: every one of those places is owed a swap, in a word, phrase or sentence, unless the MEANING RULES forbid it there. Leave the English where the sense differs, a rule forbids the swap, or you are unsure.';
 
 // The rules come first and the word lists last, known words before learning words (whose order changes as words are
 // shown during the day), so consecutive calls share a long prefix that Gemini caches. With the plugin's word state,
 // learning words (active, then shaky; unshown today first) are the target and known words fill in. Without it, the level's bundled list. Katakana loanwords are left out: on an English page they teach nothing.
 // percent: the share of words to swap; 0: the level's rule. Either way each passage comes with its target
-// (buildUserContent).
-// stage: the plugin's stage (1-4, 0 without it), which sets how many sentences go fully into Japanese. full: the answer
-// the heavier intensities and full pick from, every swap the list allows, whatever the stage and percent.
+// (buildUserContent). Every sentence the list can say is asked for at every stage. full: the answer the heavier
+// intensities and full pick from, every swap the list allows, whatever the percent.
 // Two parts: everything up to the known words, which stays the same all day, and the learning words, so a provider with
 // explicit caching (Anthropic) can mark both.
-export function buildSystemParts(level, sharedWords, shownToday = [], percent = 0, stage = 0, full = false) {
+export function buildSystemParts(level, sharedWords, shownToday = [], percent = 0, full = false) {
   const lvl = level <= 1 ? 1 : 2;
   let known = '';
   let learning;
@@ -84,19 +83,14 @@ export function buildSystemParts(level, sharedWords, shownToday = [], percent = 
     learning = `LEARNING words (Level ${lvl}):\n${wordsForLevel(lvl).filter((w) => !KATAKANA_ONLY.test(w.ja)).map(entry).join('; ')}`;
   }
   full = full === true;
-  const sentences = full ? '' : sentenceRate(lvl, Number(stage) || 0);
   const amount = full ? FULL
-    : percent > 0
-    ? `Swap about ${percent}% of the words. ${TARGET}${sentences ? ` Put ${sentences} fully into Japanese when one can be said completely.` : ''}`
-    : sentences
-    ? `${TARGET} Aim for ${sentences} as a sentence swap: look for short ones in replies, captions, dialogue and diaries. Make it a phrase wherever one fits ("we bought fish" -> "we 魚を買いました", not 魚 alone). Give every passage this care, however many come at once.`
-    : `${TARGET} No sentence swaps yet.`;
+    : `${percent > 0 ? `Swap about ${percent}% of the words. ` : ''}${TARGET} ${SENTENCES} Make it a phrase wherever one fits ("we bought fish" -> "we 魚を買いました", not 魚 alone). Give every passage this care, however many come at once.`;
   return [`You are the Japanese Weave engine for a browser extension. The reader is a native English speaker learning Japanese by meeting it inside the English they already read. You choose which English to replace with Japanese; everything else stays exactly as written.
 
 THREE KINDS OF SWAP
 1. word: one English word, or a fixed expression like "this year", replaced by one listed word in the English word order, with nothing added. "a 新しい car", "my 家族", "でも the rain stopped". A word swap only has to keep the English readable, not sound like Japanese: nouns, pronouns, adjectives, adverbs and fixed expressions swap wherever the listed sense fits. Still, where a phrase fits, a phrase teaches more.
 2. phrase: a short English phrase replaced by natural Japanese in Japanese word order, built only from listed words and grammar. Use it whenever single words would leave Japanese in an order Japanese never uses, or a particle is needed. "after work" -> 仕事の後, "with my friends" stays English (友達 is not listed), "watch a movie together" -> 一緒に映画を見る, "go home every day" -> 毎日家に帰る. Two neighbouring swaps should usually be one phrase. A phrase is a few words, never a clause with its own subject and verb, and never leaves English words dangling after Japanese verbs ("I 店に行った with my mom" is wrong): if a whole clause would go into Japanese, make the whole sentence a sentence swap, or use word swaps.
-3. sentence: a whole short sentence written fully in natural Japanese. o is the complete sentence exactly as written, with its final punctuation; f ends with 。 or ？. Use です/ます, or plain forms in casual speech (tweets, replies, captions). Only when every bit of its meaning can be said with listed words and grammar: never drop, add or soften meaning (keep "really" -> 本当に, "very", "again", times and people). When a sentence can be said completely, prefer the sentence swap over word swaps in it: "Last night I watched a movie at home." -> 昨日の夜、家で映画を見ました。 "It's raining again." -> また雨です。 "Do you like dogs?" -> 犬が好きですか？ "I didn't understand at all." stays English (全然 is not listed).
+3. sentence: a whole short sentence written fully in natural Japanese. o is the complete sentence exactly as written, with its final punctuation; f ends with 。 or ？. Use です/ます, or plain forms in casual speech (tweets, replies, captions). Only when every bit of its meaning can be said with listed words and grammar: never drop, add or soften meaning (keep "really" -> 本当に, "very", "again", times and people). When a sentence can be said completely, give the sentence swap as well as the word and phrase swaps in it: "Last night I watched a movie at home." -> 昨日の夜、家で映画を見ました。 "It's raining again." -> また雨です。 "Do you like dogs?" -> 犬が好きですか？ "I didn't understand at all." stays English (全然 is not listed).
 
 ${amount}${full ? '' : ' Skip a passage entirely if a swap would make it hard to follow.'}
 

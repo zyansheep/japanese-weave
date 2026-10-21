@@ -22,7 +22,8 @@ const host = (reply) => async () => reply;
 describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
-    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, rate: null, intensity: null, words: REPLY.words });
+    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, rate: null,
+      intensity: null, words: REPLY.words });
     const intensity = { level: -1, until: 1800000000000, at: 1799999000000 };
     expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, source: 'shortcut' } } }).intensity).toEqual(intensity);
     for (const level of [-3, 3]) { // off and full
@@ -36,6 +37,9 @@ describe('parseState', () => {
     expect(s.words.map((w) => [w.k, w.sd])).toEqual([[0.4, 0.8], [undefined, undefined]]);
     expect([s.challenge, s.budget, s.rate]).toEqual([1.5, 2.1, { per100: 1.2, peeks: 6, shownWords: 500, days: 3 }]);
     expect(parseState({ ...REPLY, challenge: -1, rate: { per100: null } })).toMatchObject({ challenge: 0, rate: null });
+    // the web's price of a whole sentence, once knowledge.json has one: lookups per sentence read, 0 to 1 (0: none yet)
+    expect(parseState({ ...REPLY, sentencePrice: 0.12 }).sentencePrice).toBe(0.12);
+    for (const sentencePrice of [0, -0.1, 1.5, '0.1', NaN, null]) expect(parseState({ ...REPLY, sentencePrice }).sentencePrice).toBe(0);
   });
   it('reads the site default setup chose; anything but "ask" means all sites', () => {
     expect(parseState({ ...REPLY, prefs: { extension_sites: 'ask' } }).sites).toBe('ask');
@@ -142,6 +146,9 @@ describe('interaction log', () => {
     expect(cleanInteraction({ ...shown, plan: old }, now)).toEqual({ ...shown, plan: old });
     const full = { level: 3, intensity: 5, jitter: 1, limit: 9, candidates: 9, expected: 2.5 }; // levels.js planSwaps at full: no budget
     expect(cleanInteraction({ ...shown, plan: full }, now)).toEqual({ ...shown, plan: full });
+    const priced = { ...plan, sentencePrice: 0.08 }; // since whole sentences cost a price and thinning left the budget alone
+    expect(cleanInteraction({ ...shown, plan: priced }, now)).toEqual({ ...shown, plan: priced });
+    for (const sentencePrice of [-0.01, 1.01, '0.08', null]) expect(cleanInteraction({ ...shown, plan: { ...plan, sentencePrice } }, now)).toBeNull();
     expect(cleanInteraction({ ...shown, plan: { ...plan, budget: 0, expected: 0 } }, now).plan).toMatchObject({ budget: 0, expected: 0 });
     for (const bad of [{ ...plan, level: 4 }, { ...plan, jitter: 1.2 }, { ...plan, limit: -1 }, { ...plan, budget: -0.1 },
       { ...plan, expected: 1001 }, { ...plan, budget: NaN }, { ...plan, budget: '0.5' }, { ...plan, expected: null }]) {
