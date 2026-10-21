@@ -106,10 +106,15 @@ class Log:
 
     @property
     def entries(self):
-        """{ja: dictionary entry or None} for the word state's words (knowledge.word_entries), found once per log."""
+        """{ja: dictionary entry or None} for the word state's words (knowledge.word_entries), found once per log
+        unless set."""
         if self.origin._entries is None:
             self.origin._entries = knowledge.word_entries(self.words)
         return self.origin._entries
+
+    @entries.setter
+    def entries(self, value):
+        self.origin._entries = value
 
     def before(self, until):
         """The same log with only its events before `until` (ms)."""

@@ -15,7 +15,9 @@ dictionary form (inflection.py: T3 glosses conjugated verbs whole).
 Fit: one penalized maximum-likelihood fit of the whole log on every refresh (NEXT_STEPS step 4), replacing the online
 updates and their pull toward the prior. Each word's k is held toward its prior mean by a Gaussian prior whose width is
 fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by origin
-and card, and the uncapped ln(1 + Anki interval)); evidence weighs half as much every EVIDENCE_DAYS; known and learn
+and card, the uncapped ln(1 + Anki interval), and for a word not marked known its dictionary entry's frequency rank,
+kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
+13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as much every EVIDENCE_DAYS; known and learn
 commands are one-sided pseudo-observations; a lookup of a conjugated form counts FORM_WEIGHT. Each word's uncertainty
 is the fit's curvature (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a
 grid, on both surfaces. The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the
@@ -617,11 +619,15 @@ FIT_ITERATIONS = 60
 # regression on its features (features): with an Anki card, an intercept by origin (origin_at; the names say new,
 # learning and known) plus a slope on ln(1 + interval), centred on the old prior 0.5 + 0.8 ln(1 + interval); without
 # one, an intercept by origin, centred on the old neutral prior (1.0) and, for words marked known, the planner's
-# fwlib.KNOWN_PRIOR_K.
+# fwlib.KNOWN_PRIOR_K; for a word not marked known, plus its word features.
 SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
-# And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD.
+# And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD: on their scales
+# (a tenfold rank, a doubling of length, a script or part of speech, all kanji known) a typical word has about four
+# features of size 1, so 0.5 lets them move its prior mean by about 1 before the data says so, the spread of words
+# around their mean (WIDTHS). Wider, a few words with much evidence swing every unseen word; in the simulated reader
+# 0.5 predicts first exposures best of 0.25, 0.5, 1 and 2 (tools/sim/run.py priors).
 WORD_FEATURES = ('rank', 'kanji known', 'all kanji known', 'kana', 'katakana', 'mixed', 'verb', 'adjective', 'adverb',
                  'other', 'length', 'rare', 'loan')
 WORD_SD = 0.5
@@ -767,14 +773,16 @@ def features(interval, origin, entry=None, known=None, own=False):
     return x, kind
 
 
-def word_entries(words):
+def word_entries(words, ids=None):
     """{ja: its dictionary entry, or None} for the word state's entries (dictionary.find, by spelling, reading and
-    gloss); {} without data/dictionary.tsv."""
+    gloss), or by its JMdict id where ids ({ja: id}, knowledge.json's) has one: a word keeps the entry it was first
+    found as, and finding it again costs ten times as much. {} without data/dictionary.tsv."""
     import dictionary  # here: only the prior needs it
     if not dictionary.PATH.exists():
         return {}
-    d = dictionary.load()
-    return {w['ja']: d.find(w['ja'], w.get('kana') or '', w.get('en') or '') for w in words}
+    d, ids = dictionary.load(), ids or {}
+    return {w['ja']: d.get(ids[w['ja']]) if w['ja'] in ids else d.find(w['ja'], w.get('kana') or '', w.get('en') or '')
+            for w in words}
 
 
 def evidenced(log, until):
@@ -838,7 +846,7 @@ class Fit:
         self.by_ja = {w['ja']: w for w in log.words}
         self.entries = {} if plain else getattr(log, 'entries', None) or {}
         self.own = {ja for ja in evidenced(log, until) if (free or {}).get(ja)} if self.entries else set()
-        self.known = kanji_counts(self.own)
+        self.known, self._features = kanji_counts(self.own), {}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
         self._terms(log)
         start = start or {}
@@ -863,8 +871,11 @@ class Fit:
         return i
 
     def features(self, ja):
-        return features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day), self.entries.get(ja),
-                        self.known, ja in self.own)
+        found = self._features.get(ja)
+        if found is None:
+            found = self._features[ja] = features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day),
+                                                  self.entries.get(ja), self.known, ja in self.own)
+        return found
 
     def _terms(self, log):
         pooled, self.episodes, self.commands = {}, [], []
@@ -1748,7 +1759,8 @@ def refresh(now=None):
 
     knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's), mu (its prior mean), free
     (known at a glance, with hysteresis against the last refresh's flag: free_flag), n (evidence weight), obs, opened,
-    recent (opens in the last RECENT_DAYS days), last and history; offset (the web's 0, chat's fitted); fit (the
+    recent (opens in the last RECENT_DAYS days), last and history, and id (the JMdict id of its dictionary entry,
+    word_entries, which the next refresh reuses); offset (the web's 0, chat's fitted); fit (the
     shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
     sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
     today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
@@ -1775,6 +1787,8 @@ def refresh(now=None):
         log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
         before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+        log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
+                                                    and isinstance(e.get('id'), int)})
         if not fresh:  # the reading model, once a day
             reading = dict(tune(log, now_ms, before), day=today, model=MODEL)
             pace, top = reading['pace'], reading['top']
@@ -1810,6 +1824,8 @@ def refresh(now=None):
             k, sd = fit.estimate(ja)
             words[ja] = {'k': round(k, 3), 'sd': round(sd, 3), 'mu': round(fit.prior(ja)[0], 3), 'free': flags[ja],
                          'n': 0.0, 'obs': 0}
+            if log.entries.get(ja):
+                words[ja]['id'] = log.entries[ja]['id']
             s, i = stats.get(ja), fit.index.get(ja)
             if s:  # a word the log has something on
                 words[ja].update(n=round(fit.n[i], 2) if i is not None else 0.0, obs=s['obs'], opened=s['opened'],
