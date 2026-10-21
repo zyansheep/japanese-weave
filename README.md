@@ -51,12 +51,14 @@ level from [blocks/](blocks/level-01.md).
 
 ## What it does
 
-- **Claude Code, Codex and T3 Code**: a prompt hook gives the model your stage and word lists every turn. Every
-  sentence stays an English sentence; listed words drop in as written, with no particles or conjugation below
-  Stage 3, suru-nouns standing in for English verbs ("let me 確認 the logs"). New words get a footer gloss with
-  romaji, and every third reply opens with a recall cue. Never in code, files, commits or anything meant to be
-  shared, and never in scripted runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK
-  sessions too, so the hook checks for a `t3 serve` parent and weaves there.
+- **Claude Code, Codex and T3 Code**: a prompt hook gives the model your stage and word lists. The first turn of a
+  chat names every word you know at a glance, with its meaning; later turns carry a short reminder, the learning
+  words and only what changed, since the hook's text stays in the conversation. Every sentence stays an English
+  sentence; listed words drop in as written, with no particles or conjugation below Stage 3, suru-nouns standing
+  in for English verbs ("let me 確認 the logs"). New words get a footer gloss with romaji, and every third reply
+  opens with a recall cue. Never in code, files, commits or anything meant to be shared, and never in scripted runs
+  (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks for
+  a `t3 serve` parent and weaves there.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
   word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
   only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
@@ -104,13 +106,14 @@ From a terminal: `sh ~/.japanese-weave/app/scripts/run ~/.japanese-weave/app/scr
 
 ## The word list
 
-[`data/lexicon.csv`](data/lexicon.csv): `ja, en, hint (romaji), kana`, in teaching order. Built from
+[`data/lexicon.csv`](data/lexicon.csv): `ja, en, hint (romaji), kana, tier`, in teaching order. Built from
 [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html) (CC BY-SA 4.0) common words that can stand in for an English
 word (nouns, suru-nouns, adverbs, connectors, adjectives), ranked by the geometric mean of their
 [JPDB](https://jpdb.io) and BCCWJ frequency ranks, then reviewed word by word: wrong-sense glosses fixed, grammar
 words and counters dropped, romaji fixed at morpheme boundaries (場合 baai, 実は jitsu wa). Connectors and words
-technical chat uses come first. `tools/` has the pipeline (`build_candidates.py`, the reviews in `curation/`,
-`assemble_lexicon.py`).
+technical chat uses come first; the tier says which (A: connectors and adverbs, T: technical, B: everyday, C: poor
+fits), and the chat brief's default swaps are your known A words. `tools/` has the pipeline (`build_candidates.py`,
+the reviews in `curation/`, `assemble_lexicon.py`).
 
 **Anki.** `fw.py anki <collection.anki2>` reads your collection (a temporary copy, so Anki can stay open) and puts
 every word on a card in learning or review (not new, not suspended) at the front of the list, most familiar first.
@@ -135,7 +138,12 @@ whose name contains NAME.
 
 In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
 glance goes in wherever the English has its meaning, and learning words go in as often as your intensity's lookup
-budget allows (see [Adaptive difficulty](#adaptive-difficulty)). The stage sets the shape:
+budget allows (see [Adaptive difficulty](#adaptive-difficulty)). The brief names the words you know at a glance on
+a chat's first turn: a dozen connectors and adverbs as default swaps, written in Japanese every time, then every other
+one with its meaning, the most useful in chat first (numbers and katakana words stay English). Later turns repeat the
+default swaps and name only the words that became known or stopped being known. The whole brief comes back after
+the chat is compacted (Claude Code and Codex mark it in the transcript) and every 20 turns, and anything that
+doesn't fit Claude Code's 10,000-character limit on hook text goes on the next turn. The stage sets the shape:
 
 | Stage | Shape of a chat reply |
 |---|---|
