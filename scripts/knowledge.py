@@ -971,7 +971,7 @@ def tune(log, until):
     (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
     inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
     defaults by TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible
-    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising to 3,300 ms a word)."""
+    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word)."""
     opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until for o in e.obs)
     scores, start = {}, None
 
