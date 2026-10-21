@@ -174,3 +174,37 @@ lab's judged passages (lab, fresh, fresh2).
     is evidence even without a lookup.
 20. **Later:** a tolerance model by context [C], a lookup habit that changes over time [R], and grammar patterns as
     items.
+
+## After deployment
+
+**Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
+entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
+
+1. **The collector first** (functor): update its app to this code and restart the collector service. Optionally run
+   `fw.py relabel --dry-run` there first: on the 2026-10-20 snapshot the switch to labels from the model changes 73 of
+   1,766 words (49 Anki cards with 11 to 19 day intervals and all 21 shaky words become known). The first refresh
+   applies the switch, starts the delayed-start experiment and refits from nothing under the new model version (about
+   20 s on today's log, once).
+2. **Then this machine:** merge `plan` into `main` (the chat hook runs from this checkout, so this is the moment it goes
+   live) and run setup, which copies the host scripts, the data files and the extension. The hook's first run
+   re-reads the last 30 days of chats for entry counts (about 15 s and 250 MB, once) and builds the reading index in
+   the background (17 MB).
+3. **Then the extension:** reload it (Chrome: the unpacked folder; Firefox: re-sign with `tools/sign-firefox.sh`, or
+   load it as a temporary add-on). Bump its version at release. A remote native host is updated on its own machine.
+
+**Undoing:** `fw.py relabel --restore` within 30 days puts back the old labels and stops the model from labeling;
+then revert the merge on `main` and reload the previous extension.
+
+**What to watch, and when:**
+
+- **Day 1:** `fw.py status` (labels from the model, intake, held-back words), a web page showing its first Japanese
+  within a second, and `fw.py calibrate` running.
+- **Week 1:** the share of chat lookups on Japanese outside the lists (was 72%; topical words now have their own class),
+  and whether the web spends its budget now that its candidates come from code.
+- **Weeks 2 to 4, step 9:** each class's interval of seen against predicted within 0.83 to 1.2; `fw.py evaluate` for
+  the fit against step 4's, word features against a flat start, and recency, each by day. Decide then whether to turn
+  on the per-surface reading model (`SURFACE_TUNING`) and reading speed as evidence: each switch says in
+  docs/adaptive-difficulty.md what result should turn it on.
+- **Day 30:** the first probe (`fw.py probe`), and every 30 days after.
+- **About week 8, step 15:** `fw.py experiment` reads out the delayed-start experiment.
+- **Day 60 or later, step 16:** a memory strength per word, if the experiment shows that exposure teaches.
