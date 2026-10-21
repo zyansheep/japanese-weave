@@ -230,7 +230,9 @@ passages it covers 51% of the places one of your words fits at normal, and 80% w
   said in Japanese; Haiku writes those, and code validates every word, as before, now with general rules for clause
   joiners, contractions, living things, spans of time, a negated "anything" and the pronoun "one".
 - **Every passage needs the call after all:** nearly every passage has a closed-class word ("I", "this", "and"),
-  which is always doubtful. The safe swaps show at once; the call adds the rest.
+  which is always doubtful. The safe swaps show at once (under a second, where the old pipeline showed nothing until
+  the model answered, about 20 s); the call adds the rest, painting passages not yet seen and only adding to those on
+  screen.
 - **Measured honestly:** in the lab the pipeline reached 85% coverage with 0.8% wrong senses, but its rules were
   written after reading that set's errors. On 30 fresh passages judged before any run it had 4.3% to 6.1% wrong (today's
   Haiku: 7.8% at full, so those passages were harder too). After general fixes, on a second fresh set of 34 judged
@@ -320,8 +322,8 @@ state and whether each "done when" is met):
 - labels from the model, intake from the unspent budget ranked by your reading, and the delayed-start experiment;
 - the chat brief naming known words once per chat, whole sentences priced by one share rule on both surfaces, and
   topical words found by code;
-- the dictionary, the matcher, sense flags, and the checked web pipeline (its wiring into the extension is the last
-  step in progress);
+- the dictionary, the matcher, sense flags, and the checked web pipeline in the extension: safe swaps show within a
+  second and the model's check adds the rest;
 - the monthly probe.
 
 Left: the live check (2 to 4 weeks of data), the experiment's readout (about 8 weeks), a memory strength per word
@@ -369,7 +371,7 @@ Measured on 2026-10-21 (the review's findings and what the implementation measur
   them (the simulation expects 2 to 4 weeks). `calibrate`: chat all lookups 1.18 (0.99 to 1.26) of expected; web 0.57
   (0.35 to 0.93), mostly one evening's page.
 - **The web pipeline:** on the second fresh set, 83% coverage and 0.6% wrong senses at full; today's Haiku 73% and
-  3.5%. API spend for the lab work: $3.51 before the extension wiring's check.
+  3.5%; through the extension's own code, 83% to 88% and 0.5% to 0.6%. API spend for all the lab work: $3.54.
 - **Chat:** the brief's first turn about 8,000 characters, later turns about 2,200; topical offers 19% wrong sense.
 
 As of 2026-10-20 (before the implementation):
