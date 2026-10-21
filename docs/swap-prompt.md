@@ -351,3 +351,11 @@ validation, `HEAVY_ANSWERS=1` picks +1 and +2 from answers of their own as befor
 tables as JSON. The header of `lab.mjs` lists the rest.
 
 Bump `PROMPT_VERSION` in `prompt.js` whenever the prompt changes, so cached answers from the old one aren't reused.
+
+## Places found by code (2026-10-20)
+
+The plan (PLAN.md section 6) has code find every place a listed word could go, and a model only check the doubtful
+senses. The first half is built but not used yet: a matcher in `extension/src/matcher.js` and `scripts/matcher.py`,
+scored on the same judged passages by `tools/prompt-lab/matcher-lab.mjs` (docs/matcher.md). With the 324 introduced
+words of 2026-10-20 it covers 379 of the 408 places (93%) at no cost, where Haiku covered 51% at normal and 80% at full,
+but 26% of its judged hits are the wrong sense (Haiku: 2.5% to 2.7%). Bringing that down is the model check's job.
