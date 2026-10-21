@@ -511,6 +511,12 @@ export const KNOWN_PRIOR_K = 2.5;
 // every line down to the lowest one opened), that is 8.4% a sentence read, 90% interval 5.4-11.4%. Chat opens a gloss
 // after 0.3 s and the web after 0.7 s, but the fitted chat offset (-0.06) says lookup chances differ little.
 export const SENTENCE_PRICE = 0.08;
+// The most of a passage's budget whole sentences may take, as ../scripts/intensity.py SENTENCE_SHARE says for chat too
+// (keep them the same): words and phrases get the rest, and what one of the two can't use goes to the other. Ranked like
+// a word whose lookup chance is their price, sentences would otherwise get only what learning words leave, and nothing
+// once code finds enough candidates. 0.18 keeps chat at the one sentence in five (about 1.1 per 100 words) its brief
+// asked for at Stage 3 before sentences were priced: 0.18 * 0.5 / 0.08 = 1.1 at normal.
+export const SENTENCE_SHARE = 0.18;
 // Lookups per 100 words a level allows for words not known at a glance: 0 at off, null (no limit) at full. normal:
 // normal's budget (the host's word state budget), which scales every level.
 export function intensityBudget(level, normal) {
@@ -582,8 +588,11 @@ function costOf(s, words, price) {
 // chance near TARGET_P: for the least-known word in them, judged on k drawn from N(k, sd) so uncertain words still get
 // shown, or for a sentence of free words, its price. One with an active word not shown today goes first, outside the
 // budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
-// sentence, a whole sentence only alone in its sentence (a full sentence passes to the next candidate); the first that
-// doesn't fit gets in with probability remaining / cost, so short passages still get learning words on average. The
+// sentence, a whole sentence only alone in its sentence (a full sentence passes to the next candidate). Whole sentences
+// spend up to SENTENCE_SHARE of the budget and words and phrases the rest, each going down the one ranking until the
+// first that doesn't fit its part; a part one of them can't use (its candidates ran out first) goes to the other, which
+// goes on from where it stopped. Then the first that didn't fit gets in with probability remaining / cost, so short
+// passages still get learning words on average. The
 // popup's density, when set, caps the total: budgeted swaps first, then free ones. One use per Japanese word. Seeded by
 // the passage and day, so a passage repaints the same way.
 // Full is the same with no budget: everything is free, so every candidate is kept, bigger swaps first, with no
@@ -642,13 +651,30 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
   };
   const fresh = ranked.find((c) => c.fresh);
   if (fresh && cap > 0) spend(fresh);
-  let remaining = budget;
-  for (const c of ranked) {
-    if (kept.length >= cap) break;
-    if (kept.includes(c) || !unused(c) || !room(c) || !clear(c)) continue;
-    if (c.cost <= remaining) { spend(c); remaining -= c.cost; continue; }
-    if (random() < remaining / c.cost) spend(c);
-    break;
+  // The budget's two parts: what is left of each, and stop, the place in the ranking of the first that didn't fit it
+  const parts = [{ left: budget * (1 - SENTENCE_SHARE) }, { left: budget * SENTENCE_SHARE }];
+  const partOf = (c) => parts[whole(c) ? 1 : 0];
+  const fits = (c) => !kept.includes(c) && unused(c) && room(c) && clear(c);
+  const go = (from, only) => {
+    for (let i = from; i < ranked.length && kept.length < cap; i++) {
+      const c = ranked[i];
+      const part = partOf(c);
+      if ((only && part !== only) || part.stop !== undefined || !fits(c)) continue;
+      if (c.cost <= part.left) { spend(c); part.left -= c.cost; } else part.stop = i;
+    }
+  };
+  go(0);
+  for (const [done, other] of [parts, [...parts].reverse()]) { // a part whose candidates ran out hands on its rest
+    if (done.stop !== undefined || other.stop === undefined || !(done.left > 0)) continue;
+    other.left += done.left;
+    done.left = 0;
+    const from = other.stop;
+    delete other.stop;
+    go(from, other);
+  }
+  for (const part of parts) {
+    const c = ranked[part.stop];
+    if (c && kept.length < cap && fits(c) && random() < part.left / c.cost) spend(c);
   }
   // Free swaps, bigger first, else in the model's order; one thinned out uses its words too, so thinning keeps a word
   // with chance jitter.

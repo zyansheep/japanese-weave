@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import {
   resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
   numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced, intensityLabel, intensityFactor, INTENSITY_LEVELS, INTENSITY_NAMES,
-  answerLevel, INTENSITY_FULL, intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K, SENTENCE_PRICE,
+  answerLevel, INTENSITY_FULL, intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K, SENTENCE_PRICE, SENTENCE_SHARE,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -290,16 +290,46 @@ describe('the lookup budget', () => {
       sentencePrice: 0.2 }));
     expect(priced.filter((r) => r.swaps[0] === sentence).length / priced.length).toBeCloseTo(0.4, 1);
     expect(priced.every((r) => r.plan.sentencePrice === 0.2 && (r.swaps[0] === sentence || r.swaps.length === 2))).toBe(true);
-    // with a learning word in it, the sentence or the word in its sentence, never both, even when two a sentence fit
+    // with a learning word in it, the sentence or the word in its sentence, never both, even when two a sentence fit;
+    // 2.6 lookups, so the sentences' part (SENTENCE_SHARE) pays for the sentence's 0.33 and the word goes by rank
     const learning = [word('大きい', 4, 'known'), word('日', 1.1, 'shaky')];
     const withDay = [sentenceOf(learning), big, day('shaky')];
     for (const intensity of [0, 2]) {
-      const picks = Array.from({ length: 200 }, (_, seed) => planSwaps(2, withDay, text, learning, { budgetPer100: 10, seed, intensity }).swaps);
+      const picks = Array.from({ length: 200 }, (_, seed) => planSwaps(2, withDay, text, learning, { budgetPer100: 20, seed, intensity }).swaps);
       expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(withDay[2]))).toBe(true);
       expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(big))).toBe(true); // big shows where the sentence doesn't
       expect(picks.some((s) => s.includes(withDay[0]))).toBe(true);
       expect(picks.some((s) => s.includes(withDay[2]))).toBe(true);
     }
+  });
+  test('whole sentences spend up to SENTENCE_SHARE of the budget, words the rest; what one cannot use goes to the other', () => {
+    // 40 sentences of 20 words: a learning word (0.25) in each of the first 20, a whole sentence of a known word to be had
+    // for each of the last 20 (SENTENCE_PRICE); 0.5 lookups per 100 words of 800 is 4
+    const learning = Array.from({ length: 20 }, (_, i) => word(`l${i}`, 1.1));
+    const known = Array.from({ length: 20 }, (_, i) => word(`k${i}`, 4, 'known'));
+    const list = [...learning, ...known];
+    const sentences = known.map((k, i) => ({ kind: 'sentence', o: `The w${20 + i} ${'x '.repeat(17)}end.`,
+      f: `${k.ja}です。`, g: 'x', ctx: '', words: [k.ja], word: k.ja }));
+    const plan = (offered) => {
+      const r = planSwaps(2, offered, passage(40), list, { budgetPer100: 0.5, seed: 7 });
+      const whole = r.swaps.filter((s) => s.kind === 'sentence');
+      return { words: r.swaps.length - whole.length, whole: whole.length, expected: r.plan.expected };
+    };
+    expect(SENTENCE_SHARE).toBe(0.18);
+    expect(SENTENCE_SHARE * intensityBudget(0) / SENTENCE_PRICE).toBeCloseTo(1.125); // sentences per 100 words at normal
+    const both = plan([...offer(learning), ...sentences]);
+    expect(both.whole).toBe(Math.floor(4 * SENTENCE_SHARE / SENTENCE_PRICE + 1e-9)); // 0.72 buys 9
+    expect(both.words).toBeGreaterThanOrEqual(13); // 3.28 buys 13, and a 14th with chance 0.03 / 0.25
+    expect(both.words).toBeLessThanOrEqual(14);
+    // either alone gets the whole budget: 16 words, or every sentence (20 cost 1.6 of the 4)
+    expect(plan(offer(learning))).toMatchObject({ words: 16, whole: 0 });
+    expect(plan(sentences)).toMatchObject({ words: 0, whole: 20 });
+    // a sentence that does not fit its part waits for what words leave: with only 2 learning words, the other 3.5 pay
+    // for sentences priced at 0.3, 11 of them and a 12th with chance 0.2 / 0.3
+    const dear = Array.from({ length: 30 }, (_, seed) => planSwaps(2, [...offer(learning.slice(0, 2)), ...sentences],
+      passage(40), list, { budgetPer100: 0.5, seed, sentencePrice: 0.3 }).swaps.filter((s) => s.kind === 'sentence').length);
+    expect(Math.min(...dear)).toBe(11);
+    expect(Math.max(...dear)).toBe(12);
   });
   test('the density caps the total, budgeted swaps first, then free ones', () => {
     const list = [word('k0', 4, 'known'), word('k1', 4, 'known'), word('k2', 4, 'known'), word('l0', 1.1), word('l1', 1.1)];
