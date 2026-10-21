@@ -16,7 +16,7 @@
 // calling a model (an edited oracle, a new picking; REVALIDATE=1 checks its answers again by today's validation); an
 // answer it doesn't have is asked for. ORACLE: the judged passages (below), oracle.json by default. QUIET: leave out the
 // woven passages. SUMMARY: a file for the tables as JSON. Keys are read from files so they never appear in a command
-// line or the shell history.
+// line or the shell history. SPEND_LOG: a spend log (spend.mjs) for the calls' tokens and cost, which holds SPEND_CAP.
 //
 // The oracle, per passage id: "use", the places a listed word fits in its listed sense, "en=ja" or "en=ja|ja" (any of
 // them will do), "en#1=ja" for only the second place the English occurs; "ok", swaps that are fine but not owed; "not",
@@ -35,6 +35,7 @@ import { costUsd } from '../../extension/src/usage.js';
 import { hashKey } from '../../extension/src/hash.js';
 import { MAX_BATCH, BATCH as BATCHES, FULL_BATCH, PARALLEL as PARALLELS } from '../../extension/src/models.js';
 import { judgedPassage, overlaps } from './oracle.mjs';
+import { spendLog, meter } from './spend.mjs';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const [model = 'gemini-3.8-flash', passagesPath = here('corpus.json')] = process.argv.slice(2);
@@ -56,6 +57,8 @@ const passages = JSON.parse(readFileSync(passagesPath, 'utf8'));
 const oraclePath = env.ORACLE || here('oracle.json');
 const oracle = existsSync(oraclePath) ? JSON.parse(readFileSync(oraclePath, 'utf8')) : {};
 const doc = new Window().document;
+// SPEND_LOG: every paid call's tokens and cost go to that file (spend.mjs), which refuses calls past SPEND_CAP
+const spent = env.SPEND_LOG ? spendLog() : null;
 const learning = new Set((state.words || []).filter((w) => w.status && w.status !== 'known').map((w) => w.ja));
 
 // One answer's calls (answerLevel: 0 or full): { results, raw, calls: [{ seconds, usd, model, errors }] }.
@@ -65,8 +68,9 @@ async function ask(answer) {
   const batches = [];
   for (let i = 0; i < passages.length; i += size) batches.push(passages.slice(i, i + size));
   const raw = {}; // every answer as it came back, before validation (Anthropic's or Google's response shape)
+  const metered = spent ? meter(spent, 'lab', { label: () => `${full ? 'full' : 'normal'}, ${passagesPath.split('/').pop()}` }) : fetch;
   const fetchImpl = async (url, init) => {
-    const res = await fetch(url, init);
+    const res = await metered(url, init);
     const data = await res.clone().json().catch(() => null);
     const text = (data?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('') ||
       (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
