@@ -158,6 +158,12 @@ class Counting(Home):
         tagged = ('The <abbr title="こうしん · update">更新</abbr> and <abbr title="こうしん · update">更新</abbr> '
                   'passed<abbr title="It passed.">。</abbr> 殆ど')  # with <abbr> tags, the tags alone
         self.assertEqual(ids(tally.count(tagged, ['殆ど'])), {'更新': 2})
+        with mock.patch.object(tally.reader, 'found', side_effect=ValueError('odd')), \
+                mock.patch('sys.stderr', new=io.StringIO()) as err:
+            self.assertEqual(tally.count('The update.'), {})  # one odd reply counts nothing, and says so once
+            self.assertEqual(tally.count('The update.'), {})
+        self.assertEqual(err.getvalue().count('a reply not counted'), 1)
+        self.assertEqual(ids(tally.count('The update.')), {'更新': 1})
         tally.close()
 
     def test_counts_per_entry_and_day_are_kept_thirty_days_and_counted_once(self):

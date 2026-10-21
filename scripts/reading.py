@@ -381,6 +381,7 @@ class Tally:
         self.words = {w['ja']: w for w in words}
         self.reader, self.d = reader, d
         self.ids = {}  # a state word -> its entry id (or None)
+        self.failed = 0  # replies that couldn't be counted
 
     def _open(self):
         if self.reader is None:
@@ -402,13 +403,20 @@ class Tally:
 
     def count(self, text, used=()):
         """{entry id (a string, as JSON keys are): times} for one reply: its English (Reader.found) and its Japanese
-        (japanese). used: the word state's words the reply uses (fwlib.read_replies' script-aware matching)."""
+        (japanese). used: the word state's words the reply uses (fwlib.read_replies' script-aware matching). Without
+        an index this raises; a reply that can't be counted counts nothing, so one odd reply never stops the rest."""
         self._open()
         out = collections.Counter()
-        for i, n in self.reader.found(text).items():
-            out[str(self.reader.ids[i])] += n
-        for id_ in self.japanese(text, used):
-            out[str(id_)] += 1
+        try:
+            for i, n in self.reader.found(text).items():
+                out[str(self.reader.ids[i])] += n
+            for id_ in self.japanese(text, used):
+                out[str(id_)] += 1
+        except Exception as error:
+            if not self.failed:
+                print(f'Japanese Weave: a reply not counted ({error.__class__.__name__}: {error})', file=sys.stderr)
+            self.failed += 1
+            return {}
         return dict(out)
 
     def japanese(self, text, used=()):
