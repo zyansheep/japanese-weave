@@ -731,8 +731,9 @@ def knowledge_cmd(args):
     words = know.get('words') or {}
     rate = know.get('rate') or {}
     challenge = knowledge.challenge_of(state)
-    print('Adaptive difficulty: ' + (f'aiming at {challenge} peeks per 100 words shown (budget {know.get("budget")})'
-                                     if challenge else 'off (fw.py challenge 1.5 turns it on)'))
+    print('Lookup budget at normal: ' + (f'{challenge} per 100 words (your challenge; budget {know.get("budget")})'
+                                         if challenge else f'{intensity.BUDGETS[0]} per 100 words (the default; '
+                                         'fw.py challenge 1.5 sets your own)'))
     per100 = rate.get('per100')
     print(f'  browser, last {rate.get("days", 3)} days: '
           + (f'{per100} peeks per 100 words shown ({rate.get("peeks")} peeks, {rate.get("shownWords")} words)'
@@ -782,7 +783,8 @@ def challenge_cmd(args):
     if value not in knowledge.CHALLENGES:
         sys.exit(f'Choose one of: off, {", ".join(str(c) for c in knowledge.CHALLENGES[1:])}')
     queued_note(hub.submit({'kind': 'set', 'prefs': {'challenge': value}}))
-    print(f'Adaptive difficulty: {"off" if not value else f"aiming at {value} peeks per 100 words shown"}.')
+    print(f'Lookup budget at normal: {f"{value} per 100 words" if value else f"the default, {intensity.BUDGETS[0]} per 100 words"}; '
+          'the other levels scale with it.')
 
 
 def intensity_cmd(args):

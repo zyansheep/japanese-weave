@@ -1632,7 +1632,7 @@ class Knowledge(Home):
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
             fw.main(['challenge', 'off'])
             fw.main(['why', first])
-        self.assertIn('Adaptive difficulty: off.', out.getvalue())
+        self.assertIn('Lookup budget at normal: the default, 0.5 per 100 words', out.getvalue())
         self.assertIn('no evidence in the gloss log yet', out.getvalue())  # the refresh found no log
         fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'}})
         state = fw_host.handle({'type': 'state'})

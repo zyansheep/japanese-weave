@@ -1,5 +1,5 @@
 ---
-description: Set the Japanese Weave challenge (target glosses opened per 100 words shown), or turn it off
+description: Set normal's Japanese Weave lookup budget (lookups per 100 words; the other levels scale with it), or "off" for the default 0.5
 argument-hint: off|0.5|1|1.5|2|3
 allowed-tools: Bash(sh:*)
 ---

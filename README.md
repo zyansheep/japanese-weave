@@ -198,13 +198,13 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 
 ## Adaptive difficulty
 
-From the log, Japanese Weave estimates for every word how likely you are to open its gloss, and uses that to keep
-web pages at a steady level: set a challenge (`fw.py challenge 1.5`, the command above, or the popup), the number of
-glosses you'd open per 100 words shown, and each page gets the learning words closest to a 25% chance of being
-opened, as many as fit that budget, with known words filling the rest. A daily controller nudges the budget until
-your real rate matches the dial. Chat uses the same estimates to tell the words you know at a glance from the
-learning ones, and to order the learning ones. Strong evidence also moves words between learning and known, a few a
-day. It's off (0) by default.
+From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each
+intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a
+glance (under an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25%
+chance, at most one per sentence, on web pages and in chat. A challenge (`fw.py challenge 1.5`, the command above,
+or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget until your real
+rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works this way
+and what comes next: [docs/plan.md](docs/plan.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.

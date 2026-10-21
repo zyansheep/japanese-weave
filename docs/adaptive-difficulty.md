@@ -1,9 +1,10 @@
 # Adaptive difficulty
 
 Japanese Weave estimates, for every word, how likely you are to open its gloss, from the gloss interaction log.
-It uses those estimates three ways: to decide which learning words appear on a page, to steer how many appear
-toward a target number of peeks per 100 words (one dial for a steady learning rate), and to move words between
-learning and known faster and more reliably than day counts alone.
+It uses those estimates three ways: to decide which words appear on a page or in a reply, to spend each intensity
+level's lookup budget (lookups per 100 words, on words not known at a glance), and to move words between learning
+and known faster and more reliably than day counts alone. The plan behind it, the simplifications it rests on and
+what comes next: [plan.md](plan.md).
 
 This is version 1. A first draft was reviewed adversarially (statistics and engineering); the decisions that
 review forced are listed at the end.

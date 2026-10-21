@@ -1,7 +1,8 @@
 # A unified learning model, walked through
 
-Status: a proposal to replace the hand-tuned rules in [adaptive-difficulty.md](adaptive-difficulty.md). Nothing here
-is built. As of 2026-10-16 the collector holds two logged peeks, so every step below waits on data.
+Status: background, written 2026-10-16. The current plan, built from this, is [plan.md](plan.md). Since this was
+written, chat logs every reply that was on screen with its word count, the levels became lookup budgets, and the
+log holds a few hundred lookups.
 
 ## 1. Two jobs: measuring and deciding
 
@@ -42,9 +43,9 @@ What exists today:
   except the *new* columns. Since every shown paragraph is logged, the old "at least one open" correction is not
   needed for the browser.
 - **Browser peeks and flips**: time, word, how long the gloss stayed open (glosses need a 0.7 s hover first).
-- **Chat peeks and pins**, but no shown records: a message is logged only if you opened something in it. Row 4 does
-  not exist today, and chat data leans toward opens. Leave chat out of the fit until it sends shown records. Chat
-  glosses words as written, conjugated verbs whole (なります); the replay maps each to its dictionary form
+- **Chat peeks and pins**, and since 2026-10-20 every reply that was on screen: its word count, once per reply
+  (older replies were backfilled from transcripts), and each paragraph's time on screen with its own word count.
+  Chat glosses words as written, conjugated verbs whole; the replay maps each to its dictionary form
   (scripts/inflection.py), and every lexicon word counts, not only the ones introduced so far.
 
 Since extension 0.3.1 time on screen is logged too (visible stays), and since 0.6.0 each shown passage's plan (the
