@@ -48,7 +48,7 @@
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
                                                      much Japanese a passage had, your heavier/lighter presses,
                                                      and the words you opened that aren't in the word list
-  fw.py evaluate [--models today,constant] [--home DIR] [--truth FILE] [--skip DAYS]
+  fw.py evaluate [--models today,fit,constant] [--home DIR] [--truth FILE] [--skip DAYS]
                                                      score models of lookup chances on the gloss log, each day
                                                      predicted from the days before (scripts/evaluate.py; a
                                                      simulated reader's state dir from tools/sim works too)
@@ -734,23 +734,25 @@ def fresh_knowledge():
 def knowledge_cmd(args):
     state, know = fresh_knowledge()
     words = know.get('words') or {}
-    rate = know.get('rate') or {}
     challenge = knowledge.challenge_of(state)
-    print('Lookup budget at normal: ' + (f'{challenge} per 100 words (your challenge; budget {know.get("budget")})'
-                                         if challenge else f'{intensity.BUDGETS[0]} per 100 words (the default; '
-                                         'fw.py challenge 1.5 sets your own)'))
-    per100 = rate.get('per100')
-    print(f'  browser, last {rate.get("days", 3)} days: '
-          + (f'{per100} peeks per 100 words shown ({rate.get("peeks")} peeks, {rate.get("shownWords")} words)'
-             if per100 is not None else 'nothing shown yet'))
-    print(f'  log: {know.get("rows", 0)} interactions; T3 offset {(know.get("offset") or {}).get("t3", 0)}')
+    print('Lookup budget at normal: ' + (f'{challenge} per 100 words (your challenge)' if challenge else
+                                         f'{intensity.BUDGETS[0]} per 100 words (the default; fw.py challenge 1.5 '
+                                         'sets your own)'))
+    fit, reading = know.get('fit') or {}, know.get('reading') or {}
+    print(f'  log: {know.get("rows", 0)} interactions; chat offset {(know.get("offset") or {}).get("t3", 0)}'
+          + (f', form offset {fit["shared"]["form"]}' if 'shared' in fit else '')
+          + (f'; reading {reading.get("pace")} ms a word, at most {reading.get("top")}' if reading else ''))
     status = {w['ja']: w['status'] for w in state['words']}
-    ranked = sorted(words.items(), key=lambda kv: -kv[1]['n'])[:args.limit]
-    if ranked:
-        print('  most evidence (word, status, peek chance in the browser, evidence weight):')
+    ranked = sorted(words.items(), key=lambda kv: -kv[1].get('n', 0))[:args.limit]
+    if ranked and ranked[0][1].get('n'):
+        print('  most evidence (word, status, lookup chance on the web, evidence weight):')
     for ja, entry in ranked:
+        if not entry.get('n'):
+            break
         p = knowledge.sigmoid(-entry['k'])
-        print(f'    {ja}  {status.get(ja, "?"):<6} p {p:.2f}  n {entry["n"]:.1f}  opened {entry["opened"]} of {entry["obs"]}')
+        free = ', free' if entry.get('free') else ''
+        print(f'    {ja}  {status.get(ja, "?"):<6} p {p:.2f}{free}  n {entry["n"]:.1f}  opened {entry["opened"]} of '
+              f'{entry["obs"]}')
     moves = know.get('moves') or []
     for m in moves[-5:]:
         print(f'  moved {m["word"]}: {m["from"]} -> {m["to"]} on {m["day"]}')
@@ -765,16 +767,19 @@ def why(args):
         sys.exit(f'Not in the word list: {args.word}')
     entry = (know.get('words') or {}).get(w['ja'])
     print(f'{w["ja"]} ({w["en"]}, "{w["hint"]}"): {w["status"]} since {w["changed"] or "never"}')
-    if not entry:
-        print('  no evidence in the gloss log yet: the day rules decide (3 exposure days without a peek)')
+    if not entry or not entry.get('obs', 1):
+        prior = f' (its prior: k {entry["k"]} +- {entry["sd"]}{", known at a glance" if entry.get("free") else ""})' \
+            if entry else ''
+        print(f'  no evidence in the gloss log yet: the day rules decide (3 exposure days without a peek){prior}')
         return
     p = knowledge.sigmoid(-entry['k'])
-    print(f'  prior {entry["mu"]}  knowledge {entry["k"]} +- {entry["sd"]}  browser peek chance {p:.2f}; '
+    free = '; known at a glance' if fwlib.is_free(entry) else ''
+    print(f'  prior {entry["mu"]}  knowledge {entry["k"]} +- {entry["sd"]}  lookup chance on the web {p:.2f}{free}; '
           f'opened {entry["opened"]} of {entry["obs"]} observations, {entry["recent"]} in the last 14 days')
     for h in entry['history']:
         when = time.strftime('%Y-%m-%d %H:%M', time.localtime(h['at'] / 1000))
         print(f'    {when}  {h["surface"]:<7} {"opened" if h["y"] else "not opened"}'
-              f'{" (glance)" if 0 < h["y"] < 1 else ""}  weight {h["w"]}  -> k {h["k"]}')
+              f'{" (glance)" if 0 < h["y"] < 1 else ""}  weight {h["w"]}' + (f'  -> k {h["k"]}' if 'k' in h else ''))
     for m in (know.get('moves') or []):
         if m['word'] == w['ja']:
             print(f'  moved {m["from"]} -> {m["to"]} on {m["day"]}')

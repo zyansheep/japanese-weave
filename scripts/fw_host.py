@@ -13,14 +13,15 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
   {"type": "stats", "since": ms}        -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
                                             "blankPassages", "readingMs", "last"}: what the log holds, on the collector
                                             when one is set
-  {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
+  {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (normal's lookup budget, knowledge.py)
   {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
                                         -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither:
                                             read); level -3 is off, 3 full
 
-The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
-evidence for it, the dial (challenge), the peek budget per 100 words, the realized peek rate, and the web's price of a
-whole sentence in Japanese (sentencePrice, its translation lookups per sentence read) once knowledge.json has one.
+The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) and whether it is known at a
+glance (free) from knowledge.json (the fit's, or for a word it hasn't seen yet, the fitted prior for its status), the
+challenge (normal's lookup budget per 100 words, if set), normal's budget, and the web's price of a whole sentence in
+Japanese (sentencePrice, its translation lookups per sentence read) once knowledge.json has one.
 
 With a collector set, the state lives on the collector: replies come from this machine's cache and changes are queued
 here and shown in it at once; a background sync (refreshed when the cache is over STATE_MAX_AGE seconds old) sends
@@ -132,20 +133,29 @@ def handle(message):
 
 
 def adaptive(state, words):
-    """Per-word estimates and the dial for the extension; starts a background refresh when they are stale. Never
-    waits on the network: the refresh runs in its own process. budget: normal's lookups per 100 words (the challenge
-    when set, else intensity.BUDGETS[0]) times the controller's scale, which only steers while a challenge is set; the
-    extension scales the other levels from it (intensity.budget)."""
+    """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
+    Never waits on the network: the refresh runs in its own process. Each word gets k, sd and free from knowledge.json
+    (fit: every word of the word state), else from its fitted prior (knowledge.prior_estimate; free when that is under
+    fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors. budget: normal's lookups per 100
+    words, the challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it
+    (intensity.budget)."""
     know = knowledge.load()
+    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
     for w in words:
-        entry = (know.get('words') or {}).get(w['ja'])
-        if entry:
+        entry = entries.get(w['ja'])
+        if isinstance(entry, dict) and 'k' in entry:
             w['k'], w['sd'] = round(entry['k'], 2), round(entry['sd'], 2)
+            if isinstance(entry.get('free'), bool):
+                w['free'] = entry['free']
+            continue
+        guess = knowledge.prior_estimate(know, w.get('status'))
+        if guess is not None:
+            w['k'], w['sd'] = round(guess[0], 2), round(guess[1], 2)
+            w['free'] = knowledge.sigmoid(-guess[0]) < fwlib.FREE_P
     if not fwlib.collector_url() and knowledge.is_stale(know) and feedback.default_path().exists():
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
-    scale = (know.get('controller') or {}).get('scale', 1.0) if challenge else 1.0
-    reply = {'challenge': challenge, 'budget': round((challenge or intensity.BUDGETS[0]) * scale, 3), 'rate': know.get('rate')}
+    reply = {'challenge': challenge, 'budget': challenge or intensity.BUDGETS[0]}
     # knowledge.json sentencePrice: {surface: lookups per sentence read}, from the fit; without one the extension uses
     # its own default (levels.js SENTENCE_PRICE)
     prices = know.get('sentencePrice')

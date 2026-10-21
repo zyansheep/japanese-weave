@@ -127,7 +127,9 @@ class Scoring(Home):
         self.assertEqual(feedback.record(items, 't3')['stored'], 5)
         know = knowledge.refresh(now)
         words = know['words']
-        self.assertEqual((words['熱']['opened'], words['熱']['recent'], words['熱']['mu']), (2, 2, 1.0))  # a queue word
+        # a queue word without an Anki card: its prior is the fitted one of new words without a card
+        self.assertEqual((words['熱']['opened'], words['熱']['recent'], words['熱']['mu']),
+                         (2, 2, round(know['prior']['none']['new'], 3)))
         self.assertEqual(words['なる']['opened'], 1)  # なります
         self.assertEqual((words['情報']['obs'], words['情報']['opened']), (2, 0))  # unopened neighbour, not introduced
         self.assertNotIn('リスト', words)
