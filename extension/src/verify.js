@@ -16,7 +16,7 @@ import { candidatesFor as modelsFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS 
 import { COOLDOWN_MS } from './engine.js';
 
 // Bumped whenever the prompt or the answer changes shape, so cached answers from an older one aren't reused.
-export const CHECK_VERSION = 1;
+export const CHECK_VERSION = 2;
 
 const TOKEN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const bare = (w) => w.toLowerCase().replace(/’/g, "'").replace(/n't$/, '').replace(/'(s|re|ve|ll|d|m)$/, '');
@@ -114,12 +114,16 @@ function snippet(text, span, around = 3) {
 }
 
 // The rules the picks most often need: today's MEANING RULES (prompt.js) that apply to choosing a word for a place.
+// Prompt 2 added the numeral rule prompt.js has (一 alone only as a plain numeral), 時 to the clause joiners, set phrases,
+// helper verbs, and そして only between sentences: prompt 1 picked 一 for "In One Week", 時 for "When I entered", 行く
+// in "go to bed" and そして for "huge and beautiful" in every seed (docs/swap-prompt.md).
 const RULES = `- Each listed word only in its listed meaning: another word with the same spelling or reading doesn't count.
-- Numbers: a number word that names a rank, an order or a label stays English ("number one", "day one", "the first", "the one", "no one", "one day" meaning someday, "one-on-one"). Counters (一つ 二つ 三つ) count things only, never people, days, years, minutes or money.
-- "have" and "had" as helper verbs ("have been", "had to") or for events ("had a meeting", "had fun") are not ある; "there is" and "has" where something exists or is owned are.
+- A span that is part of a longer expression meaning something else ("go to bed", "all day", "every time", "one more", "right then", "had fun") takes -, unless an option says the whole expression.
+- Numbers: a number word that names a rank, an order or a label stays English ("number one", "day one", "the first", "the one", "no one", "one day" meaning someday, "one-on-one"). Counters (一つ 二つ 三つ) count things only, never people, days, years, minutes or money. 一 二 三 五 十 alone only as plain numerals, never before a unit or a counted noun ("one week", "two hours").
+- "have" and "had" as helper verbs ("have been", "had to") or for events ("had a meeting", "had fun") are not ある; "there is" and "has" where something exists or is owned are. する and やる only for "do" as a main verb with an object ("do the dishes"), never as a helper ("does not", "do you", "than I do").
 - A verb that acts on something (止める 開ける 始める 変える 上げる) never stands where the subject itself stops, opens, starts or changes.
-- 前 and 後 never join clauses: "before you go" stays English.
-- だから only for "so" meaning therefore, never "so" meaning very; でも only for "but" joining two ideas; そして only for "and" joining clauses, never two nouns; もう for "already"; まだ for "still" or "not yet"; はい and いいえ only as answers; じゃ and では only as "well then".
+- 前, 後 and 時 come after the clause they belong to, so they never stand for "before", "after" or "when" joining clauses: "before you go", "when I got there" stay English.
+- だから only for "so" meaning therefore, never "so" meaning very; でも only for "but" joining two ideas; そして only for "and" starting a new sentence ("And then..."), never for "and" inside a sentence; もう for "already"; まだ for "still" or "not yet"; はい and いいえ only as answers; じゃ and では only as "well then".
 - この for "this" before a noun, これ for "this" alone; 彼 and 彼女 only for a specific person; 今 for "now" meaning at this moment, not "for a year now" or "now that"; 物 is a physical object only, never an event, fact or idea ("the best thing").
 - Never names, handles, hashtags, URLs, digits, code or quoted titles.`;
 
