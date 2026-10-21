@@ -301,6 +301,11 @@ class Calibration(unittest.TestCase):
         self.assertAlmostEqual(knowledge.words_read('t3', both), a + b + 70 * (a + b) / 50, places=6)
         self.assertEqual(knowledge.words_read('t3', dict(message_, stays=[])), 0.0)
         self.assertIsNone(knowledge.per_100(3, 0))
+        # a reading model per surface (knowledge.tune): each surface reads its own
+        pace, top = {'browser': 300, 't3': 300}, {'browser': 0.3, 't3': knowledge.READ_MAX}
+        self.assertAlmostEqual(knowledge.words_read('browser', passage, pace, top), 40 * 0.3, places=6)
+        self.assertAlmostEqual(knowledge.words_read('t3', message_, pace, top), 120 * knowledge.READ_MAX, places=6)
+        self.assertAlmostEqual(knowledge.reader('browser', passage, pace, top)(48, LINE), 0.3, places=6)
         self.assertEqual(knowledge.per_100(3, 600), 0.5)
 
     def test_intervals_resample_days(self):

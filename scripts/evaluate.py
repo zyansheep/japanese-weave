@@ -187,7 +187,9 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
             group.obs.append(Observation(
                 at=at, day=day, surface=surface, key=key, episode=episode, word=ja, written=written,
                 form=is_form(written, ja, by_ja.get(ja)), y=y, weight=weight, near=near, ms=ms, words=count,
-                share=share, read=knowledge._chance(ms, count, share, pace, top), status=status_at(by_ja.get(ja), day),
+                share=share, read=knowledge._chance(ms, count, share, knowledge.by_surface(pace, surface),
+                                                    knowledge.by_surface(top, surface)),
+                status=status_at(by_ja.get(ja), day),
                 seen=seen.get(ja, 0)))
         for o in group.obs:
             seen[o.word] = o.seen + 1
@@ -428,7 +430,7 @@ def report_text(result, log):
     episodes = sum(len(e.obs) for e in log.events if isinstance(e, Group) and e.episode)
     surfaces = {surface: sum(1 for r in rows if r[0].surface == surface) for surface in ('browser', 't3')}
     lines = [f'Prequential by day: {len(days)} days ({days[0]} to {days[-1]}), each predicted from the days before; '
-             f'reading pace {log.pace:g} ms a word, cap {log.top:g}, for every model.',
+             f'reading {knowledge.reading_text(log.pace, log.top)}, for every model.',
              f'{len(rows)} scored observations ({surfaces["browser"]} web, {surfaces["t3"]} chat); {episodes} more '
              'in episodes, fitted on only.',
              'Per class: observations, opens (a glance counts '

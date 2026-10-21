@@ -80,10 +80,22 @@ PACE_MS = 300              # ms per word a reader takes on a passage with Japane
 READ_MAX = 0.7             # the most a passage's time on screen alone says about a word in it being read
 SLACK_PX = 10              # how far above a T3 paragraph's band a word's top may sit and still be in it (stay_chance)
 READ_STEPS = 20            # words_read averages the read chance over this many depths of a passage or paragraph
-PACES = (150, 200, 300, 450, 650)    # the reading model's grid, chosen by profile likelihood (tune)
-READ_MAXES = (0.5, 0.6, 0.7, 0.8, 0.9)
-TUNE_MIN_OPENS = 60        # opens, on both surfaces, before the tuned reading model replaces the defaults
+SURFACES = ('browser', 't3')
+# The reading model's grid, chosen by profile likelihood per surface (tune), the defaults at even positions, which the
+# search scores first. On the live log of 2026-10-20 the web's best is 1,000 ms a word with a cap of 0.2 (10.7 log
+# likelihood units over the defaults), outside the grid of 150 to 650 ms and 0.5 to 0.9 it had before: time on screen
+# overstates reading on the web, where several passages are on screen at once and many pages are skimmed.
+PACES = (150, 200, 300, 450, 650, 1000, 1500, 2200, 3300, 5000)
+READ_MAXES = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+# Opens on a surface before its tuned reading model is ready (the web had 32 on 2026-10-20, 15 of them on one page),
+TUNE_MIN_OPENS = 60
 TUNE_MARGIN = 3.0          # and how much more log likelihood than the defaults it needs (about a 95% test of two)
+# A ready reading model is only reported (tune's ready), not used, until this is set: k is on the web's scale, so a
+# new web reading model rescales every word and moves the free line, the chat offset and the one unit's denominator
+# at once (on the 2026-10-20 snapshot, ready at 30 opens with web 1,000 ms and cap 0.2: the web's chance of every word
+# rises about 2.7 times, 366 free words become 68, and the web's words read fall from 16,596 to 3,354). Which scale
+# the free line is judged on is a decision to make first.
+SURFACE_TUNING = False
 READ_FLOOR = 0.05          # the least read chance an open's prediction uses: an open far down still happens
 CALIBRATION_DAYS = 30
 CALIBRATED = (0.83, 1.2)   # seen over expected lookups inside this, at 90%, is calibrated (PLAN.md section 10)
@@ -204,6 +216,20 @@ def showings(rows, contexts, now_ms):
     return sorted(out, key=lambda e: e[0])
 
 
+def by_surface(value, surface):
+    """A reading-model parameter (pace or top) on a surface: the value, or its surface's when it is one per surface,
+    {surface: value} (tune)."""
+    return value[surface] if isinstance(value, dict) else value
+
+
+def reading_text(pace, top):
+    """A reading model in words: '300 ms a word, cap 0.7', or per surface 'web 1500 ms a word, cap 0.3; chat ...'."""
+    if not isinstance(pace, dict) and not isinstance(top, dict):
+        return f'{pace:g} ms a word, cap {top:g}'
+    names = {'browser': 'web', 't3': 'chat'}
+    return '; '.join(f'{names[s]} {by_surface(pace, s):g} ms a word, cap {by_surface(top, s):g}' for s in SURFACES)
+
+
 def _chance(ms, words, share, pace, top):
     """The chance of having read down to `share` of the way through `words` words in `ms` of possible reading, at
     `pace` ms a word, at most `top`."""
@@ -264,6 +290,7 @@ def reader(surface, context, pace=PACE_MS, top=READ_MAX):
     """The read chance of a word of this passage or message from its height and the line height (read_chance or
     stay_chance)."""
     chance = stay_chance if surface == 't3' else read_chance
+    pace, top = by_surface(pace, surface), by_surface(top, surface)
     return lambda y, line: chance(context, y, line, pace, top)
 
 
@@ -277,7 +304,9 @@ def words_read(surface, context, pace=PACE_MS, top=READ_MAX):
     (read_chance, stay_chance) at evenly spaced depths: the denominator of the one unit (per_100). A T3 message's
     paragraphs are the distinct bands of its stays, the longest stayed first where bands overlap (a paragraph whose
     layout changed), each with the words and ms stay_chance gives it; its words outside them (paragraphs without
-    Japanese, which T3 doesn't watch) count at the mean read chance of the words it watched."""
+    Japanese, which T3 doesn't watch) count at the mean read chance of the words it watched. pace and top: numbers,
+    or per surface (by_surface)."""
+    pace, top = by_surface(pace, surface), by_surface(top, surface)
     if surface != 't3':
         words = context.get('words') or 0
         return words * _read_share(context.get('active') or 0, words, pace, top)
@@ -549,7 +578,8 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
             if losses is not None and surface == 'browser':
                 line = _line_height([n[2] for n in context['annotations']])
                 for ja, y, _w in obs:
-                    alone = max(0.05, read_chance(context, _y_of(context, ja, match), line, pace, top))
+                    alone = max(0.05, read_chance(context, _y_of(context, ja, match), line,
+                                                  by_surface(pace, surface), by_surface(top, surface)))
                     losses.append((y > 0, min(1 - 1e-6, max(1e-6, alone * model.chance(ja, surface, at)))))
             model.showing(at, surface, obs)
         else:
@@ -777,7 +807,8 @@ def read_weight(o, episode, pace, top, same=True):
         return 1.0
     if episode:
         return o.near
-    return o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, pace, top))
+    return o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, by_surface(pace, o.surface),
+                                                      by_surface(top, o.surface)))
 
 
 def showings_of(log, pace, top):
@@ -786,7 +817,8 @@ def showings_of(log, pace, top):
     log."""
     origin = log.origin
     cache = origin.__dict__.setdefault('_showings', {})
-    if (pace, top) not in cache:
+    key = tuple(tuple(sorted(v.items())) if isinstance(v, dict) else v for v in (pace, top))
+    if key not in cache:
         same = (pace, top) == (origin.pace, origin.top)
         out = {}
         for event in origin.events:
@@ -798,8 +830,8 @@ def showings_of(log, pace, top):
                                                    o))
         for items in out.values():
             items.sort(key=lambda h: h[0])
-        cache[(pace, top)] = out
-    return cache[(pace, top)]
+        cache[key] = out
+    return cache[key]
 
 
 def read_clocks(log, pace, top, chance):
@@ -1523,7 +1555,8 @@ def nested_loglik(log, fit, pace, top):
             break
         if not hasattr(event, 'obs') or event.episode or not event.obs:
             continue
-        rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, pace, top)), o.y,
+        rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, by_surface(pace, o.surface),
+                                                by_surface(top, o.surface))), o.y,
                         min(1 - 1e-9, max(1e-9, fit.q(o.word, o.surface, o.form, *clocks.get(id(o), (1.0, 0.0))))))
                        for o in event.obs), key=lambda t: -t[0])
         lowest = max((i for i, (_r, y, _q) in enumerate(rows) if y > 0), default=-1)
@@ -1538,41 +1571,56 @@ def nested_loglik(log, fit, pace, top):
 
 
 def tune(log, until, free=None):
-    """The reading model (pace, top) by profile likelihood over the grid PACES x READ_MAXES: at a point the whole log is
-    fitted (Fit, starting from the point before, without recency: pace and cap are about time on screen, and a dozen
-    fits with it would take most of a refresh on a long log) and scored by the likelihood of what was opened under the
-    reading model the read chances come from (nested_loglik), on both surfaces. The search scores every other point first
-    (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
-    inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
-    defaults by TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible
-    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word).
-    free: the free flags the fits take (Fit)."""
-    opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until for o in e.obs)
-    scores, start = {}, None
+    """The reading model by profile likelihood, one per surface ({surface: pace}, {surface: top}): over the grid
+    PACES x READ_MAXES of one surface, the other's held at what it has, the whole log is fitted at each point (Fit,
+    starting from the point before, without recency: pace and cap are about time on screen, and dozens of fits with it
+    would take most of a refresh on a long log) and scored by the likelihood of what was opened under the reading model
+    the read chances come from (nested_loglik, both surfaces). The web first, then chat. Each search scores every other
+    point first (the defaults among them), then the neighbours of the best until it stays. A surface keeps the defaults
+    until it has TUNE_MIN_OPENS opens, its best pair beats the defaults by TUNE_MARGIN, and it lies inside the grid: on
+    its edge the likelihood has no maximum in the plausible range, a sign the reading model doesn't fit (on the live log
+    of 2026-10-20 chat's keeps rising past 5,000 ms a word), and uses it only with SURFACE_TUNING (else it is ready,
+    reported, and the defaults stay). The surfaces differ: a web page stays on screen while it is skimmed or not read
+    at all. Returns {pace, top (per surface), tuned (whether any surface uses its own), ready, best, inside, opens (per
+    surface), grid (every point scored: surface, pace, top, loglik)}. free: the free flags the fits take (Fit)."""
+    pace, top = {s: PACE_MS for s in SURFACES}, {s: READ_MAX for s in SURFACES}
+    grid, start = [], None
+    out = {'tuned': False, 'best': {}, 'inside': {}, 'opens': {}, 'ready': {}}
+    for surface in SURFACES:
+        opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until
+                    and e.surface == surface for o in e.obs)
+        scores = {}
 
-    def score(i, j):
-        nonlocal start
-        if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
-            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start, free=free, recency=False)
-            start = fit.state()
-            scores[(i, j)] = nested_loglik(log, fit, PACES[i], READ_MAXES[j])
+        def score(i, j):
+            nonlocal start
+            if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
+                p, t = dict(pace, **{surface: PACES[i]}), dict(top, **{surface: READ_MAXES[j]})
+                fit = Fit(log, until, p, t, start=start, free=free, recency=False)
+                start = fit.state()
+                scores[(i, j)] = nested_loglik(log, fit, p, t)
+                grid.append({'surface': surface, 'pace': PACES[i], 'top': READ_MAXES[j],
+                             'loglik': round(scores[(i, j)], 3)})
 
-    for j in range(0, len(READ_MAXES), 2):
-        for i in range(0, len(PACES), 2):
-            score(i, j)
-    best = None
-    while best != max(scores, key=scores.get):
-        best = max(scores, key=scores.get)
-        for i in (best[0] - 1, best[0], best[0] + 1):
-            for j in (best[1] - 1, best[1], best[1] + 1):
+        for j in range(0, len(READ_MAXES), 2):
+            for i in range(0, len(PACES), 2):
                 score(i, j)
-    grid = [{'pace': PACES[i], 'top': READ_MAXES[j], 'loglik': round(v, 3)} for (i, j), v in sorted(scores.items())]
-    top_ = max(grid, key=lambda g: g['loglik'])
-    default = next(g for g in grid if (g['pace'], g['top']) == (PACE_MS, READ_MAX))
-    inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
-    ready = opens >= TUNE_MIN_OPENS and top_['loglik'] - default['loglik'] >= TUNE_MARGIN and inside
-    return {'pace': top_['pace'] if ready else PACE_MS, 'top': top_['top'] if ready else READ_MAX, 'tuned': ready,
-            'best': top_, 'inside': inside, 'opens': round(opens, 1), 'grid': grid}
+        best = None
+        while best != max(scores, key=scores.get):
+            best = max(scores, key=scores.get)
+            for i in (best[0] - 1, best[0], best[0] + 1):
+                for j in (best[1] - 1, best[1], best[1] + 1):
+                    score(i, j)
+        default = scores[(PACES.index(PACE_MS), READ_MAXES.index(READ_MAX))]
+        inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
+        ready = opens >= TUNE_MIN_OPENS and scores[best] - default >= TUNE_MARGIN and inside
+        if ready and SURFACE_TUNING:
+            pace[surface], top[surface] = PACES[best[0]], READ_MAXES[best[1]]
+        out['tuned'] = out['tuned'] or ready and SURFACE_TUNING
+        out['ready'][surface] = ready
+        out['best'][surface] = {'pace': PACES[best[0]], 'top': READ_MAXES[best[1]], 'loglik': round(scores[best], 3),
+                                'default': round(default, 3)}
+        out['inside'][surface], out['opens'][surface] = inside, round(opens, 1)
+    return dict(out, pace=pace, top=top, grid=grid)
 
 
 def free_flag(k, sd, before, mean):
@@ -2148,8 +2196,9 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
-MODEL = 'fit 4'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
-                 # term, with the prior by origin and word features; fit 4: the monthly probes' answers)
+MODEL = 'fit 5'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
+                 # term, with the prior by origin and word features; fit 4: the monthly probes' answers; fit 5: a
+                 # reading model per surface)
 
 
 def word_stats(log, now_ms):

@@ -246,7 +246,8 @@ def recovery(seeds=(1, 2, 3), weeks=(1, 2, 4)):
     lines.append('The reading model the profile likelihood picks on each whole log (knowledge.tune; it replaces the '
                  'defaults only when inside the grid and 3 log-likelihood units better):')
     for seed, best, tuned, pace, top in reading:
-        lines.append(f'  seed {seed}: best {best["pace"]} ms, cap {best["top"]} ({"used" if tuned else "defaults kept"}); '
+        found = '; '.join(f'{surface} {b["pace"]} ms, cap {b["top"]}' for surface, b in best.items())
+        lines.append(f'  seed {seed}: best {found} ({"used" if tuned else "defaults kept"}); '
                      f'the reader\'s true {pace} ms, cap {top}')
     return '\n'.join(lines)
 
@@ -291,8 +292,9 @@ def harness(seed=1, days=28):
             know = knowledge.refresh(now / 1000)
         reading = know['reading']
         lines.append(f'calibrate on the same log, by knowledge.json\'s model (reading model by profile likelihood, '
-                     f'knowledge.tune: pace {reading["pace"]} ms, cap {reading["top"]}, best {reading["best"]["pace"]} '
-                     f'ms and {reading["best"]["top"]}; the reader\'s true pace is {world.cfg["pace"]} ms, cap '
+                     f'knowledge.tune: {knowledge.reading_text(reading["pace"], reading["top"])}; best '
+                     + '; '.join(f'{s} {b["pace"]} ms and {b["top"]}' for s, b in reading['best'].items())
+                     + f'; the reader\'s true pace is {world.cfg["pace"]} ms, cap '
                      f'{world.cfg["top"]}):')
         lines += knowledge.classes_text(know['calibration']['classes'], know['calibration']['days'])
     return '\n'.join(lines)
