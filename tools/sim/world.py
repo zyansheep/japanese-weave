@@ -91,6 +91,10 @@ DEFAULTS = dict(
     prior=None, extra=0,
     extra_shown=True,           # False: the extra entries are never shown (chat's topical words and intake leave them
                                 # out), to see how the prior reaches words unlike any with evidence
+    # the monthly probe (scripts/probe.py): answered the evening before each of these days (logs.simulate; the number
+    # of days simulated for one after the last), from the reader's true recall, claiming a word not recognised, or a
+    # made-up one, with chance overclaim
+    probe_days=(), overclaim=0.0,
 )
 PRIOR = dict(base=0.0, noise=0.8, rank=-1.2, length=-0.3, rare=-0.5, loan=-0.5, kana=0.3, katakana=0.8, mixed=0.0,
              verb=-0.3, adjective=0.0, adverb=-0.4, other=0.5, **{'kanji known': 0.8, 'all kanji known': 0.4})
@@ -302,6 +306,8 @@ class World:
             self._introduce(t0 - rng.uniform(0, c['learn_days']) * DAY, self.start)
         self.new_per_day = c['new_per_day'] if c['new_per_day'] is not None else c['learning'] / c['learn_days']
         self.view = 0
+        self.probes, self.frame, self._by_id = [], None, None
+        self.probe_rng = random.Random(f'probe {c["seed"]}')  # its own draws: the reading is the same with or without
 
     def _introduce(self, born, day):
         """The front of the queue joins the learning set."""
@@ -339,27 +345,78 @@ class World:
 
     def _start_from_features(self, t0):
         """Every word not known starts from its features (the module docstring; cfg prior)."""
-        c, rng = self.cfg, self.rng
+        self.known_kanji = known = knowledge.kanji_counts(w.ja for w in self.words if w.kind == 'known')
+        for w in self.words + self.offlist:
+            if w.kind != 'known':
+                self._start(w, self.entries.get(w.ja), known, self.rng, t0)
+
+    def _start(self, w, entry, known, rng, t0):
+        """A word's start from its features (_start_from_features), with rng's draws."""
+        c = self.cfg
         truth = dict(c['prior'])
         base, noise = truth.pop('base', 0.0), truth.pop('noise', 0.0)
-        known = knowledge.kanji_counts(w.ja for w in self.words if w.kind == 'known')
-        for w in self.words + self.offlist:
-            if w.kind == 'known':
-                continue
-            entry = self.entries.get(w.ja)
-            x = knowledge.word_features(entry, known) if entry else {}
-            k0 = base + sum(truth.get(name, 0.0) * value for name, value in x.items()) + noise * rng.gauss(0, 1)
-            q0 = 1 / (1 + math.exp(min(30.0, max(-30.0, k0))))
-            recall = (c['habit'] - q0) / (c['habit'] - c['check'])
-            if recall <= 0:
-                w.S, w.last = 0.0, None
-            else:
-                days = rng.uniform(10, 100)
-                w.S, w.last = F * days / (min(recall, 0.999) ** (1 / C) - 1), t0 - days * DAY
-            if w.interval is not None:
-                w.interval = w.S * math.exp(c['anki_noise'] * rng.gauss(0, 1))
-            q = w.chance(t0, c)
-            w.k0 = math.log((1 - q) / q)
+        x = knowledge.word_features(entry, known) if entry else {}
+        k0 = base + sum(truth.get(name, 0.0) * value for name, value in x.items()) + noise * rng.gauss(0, 1)
+        q0 = 1 / (1 + math.exp(min(30.0, max(-30.0, k0))))
+        recall = (c['habit'] - q0) / (c['habit'] - c['check'])
+        if recall <= 0:
+            w.S, w.last = 0.0, None
+        else:
+            days = rng.uniform(10, 100)
+            w.S, w.last = F * days / (min(recall, 0.999) ** (1 / C) - 1), t0 - days * DAY
+        if w.interval is not None:
+            w.interval = w.S * math.exp(c['anki_noise'] * rng.gauss(0, 1))
+        q = w.chance(t0, c)
+        w.k0 = math.log((1 - q) / q)
+
+    # ---- the monthly probe (scripts/probe.py) ----
+
+    def word_of(self, entry_id, d):
+        """The world's word with this dictionary entry, else the entry as a word never shown: with starting values
+        from features (cfg prior), started as _start starts a word, from a draw of its own (so every probe finds it
+        alike); without, never met."""
+        if self._by_id is None:
+            self._by_id = {}
+            for w in self.words + self.offlist:
+                e = self.entries.get(w.ja) or d.find(w.ja, w.row.get('kana') or '', w.row.get('en') or '')
+                if e is not None:
+                    self._by_id.setdefault(e['id'], w)
+        w = self._by_id.get(entry_id)
+        if w is None:
+            e = d.get(entry_id)
+            w = self._by_id[entry_id] = TrueWord({'ja': e['ja'], 'en': e['en'], 'hint': e['romaji'],
+                                                  'kana': e['kana']}, 'queue', 0.0, None, 1.0)
+            if self.cfg['prior'] is not None:
+                self._start(w, e, self.known_kanji, random.Random(f'{self.cfg["seed"]} {entry_id}'), self.t0)
+        return w
+
+    def answer_probe(self, at):
+        """The monthly probe at `at` (ms): probe.sample's words and made-up words, each word answered known when the
+        reader recognises it (its true recall then; reading and lookups are what change it, so a probe doesn't), else
+        with chance cfg overclaim, as is each made-up word; kept as probe.record keeps it, in state()'s probes."""
+        import dictionary
+        import probe
+        c, rng, d, day = self.cfg, self.probe_rng, dictionary.load(), day_name(at)
+        self.frame = self.frame or probe.Frame(d)
+        asked = probe.sample({'probes': self.probes}, d, rng=rng, today=day, frame=self.frame)
+        answers = []
+        for q in asked['questions']:
+            recall = 0.0 if q.get('fake') else self.word_of(q['id'], d).recall(at, c)
+            answers.append(int(rng.random() < recall or rng.random() < c['overclaim']))
+        op = probe.record(asked, answers, 'sim', 180, probe.claims(self.probes, day))
+        op.update(uid=f'sim-probe-{len(self.probes) + 1}', at=int(at), day=day)
+        probe.keep({'probes': self.probes}, op)
+        return op
+
+    def goal(self, at):
+        """The goal the probe estimates, from the truth: the share of the probe's population (probe.Frame, by
+        weight) the reader recognises at `at`."""
+        import dictionary
+        import probe
+        d = dictionary.load()
+        self.frame = self.frame or probe.Frame(d)
+        total = sum(it['weight'] for it in self.frame.items)
+        return sum(it['weight'] * self.word_of(it['ids'][0], d).recall(at, self.cfg) for it in self.frame.items) / total
 
     def time(self, day=None):
         """Local midnight of a simulated day (default: the next one to simulate)."""
@@ -544,7 +601,7 @@ class World:
             entry.update(status=w.status, added=w.added, changed=w.changed)
             words.append(entry)
         return {'schema': 1, 'created': self.start, 'stage': 3, 'stage_pinned': False, 'paused': False,
-                'words': words, 'prefs': {}}
+                'words': words, 'prefs': {}, 'probes': list(self.probes)}
 
     def anki_rows(self):
         """anki.csv: the Anki words with their intervals."""

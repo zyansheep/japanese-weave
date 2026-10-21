@@ -85,16 +85,21 @@ class Writer:
 
 
 def simulate(home, days, checkpoints=(), **cfg):
-    """A world simulated `days` days into the state dir `home`. Returns (world, {day: snapshot}): at each checkpoint
-    day d, every word's truth at 08:59 the morning after day d (World.snapshot)."""
+    """A world simulated `days` days into the state dir `home`, with its monthly probes the evening before each of its
+    probe_days (cfg; `days` for one after the last day), kept in state.json. Returns (world, {day: snapshot}): at each
+    checkpoint day d, every word's truth at 08:59 the morning after day d (World.snapshot)."""
     from world import World, HOUR, MINUTE
     world = World(**cfg)
     writer = Writer(home, world)
     snapshots = {}
     for day in range(days):
+        if day in world.cfg['probe_days']:  # the evening before
+            world.answer_probe(world.time() - HOUR)
         writer.add(world.simulate_day())
         if day + 1 in checkpoints:
             at = world.time() + 9 * HOUR - MINUTE
             snapshots[day + 1] = (at, world.snapshot(at))
+    if days in world.cfg['probe_days']:
+        world.answer_probe(world.time() - HOUR)
     writer.finish()
     return world, snapshots

@@ -21,7 +21,9 @@ models and designs against the truth (experiments.py). Python 3.9+, standard lib
   python3 tools/sim/run.py recurrence          whether words nominated by the reader's text come back (section 6)
   python3 tools/sim/run.py priors              starting values from the word itself (step 13): coefficients
                                                against the truth, against the flat start on first exposures,
-                                               the days a replay needs, and words unlike any shown (3 minutes)
+                                               the days a replay needs, what a monthly probe's answers add (the
+                                               rank coefficient, first exposures, its next probe predicted), and
+                                               words unlike any shown, with and without the probe (about an hour)
   python3 tools/sim/run.py log DIR [--days N] [--seed S]
                                                a simulated state dir (interactions.sqlite, state.json, anki.csv,
                                                truth.jsonl, and knowledge.json from the replay) for

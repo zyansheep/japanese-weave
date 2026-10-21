@@ -719,13 +719,20 @@ def _oracle(world, fit, names, target=None):
     return dict(zip(['intercept'] + list(names), beta)) if beta else {}, len(ys)
 
 
-def prior_run(seed, days, truth, extra, widths=(None,)):
+OVERCLAIM = 0.1  # the share of words not recognised, and of made-up ones, the simulated reader claims in a probe
+
+
+def prior_run(seed, days, truth, extra, widths=(None,), probes=False):
     """One simulated log of the world with starting values from features: the evaluation of the flat start against
     the word features, for each prior width of the coefficients (None: knowledge.WORD_SD), and the coefficients of a
-    fit of the whole log against the truth's. {width: {rows, fit, days}}, world."""
+    fit of the whole log against the truth's. With probes, the reader answers a monthly probe the evening before the
+    first day and after the last (cfg probe_days, overclaim OVERCLAIM): the models above leave the answers out, and at
+    the default width the fit with them (knowledge.Fit's probes) is evaluated too, as rows' third column, and checked
+    against the last probe (probe_checks). {width: {rows, fit, days}, shown, probe}, world."""
     out = {}
     with tempfile.TemporaryDirectory() as home:
-        world, _ = logs.simulate(home, days, seed=seed, prior=truth, extra=extra)
+        world, _ = logs.simulate(home, days, seed=seed, prior=truth, extra=extra,
+                                 **({'probe_days': (0, days), 'overclaim': OVERCLAIM} if probes else {}))
         now = world.time() + DAY
         for width in widths:
             saved = dict(knowledge.SHARED)
@@ -733,10 +740,14 @@ def prior_run(seed, days, truth, extra, widths=(None,)):
                 knowledge.SHARED.update({n: (0.0, width) for n in knowledge.WORD_FEATURES})
             try:
                 log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
-                models = [evaluate.MODELS['flat'](), evaluate.current()]
+                models = [evaluate.Fitted(plain=True, probes=False), evaluate.Fitted(probes=False)]
+                if probes and width is None:
+                    models.append(evaluate.Fitted())
                 result = evaluate.evaluate(log, models, evaluate.load_truth(Path(home) / logs.TRUTH))
                 models[1].fit(log, now)
                 out[width] = {'rows': result['rows'], 'fit': models[1].last, 'days': result['days']}
+                if len(models) > 2:
+                    out['probe'] = probe_checks(world, log)
                 if width == widths[0]:  # each word's true k averaged over its showings, as the fit's k is
                     truth, shown = evaluate.load_truth(Path(home) / logs.TRUTH), {}
                     for o in log.scored():
@@ -750,18 +761,72 @@ def prior_run(seed, days, truth, extra, widths=(None,)):
     return out, world
 
 
+def _refreshed(log, until, probes):
+    """A fit as a refresh makes it (prior_reach): the free flags from a fit of the day before, then the fit."""
+    first = knowledge.Fit(log, until - DAY, probes=probes)
+    flags = knowledge.free_flags(first, [w['ja'] for w in log.words], {})
+    return knowledge.Fit(log, until, free=flags, probes=probes)
+
+
+def _recognised(fit, ja, entry, table):
+    """P(the reader recognises a word at a glance out of context) by a fit: sigmoid(k - probe) averaged over k's
+    uncertainty (the probit approximation, MacKay 1992), k the word's estimate, else its prior (for a word the fit has
+    no features for, from its entry: knowledge.prior_estimate)."""
+    if ja in fit.index or (ja in fit.by_ja and fit.entries.get(ja) is not None):
+        k, sd = fit.estimate(ja)
+    else:
+        k, sd = knowledge.prior_estimate(table, 'new', None, entry)
+    return knowledge.sigmoid((k - fit.theta[knowledge.PROBE]) / math.sqrt(1 + math.pi * sd * sd / 8))
+
+
+def probe_checks(world, log):
+    """The last probe as the check on the model: fits as a refresh makes them just before it, without and with the
+    earlier probes' answers, and its answers predicted by each (log loss per answer, P(known) = 1 - r q at each fit's
+    over-claiming rate: knowledge.Fit.known_chance), the goal (the population's weighted share recognised) by each
+    fit, by the probe's own estimate from its answers alone (corrected for guessing) and by the truth then; and the
+    words the earlier probes answered (left out where only starting values count)."""
+    import dictionary
+    import probe
+    d = dictionary.load()
+    last = world.probes[-1]
+    fits = {name: _refreshed(log, last['at'], name == 'with') for name in ('without', 'with')}
+    answers, _fakes, extra = knowledge.probe_answers([last], log.entries, d)
+    entries = dict(log.entries, **extra)
+    out = {'probed': {ja for _at, ja, _y in knowledge.probe_answers(world.probes[:-1], log.entries, d)[0]},
+           'truth': world.goal(last['at']), 'estimate': last['estimate'].get('corrected', last['estimate']['known']),
+           'answers': len(answers), 'fits': fits}
+    frame = world.frame or probe.Frame(d)
+    total = sum(it['weight'] for it in frame.items)
+    by_id = {e['id']: ja for ja, e in log.entries.items() if e is not None}
+    for name, fit in fits.items():
+        table = {'prior': knowledge.prior_table(fit)}
+        loss = []
+        for _at, ja, y in answers:
+            known = 1 - fit.probe_read * (1 - _recognised(fit, ja, entries.get(ja), table))
+            loss.append(evaluate.loss(known, 1 - y))
+        goal = 0.0
+        for it in frame.items:
+            entry = d.get(it['ids'][0])
+            ja = by_id.get(entry['id'], entry['ja'])
+            goal += it['weight'] * _recognised(fit, ja, entries.get(ja) or entry, table)
+        out[name] = {'loss': stats.mean(loss), 'goal': goal / total, 'offset': fit.theta[knowledge.PROBE],
+                     'read': fit.probe_read}
+    return out
+
+
 def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None, 1.0, 2.0),
-           windows=(3, 5, 7, 10, 14, 21), reach=True):
+           windows=(3, 5, 7, 10, 14, 21), reach=True, probes=True):
     """Starting values from the word itself (NEXT_STEPS step 13) on a world whose words start from their features
     (world.py, cfg prior; world.PRIOR the true coefficients): the fitted coefficients against the true ones and the
     oracle's, and the word features against the flat start (the prior by origin and Anki interval alone) on each
-    word's first exposures while new or learning, day by day; with reach, how far the prior reaches (prior_reach)."""
+    word's first exposures while new or learning, day by day; with probes, what the monthly probe's answers add
+    (probe_text); with reach, how far the prior reaches (prior_reach), with and without the probe."""
     from world import PRIOR
     truth = truth or PRIOR
     names = knowledge.WORD_FEATURES
     runs = []
     for seed in seeds:
-        run, world = prior_run(seed, days, truth, extra, widths)
+        run, world = prior_run(seed, days, truth, extra, widths, probes)
         runs.append((seed, run, world))
     lines = [f'Starting values from the word itself: {len(seeds)} seeds of {days} days, {extra} extra dictionary '
              f'entries in the queue. Each word not known starts at k0 = {truth["base"]} + sum beta x + '
@@ -822,29 +887,76 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None,
         lines.append(f'  Each day after the first (when both start alike): {mean:+.4f} a day, sd {sd:.4f}; a 90% '
                      f'interval excludes 0 in half of the logs after about {(1.645 * sd / mean) ** 2:.0f} days, in 80% '
                      f'after about {(2.487 * sd / mean) ** 2:.0f}.')
+    if probes:
+        lines.append(probe_text(runs, truth))
     if reach:
-        lines.append(prior_reach(seeds, days, extra, truth))
+        lines.append(prior_reach(seeds, days, extra, truth, probes=probes))
     return '\n'.join(lines)
 
 
-def prior_reach(seeds=(1, 2, 3), days=28, extra=2000, truth=None, bands=(1, 3000, 10_000, 30_000)):
+def probe_text(runs, truth):
+    """priors' lines on the monthly probe (prior_run with probes): the rank coefficient with and without its answers,
+    the fit with them against the fit without on first exposures, day by day, and the last probe as the check."""
+    j = knowledge.SHARED_NAMES.index('rank')
+    lines = [f'The monthly probe (probe.py): 60 words and 6 made up, answered the evening before the first day and '
+             f'after the last from the reader\'s true recall, claiming {OVERCLAIM:.0%} of the words not recognised and '
+             'of the made-up ones; the fit with the first probe\'s answers against the fit without (rows\' third '
+             'column against the second), per seed:']
+    for seed, run, _world in runs:
+        check = run['probe']
+        without, with_ = check['fits']['without'], check['fits']['with']
+        lines.append(f'  seed {seed}: rank coefficient {without.theta[j]:+.2f} (sd {without.theta_sd[j]:.2f}) '
+                     f'without, {with_.theta[j]:+.2f} (sd {with_.theta_sd[j]:.2f}) with (true {truth["rank"]:+.2f}); '
+                     f'probe offset {with_.theta[knowledge.PROBE]:+.2f} (sd {with_.theta_sd[knowledge.PROBE]:.2f}), '
+                     f'over-claiming {1 - with_.probe_read:.0%} from the made-up words; the last probe\'s '
+                     f'{check["answers"]} answers, log loss per answer {check["without"]["loss"]:.4f} without, '
+                     f'{check["with"]["loss"]:.4f} with; the goal {check["truth"]:.1%} true, {check["estimate"]:.1%} '
+                     f'by the probe\'s answers alone, {check["without"]["goal"]:.1%} by the fit without, '
+                     f'{check["with"]["goal"]:.1%} with')
+    for label, member in (('first exposures', _first),
+                          ('first exposures of words no probe asked', None)):
+        days_ = []
+        for _seed, run, _world in runs:
+            probed = run['probe']['probed']
+            test = member or (lambda o, probed=probed: _first(o) and o.word not in probed)
+            days_ += list(_daily(run[None]['rows'], test, 2, 1).values())
+        mean, interval, better, n = _paired(days_)
+        interval = f'{interval[0]:+.4f} to {interval[1]:+.4f}' if interval else '-'
+        count = sum(c for _d, c in days_)
+        lines.append(f'  {label} ({count}): {mean:+.4f} per observation ({interval}), better on {better} of {n} days')
+    days_ = [v for _seed, run, _world in runs for v in _daily(run[None]['rows'], lambda o: True, 2, 1).values()]
+    lines.append(f'  all observations: {_paired(days_)[0]:+.4f} per observation')
+    return '\n'.join(lines)
+
+
+def prior_reach(seeds=(1, 2, 3), days=28, extra=2000, truth=None, bands=(1, 3000, 10_000, 30_000), probes=True):
     """How far the prior reaches: a world whose extra dictionary entries are never shown (cfg extra_shown False), so
     the coefficients are learned from the lexicon's words alone (most within the first 5,000 ranks), and the extra
     entries' starting chances from a refresh's fit (two fits, the second with the first's free flags) against the
     truth's, by rank band: mean predicted and true chance, and the mean error on the log-odds scale, flat and with
-    the word features."""
+    the word features; with probes, also with the answers of a probe the evening before the first day (overclaim
+    OVERCLAIM), the entries it asked about left out (their k is no longer a starting value)."""
     from world import PRIOR
     truth = truth or PRIOR
-    sums = {}
+    sums, probed = {}, 0
     for seed in seeds:
         with tempfile.TemporaryDirectory() as home:
-            world, _ = logs.simulate(home, days, seed=seed, prior=truth, extra=extra, extra_shown=False)
+            world, _ = logs.simulate(home, days, seed=seed, prior=truth, extra=extra, extra_shown=False,
+                                     **({'probe_days': (0,), 'overclaim': OVERCLAIM} if probes else {}))
             now = world.time() + DAY
             log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
-            first = knowledge.Fit(log, now - DAY)
+            first = knowledge.Fit(log, now - DAY, probes=False)
             flags = knowledge.free_flags(first, [w['ja'] for w in log.words], {})
-            fits = {'flat': knowledge.Fit(log, now, plain=True), 'features': knowledge.Fit(log, now, free=flags)}
+            fits = {'flat': knowledge.Fit(log, now, plain=True, probes=False),
+                    'features': knowledge.Fit(log, now, free=flags, probes=False)}
+            asked = set()
+            if probes:
+                fits['probe'] = _refreshed(log, now, True)
+                asked = {ja for _at, ja, _y in knowledge.probe_log(log)[0]}
             for w in world.extras:
+                if w.ja in asked:
+                    probed += 1
+                    continue
                 rank = world.entries[w.ja]['rank']
                 band = next(b for b in bands[1:] if rank < b)
                 for name, fit in fits.items():
@@ -856,10 +968,12 @@ def prior_reach(seeds=(1, 2, 3), days=28, extra=2000, truth=None, bands=(1, 3000
                     s[3] += k - w.k0
     lines = [f'How far the prior reaches ({len(seeds)} seeds of {days} days): {extra} dictionary entries never shown, '
              'their starting chance from the fit of the rest (mean predicted against the true one), and the mean '
-             'error on the log-odds scale (predicted k - true k; positive: thought better known), by rank band:']
+             'error on the log-odds scale (predicted k - true k; positive: thought better known), by rank band'
+             + (f'; probe: with a probe\'s answers too, the {probed} entries it asked about left out' if probes else '')
+             + ':']
     for low, high in zip(bands, bands[1:]):
         cells = []
-        for name in ('flat', 'features'):
+        for name in ('flat', 'features', 'probe'):
             n, p, t, e = sums.get((high, name), [0, 0, 0, 0])
             if n:
                 cells.append(f'{name} {p / n:.0%} against {t / n:.0%}, error {e / n:+.2f}')
