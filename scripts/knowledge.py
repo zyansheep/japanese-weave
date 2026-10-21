@@ -1237,8 +1237,9 @@ class Standing:
 def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags=None, start=None,
                    done=()):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
-    at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, from nothing, as the day's
-    first refresh fits; start is unused), each word at its clock in the passage or message (read_clocks:
+    at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
+    fit before: start, a fit's state, for the first; refresh passes its fit's, which is from nothing once a day, so the
+    floor's basin is the whole log's), each word at its clock in the passage or message (read_clocks:
     its current chance), the free flags carried from day to day (free_flags, from flags, else the priors'), and the
     sentence prices from the sentence ends before (sentence_prices of sentence_events).
     done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
@@ -1248,7 +1249,8 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
             continue
         if day_of(at) != day:
             day = day_of(at)
-            fit = Fit(log, day_start(day), pace, top)  # from nothing, as the day's first refresh fits
+            fit = Fit(log, day_start(day), pace, top, start=start)
+            start = fit.state()
             flags.update(free_flags(fit, fit.words, flags))
             starts[day] = dict(flags)
             found = read_clocks(log, pace, top, fit._chance())

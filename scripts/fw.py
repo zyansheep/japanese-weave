@@ -781,8 +781,10 @@ def why(args):
         return
     p = knowledge.sigmoid(-entry['k'])
     free = '; known at a glance' if fwlib.is_free(entry) else ''
-    print(f'  prior {entry["mu"]}  knowledge {entry["k"]} +- {entry["sd"]}  lookup chance on the web {p:.2f}{free}; '
-          f'opened {entry["opened"]} of {entry["obs"]} observations, {entry["recent"]} in the last 14 days')
+    now = knowledge.current_chance(entry, know.get('recency'), int(time.time() * 1000))
+    print(f'  prior {entry["mu"]}  knowledge {entry["k"]} +- {entry["sd"]}  lookup chance on the web {p:.2f} long-term, '
+          f'{now:.2f} now{free}; opened {entry["opened"]} of {entry["obs"]} observations, {entry["recent"]} in the last '
+          '14 days')
     for h in entry['history']:
         when = time.strftime('%Y-%m-%d %H:%M', time.localtime(h['at'] / 1000))
         print(f'    {when}  {h["surface"]:<7} {"opened" if h["y"] else "not opened"}'
