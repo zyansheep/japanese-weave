@@ -1983,6 +1983,19 @@ class OncePerChat(Home):
             self.assertIn('Known, besides', self.hook())
         sessions = json.loads((fwlib.home() / 'sessions.json').read_text(encoding='utf-8'))
         self.assertIsInstance(sessions['s1']['brief']['known'], str)  # one line per chat in the file
+        sessions['s1']['t'] = 'soon'
+        fwlib.write_json(fwlib.home() / 'sessions.json', sessions)
+        self.assertIn('Known: as listed', self.hook())  # a damaged time doesn't cost the chat its memory
+
+    def test_a_new_user_with_no_known_words(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01'))
+        fwlib.write_json(fwlib.home() / 'knowledge.json', {})
+        first, second = self.hook(), self.hook()
+        self.assertIn('\nKnown (each Japanese word, then its meaning; write the Japanese every time the English has '
+                      'that meaning): none', first)
+        self.assertNotIn('Default swaps', first)
+        self.assertNotIn('no longer known', second)
+        self.assertIn('\nKnown: as listed earlier in this chat. If', second)
 
     def test_later_turns_stay_shorter_than_the_old_brief(self):
         """Measured through the hook on a copy of the 2026-10-20 state (Stage 3, 293 words known at a glance, 24

@@ -352,8 +352,9 @@ def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None
     head = (digest(stage, level, markup, n, sentences) if sent is not None and had.get('rules') == key else
             rules(stage, level, markup, like, n, sentences))
     entry = lambda w: f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
-    lines = [head, ('Learning now (use each one wherever it fits): ' + ('; '.join(map(entry, learning)) or 'none') if full
-                    else 'Learning now, by how often the user looks one up: ' + learning_groups(learning, p, stage))]
+    lines = [head, ('Learning now (use each one wherever it fits): ' + ('; '.join(map(entry, learning)) or 'none')
+                    if full else
+                    'Learning now, by how often the user looks one up: ' + learning_groups(learning, p, stage))]
     words = named_words(free)
     swaps = default_swaps(words)
     if swaps:
@@ -437,7 +438,8 @@ def compaction(lines):
             continue
         if not isinstance(item, dict):
             continue
-        if (item.get('type') == 'system' and item.get('subtype') == 'compact_boundary') or item.get('type') == 'compacted':
+        if item.get('type') == 'compacted' or (item.get('type') == 'system'
+                                               and item.get('subtype') == 'compact_boundary'):
             payload = item.get('payload') if isinstance(item.get('payload'), dict) else {}
             mark = str(item.get('uuid') or payload.get('window_id') or item.get('timestamp') or len(lines))[:100]
     return mark
@@ -539,10 +541,13 @@ def chat_turn(state, session, build, mark=None, recall=True, now=None):
         had = entry.get('brief') if isinstance(entry.get('brief'), dict) else {}
         whole = (not isinstance(had.get('at'), int) or not isinstance(had.get('known'), str)
                  or (mark is not None and mark != had.get('mark')) or entry['n'] - had['at'] >= FULL_EVERY)
-        text, after, plan = build(None if whole else dict(had, known=had['known'].split('\n')), pick)
+        text, after, plan = build(None if whole else dict(had, known=[ja for ja in had['known'].split('\n') if ja]),
+                                  pick)
         entry['brief'] = dict(after, known='\n'.join(after['known']), at=entry['n'] if whole else had['at'],
                               mark=mark if mark is not None else had.get('mark'))  # one line per chat in the file
-        newest = sorted(sessions, key=lambda k: (sessions[k].get('t') or 0) if isinstance(sessions[k], dict) else 0)
+        when = lambda k: (sessions[k].get('t') if isinstance(sessions[k], dict)
+                          and isinstance(sessions[k].get('t'), int) else 0)
+        newest = sorted(sessions, key=when)
         sessions = {k: sessions[k] for k in newest[-200:]}  # keep the newest chats only
         for k in newest[:-MEMORY_KEPT]:
             if isinstance(sessions.get(k), dict):
