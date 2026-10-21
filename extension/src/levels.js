@@ -616,12 +616,14 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
   const random = seededRandom(seed);
   const thinning = seededRandom((seed ^ 0x85ebca6b) >>> 0);
   const shown = new Set(shownToday);
-  const PRICE_K = Math.log((1 - price) / price);
-  const ranked = (full ? [] : items.filter((c) => c.cost > 0)).map((c) => {
+  const priceK = Math.log((1 - price) / price);
+  const ranked = full ? [] : items.filter((c) => c.cost > 0);
+  for (const c of ranked) {
     const lead = c.due.length ? c.due.reduce((a, b) => (b.k < a.k ? b : a)) : null;
-    return { c, value: -Math.abs((lead ? lead.k + lead.sd * normal(random) : PRICE_K) - TARGET_K),
-      fresh: c.due.some((x) => x.w?.status === 'active' && !shown.has(x.ja.normalize('NFKC').toLowerCase())) };
-  }).sort((a, b) => b.value - a.value || size(a.c) - size(b.c)).map(({ c, fresh }) => Object.assign(c, { fresh }));
+    c.value = -Math.abs((lead ? lead.k + lead.sd * normal(random) : priceK) - TARGET_K);
+    c.fresh = c.due.some((x) => x.w?.status === 'active' && !shown.has(x.ja.normalize('NFKC').toLowerCase()));
+  }
+  ranked.sort((a, b) => b.value - a.value || size(a) - size(b));
   // One use per Japanese word, decided as swaps are kept: a known word offered alone still shows where a phrase or
   // sentence with it was offered first but didn't fit the budget. Full may use a word again.
   const used = new Set();
