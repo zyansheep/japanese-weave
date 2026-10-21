@@ -975,9 +975,17 @@ and seen over expected with a 90% interval from resampling days (knowledge.day_i
 bootstrap over days, given from 5 days on). Calibrated means the interval lies inside 0.83-1.2. The classes:
 
 - costly: listed words not free as the model stood (the free flag); free: the others;
-- topical: chat words found by code (weave.topical_words). Not sorted out yet: a topical word from the list is
-  counted as costly and one from the dictionary as off-list, until calibrate reads the brief records' topical lists
-  (NEXT_STEPS step 14's check needs it);
+- topical: chat words found by code (weave.topical_words), whether on the list or not: a word in a T3 message (as
+  written, its listed word, or its dictionary entry through dictionary.find, so a conjugated form counts) that a
+  chat brief offered as topical in the hour before the message was shown (knowledge.Offers, TOPICAL_WINDOW_MS), at
+  the price that brief offered it at (the latest brief's, when several did). Nothing links a T3 message to the chat
+  its brief was for: T3 logs a window (view) and a message id (context), and its stays only bands, times and word
+  counts; the brief op has the Claude Code session id and the time. So the link is the word and the time. The hook
+  writes a brief as each prompt is sent, and on the user's 2,995 prompts with a reply (2026-10-21) the reply's last
+  text came within 30 minutes of the prompt for 90% and within an hour for 95%. A word offered in another chat in
+  that hour and used off the lists here would count as topical, which is rare: topical words come from a
+  conversation's own turns, and the brief allows no Japanese off the lists. On the 2026-10-20 snapshot there are no
+  brief records yet (the hook began writing them later), so the class is empty there;
 - whole sentences: sentence translations (a 。 annotation, or a whole sentence glossed as one), each at its read
   chance times the surface's sentence price then;
 - off-list: words the lexicon doesn't have, at the fitted prior of a new word without an Anki card;
