@@ -469,6 +469,37 @@ class Scale(Home):
             self.assertLess(len(text), 2400, known)
             self.assertIn('Known: as listed earlier in this chat. If you can no longer see that list', text)
 
+    def test_exports_describe_known_words_in_the_base_lists_order(self):
+        """An Anki sync puts its words first in the state; the exports' band still counts ranks in the base list, so
+        "up to about the N-th most frequent" means the most frequent words, and the Anki words come after it."""
+        state = grown(400)
+        band = export.band_text(state)
+        anki = [dict(word(f'語{i}'), en='card meaning') for i in range(40)]
+        moved = [w for w in state['words'] if w['status'] == 'known'][100:200]  # reviewed on cards, so moved up too
+        state['words'] = anki + moved[::-1] + [w for w in state['words'] if w not in moved]
+        self.assertNotEqual(fwlib.known_band(state)[0], fwlib.known_band(grown(400))[0])  # the state's order misleads
+        n, missing, extra = fwlib.known_band({'words': export.by_lexicon(state)})
+        self.assertEqual(n, fwlib.known_band(grown(400))[0])
+        self.assertEqual(extra[-40:], [w['ja'] for w in anki])  # beyond the band, after the base list's words
+        self.assertTrue(export.band_text(state).startswith(band.split('; also: ')[0]))
+        everyone = export.band_text(state, extras=len(extra))
+        self.assertTrue(everyone.endswith(', '.join(extra)))
+        block = export.claude_ai(state, now=0)
+        self.assertLessEqual(len(block), export.CLAUDE_AI_MAX)
+        self.assertIn(f'up to about the {export.ordinal(n)} most frequent', block)
+        self.assertIn('語0', block)  # as many past the band named as fit
+        about, respond = export.chatgpt(state, now=0)
+        self.assertLessEqual(max(len(about), len(respond)), export.CHATGPT_LIMIT)
+        self.assertIn(f'; also: {extra[0]}, ', about)
+        few = fwlib.new_state('2026-01-01')  # under KNOWN_LIST_MAX, named one by one: the base list's order too
+        for w in few['words'][:20] + few['words'][40:50]:
+            w.update(status='known', added='2026-01-01')
+        few['words'] = few['words'][40:50] + anki[:3] + few['words'][:40] + few['words'][50:]
+        listed = export.state_line(few, now=0).split('Known (use freely; never gloss): ')[1].split(' | ')[0]
+        self.assertEqual(listed.split(', '), [w['ja'] for w in export.by_lexicon(few) if w['status'] == 'known'])
+        trimmed = export.state_line(few, now=0, known_max=10).split('never gloss): ')[1].split(' | ')[0]
+        self.assertTrue(trimmed.endswith(' and 23 more not named here'), trimmed)  # not the most common: unnamed
+
     def test_state_line_round_trips(self):
         for known in (30, 400):
             state = grown(known)

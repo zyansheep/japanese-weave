@@ -17,7 +17,6 @@ import fwlib  # noqa: E402
 
 PER_LEVEL = 30
 KNOWN_NAMED = 40      # known words named one by one; above this a level block names the rank band
-CLAUDE_AI_MAX = 6000  # claude.ai doesn't document a limit for personal preferences; stay well inside a few pages
 OUT = fwlib.PLUGIN_ROOT / 'blocks'
 STARTER = fwlib.PLUGIN_ROOT / 'extension' / 'src' / 'starter.js'
 STARTER_SIZE = 150  # the extension's Level 2 list; Level 1 is the first 40
@@ -71,7 +70,7 @@ def main():
     for level in range(1, levels + 1):
         text, sizes = block(level, levels, lexicon)
         worst = [max(a, b) for a, b in zip(worst, sizes)]
-        if sizes[0] > CLAUDE_AI_MAX or max(sizes[1:]) > export.CHATGPT_LIMIT:
+        if sizes[0] > export.CLAUDE_AI_MAX or max(sizes[1:]) > export.CHATGPT_LIMIT:
             sys.exit(f'level {level} too long: {sizes}')
         path = OUT / f'level-{level:02d}.md'
         if args.check:
