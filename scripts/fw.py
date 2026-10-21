@@ -61,6 +61,9 @@
   fw.py relabel [--dry-run] [--home DIR] [--examples N]
                                                      the words whose labels the fitted model would change from
                                                      the day-count rules', grouped and explained; writes nothing
+  fw.py experiment [--power] [--home DIR]            the delayed-start experiment: its arms, probes due and
+                                                     done, the outcome per arm so far, and when it reaches 80
+                                                     words a side (--power: the simulated reader's power)
   fw.py relabel --restore                            undo the switch to the model's labels within 30 days
                                                      (then check out the code from before it)
   fw.py refresh                                      rescan chat transcripts, refit the model and label the
@@ -93,6 +96,7 @@ import feedback  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import evaluate  # noqa: E402
+import experiment  # noqa: E402
 import knowledge  # noqa: E402
 import probe  # noqa: E402
 import relabel  # noqa: E402
@@ -942,6 +946,9 @@ def main(argv=None):
     p = sub.add_parser('relabel')
     relabel.add_arguments(p)
     p.set_defaults(run=relabel.run)
+    p = sub.add_parser('experiment')
+    experiment.add_arguments(p)
+    p.set_defaults(run=experiment.run)
     p = sub.add_parser('collector')
     p.add_argument('action', choices=['run', 'install'])
     p.add_argument('--listen', required=True, metavar='HOST:PORT')

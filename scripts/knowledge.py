@@ -1541,7 +1541,8 @@ def decide(state, flags, looked, spend, log, today, seed=None):
     """The refresh's state edit, as a labels op (hub.py, fwlib.apply_labels): every word's label from its free flag
     (fwlib.label) where it changes, up to intake_room new words (fwlib.newcomers: looked up first, then the list's
     order; never one known at a glance) each with its delayed-start arm (fwlib.assign, from the experiment's seed, or
-    a new seed when it starts), and the due probes' outcomes (probe_outcomes). flags: {ja: free}; looked: {ja: messages
+    a new seed when it starts; none for a word the fixed texts name, fwlib.IN_THE_RULES), and the due probes' outcomes
+    (probe_outcomes). flags: {ja: free}; looked: {ja: messages
     opened in} (fwlib.looked_up's). Nothing when labels come from the rules (fwlib.restore)."""
     op = {'kind': 'labels', 'labels': [], 'intake': [], 'probes': []}
     if (state.get('labels') or {}).get('from') == 'rules':
@@ -1559,8 +1560,9 @@ def decide(state, flags, looked, spend, log, today, seed=None):
         else:
             seed = experiment['seed']
         free = {ja for ja, f in flags.items() if f}
-        for w in fwlib.newcomers(state, looked, free)[:room]:
-            op['intake'].append([w['ja'], *fwlib.assign(seed, w['ja'])])
+        for w in fwlib.newcomers(state, looked, free)[:room]:  # a word the fixed texts name can't be held back
+            outside = w['ja'] in fwlib.IN_THE_RULES
+            op['intake'].append([w['ja'], *((None, None) if outside else fwlib.assign(seed, w['ja']))])
     op['probes'] = probe_outcomes(state, log, today)
     return op
 

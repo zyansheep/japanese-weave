@@ -176,7 +176,8 @@ class Refill(Home):
         op = knowledge.decide(state, flags, looked, self.UNSPENT, evaluate.Log([], {}, []), '2026-10-02', seed=5)
         self.assertEqual([ja for ja, _arm, _u in op['intake']], [queue[30], queue[40], queue[50], queue[1], queue[2]])
         self.assertEqual(op['experiment'], {'seed': 5})
-        self.assertEqual([[ja, *fwlib.assign(5, ja)] for ja, _a, _u in op['intake']], op['intake'])  # the draws
+        self.assertEqual([[ja, *(fwlib.assign(5, ja) if ja not in fwlib.IN_THE_RULES else (None, None))]
+                          for ja, _a, _u in op['intake']], op['intake'])  # the draws; none for a word the rules name
         self.assertIn([queue[0], 'queue', 'known'], op['labels'])
 
     def test_the_order_and_the_limits(self):

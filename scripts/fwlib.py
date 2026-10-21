@@ -568,10 +568,10 @@ def taken_today(state, day):
     return count if last == day else 0
 
 
-def take_in(state, entries, day):
+def take_in(state, entries, day, at=None):
     """Takes words in, [[ja, arm, draw]]: each a learning word from today, its origin learning, and in the delayed-start
-    experiment with its arm and draw (assign; arm None: outside it). Counts toward the day's NEW_PER_DAY
-    (state["intake"]). Returns the words taken in."""
+    experiment with its arm, draw, day and time (at, ms) and the day its probe is due (assign; arm None: outside it).
+    Counts toward the day's NEW_PER_DAY (state["intake"]). Returns the words taken in."""
     by_ja = {w['ja']: w for w in state['words']}
     done = []
     for ja, arm, u in entries:
@@ -581,7 +581,8 @@ def take_in(state, entries, day):
         set_status(w, 'active', day)
         w['origin'] = 'learning'
         if arm in ARMS:
-            w['arm'] = {'arm': arm, 'draw': u, 'day': day, 'probe': add_days(day, PROBE_DAY)}
+            w['arm'] = dict({'arm': arm, 'draw': u, 'day': day, 'probe': add_days(day, PROBE_DAY)},
+                            **({'at': at} if at is not None else {}))
         done.append(ja)
     state['intake'] = [day, taken_today(state, day) + len(done)]
     return done
@@ -597,6 +598,11 @@ ARMS = ('held', 'shown')
 SHOW_DAYS = 14
 PROBE_DAY = 21
 PROBE_WAIT = 14
+# Words the fixed texts name whatever the lists say: the chat brief's rules and example sentences (weave.py) and the
+# claude.ai and ChatGPT rules (export.py). Held back, they would still be named there, so they come in outside the
+# experiment (knowledge.decide). tests/test_labels.py checks the list against the texts.
+IN_THE_RULES = frozenset(('いいえ', 'いつも', 'しかし', 'だから', 'でも', 'まだ', 'もう', '今', '今日', '仕事', '例えば', '前', '問題',
+                          '多分', '大丈夫', '実は', '後', '新しい', '本当', '本当に', '確認', '簡単', '設定', '忙しい', '終わる'))
 
 
 def add_days(day, n):
@@ -673,7 +679,7 @@ def apply_labels(state, op, day):
     changed = relabel(state, op.get('labels') or [], day)
     if isinstance(op.get('experiment'), dict) and not isinstance(state.get('experiment'), dict):
         state['experiment'] = {'name': 'delayed-start', 'seed': op['experiment']['seed'], 'since': day}
-    taken = take_in(state, op.get('intake') or [], day)
+    taken = take_in(state, op.get('intake') or [], day, op.get('at'))
     return {'labels': changed, 'intake': taken, 'probes': record_probes(state, op.get('probes') or [], day),
             'switched': switched}
 
