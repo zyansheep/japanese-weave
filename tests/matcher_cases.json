@@ -1,0 +1,293 @@
+{
+  "about": [
+    "Test vectors for the matcher, run by both extension/test/matcher.test.js and tests/test_matcher.py so the two",
+    "implementations cannot drift. Each case matches text against entries (with the rules in \"without\" switched off) and",
+    "expects these spans: options as the entries' Japanese, in entry order. start and end count UTF-16 code units, as",
+    "JavaScript strings do; the Python test converts its code-point offsets. forms: matcher word forms of a word for the",
+    "parts of speech given (null: all). kinds: an entry's parts of speech. alternatives: a gloss's English alternatives."
+  ],
+  "entries": [
+    {"ja":"思う","en":"think"},
+    {"ja":"言う","en":"say"},
+    {"ja":"行く","en":"go"},
+    {"ja":"帰る","en":"return / go back"},
+    {"ja":"買う","en":"buy"},
+    {"ja":"なる","en":"become / result in"},
+    {"ja":"ある","en":"have / exist"},
+    {"ja":"いる","en":"have / exist"},
+    {"ja":"止める","en":"stop"},
+    {"ja":"泣く","en":"cry"},
+    {"ja":"死ぬ","en":"die"},
+    {"ja":"休む","en":"rest / take time off"},
+    {"ja":"見る","en":"see / look at"},
+    {"ja":"違う","en":"differ / be wrong"},
+    {"ja":"出来る","en":"can do / be good at"},
+    {"ja":"する","en":"do / make"},
+    {"ja":"開ける","en":"open / unlock"},
+    {"ja":"訪ねる","en":"visit"},
+    {"ja":"男","en":"man / male"},
+    {"ja":"女","en":"woman / girl"},
+    {"ja":"子供","en":"child / kid"},
+    {"ja":"人","en":"person / people"},
+    {"ja":"人間","en":"human / person"},
+    {"ja":"妹","en":"younger sister"},
+    {"ja":"おじいさん","en":"grandfather"},
+    {"ja":"時間","en":"time / hours"},
+    {"ja":"回","en":"times"},
+    {"ja":"後","en":"after / later"},
+    {"ja":"仕事","en":"work / job"},
+    {"ja":"休み","en":"rest / holiday"},
+    {"ja":"沢山","en":"a lot / plenty"},
+    {"ja":"年","en":"counter for years"},
+    {"ja":"新しい","en":"new"},
+    {"ja":"小さい","en":"small / little"},
+    {"ja":"可愛い","en":"cute"},
+    {"ja":"大きい","en":"big / large"},
+    {"ja":"いい","en":"good"},
+    {"ja":"遅い","en":"slow / late"},
+    {"ja":"私","en":"i"},
+    {"ja":"あなた","en":"you"},
+    {"ja":"君","en":"you"},
+    {"ja":"これ","en":"this / this one"},
+    {"ja":"この","en":"this one"},
+    {"ja":"そこ","en":"there"},
+    {"ja":"自分","en":"self / oneself"},
+    {"ja":"一つ","en":"one"},
+    {"ja":"もう","en":"already / anymore"},
+    {"ja":"カフェ","en":"café"},
+    {"ja":"有名","en":"well-known / famous"},
+    {"ja":"勉強","en":"study","pos":["n","vs"]},
+    {"ja":"ください","en":"please give... / please do..."}
+  ],
+  "cases": [
+    {"name": "whole words only, any case", "without": [],
+     "text": "I THINK so, but Thinking is not rethinking or thinks-ish.",
+     "spans": [
+       {"start":0,"end":1,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":2,"end":7,"english":"THINK","options":["思う"],"glosses":["think"],"function":false},
+       {"start":16,"end":24,"english":"Thinking","options":["思う"],"glosses":["think"],"function":false}
+     ]},
+    {"name": "a possessive counts, a contraction does not, nor a word in single quotes", "without": [],
+     "text": "My grandfather's dog can't think; I've said 'think' and you’re right.",
+     "spans": [
+       {"start":3,"end":14,"english":"grandfather","options":["おじいさん"],"glosses":["grandfather"],"function":false},
+       {"start":27,"end":32,"english":"think","options":["思う"],"glosses":["think"],"function":false},
+       {"start":39,"end":43,"english":"said","options":["言う"],"glosses":["say"],"function":false}
+     ]},
+    {"name": "curly possessive, and a plural possessive is no match (as lab.mjs)", "without": [],
+     "text": "Grandfather’s hat and the grandfathers' hats.",
+     "spans": [
+       {"start":0,"end":11,"english":"Grandfather","options":["おじいさん"],"glosses":["grandfather"],"function":false}
+     ]},
+    {"name": "regular inflections", "without": [],
+     "text": "She stops; he stopped, stopping. We visited and cried; it is dying. The cutest, smaller and bigger ones.",
+     "spans": [
+       {"start":4,"end":9,"english":"stops","options":["止める"],"glosses":["stop"],"function":false},
+       {"start":14,"end":21,"english":"stopped","options":["止める"],"glosses":["stop"],"function":false},
+       {"start":23,"end":31,"english":"stopping","options":["止める"],"glosses":["stop"],"function":false},
+       {"start":36,"end":43,"english":"visited","options":["訪ねる"],"glosses":["visit"],"function":false},
+       {"start":48,"end":53,"english":"cried","options":["泣く"],"glosses":["cry"],"function":false},
+       {"start":61,"end":66,"english":"dying","options":["死ぬ"],"glosses":["die"],"function":false},
+       {"start":72,"end":78,"english":"cutest","options":["可愛い"],"glosses":["cute"],"function":false},
+       {"start":80,"end":87,"english":"smaller","options":["小さい"],"glosses":["small"],"function":false},
+       {"start":92,"end":98,"english":"bigger","options":["大きい"],"glosses":["big"],"function":false}
+     ]},
+    {"name": "irregular verbs, plurals and comparatives", "without": [],
+     "text": "I thought he said they went and bought it. Men, women and children; people. Better and best.",
+     "spans": [
+       {"start":0,"end":1,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":2,"end":9,"english":"thought","options":["思う"],"glosses":["think"],"function":false},
+       {"start":13,"end":17,"english":"said","options":["言う"],"glosses":["say"],"function":false},
+       {"start":23,"end":27,"english":"went","options":["行く"],"glosses":["go"],"function":false},
+       {"start":32,"end":38,"english":"bought","options":["買う"],"glosses":["buy"],"function":false},
+       {"start":43,"end":46,"english":"Men","options":["男"],"glosses":["man"],"function":false},
+       {"start":48,"end":53,"english":"women","options":["女"],"glosses":["woman"],"function":false},
+       {"start":58,"end":66,"english":"children","options":["子供"],"glosses":["child"],"function":false},
+       {"start":68,"end":74,"english":"people","options":["人","人間"],"glosses":["people","person"],"function":false},
+       {"start":76,"end":82,"english":"Better","options":["いい"],"glosses":["good"],"function":false},
+       {"start":87,"end":91,"english":"best","options":["いい"],"glosses":["good"],"function":false}
+     ]},
+    {"name": "a phrase inflects its first word as a verb, its last as a noun; be X is also X", "without": [],
+     "text": "We took time off with our younger sisters. You were wrong; it is wrong to go back.",
+     "spans": [
+       {"start":3,"end":16,"english":"took time off","options":["休む"],"glosses":["take time off"],"function":false},
+       {"start":26,"end":41,"english":"younger sisters","options":["妹"],"glosses":["younger sister"],"function":false},
+       {"start":43,"end":46,"english":"You","options":["あなた","君"],"glosses":["you","you"],"function":true},
+       {"start":47,"end":57,"english":"were wrong","options":["違う"],"glosses":["be wrong"],"function":false},
+       {"start":62,"end":70,"english":"is wrong","options":["違う"],"glosses":["be wrong"],"function":false},
+       {"start":74,"end":81,"english":"go back","options":["帰る"],"glosses":["go back"],"function":false}
+     ]},
+    {"name": "phrase patterns: there is, a lot of, look at, myself; longest match wins", "without": [],
+     "text": "There was a lot of rain, there's more, and is there time? I looked at myself there.",
+     "spans": [
+       {"start":0,"end":9,"english":"There was","options":["ある","いる"],"glosses":["exist","exist"],"function":true},
+       {"start":10,"end":18,"english":"a lot of","options":["沢山"],"glosses":["a lot"],"function":false},
+       {"start":25,"end":32,"english":"there's","options":["ある","いる"],"glosses":["exist","exist"],"function":true},
+       {"start":43,"end":51,"english":"is there","options":["ある","いる"],"glosses":["exist","exist"],"function":true},
+       {"start":52,"end":56,"english":"time","options":["時間"],"glosses":["time"],"function":false},
+       {"start":58,"end":59,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":60,"end":69,"english":"looked at","options":["見る"],"glosses":["look at"],"function":false},
+       {"start":70,"end":76,"english":"myself","options":["自分"],"glosses":["self"],"function":true},
+       {"start":77,"end":82,"english":"there","options":["そこ"],"glosses":["there"],"function":true}
+     ]},
+    {"name": "this before a noun can be この; options in entry order", "without": [],
+     "text": "This one is good, this book is better, and you know this.",
+     "spans": [
+       {"start":0,"end":8,"english":"This one","options":["これ","この"],"glosses":["this one","this one"],"function":true},
+       {"start":12,"end":16,"english":"good","options":["いい"],"glosses":["good"],"function":false},
+       {"start":18,"end":22,"english":"this","options":["これ","この"],"glosses":["this","this one"],"function":true},
+       {"start":31,"end":37,"english":"better","options":["いい"],"glosses":["good"],"function":false},
+       {"start":43,"end":46,"english":"you","options":["あなた","君"],"glosses":["you","you"],"function":true},
+       {"start":52,"end":56,"english":"this","options":["これ","この"],"glosses":["this","this one"],"function":true}
+     ]},
+    {"name": "parts of speech: a noun gets no -ed, an adjective no -s; pos from the entry", "without": [],
+     "text": "The news worked; I studied the new work and the works.",
+     "spans": [
+       {"start":17,"end":18,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":19,"end":26,"english":"studied","options":["勉強"],"glosses":["study"],"function":false},
+       {"start":31,"end":34,"english":"new","options":["新しい"],"glosses":["new"],"function":false},
+       {"start":35,"end":39,"english":"work","options":["仕事"],"glosses":["work"],"function":false},
+       {"start":48,"end":53,"english":"works","options":["仕事"],"glosses":["work"],"function":false}
+     ]},
+    {"name": "helper verbs: have and do", "without": [],
+     "text": "I had been there, has never played, have to go, did not see, and had a dog. Do you do it? I did.",
+     "spans": [
+       {"start":0,"end":1,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":11,"end":16,"english":"there","options":["そこ"],"glosses":["there"],"function":true},
+       {"start":44,"end":46,"english":"go","options":["行く"],"glosses":["go"],"function":false},
+       {"start":56,"end":59,"english":"see","options":["見る"],"glosses":["see"],"function":false},
+       {"start":65,"end":68,"english":"had","options":["ある","いる"],"glosses":["have","have"],"function":true},
+       {"start":79,"end":82,"english":"you","options":["あなた","君"],"glosses":["you","you"],"function":true},
+       {"start":83,"end":85,"english":"do","options":["する"],"glosses":["do"],"function":true},
+       {"start":90,"end":91,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":92,"end":95,"english":"did","options":["する"],"glosses":["do"],"function":true}
+     ]},
+    {"name": "after a determiner a verb is a noun", "without": [],
+     "text": "Take the rest, I rest, a look at the stop. I stop.",
+     "spans": [
+       {"start":9,"end":13,"english":"rest","options":["休み"],"glosses":["rest"],"function":false},
+       {"start":15,"end":16,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":17,"end":21,"english":"rest","options":["休む","休み"],"glosses":["rest","rest"],"function":false},
+       {"start":43,"end":44,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":45,"end":49,"english":"stop","options":["止める"],"glosses":["stop"],"function":false}
+     ]},
+    {"name": "a rule-made form yields to a gloss as written, an irregular form does not", "without": [],
+     "text": "Three times, see you later, and the people.",
+     "spans": [
+       {"start":6,"end":11,"english":"times","options":["回"],"glosses":["times"],"function":false},
+       {"start":13,"end":16,"english":"see","options":["見る"],"glosses":["see"],"function":false},
+       {"start":17,"end":20,"english":"you","options":["あなた","君"],"glosses":["you","you"],"function":true},
+       {"start":21,"end":26,"english":"later","options":["後"],"glosses":["later"],"function":true},
+       {"start":36,"end":42,"english":"people","options":["人","人間"],"glosses":["people","person"],"function":false}
+     ]},
+    {"name": "no match inside a hyphenated word, but a hyphenated gloss matches", "without": [],
+     "text": "A one-on-one talk with a well-known one.",
+     "spans": [
+       {"start":25,"end":35,"english":"well-known","options":["有名"],"glosses":["well-known"],"function":false},
+       {"start":36,"end":39,"english":"one","options":["一つ"],"glosses":["one"],"function":true}
+     ]},
+    {"name": "a counter description, dots and leading \"to\" are not English to match", "without": [],
+     "text": "Two years; please give, please do it.",
+     "spans": [
+       {"start":11,"end":22,"english":"please give","options":["ください"],"glosses":["please give"],"function":false},
+       {"start":24,"end":33,"english":"please do","options":["ください"],"glosses":["please do"],"function":false}
+     ]},
+    {"name": "offsets count UTF-16 units: emoji, Japanese and a letter outside the BMP before a match", "without": [],
+     "text": "😀 日本語 café: I think 𠮷-think.",
+     "spans": [
+       {"start":7,"end":11,"english":"café","options":["カフェ"],"glosses":["café"],"function":false},
+       {"start":13,"end":14,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":15,"end":20,"english":"think","options":["思う"],"glosses":["think"],"function":false}
+     ]},
+    {"name": "function words: every word of the span closed-class", "without": [],
+     "text": "There is one; there was a lot of time.",
+     "spans": [
+       {"start":0,"end":8,"english":"There is","options":["ある","いる"],"glosses":["exist","exist"],"function":true},
+       {"start":9,"end":12,"english":"one","options":["一つ"],"glosses":["one"],"function":true},
+       {"start":14,"end":23,"english":"there was","options":["ある","いる"],"glosses":["exist","exist"],"function":true},
+       {"start":24,"end":32,"english":"a lot of","options":["沢山"],"glosses":["a lot"],"function":false},
+       {"start":33,"end":37,"english":"time","options":["時間"],"glosses":["time"],"function":false}
+     ]},
+    {"name": "without helpers", "without": ["helpers"],
+     "text": "I had been there.",
+     "spans": [
+       {"start":0,"end":1,"english":"I","options":["私"],"glosses":["i"],"function":true},
+       {"start":2,"end":5,"english":"had","options":["ある","いる"],"glosses":["have","have"],"function":true},
+       {"start":11,"end":16,"english":"there","options":["そこ"],"glosses":["there"],"function":true}
+     ]},
+    {"name": "without nouns", "without": ["nouns"],
+     "text": "Take the rest.",
+     "spans": [
+       {"start":9,"end":13,"english":"rest","options":["休む","休み"],"glosses":["rest","rest"],"function":false}
+     ]},
+    {"name": "without lexical", "without": ["lexical"],
+     "text": "Three times, later.",
+     "spans": [
+       {"start":6,"end":11,"english":"times","options":["時間","回"],"glosses":["time","times"],"function":false},
+       {"start":13,"end":18,"english":"later","options":["後","遅い"],"glosses":["later","late"],"function":true}
+     ]},
+    {"name": "without hyphens", "without": ["hyphens"],
+     "text": "A one-on-one talk.",
+     "spans": [
+       {"start":2,"end":5,"english":"one","options":["一つ"],"glosses":["one"],"function":true},
+       {"start":9,"end":12,"english":"one","options":["一つ"],"glosses":["one"],"function":true}
+     ]},
+    {"name": "without kinds", "without": ["kinds"],
+     "text": "The news worked.",
+     "spans": [
+       {"start":4,"end":8,"english":"news","options":["新しい"],"glosses":["new"],"function":false},
+       {"start":9,"end":15,"english":"worked","options":["仕事"],"glosses":["work"],"function":false}
+     ]}
+  ],
+  "forms": [
+    {"word":"stop","kinds":null,"forms":["stopped","stops","stopping","stopper","stoppest"]},
+    {"word":"stop","kinds":"v","forms":["stopped","stops","stopping"]},
+    {"word":"visit","kinds":"v","forms":["visited","visitted","visits","visiting","visitting"]},
+    {"word":"cry","kinds":"v","forms":["cried","cries","crying"]},
+    {"word":"die","kinds":"v","forms":["died","dies","dying"]},
+    {"word":"be","kinds":"v","forms":["am","is","are","was","were","been","bes","being"]},
+    {"word":"have","kinds":"v","forms":["has","had","haves","having"]},
+    {"word":"go","kinds":"v","forms":["goes","went","gone","gos","going"]},
+    {"word":"see","kinds":"v","forms":["saw","seen","sees","seeing"]},
+    {"word":"make","kinds":"v","forms":["made","makes","making"]},
+    {"word":"person","kinds":"n","forms":["people"]},
+    {"word":"man","kinds":"n","forms":["men"]},
+    {"word":"woman","kinds":"n","forms":["women"]},
+    {"word":"policeman","kinds":"n","forms":["policemans","policemen"]},
+    {"word":"potato","kinds":"n","forms":["potatoes"]},
+    {"word":"box","kinds":"n","forms":["boxes"]},
+    {"word":"knife","kinds":"n","forms":["knives"]},
+    {"word":"big","kinds":"a","forms":["bigger","biggest"]},
+    {"word":"late","kinds":"a","forms":["later","latest"]},
+    {"word":"easy","kinds":"a","forms":["easier","easiest"]},
+    {"word":"good","kinds":"a","forms":["better","best"]},
+    {"word":"new","kinds":"a","forms":["newer","newest"]},
+    {"word":"about","kinds":null,"forms":[]},
+    {"word":"one","kinds":"n","forms":[]}
+  ],
+  "kinds": [
+    {"ja":"行く","kinds":"v"},
+    {"ja":"思う","kinds":"v"},
+    {"ja":"もう","kinds":""},
+    {"ja":"こう","kinds":""},
+    {"ja":"二つ","kinds":"n"},
+    {"ja":"待つ","kinds":"v"},
+    {"ja":"新しい","kinds":"a"},
+    {"ja":"本","kinds":"n"},
+    {"ja":"〜時","kinds":"n"},
+    {"ja":"コンピュータ","kinds":"n"},
+    {"ja":"ため","kinds":"n"},
+    {"ja":"勉強","pos":["n","vs"],"kinds":"nv"},
+    {"ja":"早い","pos":"adj-i","kinds":"a"},
+    {"ja":"ゆっくり","pos":["adv"],"kinds":""}
+  ],
+  "alternatives": [
+    {"en":"have / exist","alternatives":["have","exist"]},
+    {"en":"please give... / please do...","alternatives":["please give","please do"]},
+    {"en":"counter for years","alternatives":[]},
+    {"en":"right? / isn't it?","alternatives":["right","isn't it"]},
+    {"en":"to eat (something)","alternatives":["eat"]},
+    {"en":["to eat","to have a meal","counter for meals"],"alternatives":["eat","have a meal"]},
+    {"en":"Japanese (language) / “nihongo”","alternatives":["japanese","nihongo"]}
+  ]
+}
