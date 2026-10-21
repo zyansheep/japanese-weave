@@ -877,12 +877,12 @@ taking new ones in; then check out the code from before the switch, which runs t
   reading model, the challenge, and how much of the log, its interactions and the intensity changes came before the
   day's end. A refresh then fits twice (the whole log, and the log before today), and the first one of a day also
   chooses the reading model (about a dozen fits, without recency) and fits the whole log from nothing, from two floors.
-  On the 2026-10-20 log (measured on a copy of it, 2026-10-21) a refresh takes 0.27 to 0.46 s, the day's first 1.65 s
-  and 1.84 s with nothing cached (version 2: 0.22 to 0.30 s, 0.87 s and 1.07 s). On a simulated log of 60 days (52,000
-  observations), 2.6 to 3.1 s, the day's first 15.8 s and 105 s with nothing cached, as after a change of the model's
-  version (version 2: 1.6 s, 7.4 s and 12.7 s): the fit itself takes 0.9 to 1.2 s from the last one and 7 s from
-  nothing (version 2: 0.05 s and 0.38 s), each of the 30 days summed one fit. Reading the log (evaluate.extract) takes
-  about 1 s, writing knowledge.json 0.3 s.
+  On the 2026-10-20 log (measured on a copy of it, 2026-10-21, with the word features and labels) a refresh takes
+  0.35 to 0.56 s, the day's first 2.3 s and 3.0 s with nothing cached (without recency: 0.29 to 0.41 s, 1.3 s and
+  1.7 s). On a simulated log of 60 days (52,000 observations), 3.0 to 3.1 s, the day's first 17.9 s and 115 s with
+  nothing cached, as after a change of the model's version (without recency: 1.7 s, 9.3 s and 15.8 s): the fit itself
+  takes 1.2 s from the last one and 7 s from nothing (without recency: 0.08 to 0.12 s and 0.45 s), and each of the 30
+  days summed is one fit. Reading the log (evaluate.extract) takes about 1 s, writing knowledge.json 0.3 s.
 - The native host's state reply carries, per word, k, its uncertainty, whether it is free and when it was last read
   (read), and the recency term's floor, the challenge and normal's budget. They are not part of the word-state version,
   so the extension's cache isn't cleared when they change.

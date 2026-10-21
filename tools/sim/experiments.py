@@ -319,7 +319,7 @@ def fitted_decay(fit, ja):
     return -k - knowledge.recency_log_odds(k, HOUR_U, fit.theta[knowledge.FLOOR])
 
 
-def _daily(rows, i, j, member):
+def _daily_means(rows, i, j, member):
     """Per day, the mean of model j's loss minus model i's over the rows that member takes."""
     days = {}
     for o, p, _q, _t in rows:
@@ -377,7 +377,7 @@ def recency(seeds=(1, 2, 3), days=28, worlds=(('the reader', {}), ('reading refr
                             calib[('n', c)] = calib.get(('n', c), 0) + 1
                 summary = evaluate.summary(result)['paired']['fit']
                 paired.append((seed, {c: summary[c] for c in ('all', 'known', 'learning', 'new', 'browser', 't3')}))
-                learning += _daily(result['rows'], 0, 1, lambda o: not o.form and o.status == 'learning')
+                learning += _daily_means(result['rows'], 0, 1, lambda o: not o.form and o.status == 'learning')
         lines.append(f'{world_name}:')
         lines.append(f'  floor (odds) {", ".join(f"{f:.4f}" for f in floors)} (truth {true_floor:.4f}); context '
                      + ', '.join(f'{c:+.2f} ({sd:.2f})' for c, sd in contexts) + ' (truth 0)')
