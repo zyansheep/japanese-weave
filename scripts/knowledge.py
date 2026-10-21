@@ -12,8 +12,10 @@ replayed as episodes, which exist only when something was opened: there an updat
 at least one open, and only the line rule applies. Every lexicon word is scored, words not introduced yet included,
 and a glossed word is matched to its entry through its dictionary form (inflection.py: T3 glosses conjugated verbs
 whole). refresh() replays the whole log from scratch (deterministic, retunable), writes knowledge.json, steers the
-peek-rate dial, makes a few guarded status moves, and reports whether the default amount of Japanese looks right
-(calibration) and which opened words the lexicon doesn't have (unlisted).
+peek-rate dial, makes a few guarded status moves, and reports whether the default amount of Japanese looks right and
+how the model's expected lookups per class compare with those seen, in lookups per 100 words read (calibration), and
+which opened words the lexicon doesn't have (unlisted). The updates are the Online class, which evaluate.py's "today"
+model runs too.
 """
 import json
 import math
