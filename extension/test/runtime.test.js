@@ -165,6 +165,10 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     expect(new Set(local.pendingLog.map((e) => `${e.view}/${e.context}`)).size).toBe(1);
     expect(await dispatch({ type: 'event', word: 'bonjour', event: 'seen' }, page())).toEqual({ ok: false }); // not a known word
     expect(await dispatch({ ...local.pendingLog[1], type: 'interaction', word: 'bonjour' }, page())).toEqual({ ok: false });
+    // a sentence's closing mark is logged: its translation opened (levels.js isSentenceMark)
+    expect(await dispatch({ ...local.pendingLog[1], type: 'interaction', word: '。', uid: 'v-end' }, page())).toEqual({ ok: true });
+    expect(local.pendingLog.at(-1)).toMatchObject({ kind: 'peek', word: '。' });
+    local.pendingLog.pop();
     // Nothing in the DOM names the word or the revision; pages can't forge events with fake spans or synthetic input.
     expect(win.document.body.innerHTML).not.toMatch(/data-fw-(word|key)/);
     const fake = win.document.createElement('span');

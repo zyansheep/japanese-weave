@@ -163,6 +163,9 @@ function pieceWord(t, idx) {
 
 const MAX_PARTS = 40;
 const SENTENCE_END = /[。？！?!]$/;
+// A sentence's closing mark, which stands for the sentence in the log: its end span's word (text.js), opened for the
+// translation.
+export const isSentenceMark = (t) => /^[。？！?!]$/.test(t);
 
 // A phrase or sentence swap: every piece a listed word (or a form of one) or grammar, the pieces spelling f, at least one
 // listed word. Each word piece gets its gloss, romaji and kana from the list. null if anything is off.

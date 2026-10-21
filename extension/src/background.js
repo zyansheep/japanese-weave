@@ -7,8 +7,8 @@ import { requestSwaps } from './engine.js';
 import { PROMPT_VERSION } from './prompt.js';
 import { candidatesFor, MAX_BATCH, BATCH, FULL_BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, INTENSITY_OFF,
-  INTENSITY_FULL } from './levels.js';
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, isSentenceMark,
+  INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
@@ -280,12 +280,13 @@ async function record(msg, sender) {
   return { ok: true };
 }
 
-// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state.
+// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state and a
+// sentence's closing mark (its translation opened).
 async function logInteraction(msg, sender) {
   const ctx = await context();
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
   const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
-  if (!item || (item.word !== undefined && !(await listed(item.word)))) return { ok: false };
+  if (!item || (item.word !== undefined && !isSentenceMark(item.word) && !(await listed(item.word)))) return { ok: false };
   const queued = await locked(() => queueLog(chromeStorage, [item]));
   if (queued >= FLUSH_AT) void flush();
   else scheduleFlush();

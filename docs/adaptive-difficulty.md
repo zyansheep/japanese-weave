@@ -92,8 +92,9 @@ candidate the fewest steps back, then the earliest entry; a form is matched only
   alone would overstate each; without a message height, the summed height of the distinct bands is used); share is
   how far down the band the word sits. A word whose paragraph has no stay gets 0 from this, so only the line rule from the
   words opened can weigh it.
-- Unopened words in a T3 sentence whose whole-sentence translation was opened get no observation: you read it in
-  English. Words opened in that sentence still count as opened.
+- Unopened words in a sentence whose whole-sentence translation was opened (its 。 is among the annotations; in T3,
+  and on the web since 2026-10-20) get no observation: you read it in English. Words opened in that sentence still
+  count as opened.
 
 ### Passages and messages shown: the chance it was read
 

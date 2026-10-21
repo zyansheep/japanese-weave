@@ -37,7 +37,9 @@ did once each passage named the listed words in it (below):
 
 On the page a phrase or sentence is one group: each of its words is underlined and glossed on its own (a peek is logged
 for that word), a sentence's 。 shows the translation of the whole sentence, and a click anywhere flips the group back
-to English. A flip of a group is logged but not counted against the word clicked.
+to English. A flip of a group is logged but not counted against the word clicked. Since 2026-10-20 the 。 is logged too,
+as T3 logs it: it is in the passage's glossed words, and opening it is a peek of the 。 (the price of a sentence is
+fitted from these); before, nothing recorded a sentence's translation being opened on the web.
 
 How many sentences go fully into Japanese is up to the extension's lookup budget, not the stage: since prompt 6 the
 model is asked for every sentence the list can say, with the word and phrase swaps inside it, and `planSwaps` prices
