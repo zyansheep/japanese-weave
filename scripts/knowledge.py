@@ -25,10 +25,12 @@ and card, the uncapped ln(1 + Anki interval), and for a word not marked known it
 kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
 13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as
 much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
-counts FORM_WEIGHT. Each word's uncertainty is the fit's curvature (Laplace). The reading model (pace and cap) is
-chosen once a day by profile likelihood over a grid, on both surfaces. The fit is the Fit class, which evaluate.py's
-"fit" model (evaluate.CURRENT) runs too; the online updates it replaced are the Online class, kept as evaluate.py's
-"today" for comparison.
+counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset,
+corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
+computed from its answers alone, so it remains the check on the model. Each word's uncertainty is the fit's curvature
+(Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
+The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online updates it replaced
+are the Online class, kept as evaluate.py's "today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
@@ -681,11 +683,14 @@ FIT_ITERATIONS = 60
 # (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. The recency term's
 # (recency_log_odds): the floor, the log odds of a lookup right after a read, centred above every word (no recency: the
 # term enters only as the reader's own log shows it), and the context offset for a repeat in the same page or window.
+# The monthly probe's (probe): its answers are observations of their own kind (probe_answers), recognition out of
+# context, answered on purpose, so they get their own offset on the web's scale, centred on none and free to move by
+# about the lookup habit (PLAN.md row R: a word not recognised in reading is looked up only some of the time).
 # Then a word's prior mean, a regression on its features (features): with an Anki card, an intercept by origin
 # (origin_at; the names say new, learning and known) plus a slope on ln(1 + interval), centred on the old prior
 # 0.5 + 0.8 ln(1 + interval); without one, an intercept by origin, centred on the old neutral prior (1.0) and, for words
 # marked known, the planner's fwlib.KNOWN_PRIOR_K; for a word not marked known, plus its word features.
-SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5),
+SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5), 'probe': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 # And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD: on their scales
@@ -698,8 +703,8 @@ WORD_FEATURES = ('rank', 'kanji known', 'all kanji known', 'kana', 'katakana', '
 WORD_SD = 0.5
 SHARED.update({name: (0.0, WORD_SD) for name in WORD_FEATURES})
 SHARED_NAMES = tuple(SHARED)
-T3, FORM, FLOOR, CONTEXT = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context'))
-JOINED = (T3, FORM, FLOOR, CONTEXT)  # the shared parameters an observation's chance depends on
+T3, FORM, FLOOR, CONTEXT, PROBE = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context', 'probe'))
+JOINED = (T3, FORM, FLOOR, CONTEXT, PROBE)  # the shared parameters an observation's chance depends on
 ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
@@ -982,7 +987,7 @@ def word_entries(words, ids=None):
 
 
 def evidenced(log, until):
-    """The words with evidence in a log before `until`: an observation or a command."""
+    """The words with evidence in a log before `until`: an observation, a command or a probe answer."""
     out = set()
     for event in log.events:
         if event.at >= until:
@@ -991,7 +996,73 @@ def evidenced(log, until):
             out.update(o.word for o in event.obs)
         else:
             out.add(event.word)
+    out.update(ja for at, ja, _y in probe_log(log)[0] if at < until)
     return out
+
+
+OVERCLAIM_DAYS = 365       # the over-claiming rate pools the made-up words of the probes this long before a fit
+                           # (probe.FAKE_DAYS)
+
+
+def probe_answers(probes, entries, d=None):
+    """The monthly probes' answers (state["probes"], probe.py's records) as the fit reads them: (answers, fakes,
+    extra). answers: [(at, ja, y)], one per real word answered, y 1 when answered not known (the event the fit counts,
+    as it counts a lookup) and 0 known; skipped words are left out, and so are the made-up words, which only say how
+    often the reader claims a word not known. ja is the word state's word with the answered entry (entries: {ja: its
+    dictionary entry}, knowledge.word_entries of the word state; by JMdict id, else by spelling), else the entry's
+    own spelling, and extra has that entry ({ja: entry}, from the dictionary d) for the word features. fakes:
+    [(at, claimed, answered)] per probe, for the over-claiming rate (overclaiming). A record that isn't one is left
+    out whole."""
+    by_id, by_key = {}, {}
+    for ja, e in (entries or {}).items():
+        if e is not None:
+            by_id.setdefault(e['id'], ja)
+        by_key.setdefault(fwlib.key(ja), ja)
+    answers, fakes, extra = [], [], {}
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    for p in probes or ():
+        if not isinstance(p, dict) or not number(p.get('at')):
+            continue
+        rows = [r for r in p.get('words') or () if isinstance(r, list) and len(r) == 5 and isinstance(r[0], str)
+                and isinstance(r[1], int) and r[4] in (0, 1)]
+        made_up = [r[1] for r in p.get('fakes') or () if isinstance(r, list) and len(r) == 2 and r[1] in (0, 1)]
+        fakes.append((p['at'], sum(made_up), len(made_up)))
+        for spelling, id_, _band, _weight, answer in rows:
+            ja = by_id.get(id_) or by_key.get(fwlib.key(spelling))
+            if ja is None:
+                if d is None:
+                    import dictionary  # here: only a probe of a word outside the state needs it
+                    d = dictionary.load() if dictionary.PATH.exists() else False
+                entry = d.get(id_) if d else None
+                if entry is None:  # without the dictionary, the words outside the state are left out
+                    continue
+                ja = entry['ja']
+                extra[ja] = entry
+            answers.append((p['at'], ja, 1 - answer))
+    return answers, fakes, extra
+
+
+def probe_log(log):
+    """probe_answers of a log's probes (log.probes: the state's records; none for a log without them), found once per
+    log and its word state's entries."""
+    origin = getattr(log, 'origin', log)
+    found = origin.__dict__.get('_probed')
+    if found is None:
+        probes = getattr(log, 'probes', None) or ()
+        found = probe_answers(probes, getattr(log, 'entries', None) or {}) if probes else ((), (), {})
+        origin.__dict__['_probed'] = found
+    return found
+
+
+def overclaiming(fakes, until, days=OVERCLAIM_DAYS):
+    """The share of made-up words the reader claimed known in the probes of the `days` days before `until` (fakes:
+    probe_answers'), the over-claiming rate the probe's own correction for guessing uses (probe.corrected); 0 without
+    any."""
+    claimed = answered = 0
+    for at, c, n in fakes:
+        if until - days * DAY_MS <= at < until:
+            claimed, answered = claimed + c, answered + n
+    return claimed / answered if answered else 0.0
 
 
 def _solve(a, b):
@@ -1023,6 +1094,10 @@ class Fit:
     conditioned on at least one open. A word's unopened observations with the same read weight and clock, rounded to
     POOL_STEP (u on its square root, finer near 0), pool, so the work grows with the words more than with the log.
 
+    The monthly probes' answers before `until` (probe_log, without them when probes is False) are observations too,
+    each at the word's long-term chance with an offset of its own (_probe_terms); a probed word outside the word state
+    takes its features from its dictionary entry.
+
     Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
     regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
     times (COMMAND_K - k)^2 / 2 while k is below a known command's or above a learn command's; and each shared
@@ -1043,13 +1118,15 @@ class Fit:
     and Anki interval alone), for comparison."""
 
     def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, free=None, plain=False,
-                 recency=True):
+                 recency=True, probes=True):
         self.until, self.day, self.frozen, self.plain = until, day_of(until - 1), frozen, plain
-        self.recency = recency
+        self.recency, self.probes = recency, probes
         self.pace, self.top = pace or log.pace, top or log.top
         self.intervals = log.intervals
         self.by_ja = {w['ja']: w for w in log.words}
         self.entries = {} if plain else getattr(log, 'entries', None) or {}
+        if probes and not plain and probe_log(log)[2]:  # the entries of probed words outside the word state
+            self.entries = dict(self.entries, **probe_log(log)[2])
         self.own = {ja for ja in evidenced(log, until) if (free or {}).get(ja)} if self.entries else set()
         self.known, self._features = kanji_counts(self.own), {}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
@@ -1145,6 +1222,28 @@ class Fit:
                 self.episodes.append((chosen, decay))
         keys = list(pooled)
         self.terms = tuple(tuple(key[j] for key in keys) for j in range(7)) + (tuple(pooled[key] for key in keys),)
+        self._probe_terms(log)
+
+    def _probe_terms(self, log):
+        """The monthly probes' answers before until (probe_log), pooled by word and answer: probe_terms (word, y:
+        weight), each weighted like evidence. A word answered not known (y 1) has a chance r q, one answered known
+        1 - r q, with q = sigmoid(probe - k) the chance the reader doesn't recognise it at a glance out of context and
+        r = 1 - f the chance such a word is answered not known, f the over-claiming rate of the made-up words
+        (overclaiming, as the probe's own correction for guessing has it): a probe answer is a read showing with its
+        own offset, at the word's long-term chance (a probe is no reading, and its clock doesn't move)."""
+        pooled, self.probe_read = {}, 1.0
+        answers, fakes, _extra = probe_log(log) if self.probes else ((), (), {})
+        if answers:
+            self.probe_read = 1.0 - min(0.9, overclaiming(fakes, self.until))
+        for at, ja, y in answers:
+            if at >= self.until:
+                continue
+            i = self._word(ja)
+            v = 0.5 ** ((self.until - at) / DAY_MS / EVIDENCE_DAYS)
+            pooled[(i, y)] = pooled.get((i, y), 0.0) + v
+            self.n[i] += v * (1.0 if y else self.probe_read)
+        keys = list(pooled)
+        self.probe_terms = (tuple(i for i, _y in keys), tuple(y for _i, y in keys), tuple(pooled[k] for k in keys))
 
     def _mean(self, i, theta):
         return sum(theta[f] * value for f, value in self.x[i].items())
@@ -1227,6 +1326,26 @@ class Fit:
                 gc -= vd * x
                 jcontext[w] += vik * x
                 hcc += vi * x * x
+        r, jprobe, gp, hpp = self.probe_read, joins[PROBE], 0.0, 0.0
+        for w, y, v in zip(*self.probe_terms):  # eta = probe - k: d eta / d k = -1, d eta / d probe = 1
+            kw = k[w]
+            kw = -30.0 if kw < -30.0 else 30.0 if kw > 30.0 else kw
+            q = 1 / (1 + exp(-(theta[PROBE] - kw)))
+            q = 1e-12 if q < 1e-12 else 1 - 1e-12 if q > 1 - 1e-12 else q
+            if y:  # answered not known: r q
+                d, i = 1 - q, q * (1 - q)
+                total -= v * log(r * q)
+            else:  # answered known: 1 - r q
+                a = 1 - r * q
+                d, i = -r * q * (1 - q) / a, r * q * (1 - q) * (1 - q) / a
+                total -= v * log(a)
+            grad[w] += v * d
+            info[w] += v * i
+            jprobe[w] -= v * i
+            gp -= v * d
+            hpp += v * i
+        g[PROBE] += gp
+        h[PROBE][PROBE] += hpp
         for (a, b), value in (((T3, T3), htt), ((T3, FORM), htf), ((T3, FLOOR), htl), ((T3, CONTEXT), htc),
                               ((FORM, FORM), hff), ((FORM, FLOOR), hfl), ((FORM, CONTEXT), hfc),
                               ((FLOOR, FLOOR), hll), ((FLOOR, CONTEXT), hlc), ((CONTEXT, CONTEXT), hcc)):
@@ -1377,6 +1496,11 @@ class Fit:
         """q for a word whose long-term knowledge is k."""
         offset = (self.theta[T3] if surface == 't3' else 0.0) + (self.theta[FORM] if form else 0.0)
         return sigmoid(offset + self.theta[CONTEXT] * s + recency_log_odds(k, u, self.theta[FLOOR]))
+
+    def known_chance(self, ja):
+        """The chance a probe answers this word known: 1 - r sigmoid(probe - k) (_probe_terms), at the over-claiming
+        rate of this fit's probes."""
+        return 1 - self.probe_read * sigmoid(self.theta[PROBE] - self.estimate(ja)[0])
 
     def shared(self):
         return {name: round(v, 4) for name, v in zip(SHARED_NAMES, self.theta)}
@@ -2024,8 +2148,8 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
-MODEL = 'fit 3'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
-                 # term, with the prior by origin and word features)
+MODEL = 'fit 4'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
+                 # term, with the prior by origin and word features; fit 4: the monthly probes' answers)
 
 
 def word_stats(log, now_ms):
@@ -2076,9 +2200,10 @@ def refresh(now=None):
     flag: free_flag), n (evidence weight), obs, opened, recent (opens in the last RECENT_DAYS days), last and history,
     read (when it was last read: [shown, chance] per showing of the last LONG_DAYS, word_reads; a consumer gets its
     current chance from it, current_chance), and id (the JMdict id of its dictionary entry, word_entries, which the next
-    refresh reuses); offset (the web's 0, chat's fitted); recency (the floor, the context offset, LONG_DAYS, SOFT_MIN
-    and SPACING_P); fit (the shared parameters with their sd, the prior widths, and whether it started from nothing, as
-    the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices; sentences has their counts);
+    refresh reuses); also each word a monthly probe answered that the word state doesn't have (probed, with its entry's
+    id: reading.starting_k takes its k for that entry); offset (the web's 0, chat's fitted); recency (the floor, the
+    context offset, LONG_DAYS, SOFT_MIN and SPACING_P); fit (the shared parameters with their sd, the prior widths,
+    and whether it started from nothing, as the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices; sentences has their counts);
     reading (tune, once a day); calibration, with daily, its sums for each day before today (day_totals), reused while
     the day's key holds (day_keys), and dailyFree, the free flags at the start of the last of those days, which today's
     records carry on from; unlisted; spend (spending: the budget's use that sets intake); moves (the label changes
@@ -2101,7 +2226,8 @@ def refresh(now=None):
         reading = previous.get('reading')
         fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == MODEL
         pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
-        log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
+        log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top,
+                               state.get('probes'))
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
         before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
         log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
@@ -2154,6 +2280,14 @@ def refresh(now=None):
                     if chance >= 0.001]
             if read:  # when it was last read, for its current chance (current_chance)
                 words[ja]['read'] = read
+        for ja, entry in probe_log(log)[2].items():  # a probed word outside the word state, by its entry's id
+            i = fit.index.get(ja)
+            if ja not in words and i is not None:
+                k, sd = fit.estimate(ja)
+                mean = fit.prior(ja)[0]
+                words[ja] = {'k': round(k, 3), 'sd': round(sd, 3), 'mu': round(mean, 3),
+                             'free': free_flag(k, sd, before.get(ja), mean), 'n': round(fit.n[i], 2), 'obs': 0,
+                             'id': entry['id'], 'probed': True}
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
         spend = spending(contexts, briefs, now_ms)
         looked = {ja: len(st['recent']) for ja, st in stats.items() if len(st['recent']) >= fwlib.LOOKED_UP}

@@ -66,7 +66,17 @@ clusters. Few words a probe answers unknown have been shown, so it rests on few 
 Records. A probe is a `probe` op (hub.py): its words with their entry id, band, weight and answer, its made-up words
 and answers, the bands, the estimate, how it was taken and how long it took. It is applied where the word state lives
 and kept in state["probes"] (the newest KEEP), so every machine's cache has the history the no-repeat rule and the
-due date read. The answers are never evidence for the model: the probe is its check.
+due date read.
+
+The model and the probe. Each answer is also evidence for the model (knowledge.probe_answers): an observation of its
+own kind, recognition out of context answered on purpose, with an offset of its own; a "yes" counts for less as the
+made-up words show over-claiming (the same f as the correction above), and the made-up words themselves are left
+out. The probe samples every rank band, which is what the starting values' rank slope lacks; on the simulated reader
+(tools/sim/run.py priors) one probe takes the error of rare words' starting values from about +0.7 to +0.6 on the
+log-odds scale (docs/adaptive-difficulty.md). But the probe stays the check on the model: its estimate here is
+computed from its answers alone, never from the model, and anything that sets the two side by side takes the model
+as it stood before the probe (the listed share above, from the labels when the probe was drawn; in the simulated
+reader, a fit made just before the probe, whose predictions of its answers are scored).
 """
 import argparse
 import datetime as dt

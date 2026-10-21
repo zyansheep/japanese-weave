@@ -455,12 +455,14 @@ class Tally:
 
 def starting_k(know, entry, word=None):
     """A word's knowledge on the log-odds scale before it comes in (k: its lookup chance is sigmoid(offset - k)): its
-    estimate in knowledge.json when the word state has it (every word of the state is scored, new ones too), else the
-    starting value of a new word with this dictionary entry (knowledge.prior_estimate: the fitted prior by the word's
-    own features: frequency rank, kanji known, script, word type, length), else the neutral prior."""
+    estimate in knowledge.json when the word state has it (every word of the state is scored, new ones too) or a
+    monthly probe asked about this entry (knowledge.json keeps those words too, with the entry's id), else the starting
+    value of a new word with this dictionary entry (knowledge.prior_estimate: the fitted prior by the word's own
+    features: frequency rank, kanji known, script, word type, length), else the neutral prior."""
     import knowledge
     estimate = ((know or {}).get('words') or {}).get(word['ja'] if word else entry['ja'])
-    if word is not None and isinstance(estimate, dict) and isinstance(estimate.get('k'), (int, float)):
+    if isinstance(estimate, dict) and isinstance(estimate.get('k'), (int, float)) and (
+            word is not None or estimate.get('probed') is True and estimate.get('id') == entry.get('id')):
         return estimate['k']
     prior = knowledge.prior_estimate(know or {}, 'new', entry=entry)
     return prior[0] if prior else knowledge.prior(None)
