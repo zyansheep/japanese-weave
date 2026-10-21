@@ -623,11 +623,11 @@ chat exposure) is counted per dictionary entry (data/dictionary.tsv, by its JMdi
   included ("go back" is 戻る's, so its "back" is never 奥). Code, links, `<abbr>` tags with their glosses, footer
   gloss lines, markup and identifiers (snake_case, paths, dotted and camelCase names) are left out. A place counts for
   at most one entry, and only where a sense check can trust it (reading.Reader.trusted): never closed-class English
-  (the matcher's function flag: "about", "one", "so"); with sense flags (data/senses.tsv through senses.py, NEXT_STEPS
-  step 12), the most frequent option flagged safe; until then, the most frequent option when that English is its main
-  meaning (the first of its display gloss) and no more frequent entry reaches the same English only by a rule's
-  inflection ("used" is the past of 使う before it is 中古 "used"). The index is rebuilt when the flags file appears
-  or changes, so the counts switch to the flags from then on.
+  (the matcher's function flag: "about", "one", "so"); then the most frequent option the sense flags (data/senses.tsv
+  through senses.py, NEXT_STEPS step 12) call safe for the English it matched. Without a flags file (and for the
+  chat's topical words) the most frequent option when that English is its main meaning (the first of its display
+  gloss) and no more frequent entry reaches the same English only by a rule's inflection ("used" is the past of 使う
+  before it is 中古 "used"). The index is rebuilt when the flags file appears or changes.
 - its Japanese, which Claude wrote and so is checked by a model: through its `<abbr>` tags when it has them
   (dictionary.find on the word, its reading and its meaning, so a conjugated verb counts for its entry), else the
   word state's words found by the script-aware matching.
