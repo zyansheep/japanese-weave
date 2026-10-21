@@ -48,6 +48,10 @@
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
                                                      much Japanese a passage had, your heavier/lighter presses,
                                                      and the words you opened that aren't in the word list
+  fw.py evaluate [--models today,constant] [--home DIR] [--truth FILE] [--skip DAYS]
+                                                     score models of lookup chances on the gloss log, each day
+                                                     predicted from the days before (scripts/evaluate.py; a
+                                                     simulated reader's state dir from tools/sim works too)
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
                                                      (with a collector: send them and anything queued, and
                                                      refresh the cached state)
@@ -78,6 +82,7 @@ import anki  # noqa: E402
 import feedback  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
+import evaluate  # noqa: E402
 import knowledge  # noqa: E402
 import threads  # noqa: E402
 
@@ -890,6 +895,9 @@ def main(argv=None):
     p.add_argument('--session', help='the chat for "here": its Claude Code session id')
     p.set_defaults(run=intensity_cmd)
     sub.add_parser('calibrate').set_defaults(run=calibrate_cmd)
+    p = sub.add_parser('evaluate')
+    evaluate.add_arguments(p)
+    p.set_defaults(run=evaluate.run)
     p = sub.add_parser('collector')
     p.add_argument('action', choices=['run', 'install'])
     p.add_argument('--listen', required=True, metavar='HOST:PORT')
