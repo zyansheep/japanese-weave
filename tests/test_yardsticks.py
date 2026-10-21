@@ -43,21 +43,28 @@ class Home(unittest.TestCase):
 
 class Convergence(unittest.TestCase):
     """PLAN.md section 10: a word starting at 27% whose true chance is 5%, read 3 times a day, must cross the 8% free
-    line within 300 exposures. evaluate.CURRENT is the model knowledge.py runs."""
+    line within 300 exposures. evaluate.CURRENT is the model knowledge.py runs. Its estimate is the long-term chance;
+    the words' true chance here is the same at every gap, which the fit learns: the floor goes above them."""
 
     def test_a_word_crosses_the_free_line_within_300_exposures(self):
         log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
-        q = experiments.estimates(evaluate.current(), log, 300)
+        model = evaluate.current()
+        q = experiments.estimates(model, log, 300)
         self.assertLess(statistics.median(q), fwlib.FREE_P)
+        self.assertGreater(model.last.q('w0', 'browser'), 0.02)  # no recency: the floor is above them
+        self.assertGreater(model.last.theta[knowledge.FLOOR], knowledge.logit(0.05))
 
     def test_one_word_among_others_crosses_it_too(self):
         # The fit learns the prior's mean from the words themselves, so a hundred words all at 5% pull it down as well.
         # Held at its prior (27%, as for one word among many others that are at 27%), each word still gets there on
-        # its own evidence (between 30 and 100 exposures), and has not by 10.
+        # its own evidence (between 30 and 100 exposures), and has not by 10. This tests the prior's pull, so recency
+        # is off: held at its prior too, the floor (2%) would say these words, at 5% when read 5 hours after the last
+        # time, are at about 25% a week after, which is right in a world with that floor and isn't this one.
         log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
         self.assertEqual(evaluate.CURRENT, 'fit')
-        self.assertLess(statistics.median(experiments.estimates(evaluate.Fitted(frozen=True), log, 300)), fwlib.FREE_P)
-        self.assertGreater(statistics.median(experiments.estimates(evaluate.Fitted(frozen=True), log, 10)), 0.1)
+        held = lambda: evaluate.Fitted(frozen=True, recency=False)
+        self.assertLess(statistics.median(experiments.estimates(held(), log, 300)), fwlib.FREE_P)
+        self.assertGreater(statistics.median(experiments.estimates(held(), log, 10)), 0.1)
 
     def test_without_the_pull_today_s_steps_get_there(self):
         log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
@@ -67,7 +74,9 @@ class Convergence(unittest.TestCase):
 
 class FreeLine(unittest.TestCase):
     """PLAN.md section 5, rule 1: a word leaves the free set only when the low end of its lookup chance passes 8%, and
-    rejoins only when the high end falls below it, so one lookup doesn't flip it (knowledge.free_flag)."""
+    rejoins only when the high end falls below it, so one lookup doesn't flip it (knowledge.free_flag). On the fit
+    without recency: in this log every read is 5 hours after the last, and only two words are ever looked up, so with
+    recency the floor would be fitted from those two alone (the Recency tests check the free line with it)."""
     START = '2026-09-01'
 
     def log(self, opens):
@@ -94,12 +103,12 @@ class FreeLine(unittest.TestCase):
 
     def flags(self, opens, before):
         log, at = self.log(opens)
-        fit = knowledge.Fit(log, at)
+        fit = knowledge.Fit(log, at, recency=False)
         return {ja: knowledge.free_flag(*fit.estimate(ja), before, fit.prior(ja)[0]) for ja in ('行く', '見る')}, fit
 
     def test_one_lookup_leaves_a_known_word_free(self):
         log, at = self.log(())
-        fit = knowledge.Fit(log, at)
+        fit = knowledge.Fit(log, at, recency=False)
         for ja in ('行く', '見る'):  # free by their priors (no history) and by their evidence
             self.assertLess(knowledge.sigmoid(-fit.prior(ja)[0]), fwlib.FREE_P, ja)
             self.assertTrue(knowledge.free_flag(*fit.estimate(ja), None, fit.prior(ja)[0]), ja)

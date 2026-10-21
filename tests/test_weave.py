@@ -1698,7 +1698,8 @@ class Knowledge(Home):
         know = knowledge.refresh(now)
         self.assertEqual([(m['word'], m['to']) for m in know['moves']], [(target, 'known')])
         self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'known')
-        self.assertLess(know['words'][target]['k'] - know['words'][target]['mu'], 3)
+        entry = know['words'][target]  # far above its prior, but not without bound: read a minute apart, the reads say
+        self.assertLess((entry['k'] - entry['mu']) / entry['sd'], 3)  # little about a week on, and k's sd says so
         self.assertGreater(know['words'][target]['k'], know['words'][others[0]]['k'])
 
     def showing(self, contexts, rows, view, notes, at, active, words=60, opened=(), jitter=None, level=0):

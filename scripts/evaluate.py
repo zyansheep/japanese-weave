@@ -26,7 +26,8 @@ same Log of the whole log.
 
   Command      at, word (its entry), kind: 'known' or 'learn'
   Group        one showing or episode: at (when it was scored), surface ('browser' or 't3'), key (surface, view,
-               context), episode (True for an episode), obs (its Observations)
+               context), episode (True for an episode), obs (its Observations), shown (when it was shown: its shown
+               record, else its first interaction, else at; the recency clock reads it, knowledge.read_clocks)
   Observation  at, day ('YYYY-MM-DD', local), surface, key, episode; word (the lexicon entry), written (the
                annotation), form (written is a conjugated form of word, not the word or its reading); y (1 opened,
                knowledge.GLANCE_Y a glance, 0 not opened); weight (replay's: 1 opened, else the larger of near and
@@ -78,10 +79,11 @@ class Observation:
 
 
 class Group:
-    __slots__ = ('at', 'surface', 'key', 'episode', 'obs')
+    __slots__ = ('at', 'surface', 'key', 'episode', 'obs', 'shown')
 
-    def __init__(self, at, surface, key, episode, obs):
+    def __init__(self, at, surface, key, episode, obs, shown=None):
         self.at, self.surface, self.key, self.episode, self.obs = at, surface, key, episode, obs
+        self.shown = shown if shown is not None else at
 
 
 class Command:
@@ -150,7 +152,8 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
         notes = context['annotations']
         line = knowledge._line_height([n[2] for n in notes])
         day, surface, episode = day_of(at), key[0], kind == knowledge.EPISODE
-        group = Group(at, surface, key, episode, [])
+        shown = context.get('shown_at') or (items[0]['at'] if items else at)  # when it was read, for the clock
+        group = Group(at, surface, key, episode, [], min(shown, at))
         for ja, y, weight, index, near in found:
             written, _x, y_pos = notes[index]
             ms, count, share = knowledge.reading(surface, context, y_pos, line) or (0, 0, 1.0)
@@ -231,18 +234,30 @@ class Fitted:
     day, at the log's reading pace and cap, each day starting from the day before's. frozen: the shared parameters and
     prior widths held at their priors."""
 
-    def __init__(self, frozen=False):
-        self.frozen, self.last = frozen, None
-        self.name = 'fit, priors held' if frozen else 'fit'
+    def __init__(self, frozen=False, recency=True):
+        self.frozen, self.recency, self.last = frozen, recency, None
+        self.name = ('fit, priors held' if frozen else 'fit') + ('' if recency else ', no recency')
 
     def fit(self, log, until):
-        self.last = knowledge.Fit(log, until, start=self.last.state() if self.last else None, frozen=self.frozen)
+        self.last = knowledge.Fit(log, until, start=self.last.state() if self.last else None, frozen=self.frozen,
+                                  recency=self.recency)
+        self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
+            else {}
 
     def predict(self, obs):
-        return self.last.q(obs.word, obs.surface, obs.form)
+        """At the observation's time since the word was last read (knowledge.read_clocks: the log up to its showing)."""
+        return self.last.q(obs.word, obs.surface, obs.form, *self.clocks.get(id(obs), (1.0, 0.0)))
 
 
-MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted}
+class Stale(Fitted):
+    """The one fitter without recency (NEXT_STEPS step 4's model): every observation at the word's long-term chance."""
+
+    def __init__(self):
+        super().__init__(recency=False)
+        self.name = 'step4'
+
+
+MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 

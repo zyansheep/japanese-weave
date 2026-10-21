@@ -616,14 +616,141 @@ FIT_ITERATIONS = 60
 # regression on its features (features): with an Anki card, an intercept by status plus a slope on ln(1 + interval),
 # centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on the old neutral
 # prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
-SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
+SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (math.log(0.02), 1.0), 'context': (0.0, 0.5),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 SHARED_NAMES = tuple(SHARED)
-T3, FORM = SHARED_NAMES.index('t3'), SHARED_NAMES.index('form')
+T3, FORM, FLOOR, CONTEXT = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context'))
+JOINED = (T3, FORM, FLOOR, CONTEXT)  # the shared parameters an observation's chance depends on
 STATUSES = ('new', 'learning', 'known')
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
+
+
+# Recency (NEXT_STEPS step 10): right after a word is read its lookup chance falls to a floor shared by every word, and
+# climbs back to the word's long-term chance over LONG_DAYS (recency_log_odds); a repeat in the same page or T3 window
+# gets an offset of its own (context). k is the long-term knowledge: the free line and the status moves judge on it,
+# and a lookup costs the current chance.
+LONG_DAYS = 7              # the long-term chance is the chance a week after the last read
+SOFT_MIN = 8               # how sharply the floor gives way to a word known better than it (recency_log_odds)
+CLOCK_EPS = 0.01           # the last-read chances stop once no read in the newer showings is less likely than this
+CONTEXT_MS = 3_600_000     # an earlier showing in the same page view or T3 window this recent is the same context
+CLOCK_PASSES = 2           # fits, each weighing the showings for the clock by the chances the one before found
+NO_FLOOR = 1.0             # a fit with nothing to start from also starts from this floor (log odds), above every word
+FLOOR_STEP = 0.5           # the most the floor moves in one Newton step
+SPACING_P = 0.10           # a costly word whose current chance is under this waits (PLAN.md section 5, rule 2)
+
+
+def last_reads(history, at, view=None):
+    """When a word was last read before `at`, as chances: ([(shown, chance, same)] newest first, rest). chance is the
+    chance that showing was the last one the word was read in: its read chance times the chance none of the newer ones
+    was read; same, whether it was in the same context (view: the (surface, view) of the showing at `at`, and less than
+    CONTEXT_MS before); rest, the chance none was read. history: the word's [(shown, read chance, (surface, view))]
+    oldest first. Showings LONG_DAYS or more before `at` don't count: the word is back at its long-term chance by
+    then, as if never read; nor do older ones once rest is under CLOCK_EPS."""
+    out, rest = [], 1.0
+    for shown, r, where in reversed(history):
+        if shown >= at:
+            continue
+        if at - shown >= LONG_DAYS * DAY_MS or rest < CLOCK_EPS:
+            break
+        out.append((shown, rest * r, where == view and at - shown < CONTEXT_MS))
+        rest *= 1 - r
+    return out, rest
+
+
+def since_read(reads, rest, at):
+    """(u, s) from last_reads: u, how far the word is back toward its long-term chance at `at`, the mean over when it
+    was last read of min(1, time since / LONG_DAYS), never read (in the last LONG_DAYS) counting 1; s, the chance it
+    was last read in the same context."""
+    u, s = rest, 0.0
+    for shown, chance, same in reads:
+        u += chance * min(1.0, max(0.0, (at - shown) / (LONG_DAYS * DAY_MS)))
+        s += chance if same else 0.0
+    return min(1.0, u), s
+
+
+def recency_log_odds(k, u, floor):
+    """The log odds of a lookup on the web (offset 0, the word as written) of a word whose long-term knowledge is k, a
+    share u of the way back to its long-term chance since it was last read (since_read): odds m + (o - m) u, where
+    o = e^-k is its long-term odds and m the floor's, e^floor, or o for a word known better than the floor (a smooth
+    minimum, SOFT_MIN, so a word that well known has no recency). At u = 1 it is -k."""
+    k = max(-30.0, min(30.0, k))
+    if u >= 1.0:
+        return -k
+    o, c = math.exp(-k), math.exp(max(-30.0, min(30.0, floor)))
+    m = (c ** -SOFT_MIN + o ** -SOFT_MIN) ** (-1 / SOFT_MIN)
+    return math.log(m + (o - m) * u)
+
+
+def read_weight(o, episode, pace, top, same=True):
+    """An observation's read chance as the fit weighs it: 1 when opened, the line rule's alone in an episode, else the
+    larger of the line rule and the time on screen at `pace` and `top` (same: they are the log's, so its weight)."""
+    if o.y > 0:
+        return 1.0
+    if episode:
+        return o.near
+    return o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, pace, top))
+
+
+def showings_of(log, pace, top):
+    """{word: [(shown, read chance, (surface, view), observation)]} over the whole log (log.origin), oldest first: every
+    showing and episode a word was observed in, with its read chance at `pace` and `top` (read_weight); kept with the
+    log."""
+    origin = log.origin
+    cache = origin.__dict__.setdefault('_showings', {})
+    if (pace, top) not in cache:
+        same = (pace, top) == (origin.pace, origin.top)
+        out = {}
+        for event in origin.events:
+            if not hasattr(event, 'obs'):
+                continue
+            shown = getattr(event, 'shown', event.at)
+            for o in event.obs:
+                out.setdefault(o.word, []).append((shown, read_weight(o, event.episode, pace, top, same), event.key[:2],
+                                                   o))
+        for items in out.values():
+            items.sort(key=lambda h: h[0])
+        cache[(pace, top)] = out
+    return cache[(pace, top)]
+
+
+def read_clocks(log, pace, top, chance):
+    """{id(observation): (u, s)} for every observation of the whole log: since_read at its showing's time, in its
+    context, from the word's showings before it in the log. Each counts by the chance it was read given what happened
+    there: 1 when opened, else r (1 - q) / (1 - r q), r its read chance (read_weight) and q = chance(observation, u, s)
+    its P(lookup | read) at its own clock, so a showing of a word the reader didn't know, left unopened, was most likely
+    skipped and doesn't reset the clock."""
+    found = {}
+    for items in showings_of(log, pace, top).values():
+        history = []
+        for shown, r, where, o in items:
+            u, s = since_read(*last_reads(history, shown, where), shown)
+            found[id(o)] = u, s
+            if o.y <= 0:
+                q = chance(o, u, s)
+                r = r * (1 - q) / (1 - r * q)
+            history.append((shown, r, where))
+    return found
+
+
+def word_reads(log, fit, now):
+    """{word: (reads, rest)}: last_reads at `now` for every word of the log, its showings weighed as read_clocks weighs
+    them by the fit's chances, in no context (a new page or reply)."""
+    chance = fit._chance()
+    out = {}
+    for word, items in showings_of(log, fit.pace, fit.top).items():
+        history = []
+        for shown, r, where, o in items:
+            if shown >= now:
+                break
+            if o.y <= 0:
+                u, s = since_read(*last_reads(history, shown, where), shown)
+                q = chance(o, u, s)
+                r = r * (1 - q) / (1 - r * q)
+            history.append((shown, r, where))
+        out[word] = last_reads(history, now)
+    return out
 
 
 def day_of(at):
@@ -681,11 +808,15 @@ class Fit:
     """One penalized maximum-likelihood fit of a log's events before `until` (an evaluate.Log: its events, Anki
     intervals and word state), at a reading pace and cap (default: the log's).
 
-    An observation is a Bernoulli with P(open) = w q: q = P(lookup | read) = sigmoid(offset_s + form - k_w), w its read
-    weight (1 when opened, else the larger of the line rule and the read chance at this pace and cap; an episode's,
-    the line rule alone), weighted 0.5 ** (age / EVIDENCE_DAYS) and FORM_WEIGHT for a form. An episode's observations
-    are conditioned on at least one open. A word's unopened observations with the same read weight, rounded to
-    POOL_STEP, pool, so the work grows with the words more than with the log.
+    An observation is a Bernoulli with P(open) = w q: q = P(lookup | read) = sigmoid(offset_s + form + context s +
+    recency_log_odds(k_w, u, floor)), w its read weight (1 when opened, else the larger of the line rule and the read
+    chance at this pace and cap; an episode's, the line rule alone), weighted 0.5 ** (age / EVIDENCE_DAYS) and
+    FORM_WEIGHT for a form. u and s are the observation's clock (read_clocks): how far the word is back toward its
+    long-term chance since it was last read, and the chance it was last read in the same context; recency=False puts
+    every observation at its long-term chance (NEXT_STEPS step 4's model). The clock weighs earlier showings by the
+    chances the fit finds, so the fit runs CLOCK_PASSES times, each from the one before. An episode's observations are
+    conditioned on at least one open. A word's unopened observations with the same read weight and clock, rounded to
+    POOL_STEP (u on its square root, finer near 0), pool, so the work grows with the words more than with the log.
 
     Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
     regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
@@ -694,24 +825,55 @@ class Fit:
     diagonal for the words, joined only through the shared parameters) the Schur complement solves in time linear in
     the words; the widths by EM toward WIDTHS. Each word's sd is its k's from the inverse of the information (Laplace),
     the shared parameters' uncertainty included. frozen: the shared parameters and widths stay at their priors, as for
-    one word among many others. start: what an earlier fit learned (state()), to start from."""
+    one word among many others. start: what an earlier fit learned (state()), to start from; without its shared
+    parameters, the fit also starts from a floor above every word (NO_FLOOR: no recency) and keeps the better of the
+    two, since where the floor is above every word only its prior bends the objective and the two starts can end in
+    different minima. The floor moves at most FLOOR_STEP a step."""
 
-    def __init__(self, log, until, pace=None, top=None, start=None, frozen=False):
-        self.until, self.day, self.frozen = until, day_of(until - 1), frozen
+    def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, recency=True):
+        self.until, self.day, self.frozen, self.recency = until, day_of(until - 1), frozen, recency
         self.pace, self.top = pace or log.pace, top or log.top
         self.intervals = log.intervals
         self.by_ja = {w['ja']: w for w in log.words}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
-        self._terms(log)
-        start = start or {}
-        shared = start.get('shared') or {}
-        self.theta = [shared.get(name, SHARED[name][0]) if not frozen else SHARED[name][0] for name in SHARED_NAMES]
-        self.widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
-        before = start.get('k') or {}
-        self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
         started = time.time()
-        self.iterations = self._run()
+        start = start or {}
+        shared = {} if frozen else start.get('shared') or {}
+        theta = [shared.get(name, SHARED[name][0]) for name in SHARED_NAMES]
+        widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
+        self._fit(log, theta, widths, start.get('k') or {})
+        if recency and not frozen and not shared:  # nothing to start from: also try a floor above every word
+            first = dict(self.__dict__)
+            self._fit(log, [NO_FLOOR if j == FLOOR else v for j, v in enumerate(theta)], widths,
+                      start.get('k') or {})
+            if first['objective'] <= self.objective:
+                self.__dict__.update(first)
         self.seconds = time.time() - started
+
+    def _fit(self, log, theta, widths, before):
+        """Fits from theta, the widths and before ({ja: k}; the others from their priors): with recency, CLOCK_PASSES
+        times, each with the clock weighed by the chances the fit before found (the first, by the start's)."""
+        self.theta, self.widths, self.k, self.var = list(theta), dict(widths), [], []
+        self._terms(log, read_clocks(log, self.pace, self.top, self._chance(before)) if self.recency else {})
+        self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
+        self.iterations = self._run()
+        for _ in range(CLOCK_PASSES - 1 if self.recency else 0):
+            self._terms(log, read_clocks(log, self.pace, self.top, self._chance()))
+            self.iterations += self._run()
+
+    def _chance(self, before=None):
+        """chance(observation, u, s) for read_clocks: its P(lookup | read) by this fit, or with before ({ja: k}) by
+        those k's and, for the other words, the priors at the current shared parameters."""
+        if before is None:
+            return lambda o, u, s: self.q(o.word, o.surface, o.form, u, s)
+
+        def chance(o, u, s):
+            k = before.get(o.word)
+            if k is None:
+                x, _kind = self.features(o.word)
+                k = sum(self.theta[SHARED_NAMES.index(name)] * value for name, value in x.items())
+            return self.q_at(k, o.surface, o.form, u, s)
+        return chance
 
     def _word(self, ja):
         i = self.index.get(ja)
@@ -727,9 +889,12 @@ class Fit:
     def features(self, ja):
         return features(self.intervals.get(ja), status_at(self.by_ja.get(ja), self.day))
 
-    def _terms(self, log):
+    def _terms(self, log, clocks):
+        """The pooled terms (word, chat, form, y, read weight, u, s: weight) and episodes from the log's events before
+        until, each observation at its clock (read_clocks; without one, at its long-term chance), and the commands."""
         pooled, self.episodes, self.commands = {}, [], []
         same = (self.pace, self.top) == (log.pace, log.top)
+        self.n = [0.0] * len(self.words)
         for event in log.events:
             if event.at >= self.until:
                 break
@@ -741,38 +906,53 @@ class Fit:
             for o in event.obs:
                 i = self._word(o.word)
                 v = decay * (FORM_WEIGHT if o.form else 1.0)
-                if o.y > 0:
-                    w = 1.0
-                elif event.episode:
-                    w = o.near
-                else:
-                    w = o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, self.pace, self.top))
+                w = read_weight(o, event.episode, self.pace, self.top, same)
+                if o.y <= 0 and not event.episode:
                     w = min(1.0, max(POOL_STEP, round(w / POOL_STEP) * POOL_STEP))
-                key = (i, o.surface == 't3', bool(o.form), o.y, w)
+                u, s = clocks.get(id(o), (1.0, 0.0))
+                u = 1.0 if u >= 1.0 else (round(math.sqrt(u) / POOL_STEP) * POOL_STEP) ** 2  # finer near 0
+                s = round(s / POOL_STEP) * POOL_STEP
+                key = (i, o.surface == 't3', bool(o.form), o.y, w, u, s)
                 pooled[key] = pooled.get(key, 0.0) + v
                 self.n[i] += v * w
                 if event.episode:
-                    chosen.append((i, o.surface == 't3', bool(o.form), w))
+                    chosen.append((i, o.surface == 't3', bool(o.form), w, u, s))
             if event.episode and chosen:
                 self.episodes.append((chosen, decay))
         keys = list(pooled)
-        self.terms = (tuple(k[0] for k in keys), tuple(k[1] for k in keys), tuple(k[2] for k in keys),
-                      tuple(k[3] for k in keys), tuple(k[4] for k in keys), tuple(pooled[k] for k in keys))
+        self.terms = tuple(tuple(key[j] for key in keys) for j in range(7)) + (tuple(pooled[key] for key in keys),)
 
     def _mean(self, i, theta):
         return sum(theta[f] * value for f, value in self.x[i].items())
 
     def _pass(self, k, theta):
         """The data's negative log likelihood and its derivatives: per word, the gradient and information; the
-        information joining each word to the chat and form offsets; for the shared parameters, gradient and
-        information."""
+        information joining each word to the shared parameters its chances depend on (JOINED: the chat and form
+        offsets, the floor and the context), {parameter: [per word]}; for the shared parameters, gradient and
+        information. The information is the expected one, through each chance's log odds eta (Gauss-Newton)."""
         words, shared = len(k), len(theta)
-        grad, info, chat, form = [0.0] * words, [0.0] * words, [0.0] * words, [0.0] * words
+        grad, info = [0.0] * words, [0.0] * words
+        joins = {j: [0.0] * words for j in JOINED}
         g, h = [0.0] * shared, [[0.0] * shared for _ in range(shared)]
-        total, t3, phi = 0.0, theta[T3], theta[FORM]
+        total, t3, phi, delta = 0.0, theta[T3], theta[FORM], theta[CONTEXT]
         exp, log = math.exp, math.log
-        for w, s, f, y, r, v in zip(*self.terms):
-            eta = (t3 if s else 0.0) + (phi if f else 0.0) - k[w]
+        c = exp(max(-30.0, min(30.0, theta[FLOOR])))
+        cp, power = c ** -SOFT_MIN, -1 / SOFT_MIN
+
+        def eta_of(kw, u, s, f, x):
+            """eta, d eta / d k and d eta / d floor: recency_log_odds and the offsets."""
+            kw = max(-30.0, min(30.0, kw))
+            offset = (t3 if s else 0.0) + (phi if f else 0.0) + delta * x
+            if u >= 1.0:  # back at the long-term chance
+                return offset - kw, -1.0, 0.0
+            o = exp(-kw)
+            m = (cp + o ** -SOFT_MIN) ** power
+            a = m + (o - m) * u
+            return (offset + log(a), -o * ((m / o) ** (SOFT_MIN + 1) * (1 - u) + u) / a,
+                    (1 - u) * (m / c) ** (SOFT_MIN + 1) * c / a)
+
+        for w, s, f, y, r, u, x, v in zip(*self.terms):
+            eta, dk, dfl = eta_of(k[w], u, s, f, x)
             q = 1 / (1 + exp(-min(30.0, max(-30.0, eta))))
             if y > 0:  # opened, so read: y log q + (1 - y) log (1 - q)
                 d, i = y - q, q * (1 - q)
@@ -782,33 +962,33 @@ class Fit:
                 d, i = -r * q * (1 - q) / a, r * q * (1 - q) * (1 - q) / a
                 total -= v * log(a)
             vd, vi = v * d, v * i
-            grad[w] += vd
-            info[w] += vi
-            if s:
-                g[T3] -= vd
-                h[T3][T3] += vi
-                chat[w] -= vi
-                if f:
-                    h[T3][FORM] += vi
-            if f:
-                g[FORM] -= vd
-                h[FORM][FORM] += vi
-                form[w] -= vi
-        h[FORM][T3] = h[T3][FORM]
+            grad[w] -= vd * dk
+            info[w] += vi * dk * dk
+            nonzero = [(j, z) for j, z in ((T3, 1.0 if s else 0.0), (FORM, 1.0 if f else 0.0), (FLOOR, dfl),
+                                            (CONTEXT, x)) if z]
+            for j, z in nonzero:
+                g[j] -= vd * z
+                joins[j][w] += vi * dk * z
+                row = h[j]
+                for j2, z2 in nonzero:
+                    row[j2] += vi * z * z2
         for chosen, v in self.episodes:  # conditioned on at least one open: minus log (1 - none)
-            qs, none = [], 1.0
-            for w, s, f, r in chosen:
-                q = sigmoid((t3 if s else 0.0) + (phi if f else 0.0) - k[w])
-                qs.append(q)
+            found, none = [], 1.0
+            for w, s, f, r, u, x in chosen:
+                eta, dk, dfl = eta_of(k[w], u, s, f, x)
+                q = sigmoid(eta)
+                found.append((q, dk, dfl))
                 none *= 1 - r * q
             none = min(none, 1 - 1e-12)
             total += v * log(1 - none)
-            for (w, s, f, r), q in zip(chosen, qs):
-                d = v * none / (1 - none) * r * q * (1 - q) / (1 - r * q)
-                grad[w] -= d
-                g[T3] += d if s else 0.0
-                g[FORM] += d if f else 0.0
-        return total, grad, info, chat, form, g, h
+            for (w, s, f, r, u, x), (q, dk, dfl) in zip(chosen, found):
+                e = v * none / (1 - none) * r * q * (1 - q) / (1 - r * q)
+                grad[w] += e * dk
+                g[T3] += e if s else 0.0
+                g[FORM] += e if f else 0.0
+                g[FLOOR] += e * dfl
+                g[CONTEXT] += e * x
+        return total, grad, info, joins, g, h
 
     def _priors(self, k, theta, grad, info, g, h):
         """Adds the priors' and commands' terms to the derivatives; returns their part of the objective."""
@@ -840,11 +1020,11 @@ class Fit:
     def _objective(self, k, theta, data=None):
         """The objective and its derivatives (as _pass gives them); data: the data's part at k and theta, if known."""
         data = data or self._pass(k, theta)
-        found = [data[0], list(data[1]), list(data[2]), data[3], data[4], list(data[5]), [row[:] for row in data[6]]]
-        found[0] += self._priors(k, theta, found[1], found[2], found[5], found[6])
+        found = [data[0], list(data[1]), list(data[2]), data[3], list(data[4]), [row[:] for row in data[5]]]
+        found[0] += self._priors(k, theta, found[1], found[2], found[4], found[5])
         return tuple(found), data
 
-    def _step(self, k, grad, info, chat, form, g, h):
+    def _step(self, k, grad, info, joined, g, h):
         """The Newton step (dk, dtheta), by the Schur complement on the shared parameters; also each word's row of the
         information joining it to them, and the complement."""
         if self.frozen:
@@ -852,10 +1032,9 @@ class Fit:
         schur, rest, joins = [row[:] for row in h], list(g), []
         for i in range(len(k)):
             c = {f: -x / self.widths[self.kind[i]] ** 2 for f, x in self.x[i].items()}
-            if chat[i]:
-                c[T3] = c.get(T3, 0.0) + chat[i]
-            if form[i]:
-                c[FORM] = c.get(FORM, 0.0) + form[i]
+            for j in JOINED:
+                if joined[j][i]:
+                    c[j] = c.get(j, 0.0) + joined[j][i]
             joins.append(c)
             for a, ca in c.items():
                 rest[a] -= ca * grad[i] / info[i]
@@ -867,11 +1046,12 @@ class Fit:
 
     def _run(self):
         k, theta = self.k, self.theta
-        (total, grad, info, chat, form, g, h), data = self._objective(k, theta)
+        (total, grad, info, joined, g, h), data = self._objective(k, theta)
         last, iteration = {}, 0
         for iteration in range(1, FIT_ITERATIONS + 1):
-            dk, dtheta, _joins, _schur = self._step(k, grad, info, chat, form, g, h)
-            t = 1.0
+            dk, dtheta, _joins, _schur = self._step(k, grad, info, joined, g, h)
+            t = min(1.0, FLOOR_STEP / max(abs(dtheta[FLOOR]), 1e-12))  # where the floor is above every word, only
+            # its prior bends the objective, and a whole step would jump it past the data's optimum
             while True:  # halve the step until the objective doesn't rise
                 k2 = [a + t * b for a, b in zip(k, dk)]
                 theta2 = [a + t * b for a, b in zip(theta, dtheta)]
@@ -879,7 +1059,7 @@ class Fit:
                 if found[0] <= total + 1e-9 or t < 1e-3:
                     break
                 t /= 2
-            k, theta, data, (total, grad, info, chat, form, g, h) = k2, theta2, data2, found
+            k, theta, data, (total, grad, info, joined, g, h) = k2, theta2, data2, found
             moved = t * max([abs(x) for x in dk + dtheta] or [0.0])
             widened = 0.0
             if not self.frozen and k:  # EM for the widths: mean squared distance from the prior mean, plus variance
@@ -898,11 +1078,11 @@ class Fit:
                     widened = max(widened, abs(new - self.widths[kind]))
                     self.widths[kind] = max(0.1, self.widths[kind] + step)
                 if widened:  # only the priors' terms change
-                    (total, grad, info, chat, form, g, h), data = self._objective(k, theta, data)
+                    (total, grad, info, joined, g, h), data = self._objective(k, theta, data)
             if moved < FIT_TOLERANCE and widened < WIDTH_TOLERANCE:
                 break
         self.k, self.theta, self.objective = k, theta, total
-        _dk, _dt, joins, schur = self._step(k, grad, info, chat, form, g, h)
+        _dk, _dt, joins, schur = self._step(k, grad, info, joined, g, h)
         self.var = [1 / x for x in info]
         self.theta_sd = [0.0] * len(theta)
         if schur is not None:  # Laplace: the diagonal of the inverse information
@@ -924,10 +1104,16 @@ class Fit:
         i = self.index.get(ja)
         return (self.k[i], math.sqrt(self.var[i])) if i is not None else self.prior(ja)
 
-    def q(self, ja, surface, form=False):
-        """P(lookup | read) of a word on a surface, as a conjugated form or not."""
+    def q(self, ja, surface, form=False, u=1.0, s=0.0):
+        """P(lookup | read) of a word on a surface, as a conjugated form or not, a share u of the way back to its
+        long-term chance since it was last read (since_read; 1: the long-term chance) and with chance s last read in the
+        same context."""
+        return self.q_at(self.estimate(ja)[0], surface, form, u, s)
+
+    def q_at(self, k, surface, form=False, u=1.0, s=0.0):
+        """q for a word whose long-term knowledge is k."""
         offset = (self.theta[T3] if surface == 't3' else 0.0) + (self.theta[FORM] if form else 0.0)
-        return sigmoid(offset - self.estimate(ja)[0])
+        return sigmoid(offset + self.theta[CONTEXT] * s + recency_log_odds(k, u, self.theta[FLOOR]))
 
     def shared(self):
         return {name: round(v, 4) for name, v in zip(SHARED_NAMES, self.theta)}
@@ -944,15 +1130,15 @@ def nested_loglik(log, fit, pace, top):
     higher read chance (at least READ_FLOOR) than an open was read. With the words ordered by read chance r_1 >= ... >=
     r_n, reading exactly the first j happens with chance r_j - r_(j+1) (r_(n+1) = 0; none: 1 - r_1), and then each
     read word is opened with its chance q. Weighted like evidence."""
-    total = 0.0
+    total, clocks = 0.0, read_clocks(log, pace, top, fit._chance()) if fit.recency else {}
     for event in log.events:
         if event.at >= fit.until:
             break
         if not hasattr(event, 'obs') or event.episode or not event.obs:
             continue
         rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, pace, top)), o.y,
-                        min(1 - 1e-9, max(1e-9, fit.q(o.word, o.surface, o.form)))) for o in event.obs),
-                      key=lambda t: -t[0])
+                        min(1 - 1e-9, max(1e-9, fit.q(o.word, o.surface, o.form, *clocks.get(id(o), (1.0, 0.0))))))
+                       for o in event.obs), key=lambda t: -t[0])
         lowest = max((i for i, (_r, y, _q) in enumerate(rows) if y > 0), default=-1)
         chance = 1 - rows[0][0] if lowest < 0 else 0.0
         product = 1.0
@@ -1493,7 +1679,7 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
-MODEL = 'fit 1'  # the reading model is chosen again when this changes (knowledge.json "reading")
+MODEL = 'fit 2'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 2: recency)
 
 
 class Estimate:
