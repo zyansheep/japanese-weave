@@ -223,6 +223,27 @@ class Calibration(unittest.TestCase):
         rows.append(dict(rows[-1], id=99, word='私のおすすめは2です。'))
         self.assertEqual(knowledge.unlisted(rows, LISTED, NOW)['top'], [['燃料', 1]])  # sentences aren't words
 
+    def test_a_sentence_costs_its_translation_lookups_per_sentence_read(self):
+        rows, contexts = [], {}
+        notes = NOTES[:2] + [['。', 60, 27], ['燃料', 0, 51], ['。', 60, 51]]  # two sentences in A
+        for e in range(10):  # each read once (A on screen 30 s), its first sentence's translation opened 4 times in 10
+            message(contexts, rows, f'v{e}', NOW - (20 - e) * 3_600_000, notes=notes, stays=[stay(A, 30_000, 30)],
+                    opened=[2] if e % 5 < 2 else [], kind='peek')
+        events = knowledge.sentence_events(rows, contexts, NOW)
+        self.assertEqual(len(events), 20)
+        read = sum(r for _at, _s, _y, r in events)
+        self.assertAlmostEqual(read, 10 * sum(knowledge.stay_chance(contexts[('t3', 'v0', 'c')], y, LINE)
+                                              for y in (27, 51)))
+        prices = knowledge.sentence_prices(events, NOW)
+        self.assertEqual(prices['browser'], {'p': knowledge.SENTENCE_PRICE, 'read': 0.0, 'opens': 0.0})  # no data
+        decay = lambda at: 0.5 ** ((NOW - at) / knowledge.DAY_MS / knowledge.EVIDENCE_DAYS)
+        opens = sum(decay(at) * y for at, _s, y, _r in events)
+        weight = sum(decay(at) * r for at, _s, _y, r in events)
+        self.assertAlmostEqual(prices['t3']['p'], (opens + 0.08 * knowledge.SENTENCE_WEIGHT) /
+                               (weight + knowledge.SENTENCE_WEIGHT), places=4)
+        self.assertGreater(prices['t3']['p'], knowledge.SENTENCE_PRICE)  # 4 opens in about 12 sentences read
+        self.assertEqual(knowledge.sentence_prices(events, NOW - 30 * 3_600_000)['t3']['p'], knowledge.SENTENCE_PRICE)
+
     def test_words_read_weigh_each_word_by_its_read_chance(self):
         passage = {'words': 40, 'height': 72, 'active': 600_000}  # long enough to read it all
         self.assertAlmostEqual(knowledge.words_read('browser', passage), 40 * knowledge.READ_MAX, places=6)

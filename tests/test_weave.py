@@ -1674,14 +1674,6 @@ class Knowledge(Home):
         fwlib.promote(state, '2026-10-10', chat={}, veto=set())
         self.assertEqual(state['words'][0]['status'], 'known')
 
-    def test_steer(self):
-        self.assertEqual(knowledge.steer(None, 2, 0.5, 100, 'd1'), {'scale': 1.0, 'day': ''})  # too little reading
-        once = knowledge.steer(None, 2, 0.5, 400, 'd1')
-        self.assertEqual(once, {'scale': 2.0, 'day': 'd1'})
-        self.assertEqual(knowledge.steer(once, 2, 0.5, 400, 'd1'), once)  # once a day
-        self.assertEqual(knowledge.steer(once, 2, 0.01, 400, 'd2')['scale'], 4.0)
-        self.assertEqual(knowledge.steer(once, 0, 0.5, 400, 'd2'), once)  # dial off
-
     def test_refresh_moves_words_and_ignores_a_shrunk_log(self):
         with fwlib.editing() as state:
             listed = [w for w in state['words'] if w['status'] != 'queue']
@@ -1696,7 +1688,7 @@ class Knowledge(Home):
                           'dwellMs': 1500, 'view': f'v{e}', 'context': 'c', 'position': 1 + e % len(others),
                           'box': [0, 0, 500, 40], 'annotations': notes, 'uid': f'u{e}'})
         feedback.record(items, 'browser')
-        know = knowledge.refresh(now)  # the dial is off: only the day rules move words
+        know = knowledge.refresh(now)  # no challenge set: only the day rules move words
         self.assertEqual((know['rows'], know['moves'], know['challenge']), (40, [], 0))
         fw_host.handle({'type': 'prefs', 'challenge': 1.5})
         fwlib.write_json(knowledge.path(), {'rows': 10_000})  # the log used to be longer: don't trust it
@@ -1714,7 +1706,8 @@ class Knowledge(Home):
                                            'words': words, 'shown_at': at, 'height': 80, 'active': active,
                                            'seen_until': at,
                                            'plan': None if jitter is None else {'level': level, 'jitter': jitter,
-                                                                                 'candidates': 6}}
+                                                                                 'candidates': 6,
+                                                                                 'sentencePrice': 0.08}}
         for i in opened:
             rows.append({'id': len(rows) + 1, 'at': at + 1000 + i, 'surface': 'browser', 'kind': 'peek',
                          'word': notes[i][0], 'dwell_ms': 1500, 'view': view, 'context': 'c', 'position': i, 'uid': None})
@@ -1746,9 +1739,16 @@ class Knowledge(Home):
         losses = []
         knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW, losses=losses)
         self.assertEqual((len(losses), sum(o for o, _ in losses)), (21, 1))
-        tuned = knowledge.tune(rows, contexts, {'今'}, {}, [], self.NOW)
-        self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned']), (knowledge.PACE_MS, knowledge.READ_MAX, False))
-        self.assertEqual(len(tuned['grid']), len(knowledge.PACES) * len(knowledge.READ_MAXES))
+        import evaluate
+        words = [{'ja': '今', 'kana': 'いま', 'status': 'queue', 'added': '', 'changed': ''}]
+        log = evaluate.extract(rows, contexts, words, {}, [], self.NOW)
+        fit = knowledge.Fit(log, self.NOW)
+        self.assertGreater(fit.estimate('今')[0], fit.prior('今')[0])  # read and not opened, 20 times to 1
+        tuned = knowledge.tune(log, self.NOW)  # one open: too few to leave the defaults
+        self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned'], tuned['opens']),
+                         (knowledge.PACE_MS, knowledge.READ_MAX, False, 1.0))
+        self.assertIn({'pace': knowledge.PACE_MS, 'top': knowledge.READ_MAX},
+                      [{k: g[k] for k in ('pace', 'top')} for g in tuned['grid']])
 
     def test_calibrate_compares_thinned_passages_and_counts_presses(self):
         import random
@@ -1778,7 +1778,7 @@ class Knowledge(Home):
                                                         'verdict': None})
         self.assertEqual(report['presses']['chat']['hoursAt'], {'1': 3.0})
         text = knowledge.calibration_text(report)
-        self.assertIn('Randomly thinned passages: 40', text)
+        self.assertIn('Randomly thinned passages (thinning free words only, since 2026-10-20): 40', text)
         self.assertIn('Web pages: 2 lighter and 0 heavier presses', text)
 
     def test_commands_set_knowledge_and_immunity(self):
@@ -1791,18 +1791,29 @@ class Knowledge(Home):
         self.assertLess(words['今'].k, 1)
         self.assertEqual(words['今'].command_at, self.NOW - 3_600_000)
 
-    def test_host_and_commands_carry_the_dial(self):
+    def test_host_and_commands_carry_the_challenge(self):
         self.assertEqual(fw_host.handle({'type': 'prefs', 'challenge': 1.5}), {'ok': True, 'challenge': 1.5})
         self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': True})['ok'])
         self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': 7})['ok'])
         state = fw_host.handle({'type': 'state'})
-        first = state['words'][0]['ja']
+        first, second, third = (w['ja'] for w in state['words'][:3])
         fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'},
-                                            'words': {first: {'k': 0.3, 'sd': 0.9}}})
+                                            'words': {first: {'k': 0.3, 'sd': 0.9},
+                                                      second: {'k': 2.0, 'sd': 0.4, 'free': True}}})
         state = fw_host.handle({'type': 'state'})
-        self.assertEqual((state['challenge'], state['budget']), (1.5, 3.0))
+        self.assertEqual((state['challenge'], state['budget']), (1.5, 1.5))  # the challenge is normal's budget
+        self.assertNotIn('rate', state)
         self.assertEqual({k: state['words'][0][k] for k in ('k', 'sd')}, {'k': 0.3, 'sd': 0.9})
-        self.assertNotIn('k', state['words'][1])
+        self.assertNotIn('free', state['words'][0])  # no flag: the extension compares p with FREE_P
+        self.assertEqual({k: state['words'][1][k] for k in ('k', 'sd', 'free')}, {'k': 2.0, 'sd': 0.4, 'free': True})
+        self.assertNotIn('k', state['words'][2])
+        prior = {'card': {'new': 0.5, 'learning': 0.5, 'known': 0.5}, 'interval': 0.8,
+                 'none': {'new': 1.0, 'learning': 1.2, 'known': 2.8}, 'sd': {'card': 0.8, 'none': 1.1}}
+        fwlib.write_json(knowledge.path(), {'updated': time.time(), 'prior': prior, 'words': {}})
+        words = fw_host.handle({'type': 'state'})['words']  # no estimates yet: the fitted prior for the word's status
+        self.assertEqual({k: words[2][k] for k in ('k', 'sd', 'free')},
+                         {'k': 2.8 if words[2]['status'] == 'known' else 1.0 if words[2]['status'] == 'queue'
+                          else 1.2, 'sd': 1.1, 'free': words[2]['status'] == 'known'})
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
             fw.main(['challenge', 'off'])
             fw.main(['why', first])
@@ -1810,7 +1821,7 @@ class Knowledge(Home):
         self.assertIn('no evidence in the gloss log yet', out.getvalue())  # the refresh found no log
         fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'}})
         state = fw_host.handle({'type': 'state'})
-        # without a challenge, normal's own budget, which the controller doesn't steer
+        # without a challenge, normal's own budget; a controller's scale from before is ignored
         self.assertEqual((state['challenge'], state['budget']), (0, intensity.BUDGETS[0]))
         self.assertNotIn('sentencePrice', state)  # none fitted yet: the extension uses its own default
         # the web's price of a whole sentence, once the fit puts one per surface in knowledge.json
@@ -1995,6 +2006,24 @@ class Budget(Home):
                                                            dict(state, words=words + [word('中', 'queue')])))
         self.assertEqual(weave.calibration(filler * 5, state, level=intensity.FULL), '')
         self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
+
+    def test_the_free_flag_decides_what_is_known_at_a_glance(self):
+        know = self.know({'でも': 1.5, '中': 4.0, '多分': 1.5})
+        know['words']['でも']['free'] = True  # p 0.18 but free: one lookup didn't take it out
+        know['words']['中']['free'] = False  # p 0.018 but not free: not yet clearly known again
+        self.assertEqual({ja: fwlib.is_free(e) for ja, e in know['words'].items()},
+                         {'でも': True, '中': False, '多分': False})
+        self.assertLess(knowledge.word_estimate(know, 'でも', 't3')[0], fwlib.FREE_P)
+        self.assertEqual(knowledge.word_estimate(know, '中', 't3')[0], fwlib.FREE_P)
+        self.assertAlmostEqual(knowledge.word_estimate(know, '多分', 't3')[0], knowledge.sigmoid(-1.5))  # no flag
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False,
+                 'words': [word('でも'), word('中'), word('多分', 'active')]}
+        free, learning, _p = weave.lists(state, {}, know)
+        self.assertEqual(([w['ja'] for w in free], [w['ja'] for w in learning]), (['でも'], ['多分', '中']))
+        fwlib.write_json(fwlib.home() / 'knowledge.json', know)
+        self.assertEqual(fwlib.settled_words(), {'でも'})
+        know['words']['でも']['obs'] = 0  # free by its prior alone: the log has nothing on it
+        self.assertEqual(fwlib.settled_words(know), set())
 
     def test_words_known_at_a_glance_leave_their_learning_slot(self):
         state = fwlib.new_state('2026-10-01')

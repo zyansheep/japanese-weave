@@ -43,10 +43,12 @@ SHAKY_DAYS = 7          # shaky -> known: days with no new flip, asked or peek
 PEEK_WINDOW = 7         # a known word peeked on 2 different days within this many days becomes shaky
 ASSUMED_WEIGHT = 1      # a day with only opt-in "assumed" exposure (fw.py log-chat-day) counts this much
 STAGES = [(400, 4), (150, 3), (40, 2)]  # (known words, stage): first match wins; otherwise Stage 1
-# Known at a glance: a word whose predicted lookup chance (knowledge.json) is under FREE_P costs nothing against the
-# intensity's lookup budget (intensity.BUDGETS) and is used wherever it fits; it no longer takes a learning slot
-# either. A word the log has nothing on yet starts at KNOWN_PRIOR_K (log-odds of not looking it up) if its status is
-# known, else at the neutral prior (knowledge.prior).
+# Known at a glance: a word knowledge.json marks free (its lookup chance under FREE_P, with hysteresis: is_free)
+# costs nothing against the intensity's lookup budget (intensity.BUDGETS) and is used wherever it fits; it no longer
+# takes a learning slot either. knowledge.json has an estimate for every word, from the fitted prior for a word the log
+# has nothing on; without knowledge.json a known word starts at KNOWN_PRIOR_K (log-odds of not looking it up), any
+# other at the neutral prior (knowledge.prior). KNOWN_PRIOR_K is also the fit's prior mean for a known word without an
+# Anki card (knowledge.SHARED).
 FREE_P = 0.08
 KNOWN_PRIOR_K = 2.5
 
@@ -476,16 +478,28 @@ def looked_up():
             if isinstance(e, dict) and isinstance(e.get('recent'), int) and e['recent'] >= LOOKED_UP}
 
 
+def is_free(entry, offset=0.0):
+    """Whether a knowledge.json word entry is known at a glance: its free flag when it has one (knowledge.free_flag:
+    it leaves the free set only when the low end of its lookup chance passes FREE_P, and rejoins when the high end
+    falls below it), else a lookup chance under FREE_P at the web's offset."""
+    if not isinstance(entry, dict):
+        return False
+    if isinstance(entry.get('free'), bool):
+        return entry['free']
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    least = (offset if number(offset) else 0.0) - math.log(FREE_P / (1 - FREE_P))  # p < FREE_P exactly when k > least
+    return number(entry.get('k')) and entry['k'] > least
+
+
 def settled_words(know=None):
-    """Words known at a glance by the gloss log: a predicted lookup chance (knowledge.json, browser offset) under
-    FREE_P. A word with no estimate there isn't. Read here, not through knowledge.py, which imports this module."""
+    """Words known at a glance by the gloss log: free in knowledge.json (is_free, at the browser offset) with evidence
+    there (obs; an entry without the field counts). A word the log has nothing on isn't, even when its prior says
+    free. Read here, not through knowledge.py, which imports this module."""
     know = read_json(home() / 'knowledge.json', {}) if know is None else know
     know = know if isinstance(know, dict) else {}
-    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
     offset = know['offset'].get('browser') if isinstance(know.get('offset'), dict) else None
-    least = (offset if number(offset) else 0.0) - math.log(FREE_P / (1 - FREE_P))  # p < FREE_P exactly when k > least
     words = know['words'] if isinstance(know.get('words'), dict) else {}
-    return {ja for ja, e in words.items() if isinstance(e, dict) and number(e.get('k')) and e['k'] > least}
+    return {ja for ja, e in words.items() if isinstance(e, dict) and e.get('obs', 1) and is_free(e, offset)}
 
 
 def graduation_veto():

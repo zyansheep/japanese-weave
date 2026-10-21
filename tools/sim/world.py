@@ -16,8 +16,8 @@ share))). A reader reads a passage or message down to a depth drawn once for it,
 
 Lookups: a word read and not recognised is looked up with chance `habit` (0.9); one recognised, with chance `check`
 (0.02; `form_check` for a conjugated form, whose ending may need a look). A day's mood scales both, by
-exp(day_sd z - day_sd^2 / 2), z one draw a day, each chance at most 1. So the true P(lookup | read) is
-(1 - R) min(1, factor habit) + R min(1, factor check).
+exp(day_sd z - day_sd^2 / 2), z one draw a day, each chance at most 1; in chat, chat_factor scales them too (1: the
+surfaces alike). So the true P(lookup | read) is (1 - R) min(1, factor habit) + R min(1, factor check).
 A whole sentence in Japanese is read in English (its translation opened) with chance `sentence_p`.
 
 The world: known words (Anki words whose intervals track their stability, and the lexicon's top words without one),
@@ -64,6 +64,7 @@ DEFAULTS = dict(
     zipf_known=0.8, zipf_queue=1.0, zipf_offlist=1.0,
     # memory and habits
     rho=0.1, habit=0.9, check=0.02, form_check=0.1, sentence_p=0.2, day_sd=0.25,
+    chat_factor=1.0,            # chat scales both lookup chances by this too: a surface difference (PLAN.md row M)
     # reading: the true pace and cap, and the log of time on screen over the time reading it all takes
     pace=knowledge.PACE_MS, top=knowledge.READ_MAX, web_screen=(0.0, 1.0), chat_screen=(0.3, 0.8),
     # chat: sessions of replies; each reply's Japanese words and whole sentences
@@ -319,7 +320,7 @@ class World:
                                               known, known_cum))
         showings.sort(key=lambda s: s.at)
         for s in showings:
-            self._read(s, factor)
+            self._read(s, factor * (c['chat_factor'] if s.surface == 't3' else 1.0))
         self.day += 1
         return showings
 

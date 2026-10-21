@@ -95,7 +95,7 @@ way round.
 | `/japanese-weave:known <word>` | Mark a word known: kanji, kana or romaji (`多分`, `たぶん`, `tabun`) |
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
-| `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
+| `/japanese-weave:challenge off\|0.5-3` | Set normal's lookup budget per 100 words (the other levels scale with it) |
 | `/japanese-weave:intensity [chat\|browser] up\|down\|normal\|off\|full` | More or less Japanese, none (off) or all you can follow (full), for the next 3 hours |
 | `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
@@ -138,7 +138,7 @@ whose name contains NAME.
 - **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
 - **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
   often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or
-  peek. With adaptive difficulty on, evidence from the gloss log can also move words (see
+  peek. With a challenge set, evidence from the gloss log can also move words (see
   [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md)).
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
 
@@ -211,15 +211,16 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 
 ## Adaptive difficulty
 
-From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each intensity
-level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a glance (under
-an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most
-one per sentence, on web pages and in chat. A whole sentence in Japanese costs too, about 0.08 lookups (how often a
-sentence's translation gets opened), and takes its sentence's one place; sentences may take up to 18% of the budget and
-learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the
-command above, or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget
-until your real rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works
-this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
+From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss): one fit of the
+whole log, redone on every refresh, which starts each word from its Anki interval and status and moves it by what you
+opened and didn't. Each intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal):
+words you know at a glance (under an 8% chance, judged with a margin for doubt so one lookup doesn't change it) are free
+and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most one per sentence, on web
+pages and in chat. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted from
+your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the budget
+and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the command
+above, or the popup) is normal's budget. While one is set, strong evidence also moves words between learning and known,
+a few a day. Why it works this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.
@@ -261,9 +262,10 @@ switch is kept per session id, recorded as a `thread` op (so the collector has i
 of reach still holds here at once), and forgotten 60 days after its last change. `fw.py calibrate` counts each chat
 turned off as a lighter press.
 
-`fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
-one word's estimate and every observation behind it; `fw.py evaluate` scores the model on your log day by day, each
-day predicted from the days before, against a constant guess. The design, with its sources:
+`fw.py knowledge` shows normal's budget, the fitted chat offset and reading model, and the words with the most
+evidence; `fw.py why <word>` shows one word's estimate and every observation behind it; `fw.py evaluate` scores the
+model on your log day by day, each day predicted from the days before, against the online model it replaced and a
+constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
 
 **Once a month: the probe.** `/japanese-weave:probe`, or `fw.py probe` in a terminal (one word at a time: y, n, s to

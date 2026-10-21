@@ -496,7 +496,7 @@ export const intensityFactor = (level) => INTENSITY_FACTORS[level] ?? 1;
 // don't know at a glance yet and on whole sentences in Japanese. Words they do know (a mean predicted lookup chance
 // under FREE_P) cost nothing and are used wherever the model offered them, at every level but off. Normal starts at the
 // chat's lookup rate before levels meant this (0.33 per 100 words shown, 2026-10-20). Off has no budget and full no
-// limit; normal's budget from the host (the popup's challenge, when set, steered) scales the others with it. A word the
+// limit; normal's budget from the host (the popup's challenge, when set) scales the others with it. A word the
 // log has nothing on yet starts at KNOWN_PRIOR_K (log-odds of not looking it up) if its status is known, else at PRIOR_K.
 export const INTENSITY_BUDGETS = { '-2': 0.15, '-1': 0.3, 0: 0.5, 1: 0.8, 2: 1.2 };
 export const INTENSITY_PER_SENTENCE = { '-2': 1, '-1': 1, 0: 1, 1: 2, 2: 2 }; // most budgeted (not-yet-known) swaps in one sentence
@@ -559,16 +559,18 @@ const round3 = (x) => Math.round(x * 1000) / 1000;
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 
 // A swap's listed words with their estimates: the host's k and sd (knowledge.json), else the prior for the word's status,
-// and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance; a whole
+// and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance: the
+// host's free flag (knowledge.json, with hysteresis) when it sends one, else p under FREE_P; a whole
 // sentence also costs its translation's price. expected: the lookups predicted if it is read, every word and the
 // translation.
 function costOf(s, words, price) {
   const listed = (s.words || [s.word || s.f]).map((ja) => {
     const w = words.get(ja);
     const k = Number.isFinite(w?.k) ? w.k : w?.status === 'known' ? KNOWN_PRIOR_K : PRIOR_K;
-    return { ja, w, k, sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p: peekChance(k) };
+    const p = peekChance(k);
+    return { ja, w, k, sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p, free: typeof w?.free === 'boolean' ? w.free : p < FREE_P };
   });
-  const due = listed.filter((x) => x.p >= FREE_P);
+  const due = listed.filter((x) => !x.free);
   const translation = s.kind === 'sentence' ? price : 0;
   return { s, listed, due, cost: sum(due.map((x) => x.p)) + translation, expected: sum(listed.map((x) => x.p)) + translation };
 }

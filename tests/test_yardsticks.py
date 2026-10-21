@@ -45,17 +45,86 @@ class Convergence(unittest.TestCase):
     """PLAN.md section 10: a word starting at 27% whose true chance is 5%, read 3 times a day, must cross the 8% free
     line within 300 exposures. evaluate.CURRENT is the model knowledge.py runs."""
 
-    @unittest.expectedFailure  # today's online model pulls k back toward its prior between observations (FORGET_DAYS,
-    # downward only) while each step is small: the word settles near 11%. NEXT_STEPS step 4 replaces it with one fitter.
     def test_a_word_crosses_the_free_line_within_300_exposures(self):
         log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
         q = experiments.estimates(evaluate.current(), log, 300)
         self.assertLess(statistics.median(q), fwlib.FREE_P)
 
+    def test_one_word_among_others_crosses_it_too(self):
+        # The fit learns the prior's mean from the words themselves, so a hundred words all at 5% pull it down as well.
+        # Held at its prior (27%, as for one word among many others that are at 27%), each word still gets there on
+        # its own evidence (between 30 and 100 exposures), and has not by 10.
+        log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
+        self.assertEqual(evaluate.CURRENT, 'fit')
+        self.assertLess(statistics.median(experiments.estimates(evaluate.Fitted(frozen=True), log, 300)), fwlib.FREE_P)
+        self.assertGreater(statistics.median(experiments.estimates(evaluate.Fitted(frozen=True), log, 10)), 0.1)
+
     def test_without_the_pull_today_s_steps_get_there(self):
         log = experiments.convergence_log(100, 300, knowledge.prior(None), 0.05, seed=3)
         self.assertLess(statistics.median(experiments.estimates(experiments.NoPull(), log, 300)), fwlib.FREE_P)
         self.assertGreater(statistics.median(experiments.estimates(evaluate.Today(), log, 300)), 0.1)
+
+
+class FreeLine(unittest.TestCase):
+    """PLAN.md section 5, rule 1: a word leaves the free set only when the low end of its lookup chance passes 8%, and
+    rejoins only when the high end falls below it, so one lookup doesn't flip it (knowledge.free_flag)."""
+    START = '2026-09-01'
+
+    def log(self, opens):
+        """60 known words with Anki intervals of 21 to 120 days, each read 30 times over 10 days and never opened, and
+        two more: 行く (known, no Anki card) and 見る (an Anki interval of 21 days), read 30 times and opened at the
+        exposures `opens`. Returns (Log, the time after it)."""
+        t0 = evaluate.day_start(self.START)
+        names = [f'w{i}' for i in range(60)]
+        intervals = dict({ja: 21 + (i * 99) // 59 for i, ja in enumerate(names)}, **{'見る': 21})
+        events = []
+        for e in range(30):
+            at = t0 + (e // 3) * DAY + (9 + 5 * (e % 3)) * HOUR
+            group = evaluate.Group(at, 'browser', ('browser', f'v{e}', 'p'), False, [])
+            for ja in names + ['行く', '見る']:
+                looked = ja in ('行く', '見る') and e in opens
+                group.obs.append(evaluate.Observation(
+                    at=at, day=evaluate.day_of(at), surface='browser', key=group.key, episode=False, word=ja,
+                    written=ja, form=False, y=1.0 if looked else 0.0, weight=1.0 if looked else 0.6, near=0.0,
+                    ms=1, words=1, share=1.0, read=0.6, status='known'))
+            events.append(group)
+        words = [{'ja': ja, 'kana': '', 'status': 'known', 'added': self.START, 'changed': self.START}
+                 for ja in names + ['行く', '見る']]
+        return evaluate.Log(events, intervals, words), events[-1].at + HOUR
+
+    def flags(self, opens, before):
+        log, at = self.log(opens)
+        fit = knowledge.Fit(log, at)
+        return {ja: knowledge.free_flag(*fit.estimate(ja), before, fit.prior(ja)[0]) for ja in ('行く', '見る')}, fit
+
+    def test_one_lookup_leaves_a_known_word_free(self):
+        log, at = self.log(())
+        fit = knowledge.Fit(log, at)
+        for ja in ('行く', '見る'):  # free by their priors (no history) and by their evidence
+            self.assertLess(knowledge.sigmoid(-fit.prior(ja)[0]), fwlib.FREE_P, ja)
+            self.assertTrue(knowledge.free_flag(*fit.estimate(ja), None, fit.prior(ja)[0]), ja)
+        flags, after = self.flags([29], True)  # one lookup, at the last exposure
+        self.assertEqual(flags, {'行く': True, '見る': True})
+        for ja in ('行く', '見る'):  # though it did raise their chances
+            self.assertGreater(after.estimate(ja)[1], 0)
+            self.assertLess(after.estimate(ja)[0], fit.estimate(ja)[0])
+        self.assertEqual(self.flags([5, 11, 17, 23, 29], True)[0], {'行く': False, '見る': True})  # 1 in 6: 見る's card
+        # holds it until the evidence is clearer
+        self.assertEqual(self.flags(range(2, 30, 3), True)[0], {'行く': False, '見る': False})  # 1 in 3: they leave
+        # the same evidence as one lookup, for words that were out: 見る's high end is under the line, so it rejoins;
+        # 行く's chance is under it too (6.5%), but not its high end, so it stays out
+        self.assertEqual(self.flags([29], False)[0], {'行く': False, '見る': True})
+        self.assertLess(knowledge.sigmoid(-after.estimate('行く')[0]), fwlib.FREE_P)
+
+    def test_the_line_has_hysteresis(self):
+        line = knowledge.logit(1 - fwlib.FREE_P)  # k where the chance is FREE_P
+        for before in (True, False):  # far from the line: the evidence decides
+            self.assertTrue(knowledge.free_flag(line + 1.0, 0.3, before, 0.0))
+            self.assertFalse(knowledge.free_flag(line - 1.0, 0.3, before, 0.0))
+        self.assertTrue(knowledge.free_flag(line - 0.3, 0.3, True, 0.0))  # its low end is still under the line
+        self.assertFalse(knowledge.free_flag(line + 0.3, 0.3, False, 0.0))  # its high end is still over it
+        self.assertTrue(knowledge.free_flag(line + 0.1, 1.0, None, line + 0.5))  # no history: the prior's side
+        self.assertFalse(knowledge.free_flag(line + 0.1, 1.0, None, line - 0.5))
 
 
 def simulated(home, days=3, seed=5):
@@ -226,6 +295,43 @@ class Simulator(Home):
                     expected += m.read * m.q
                     seen += m.looked
         self.assertLess(abs(seen - expected), 3 * expected ** 0.5)
+
+
+class Refresh(Home):
+    def test_a_refresh_fits_once_and_reuses_the_days_before(self):
+        world, _ = logs.simulate(self.home, 3, seed=5)
+        now = world.time() / 1000 + 3600  # an hour into the next day: nothing shown yet today
+        fits = []
+        real = knowledge.Fit
+
+        class Counted(real):
+            def __init__(self, log, until, *args, **kwargs):
+                fits.append(until)
+                super().__init__(log, until, *args, **kwargs)
+
+        with fwlib.using_home(self.home), mock.patch.object(knowledge, 'Fit', Counted):
+            first = knowledge.refresh(now)
+            grid = len(first['reading']['grid'])
+            self.assertEqual(len(fits), grid + 1 + 3)  # the reading model's grid, the fit, one for each day before
+            self.assertEqual(sorted(first['daily']), sorted({evaluate.day_of(at) for at in fits[grid + 1:]}))
+            fits.clear()
+            second = knowledge.refresh(now + 60)
+        self.assertEqual(fits, [int((now + 60) * 1000)])  # only the fit itself: the days before are summed already
+        self.assertEqual(second['calibration']['classes'], first['calibration']['classes'])
+        self.assertEqual(second['dailyFree']['day'], max(first['daily']))
+        words = second['words']
+        self.assertEqual(len(words), len(world.state()['words']))  # every word, with its fitted prior if nothing else
+        self.assertTrue(all(isinstance(e['free'], bool) and e['sd'] > 0 for e in words.values()))
+        self.assertEqual(second['offset']['browser'], 0.0)
+        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd'})
+        for status in ('active', 'known', 'queue'):
+            k, sd = knowledge.prior_estimate(second, status)
+            self.assertEqual((k, sd), (second['prior']['none'][{'active': 'learning', 'queue': 'new'}.get(status, status)],
+                                       second['prior']['sd']['none']))
+        self.assertIsNone(knowledge.prior_estimate({}, 'known'))
+        chat = second['calibration']['classes']['t3']['classes']['sentences']
+        self.assertGreater(chat['expected'], 0)  # whole sentences are priced
+        self.assertTrue(0 < second['sentencePrice']['t3'] < 1)
 
 
 class Stats(unittest.TestCase):

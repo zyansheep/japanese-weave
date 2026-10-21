@@ -13,7 +13,8 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const DENSITIES = [0, 3, 5, 8, 10, 15, 20, 25, 30, 40];
-// The adaptive-difficulty dial: peeks per 100 words shown, 0 off. Kept by the native host (knowledge.py CHALLENGES).
+// The challenge: normal's lookup budget per 100 words read, 0 for the default. Kept by the native host (knowledge.py
+// CHALLENGES).
 export const CHALLENGES = [0, 0.5, 1, 1.5, 2, 3];
 
 export function cleanSettings(s = {}) {

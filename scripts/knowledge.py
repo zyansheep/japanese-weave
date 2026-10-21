@@ -1,21 +1,30 @@
 """Adaptive difficulty: per-word knowledge estimated from the gloss interaction log (see docs/adaptive-difficulty.md).
 Python 3.9+, standard library only.
 
-Model: P(peek) = sigmoid(offset_s - k_w). k_w is the reader's knowledge of a word on a log-odds scale, learned by
-Elo-style updates. Every browser passage shown (its "shown" record) and every T3 message with a word count counts,
-opened or not. A word left unopened is evidence the reader knew it in proportion to the chance it was read: certain
-down to the lowest opened line (halving per line below it), else from time on screen against the time reading down to
-the word takes (read_chance: the passage's stays in the browser; stay_chance: in T3, the stays of the paragraph the
-word is in). The update is the gradient of log P(what happened) with P(open) = P(read) * P(peek), and the T3 offset
-follows the same gradient. A T3 message without a word count (logged before T3 sent them, and not backfilled) is
-replayed as episodes, which exist only when something was opened: there an update is conditioned on the episode having
-at least one open, and only the line rule applies. Every lexicon word is scored, words not introduced yet included,
-and a glossed word is matched to its entry through its dictionary form (inflection.py: T3 glosses conjugated verbs
-whole). refresh() replays the whole log from scratch (deterministic, retunable), writes knowledge.json, steers the
-peek-rate dial, makes a few guarded status moves, and reports whether the default amount of Japanese looks right and
-how the model's expected lookups per class compare with those seen, in lookups per 100 words read (calibration), and
-which opened words the lexicon doesn't have (unlisted). The updates are the Online class, which evaluate.py's "today"
-model runs too.
+Model: P(lookup | read) = sigmoid(offset_s + form - k_w). k_w is the reader's knowledge of a word on a log-odds scale;
+offset_s is 0 on the web (the reference) and fitted for chat; form is a fitted offset for a conjugated form of the word.
+Every browser passage shown (its "shown" record) and every T3 message with a word count counts, opened or not. A word
+left unopened is evidence the reader knew it in proportion to the chance it was read: certain down to the lowest opened
+line (halving per line below it), else from time on screen against the time reading down to the word takes
+(read_chance: the passage's stays in the browser; stay_chance: in T3, the stays of the paragraph the word is in). A T3
+message without a word count (logged before T3 sent them, and not backfilled) counts as an episode, which exists only
+when something was opened: its likelihood is conditioned on at least one open, and only the line rule applies. Every
+lexicon word is scored, words not introduced yet included, and a glossed word is matched to its entry through its
+dictionary form (inflection.py: T3 glosses conjugated verbs whole).
+
+Fit: one penalized maximum-likelihood fit of the whole log on every refresh (NEXT_STEPS step 4), replacing the online
+updates and their pull toward the prior. Each word's k is held toward its prior mean by a Gaussian prior whose width is
+fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by status
+and card, and the uncapped ln(1 + Anki interval)); evidence weighs half as much every EVIDENCE_DAYS; known and learn
+commands are one-sided pseudo-observations; a lookup of a conjugated form counts FORM_WEIGHT. Each word's uncertainty
+is the fit's curvature (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a
+grid, on both surfaces. The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the
+online updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
+
+refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
+with hysteresis), fits the price of a whole sentence per surface, makes a few guarded status moves, and reports whether
+the default amount of Japanese looks right and how the model's expected lookups per class compare with those seen, in
+lookups per 100 words read (calibration), and which opened words the lexicon doesn't have (unlisted).
 """
 import json
 import math
@@ -41,8 +50,10 @@ SETTLE_MS = 10 * 60_000    # and is scored once its last interaction is this old
 GLANCE_MS = 600            # a peek open shorter than this is a glance: soft evidence
 GLANCE_Y = 0.6
 T3_NOISE_MS = 300          # T3 opens popovers after 0.3 s, so shorter peeks are the mouse passing over a word
-FORGET_DAYS = 45           # k decays toward its prior, downward only, with this half-life
 EVIDENCE_DAYS = 30         # evidence weight decays with this half-life, so unseen words grow uncertain again
+# The online updates the fit replaced (Online, evaluate.py's "today"): k decays toward its prior, downward only, with
+# FORGET_DAYS' half-life; step sizes; the T3 offset's rate and clamp; what a command sets k to.
+FORGET_DAYS = 45
 ETA_MAX, ETA_MIN, ETA_SLOPE = 1.2, 0.2, 0.3
 T3_RATE, T3_LIMIT = 0.02, 1.5
 KNOWN_COMMAND_K, LEARN_COMMAND_K = 2.5, 0.0
@@ -51,18 +62,17 @@ Z80 = 0.8416               # one-sided 80% bound
 MOVE_CAP = 3               # evidence moves per direction per day
 IMMUNE_DAYS = 14           # no evidence moves this soon after a known or learn command
 RECENT_DAYS = 14
-RATE_DAYS = 3              # the dial's controller looks at the last 3 days of browser reading
-RATE_MIN_WORDS = 300
-SCALE_RANGE = (0.25, 4.0)
-CHALLENGES = (0, 0.5, 1, 1.5, 2, 3)
+CHALLENGES = (0, 0.5, 1, 1.5, 2, 3)  # normal's lookup budget per 100 words (0: intensity.BUDGETS[0])
 PUNCTUATION = set('。？！?!.')
 PACE_MS = 300              # ms per word a reader takes on a passage with Japanese in it (about 200 words a minute)
 READ_MAX = 0.7             # the most a passage's time on screen alone says about a word in it being read
 SLACK_PX = 10              # how far above a T3 paragraph's band a word's top may sit and still be in it (stay_chance)
 READ_STEPS = 20            # words_read averages the read chance over this many depths of a passage or paragraph
-PACES = (150, 250, 400, 650)   # the reading model's grid, scored by how well it predicts opens (tune)
-READ_MAXES = (0.5, 0.7, 0.9)
-TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
+PACES = (150, 200, 300, 450, 650)    # the reading model's grid, chosen by profile likelihood (tune)
+READ_MAXES = (0.5, 0.6, 0.7, 0.8, 0.9)
+TUNE_MIN_OPENS = 60        # opens, on both surfaces, before the tuned reading model replaces the defaults
+TUNE_MARGIN = 3.0          # and how much more log likelihood than the defaults it needs (about a 95% test of two)
+READ_FLOOR = 0.05          # the least read chance an open's prediction uses: an open far down still happens
 CALIBRATION_DAYS = 30
 CALIBRATED = (0.83, 1.2)   # seen over expected lookups inside this, at 90%, is calibrated (PLAN.md section 10)
 MIN_DAYS = 5               # days before calibrate gives an interval: with 3, one from a model off by 20% passes
@@ -368,7 +378,7 @@ def observed(surface, context, items, listed, read=None):
     return [(word, y, weight, index, near) for word, (y, weight, index, near) in best.items()]
 
 
-# ---- replay ----
+# ---- the online model the fit replaced (evaluate.py's "today") ----
 
 class Word:
     __slots__ = ('mu', 'k', 'n', 'last', 'obs', 'opened', 'recent', 'history', 'command_at')
@@ -398,9 +408,11 @@ class Word:
 
 
 class Online:
-    """Today's model: every word's knowledge and the T3 offset, updated one passage, message, episode or command at a
-    time, oldest first, by the gradients in the module docstring. replay feeds it the whole log; evaluate.py's "today"
-    model feeds it the log day by day."""
+    """The online model the fit replaced, kept as evaluate.py's "today" for comparison: every word's knowledge and the
+    T3 offset, updated one passage, message, episode or command at a time, oldest first, each by a step of the gradient
+    of log P(what happened), with P(open) = read chance x P(peek), and k pulled back toward its prior between
+    observations (FORGET_DAYS, downward only). replay feeds it the whole log; evaluate.py's "today" model feeds it the
+    log day by day."""
 
     def __init__(self, intervals):
         self.intervals, self.words, self.offset = intervals, {}, {'browser': 0.0, 't3': 0.0}
@@ -505,11 +517,11 @@ def timeline(rows, contexts, listed, commands, now_ms):
 
 
 def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, top=READ_MAX, losses=None, shown=None):
-    """Every word's knowledge after the whole log; also the T3 offset. listed: as in observations. pace, top: the
-    reading model (read_chance, stay_chance). losses: a list to append, for every listed word of every browser passage
-    shown, (opened, predicted chance of an open) before the update, with the read chance from time on screen alone: how
-    well the model predicts (tune). shown: a list to append, for every browser passage and T3 message shown, its
-    record before the update (shown_record, for calibrate)."""
+    """The online model the fit replaced (Online, evaluate.py's "today"): every word's knowledge after the whole log;
+    also the T3 offset. listed: as in observations. pace, top: the reading model (read_chance, stay_chance). losses: a
+    list to append, for every listed word of every browser passage shown, (opened, predicted chance of an open) before
+    the update, with the read chance from time on screen alone. shown: a list to append, for every browser passage and
+    T3 message shown, its record before the update (shown_record, as calibrate reads it)."""
     match = matcher(listed)
     model = Online(intervals)
     for at, kind, item in timeline(rows, contexts, listed, commands, now_ms):
@@ -546,13 +558,14 @@ CLASSES = ('costly', 'free', 'topical', 'sentences', 'offlist')  # calibrate's c
 
 def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX):
     """One passage or message for calibrate, as the model stood before it: {at, shown (when it was shown: its shown
-    record, else at), surface, words (shown), japanese (its
-    annotations: none in a blank passage), read (words_read), lookups (its opens; T3 peeks under T3_NOISE_MS left
-    out), budget (a browser plan's, per 100 words; else None), classes: {class: [expected, seen]}}. Expected is the
-    read chance from time on screen times P(peek), each word at its best annotation, and seen its opens (a glance
-    counts GLANCE_Y): listed words are costly, or free when P(peek) is under fwlib.FREE_P; sentence translations
-    (is_sentence) aren't priced yet; a word off the list costs its prior's P(peek). Topical words (chat words found by
-    code, planned) have none yet."""
+    record, else at), surface, words (shown), japanese (its annotations: none in a blank passage), read (words_read),
+    lookups (its opens; T3 peeks under T3_NOISE_MS left out), budget (a browser plan's, per 100 words; else None),
+    classes: {class: [expected, seen]}}. Expected is the read chance from time on screen times P(peek), each word at
+    its best annotation, and seen its opens (a glance counts GLANCE_Y): listed words are free when the model says so
+    (model.is_free, the free flag; without one, P(peek) under fwlib.FREE_P), else costly; a sentence translation
+    (is_sentence) costs the model's price of a whole sentence (model.sentence_price, a chance per sentence read; without
+    one it isn't priced); a word off the list costs its prior's P(peek). Topical words (chat words found by code,
+    planned) have none yet. model: chance(word, surface, at), and maybe is_free(word) and sentence_price(surface)."""
     notes = context['annotations']
     line = _line_height([n[2] for n in notes])
     read = reader(surface, context, pace, top)
@@ -567,12 +580,15 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
         best = units.setdefault(unit, [0.0, 0.0])
         best[0] = max(best[0], read(y, line))
         best[1] = max(best[1], opened.get(index, 0.0))
+    is_free = getattr(model, 'is_free', None)
+    price = getattr(model, 'sentence_price', lambda _surface: 0.0)(surface) or 0.0
     classes = {name: [0.0, 0.0] for name in CLASSES}
     for (kind, word), (chance, seen) in units.items():
-        p = 0.0 if kind == 'sentences' else model.chance(word, surface, at)
-        name = kind if kind != 'listed' else 'free' if p < fwlib.FREE_P else 'costly'
-        classes[name][0] += chance * p
-        classes[name][1] += seen
+        p = price if kind == 'sentences' else model.chance(word, surface, at)
+        if kind == 'listed':
+            kind = 'free' if (is_free(word) if is_free else p < fwlib.FREE_P) else 'costly'
+        classes[kind][0] += chance * p
+        classes[kind][1] += seen
     words = context.get('words') or 0
     plan = context.get('plan') or {}
     budget = plan.get('budget') if surface == 'browser' else None
@@ -585,25 +601,526 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
             'classes': classes}
 
 
-def tune(rows, contexts, listed, intervals, commands, now_ms):
-    """The reading model (pace, top) that best predicts browser opens: mean log loss of P(open) = P(read) * P(peek)
-    over every listed word of every passage shown, each predicted before its own update. Returns {pace, top, opens,
-    words, loss, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens to judge by."""
-    grid = []
-    opens = scored = 0
-    for pace in PACES:
-        for top in READ_MAXES:
-            losses = []
-            replay(rows, contexts, listed, intervals, commands, now_ms, pace, top, losses)
-            if not losses:
-                return {'pace': PACE_MS, 'top': READ_MAX, 'opens': 0, 'words': 0, 'loss': None, 'grid': []}
-            opens, scored = sum(o for o, _ in losses), len(losses)
-            loss = -sum(math.log(p if o else 1 - p) for o, p in losses) / len(losses)
-            grid.append({'pace': pace, 'top': top, 'loss': round(loss, 5)})
-    best = min(grid, key=lambda g: g['loss'])
-    ready = opens >= TUNE_MIN_OPENS
-    return {'pace': best['pace'] if ready else PACE_MS, 'top': best['top'] if ready else READ_MAX, 'tuned': ready,
-            'best': best, 'opens': opens, 'words': scored, 'grid': grid}
+# ---- the fit ----
+
+FORM_WEIGHT = 0.3          # a conjugated form's outcome counts this much for its word (docs/adaptive-difficulty.md)
+COMMAND_K = {'known': 3.5, 'learn': 0.0}  # a known command holds k at least at this, a learn command at most
+COMMAND_WEIGHT = 4.0       # with this curvature (a pseudo-observation with an sd of 0.5), fading like evidence
+POOL_STEP = 0.02           # unopened observations of a word pool by their read weight, rounded to this
+FREE_Z = 1.2816            # the free line's hysteresis: a word's lookup chance at k -+ this many sd (90%, one-sided)
+FIT_TOLERANCE = 1e-4       # the fit stops once no parameter moves more than this
+WIDTH_TOLERANCE = 1e-3     # nor a prior width
+FIT_ITERATIONS = 60
+# The shared parameters, each with the prior that holds it while the data is thin: (mean, sd). The offsets: chat's
+# (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. Then a word's prior mean, a
+# regression on its features (features): with an Anki card, an intercept by status plus a slope on ln(1 + interval),
+# centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on the old neutral
+# prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
+SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
+          'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
+          'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
+SHARED_NAMES = tuple(SHARED)
+T3, FORM = SHARED_NAMES.index('t3'), SHARED_NAMES.index('form')
+STATUSES = ('new', 'learning', 'known')
+WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
+WIDTH_WEIGHT = 5                     # with this many words' worth of weight
+
+
+def day_of(at):
+    """'YYYY-MM-DD', the local day of a time in ms."""
+    return time.strftime('%Y-%m-%d', time.localtime(at / 1000))
+
+
+def day_start(day):
+    """Local midnight of a 'YYYY-MM-DD' day, in ms."""
+    return int(time.mktime(time.strptime(day, '%Y-%m-%d')) * 1000)
+
+
+def status_at(word, day):
+    """A word's status on `day` ('YYYY-MM-DD'): 'known', 'learning' (active or shaky) or 'new' (not introduced yet),
+    from the word state's added and changed days. Before it was added it was new; from its last change on, its status
+    now; in between, where it most likely came from: a known word was learning (it graduated), a shaky word known (two
+    peek days make a known word shaky), an active word learning. None for a word the state doesn't have."""
+    if word is None:
+        return None
+    status = word.get('status')
+    if status == 'queue' or not word.get('added') or day < word['added']:
+        return 'new'
+    if day >= (word.get('changed') or ''):
+        return 'known' if status == 'known' else 'learning'
+    return 'known' if status == 'shaky' else 'learning'
+
+
+def features(interval, status):
+    """A word's prior features, {shared parameter: value}, and the kind whose prior width it takes: with an Anki card,
+    its status's card intercept and ln(1 + interval in days), uncapped; without one, its status's intercept. The hook
+    for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words, script, word type,
+    length): each is one more shared parameter, with its prior in SHARED."""
+    status = status if status in STATUSES else 'new'
+    if interval is not None:
+        return {f'card {status}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
+    return {status: 1.0}, 'none'
+
+
+def _solve(a, b):
+    """x with a x = b, for a small positive definite a (Gaussian elimination with pivoting)."""
+    n = len(b)
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda r: abs(m[r][col]))
+        m[col], m[pivot] = m[pivot], m[col]
+        for r in range(n):
+            if r != col and m[r][col]:
+                f = m[r][col] / m[col][col]
+                for c in range(col, n + 1):
+                    m[r][c] -= f * m[col][c]
+    return [m[i][n] / m[i][i] for i in range(n)]
+
+
+class Fit:
+    """One penalized maximum-likelihood fit of a log's events before `until` (an evaluate.Log: its events, Anki
+    intervals and word state), at a reading pace and cap (default: the log's).
+
+    An observation is a Bernoulli with P(open) = w q: q = P(lookup | read) = sigmoid(offset_s + form - k_w), w its read
+    weight (1 when opened, else the larger of the line rule and the read chance at this pace and cap; an episode's,
+    the line rule alone), weighted 0.5 ** (age / EVIDENCE_DAYS) and FORM_WEIGHT for a form. An episode's observations
+    are conditioned on at least one open. A word's unopened observations with the same read weight, rounded to
+    POOL_STEP, pool, so the work grows with the words more than with the log.
+
+    Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
+    regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
+    times (COMMAND_K - k)^2 / 2 while k is below a known command's or above a learn command's; and each shared
+    parameter's prior (SHARED). By Newton's method with the expected information, positive definite, whose shape (a
+    diagonal for the words, joined only through the shared parameters) the Schur complement solves in time linear in
+    the words; the widths by EM toward WIDTHS. Each word's sd is its k's from the inverse of the information (Laplace),
+    the shared parameters' uncertainty included. frozen: the shared parameters and widths stay at their priors, as for
+    one word among many others. start: what an earlier fit learned (state()), to start from."""
+
+    def __init__(self, log, until, pace=None, top=None, start=None, frozen=False):
+        self.until, self.day, self.frozen = until, day_of(until - 1), frozen
+        self.pace, self.top = pace or log.pace, top or log.top
+        self.intervals = log.intervals
+        self.by_ja = {w['ja']: w for w in log.words}
+        self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
+        self._terms(log)
+        start = start or {}
+        shared = start.get('shared') or {}
+        self.theta = [shared.get(name, SHARED[name][0]) if not frozen else SHARED[name][0] for name in SHARED_NAMES]
+        self.widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
+        before = start.get('k') or {}
+        self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
+        started = time.time()
+        self.iterations = self._run()
+        self.seconds = time.time() - started
+
+    def _word(self, ja):
+        i = self.index.get(ja)
+        if i is None:
+            i = self.index[ja] = len(self.words)
+            self.words.append(ja)
+            x, kind = self.features(ja)
+            self.x.append({SHARED_NAMES.index(name): value for name, value in x.items()})
+            self.kind.append(kind)
+            self.n.append(0.0)
+        return i
+
+    def features(self, ja):
+        return features(self.intervals.get(ja), status_at(self.by_ja.get(ja), self.day))
+
+    def _terms(self, log):
+        pooled, self.episodes, self.commands = {}, [], []
+        same = (self.pace, self.top) == (log.pace, log.top)
+        for event in log.events:
+            if event.at >= self.until:
+                break
+            decay = 0.5 ** ((self.until - event.at) / DAY_MS / EVIDENCE_DAYS)
+            if not hasattr(event, 'obs'):  # a command
+                self.commands.append((self._word(event.word), event.kind, decay))
+                continue
+            chosen = []
+            for o in event.obs:
+                i = self._word(o.word)
+                v = decay * (FORM_WEIGHT if o.form else 1.0)
+                if o.y > 0:
+                    w = 1.0
+                elif event.episode:
+                    w = o.near
+                else:
+                    w = o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, self.pace, self.top))
+                    w = min(1.0, max(POOL_STEP, round(w / POOL_STEP) * POOL_STEP))
+                key = (i, o.surface == 't3', bool(o.form), o.y, w)
+                pooled[key] = pooled.get(key, 0.0) + v
+                self.n[i] += v * w
+                if event.episode:
+                    chosen.append((i, o.surface == 't3', bool(o.form), w))
+            if event.episode and chosen:
+                self.episodes.append((chosen, decay))
+        keys = list(pooled)
+        self.terms = (tuple(k[0] for k in keys), tuple(k[1] for k in keys), tuple(k[2] for k in keys),
+                      tuple(k[3] for k in keys), tuple(k[4] for k in keys), tuple(pooled[k] for k in keys))
+
+    def _mean(self, i, theta):
+        return sum(theta[f] * value for f, value in self.x[i].items())
+
+    def _pass(self, k, theta):
+        """The data's negative log likelihood and its derivatives: per word, the gradient and information; the
+        information joining each word to the chat and form offsets; for the shared parameters, gradient and
+        information."""
+        words, shared = len(k), len(theta)
+        grad, info, chat, form = [0.0] * words, [0.0] * words, [0.0] * words, [0.0] * words
+        g, h = [0.0] * shared, [[0.0] * shared for _ in range(shared)]
+        total, t3, phi = 0.0, theta[T3], theta[FORM]
+        exp, log = math.exp, math.log
+        for w, s, f, y, r, v in zip(*self.terms):
+            eta = (t3 if s else 0.0) + (phi if f else 0.0) - k[w]
+            q = 1 / (1 + exp(-min(30.0, max(-30.0, eta))))
+            if y > 0:  # opened, so read: y log q + (1 - y) log (1 - q)
+                d, i = y - q, q * (1 - q)
+                total -= v * (y * log(q) + (1 - y) * log(1 - q))
+            else:  # not opened, read with chance r: log (1 - r q)
+                a = 1 - r * q
+                d, i = -r * q * (1 - q) / a, r * q * (1 - q) * (1 - q) / a
+                total -= v * log(a)
+            vd, vi = v * d, v * i
+            grad[w] += vd
+            info[w] += vi
+            if s:
+                g[T3] -= vd
+                h[T3][T3] += vi
+                chat[w] -= vi
+                if f:
+                    h[T3][FORM] += vi
+            if f:
+                g[FORM] -= vd
+                h[FORM][FORM] += vi
+                form[w] -= vi
+        h[FORM][T3] = h[T3][FORM]
+        for chosen, v in self.episodes:  # conditioned on at least one open: minus log (1 - none)
+            qs, none = [], 1.0
+            for w, s, f, r in chosen:
+                q = sigmoid((t3 if s else 0.0) + (phi if f else 0.0) - k[w])
+                qs.append(q)
+                none *= 1 - r * q
+            none = min(none, 1 - 1e-12)
+            total += v * log(1 - none)
+            for (w, s, f, r), q in zip(chosen, qs):
+                d = v * none / (1 - none) * r * q * (1 - q) / (1 - r * q)
+                grad[w] -= d
+                g[T3] += d if s else 0.0
+                g[FORM] += d if f else 0.0
+        return total, grad, info, chat, form, g, h
+
+    def _priors(self, k, theta, grad, info, g, h):
+        """Adds the priors' and commands' terms to the derivatives; returns their part of the objective."""
+        total = 0.0
+        for i in range(len(k)):
+            w2 = self.widths[self.kind[i]] ** 2
+            r = k[i] - self._mean(i, theta)
+            total += 0.5 * r * r / w2
+            grad[i] += r / w2
+            info[i] += 1 / w2
+            if not self.frozen:
+                for f, x in self.x[i].items():
+                    g[f] -= x * r / w2
+                    for f2, x2 in self.x[i].items():
+                        h[f][f2] += x * x2 / w2
+        for i, kind, decay in self.commands:
+            u, gap = COMMAND_WEIGHT * decay, (COMMAND_K[kind] - k[i]) * (1 if kind == 'known' else -1)
+            if gap > 0:
+                total += 0.5 * u * gap * gap
+                grad[i] += -u * gap if kind == 'known' else u * gap
+                info[i] += u
+        for j, name in enumerate(SHARED_NAMES):
+            mean, sd = SHARED[name]
+            total += 0.5 * ((theta[j] - mean) / sd) ** 2
+            g[j] += (theta[j] - mean) / sd ** 2
+            h[j][j] += 1 / sd ** 2
+        return total
+
+    def _objective(self, k, theta, data=None):
+        """The objective and its derivatives (as _pass gives them); data: the data's part at k and theta, if known."""
+        data = data or self._pass(k, theta)
+        found = [data[0], list(data[1]), list(data[2]), data[3], data[4], list(data[5]), [row[:] for row in data[6]]]
+        found[0] += self._priors(k, theta, found[1], found[2], found[5], found[6])
+        return tuple(found), data
+
+    def _step(self, k, grad, info, chat, form, g, h):
+        """The Newton step (dk, dtheta), by the Schur complement on the shared parameters; also each word's row of the
+        information joining it to them, and the complement."""
+        if self.frozen:
+            return [-grad[i] / info[i] for i in range(len(k))], [0.0] * len(g), None, None
+        schur, rest, joins = [row[:] for row in h], list(g), []
+        for i in range(len(k)):
+            c = {f: -x / self.widths[self.kind[i]] ** 2 for f, x in self.x[i].items()}
+            if chat[i]:
+                c[T3] = c.get(T3, 0.0) + chat[i]
+            if form[i]:
+                c[FORM] = c.get(FORM, 0.0) + form[i]
+            joins.append(c)
+            for a, ca in c.items():
+                rest[a] -= ca * grad[i] / info[i]
+                for b, cb in c.items():
+                    schur[a][b] -= ca * cb / info[i]
+        dtheta = _solve(schur, [-x for x in rest])
+        dk = [-(grad[i] + sum(c * dtheta[a] for a, c in joins[i].items())) / info[i] for i in range(len(k))]
+        return dk, dtheta, joins, schur
+
+    def _run(self):
+        k, theta = self.k, self.theta
+        (total, grad, info, chat, form, g, h), data = self._objective(k, theta)
+        last, iteration = {}, 0
+        for iteration in range(1, FIT_ITERATIONS + 1):
+            dk, dtheta, _joins, _schur = self._step(k, grad, info, chat, form, g, h)
+            t = 1.0
+            while True:  # halve the step until the objective doesn't rise
+                k2 = [a + t * b for a, b in zip(k, dk)]
+                theta2 = [a + t * b for a, b in zip(theta, dtheta)]
+                found, data2 = self._objective(k2, theta2)
+                if found[0] <= total + 1e-9 or t < 1e-3:
+                    break
+                t /= 2
+            k, theta, data, (total, grad, info, chat, form, g, h) = k2, theta2, data2, found
+            moved = t * max([abs(x) for x in dk + dtheta] or [0.0])
+            widened = 0.0
+            if not self.frozen and k:  # EM for the widths: mean squared distance from the prior mean, plus variance
+                sums = {kind: [0.0, 0] for kind in self.widths}
+                for i in range(len(k)):
+                    s = sums[self.kind[i]]
+                    s[0] += (k[i] - self._mean(i, theta)) ** 2 + 1 / info[i]
+                    s[1] += 1
+                for kind, (squares, count) in sums.items():
+                    new = math.sqrt((squares + WIDTH_WEIGHT * WIDTHS[kind] ** 2) / (count + WIDTH_WEIGHT))
+                    step = new - self.widths[kind]
+                    before = last.get(kind)
+                    last[kind] = step
+                    if before and step * before > 0 and abs(step) < abs(before):  # EM creeps: jump toward its limit
+                        step /= 1 - min(0.95, step / before)
+                    widened = max(widened, abs(new - self.widths[kind]))
+                    self.widths[kind] = max(0.1, self.widths[kind] + step)
+                if widened:  # only the priors' terms change
+                    (total, grad, info, chat, form, g, h), data = self._objective(k, theta, data)
+            if moved < FIT_TOLERANCE and widened < WIDTH_TOLERANCE:
+                break
+        self.k, self.theta, self.objective = k, theta, total
+        _dk, _dt, joins, schur = self._step(k, grad, info, chat, form, g, h)
+        self.var = [1 / x for x in info]
+        self.theta_sd = [0.0] * len(theta)
+        if schur is not None:  # Laplace: the diagonal of the inverse information
+            columns = [_solve(schur, [1.0 if i == j else 0.0 for i in range(len(theta))]) for j in range(len(theta))]
+            inverse = [[columns[j][i] for j in range(len(theta))] for i in range(len(theta))]
+            for i, c in enumerate(joins):
+                extra = sum(ca * inverse[a][b] * cb for a, ca in c.items() for b, cb in c.items())
+                self.var[i] += extra / info[i] ** 2
+            self.theta_sd = [math.sqrt(max(0.0, inverse[j][j])) for j in range(len(theta))]
+        return iteration
+
+    def prior(self, ja):
+        """(mean, sd) of a word's k before any evidence on it."""
+        x, kind = self.features(ja)
+        return sum(self.theta[SHARED_NAMES.index(name)] * value for name, value in x.items()), self.widths[kind]
+
+    def estimate(self, ja):
+        """(k, sd): the fit's for a word with evidence or a command, else its prior."""
+        i = self.index.get(ja)
+        return (self.k[i], math.sqrt(self.var[i])) if i is not None else self.prior(ja)
+
+    def q(self, ja, surface, form=False):
+        """P(lookup | read) of a word on a surface, as a conjugated form or not."""
+        offset = (self.theta[T3] if surface == 't3' else 0.0) + (self.theta[FORM] if form else 0.0)
+        return sigmoid(offset - self.estimate(ja)[0])
+
+    def shared(self):
+        return {name: round(v, 4) for name, v in zip(SHARED_NAMES, self.theta)}
+
+    def state(self):
+        """What a later fit may start from."""
+        return {'shared': dict(zip(SHARED_NAMES, self.theta)), 'widths': dict(self.widths),
+                'k': dict(zip(self.words, self.k))}
+
+
+def nested_loglik(log, fit, pace, top):
+    """The log likelihood of what was opened in the log's passages and messages shown before fit.until, under the
+    reading model at `pace` and `top` and the fit's chances: a reader reads down to one depth, so everything with a
+    higher read chance (at least READ_FLOOR) than an open was read. With the words ordered by read chance r_1 >= ... >=
+    r_n, reading exactly the first j happens with chance r_j - r_(j+1) (r_(n+1) = 0; none: 1 - r_1), and then each
+    read word is opened with its chance q. Weighted like evidence."""
+    total = 0.0
+    for event in log.events:
+        if event.at >= fit.until:
+            break
+        if not hasattr(event, 'obs') or event.episode or not event.obs:
+            continue
+        rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, pace, top)), o.y,
+                        min(1 - 1e-9, max(1e-9, fit.q(o.word, o.surface, o.form)))) for o in event.obs),
+                      key=lambda t: -t[0])
+        lowest = max((i for i, (_r, y, _q) in enumerate(rows) if y > 0), default=-1)
+        chance = 1 - rows[0][0] if lowest < 0 else 0.0
+        product = 1.0
+        for j, (r, y, q) in enumerate(rows):
+            product *= q ** y * (1 - q) ** (1 - y)
+            if j >= lowest:
+                chance += (r - (rows[j + 1][0] if j + 1 < len(rows) else 0.0)) * product
+        total += 0.5 ** ((fit.until - event.at) / DAY_MS / EVIDENCE_DAYS) * math.log(max(chance, 1e-300))
+    return total
+
+
+def tune(log, until):
+    """The reading model (pace, top) by profile likelihood over the grid PACES x READ_MAXES: at a point the whole log is
+    fitted (Fit, starting from the point before) and scored by the likelihood of what was opened under the reading
+    model the read chances come from (nested_loglik), on both surfaces. The search scores every other point first
+    (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
+    inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
+    defaults by TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible
+    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word)."""
+    opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until for o in e.obs)
+    scores, start = {}, None
+
+    def score(i, j):
+        nonlocal start
+        if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
+            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start)
+            start = fit.state()
+            scores[(i, j)] = nested_loglik(log, fit, PACES[i], READ_MAXES[j])
+
+    for j in range(0, len(READ_MAXES), 2):
+        for i in range(0, len(PACES), 2):
+            score(i, j)
+    best = None
+    while best != max(scores, key=scores.get):
+        best = max(scores, key=scores.get)
+        for i in (best[0] - 1, best[0], best[0] + 1):
+            for j in (best[1] - 1, best[1], best[1] + 1):
+                score(i, j)
+    grid = [{'pace': PACES[i], 'top': READ_MAXES[j], 'loglik': round(v, 3)} for (i, j), v in sorted(scores.items())]
+    top_ = max(grid, key=lambda g: g['loglik'])
+    default = next(g for g in grid if (g['pace'], g['top']) == (PACE_MS, READ_MAX))
+    inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
+    ready = opens >= TUNE_MIN_OPENS and top_['loglik'] - default['loglik'] >= TUNE_MARGIN and inside
+    return {'pace': top_['pace'] if ready else PACE_MS, 'top': top_['top'] if ready else READ_MAX, 'tuned': ready,
+            'best': top_, 'inside': inside, 'opens': round(opens, 1), 'grid': grid}
+
+
+def free_flag(k, sd, before, mean):
+    """Whether a word is free, known at a glance, on the web's scale (offset 0), with hysteresis so that one lookup
+    doesn't flip it: a free word stays free until the low end of its lookup chance, sigmoid(-(k + FREE_Z sd)), passes
+    fwlib.FREE_P; any other word becomes free once the high end, sigmoid(-(k - FREE_Z sd)), falls below it. before:
+    the word's flag at the last refresh, else (no history) whether its prior mean gives under FREE_P."""
+    if before is None:
+        before = sigmoid(-mean) < fwlib.FREE_P
+    if before:
+        return sigmoid(-(k + FREE_Z * sd)) <= fwlib.FREE_P
+    return sigmoid(-(k - FREE_Z * sd)) < fwlib.FREE_P
+
+
+def free_flags(fit, words, before):
+    """{ja: free} for words (ja), each from the fit and its flag before ({ja: bool}; free_flag)."""
+    out = {}
+    for ja in words:
+        k, sd = fit.estimate(ja)
+        out[ja] = free_flag(k, sd, before.get(ja), fit.prior(ja)[0])
+    return out
+
+
+class Standing:
+    """The model as it stood at a time, as shown_record reads it: a Fit, the free flags then ({ja: bool}; a word
+    without one gets its prior's, free_flag) and the sentence prices then (sentence_prices)."""
+
+    def __init__(self, fit, flags, prices):
+        self.fit, self.flags, self.prices = fit, flags, prices
+
+    def chance(self, ja, surface, _at=None):
+        return self.fit.q(ja, surface)
+
+    def is_free(self, ja):
+        if ja not in self.flags:
+            k, sd = self.fit.estimate(ja)
+            self.flags[ja] = free_flag(k, sd, None, self.fit.prior(ja)[0])
+        return self.flags[ja]
+
+    def sentence_price(self, surface):
+        return self.prices[surface]['p']
+
+
+def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags=None, start=None,
+                   done=()):
+    """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
+    at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
+    fit before: start, a fit's state, for the first), the free flags carried from day to day (free_flags, from flags,
+    else the priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events).
+    done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
+    for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
+        if at < since or day_of(at) in done:
+            continue
+        if day_of(at) != day:
+            day = day_of(at)
+            fit = Fit(log, day_start(day), pace, top, start=start)
+            start = fit.state()
+            flags.update(free_flags(fit, fit.words, flags))
+            starts[day] = dict(flags)
+            standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)))
+        out.append(shown_record(at, surface, context, items, standing, match, pace, top))
+    return out, starts
+
+
+def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
+    """{day: key} for the days from `since` to yesterday: what their records depend on (the model, the reading model,
+    the challenge, and how much of the log, its interactions and intensity changes came before the day's end), so a
+    day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
+    import bisect
+    ats, row_ats = [e.at for e in log.events], sorted(r['at'] for r in rows)
+    counts, total = [], 0
+    for e in log.events:
+        total += len(getattr(e, 'obs', ()))
+        counts.append(total)
+    out, day = {}, day_of(since)
+    while day_start(day) < day_start(day_of(now_ms)):
+        end = day_start(day) + DAY_MS + 3 * 3_600_000  # past a daylight-saving change, then back to midnight
+        end = day_start(day_of(end))
+        n = bisect.bisect_left(ats, end)
+        out[day] = (f'{MODEL} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
+                    f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}')
+        day = day_of(end)
+    return out
+
+
+SENTENCE_PRICE = 0.08      # a whole sentence's price before the log says (levels.js SENTENCE_PRICE): the beta prior's
+SENTENCE_WEIGHT = 25       # mean, and its weight in sentences read
+
+
+def sentence_ends(surface, context, items, read):
+    """[(y, read chance)] for each whole-sentence translation a passage or message offered (an annotation is_sentence
+    takes): y as an open of a word counts (_opened), 0 if not opened, and its read chance from time on screen alone,
+    read(y, line), as calibrate weighs it (shown_record)."""
+    notes = context['annotations']
+    opened = _opened(surface, notes, items)
+    line = _line_height([n[2] for n in notes])
+    return [(opened.get(index, 0.0), read(y, line)) for index, (written, _x, y) in enumerate(notes)
+            if is_sentence(written)]
+
+
+def sentence_events(rows, contexts, now_ms, pace=PACE_MS, top=READ_MAX):
+    """[(at, surface, y, read chance)] for every sentence end of every passage and message shown (sentence_ends)."""
+    out = []
+    for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
+        read = reader(surface, context, pace, top)
+        out += [(at, surface, y, r) for y, r in sentence_ends(surface, context, items, read)]
+    return out
+
+
+def sentence_prices(events, until):
+    """{surface: {p, read, opens}}: the chance a reader who reads a sentence in Japanese opens its translation: the
+    opens of sentence ends before `until` over their read chances from time on screen (so calibrate, which expects
+    read chance times p, agrees on the days it was fitted on), both weighted like evidence (EVIDENCE_DAYS) and shrunk
+    toward SENTENCE_PRICE by SENTENCE_WEIGHT sentences of prior (a beta prior)."""
+    sums = {'browser': [0.0, 0.0], 't3': [0.0, 0.0]}
+    for at, surface, y, read in events:
+        if at < until:
+            decay = 0.5 ** ((until - at) / DAY_MS / EVIDENCE_DAYS)
+            sums[surface][0] += decay * y
+            sums[surface][1] += decay * read
+    return {surface: {'p': round((opens + SENTENCE_PRICE * SENTENCE_WEIGHT) / (read + SENTENCE_WEIGHT), 4),
+                      'read': round(read, 1), 'opens': round(opens, 1)} for surface, (opens, read) in sums.items()}
 
 
 # ---- calibration: is the default amount right? ----
@@ -623,7 +1140,7 @@ def decisions(changes):
     return [tuple(d) for d in out]
 
 
-def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None, challenge=0):
+def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None, challenge=0, totals=None):
     """Evidence on the default amount of Japanese, over the last `days` days.
 
     reading: browser passages shown with some time on screen, by the share of their words in Japanese (the first bin,
@@ -631,14 +1148,17 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     per 100 words. Screen time overstates reading (a passage stays on screen while its neighbours are read), so
     compare bins with each other, not with a reading speed.
     jitter: passages the extension randomly thinned (plan.jitter < 1, also to none) against untouched ones, among those
-    with candidates (thinning can't change a passage without any). The thinning is random, so the difference between
-    the two groups is caused by the amount alone; gap: how much less Japanese the thinned ones have (share), once both
-    groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how much
-    one more point of Japanese slows reading, once the gap is over THIN_MIN_GAP.
+    with candidates (thinning can't change a passage without any), planned since thinning took free words only (their
+    plan has a sentencePrice, from extension 0.9.0, 2026-10-20). The thinning is random, so the difference between
+    the two groups is caused by the free words alone; gap: how much less Japanese the thinned ones have (share), once
+    both groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how
+    much one more point of Japanese known at a glance slows reading, once the gap is over THIN_MIN_GAP. jitterBefore:
+    the same for the passages planned before, when thinning scaled the budget too.
     presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
     heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
     (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats).
-    classes: the model against what happened, from replay's shown records (lookup_classes), in the one unit.
+    classes: the model against what happened, from shown records (fitted_records; replay's for the model it replaced)
+    and the day totals of days already summed (lookup_classes), in the one unit.
     """
     since = now_ms - days * DAY_MS
     opens = {}
@@ -657,7 +1177,7 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
         plan = c.get('plan') or {}
         passages.append({'share': japanese / c['words'], 'msPerWord': c['active'] / c['words'], 'words': c['words'],
                          'opens': opens.get(key, 0), 'jitter': plan.get('jitter'), 'level': plan.get('level', 0),
-                         'candidates': plan.get('candidates') or 0})
+                         'candidates': plan.get('candidates') or 0, 'free': 'sentencePrice' in plan})
 
     def summary(group):
         if not group:
@@ -672,17 +1192,23 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     for low, high in zip(SHARE_BINS, SHARE_BINS[1:]):
         group = [p for p in normal if low <= p['share'] < high and p['share']]
         bins.append(dict(summary(group), low=low, high=min(1.0, high)))
+    def thinning(offered):
+        jittered = [p for p in offered if p['jitter'] is not None and p['jitter'] < 1]
+        untouched = [p for p in offered if p['jitter'] == 1]
+        out = {'thinned': summary(jittered), 'untouched': summary(untouched), 'gap': None, 'effect': None}
+        if len(jittered) >= THIN_MIN_PASSAGES and len(untouched) >= THIN_MIN_PASSAGES:
+            mean = lambda xs: sum(xs) / len(xs)
+            gap = mean([p['share'] for p in untouched]) - mean([p['share'] for p in jittered])
+            out['gap'] = round(gap, 4)
+            if gap > THIN_MIN_GAP:
+                slow = mean([math.log(p['msPerWord']) for p in untouched]) - mean([math.log(p['msPerWord'])
+                                                                                    for p in jittered])
+                out['effect'] = round(slow / gap, 3)
+        return out
+
     offered = [p for p in normal if p['candidates'] > 0]
-    jittered = [p for p in offered if p['jitter'] is not None and p['jitter'] < 1]
-    untouched = [p for p in offered if p['jitter'] == 1]
-    jitter = {'thinned': summary(jittered), 'untouched': summary(untouched), 'gap': None, 'effect': None}
-    if len(jittered) >= THIN_MIN_PASSAGES and len(untouched) >= THIN_MIN_PASSAGES:
-        mean = lambda xs: sum(xs) / len(xs)
-        gap = mean([p['share'] for p in untouched]) - mean([p['share'] for p in jittered])
-        jitter['gap'] = round(gap, 4)
-        if gap > THIN_MIN_GAP:
-            slow = mean([math.log(p['msPerWord']) for p in untouched]) - mean([math.log(p['msPerWord']) for p in jittered])
-            jitter['effect'] = round(slow / gap, 3)
+    jitter = thinning([p for p in offered if p['free']])
+    before = thinning([p for p in offered if not p['free']])
     presses = {}
     threads_off = len({c['session'] for c in changes if c['surface'] == 'thread' and c['off'] and c['at'] >= since})
     for surface in ('chat', 'browser'):
@@ -703,8 +1229,10 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
                                                                                for k, v in sorted(time_at.items())},
                             'verdict': verdict}
     presses['chat']['threadsOff'] = threads_off
-    return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'presses': presses,
-            'classes': lookup_classes([r for r in shown or [] if r['at'] >= since], changes, challenge)}
+    return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'jitterBefore': before,
+            'presses': presses,
+            'classes': lookup_classes([r for r in shown or [] if r['at'] >= since], changes, challenge,
+                                      {day: t for day, t in (totals or {}).items() if day >= day_of(since)})}
 
 
 def chat_budget(changes, at, challenge=0):
@@ -737,42 +1265,60 @@ def ratio(days):
     return sum(s for _e, s in days) / expected if expected > 0 else None
 
 
-def lookup_classes(records, changes=(), challenge=0):
-    """Per surface ('browser', 't3'), from shown records (shown_record) of passages and messages with Japanese (blank
-    passages have nothing to look up and don't count, as in peek_rate), in lookups per 100 words read (per_100): {n,
-    words (shown), read (words_read), lookups, none (with no lookup), days, budget (the level's budget per 100 words
-    read, weighted by words read: a browser passage's plan, a chat message's level when shown; full has none),
-    classes: {class: {expected, seen, ratio: seen / expected, interval: its 90% interval from resampling days}}}, for
-    each of CLASSES and "all"."""
+def day_totals(records, changes=(), challenge=0):
+    """The sums lookup_classes reads, per day and surface, from shown records (shown_record) of passages and messages
+    with Japanese (blank passages have nothing to look up and don't count): {day: {surface: {n, words, read, lookups,
+    none, budget: [sum of budget x read, read under a budget], classes: {class: [expected, seen]}}}}. A budget is the
+    level's per 100 words read: a browser passage's plan's, a chat message's level's when shown (full has none)."""
+    out = {}
+    for r in records:
+        if not r['japanese']:
+            continue
+        day = out.setdefault(day_of(r['at']), {})
+        t = day.setdefault(r['surface'], {'n': 0, 'words': 0, 'read': 0.0, 'lookups': 0, 'none': 0,
+                                          'budget': [0.0, 0.0], 'classes': {name: [0.0, 0.0] for name in CLASSES}})
+        t['n'] += 1
+        t['words'] += r['words']
+        t['read'] += r['read']
+        t['lookups'] += r['lookups']
+        t['none'] += not r['lookups']
+        for name, (expected, seen) in r['classes'].items():
+            t['classes'][name][0] += expected
+            t['classes'][name][1] += seen
+        budget = r['budget'] if r['surface'] == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge)
+        if budget is not None:
+            t['budget'][0] += budget * r['read']
+            t['budget'][1] += r['read']
+    return out
+
+
+def lookup_classes(records, changes=(), challenge=0, totals=None):
+    """Per surface ('browser', 't3'), from shown records (shown_record) of passages and messages with Japanese, and
+    totals (day_totals of other days, as cached), in lookups per 100 words read (per_100): {n, words (shown), read
+    (words_read), lookups, none (with no lookup), days, budget (the level's budget per 100 words read, weighted by words
+    read), classes: {class: {expected, seen, ratio: seen / expected, interval: its 90% interval from resampling days}}},
+    for each of CLASSES and "all"."""
+    days = dict(totals or {})
+    days.update(day_totals(records, changes, challenge))
     out = {}
     for surface in ('browser', 't3'):
-        mine = [r for r in records if r['surface'] == surface and r['japanese']]
-        read = sum(r['read'] for r in mine)
-        by_day, budgets = {}, []
-        for r in mine:
-            day = by_day.setdefault(time.strftime('%Y-%m-%d', time.localtime(r['at'] / 1000)),
-                                    {name: [0.0, 0.0] for name in CLASSES + ('all',)})
-            for name, (expected, seen) in r['classes'].items():
-                for key in (name, 'all'):
-                    day[key][0] += expected
-                    day[key][1] += seen
-            budget = r['budget'] if surface == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge)
-            if budget is not None:
-                budgets.append((budget, r['read']))
+        mine = [d[surface] for d in days.values() if surface in d]
+        read = sum(t['read'] for t in mine)
         classes = {}
         for name in CLASSES + ('all',):
-            days = [tuple(d[name]) for d in by_day.values()]
-            expected, seen = sum(e for e, _s in days), sum(s for _e, s in days)
-            interval = day_interval([d for d in days if d != (0.0, 0.0)], ratio)
+            pairs = [tuple(t['classes'][name]) if name != 'all' else
+                     (sum(e for e, _s in t['classes'].values()), sum(s for _e, s in t['classes'].values()))
+                     for t in mine]
+            expected, seen = sum(e for e, _s in pairs), sum(s for _e, s in pairs)
+            interval = day_interval([d for d in pairs if d != (0.0, 0.0)], ratio)
             classes[name] = {'expected': round(per_100(expected, read) or 0.0, 4),
                              'seen': round(per_100(seen, read) or 0.0, 4),
                              'ratio': round(seen / expected, 3) if expected > 0 else None,
                              'interval': [round(v, 3) for v in interval] if interval else None}
-        weight = sum(w for _b, w in budgets)
-        out[surface] = {'n': len(mine), 'words': sum(r['words'] for r in mine), 'read': round(read),
-                        'lookups': sum(r['lookups'] for r in mine), 'none': sum(1 for r in mine if not r['lookups']),
-                        'days': len(by_day), 'classes': classes,
-                        'budget': round(sum(b * w for b, w in budgets) / weight, 3) if weight else None}
+        budget, weight = sum(t['budget'][0] for t in mine), sum(t['budget'][1] for t in mine)
+        out[surface] = {'n': sum(t['n'] for t in mine), 'words': sum(t['words'] for t in mine), 'read': round(read),
+                        'lookups': sum(t['lookups'] for t in mine), 'none': sum(t['none'] for t in mine),
+                        'days': len(mine), 'classes': classes, 'budget': round(budget / weight, 3) if weight else None}
     return out
 
 
@@ -784,23 +1330,7 @@ def calibration_text(report):
             share = f'{100 * b["low"]:4.0f}-{100 * b["high"]:3.0f}% Japanese' if b['high'] else 'no Japanese'.rjust(18)
             lines.append(f'  {share}: {b["n"]:4d} passages, '
                          f'{b["msPerWord"]:4d} ms on screen per word, {b["opensPer100"]:.2f} opens per 100 words')
-    j = report['jitter']
-    if j['thinned']['n'] and j['untouched']['n']:
-        lines.append(f'Randomly thinned passages: {j["thinned"]["n"]} at {100 * j["thinned"]["share"]:.1f}% Japanese, '
-                     f'{j["thinned"]["msPerWord"]} ms/word; untouched: {j["untouched"]["n"]} at '
-                     f'{100 * j["untouched"]["share"]:.1f}%, {j["untouched"]["msPerWord"]} ms/word.')
-        if j['effect'] is not None:
-            lines.append(f'  Each extra point of Japanese changes screen time per word by about '
-                         f'{j["effect"] / 100:+.1%}.')
-        elif j.get('gap') is not None:  # enough of both, but the thinning took too little Japanese off
-            lines.append(f'  Thinned passages have only {100 * j["gap"]:.1f} points less Japanese than untouched ones: '
-                         f'too close to measure the effect ({100 * THIN_MIN_GAP:.1f} needed).' if j['gap'] > 0 else
-                         f'  Thinned passages have no less Japanese than untouched ones ({-100 * j["gap"]:.1f} points '
-                         "more): the effect can't be measured yet.")
-        else:
-            lines.append(f'  Not enough of either yet to measure the effect ({THIN_MIN_PASSAGES} each).')
-    else:
-        lines.append('No randomly thinned passages yet (extension 0.6.0 and later).')
+    lines += thinning_text(report['jitter'], report.get('jitterBefore'))
     lines += classes_text(report.get('classes'), report['days'])  # knowledge.json from before has none
     for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
         p = report['presses'][surface]
@@ -811,6 +1341,37 @@ def calibration_text(report):
         chats = f', counting {n} chat{"s" if n != 1 else ""} with Japanese turned off' if n else ''
         lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){chats}{verdict}.')
     return '\n'.join(lines)
+
+
+def thinning_text(jitter, before=None):
+    """calibration_text's lines on the random thinning: since it took free words only, then before (if any)."""
+    lines = []
+    if jitter['thinned']['n'] and jitter['untouched']['n']:
+        t, u = jitter['thinned'], jitter['untouched']
+        lines.append(f'Randomly thinned passages (thinning free words only, since 2026-10-20): {t["n"]} at '
+                     f'{100 * t["share"]:.1f}% Japanese, {t["msPerWord"]} ms/word; untouched: {u["n"]} at '
+                     f'{100 * u["share"]:.1f}%, {u["msPerWord"]} ms/word.')
+        if jitter['effect'] is not None:
+            lines.append(f'  Each extra point of Japanese known at a glance changes screen time per word by about '
+                         f'{jitter["effect"] / 100:+.1%}.')
+        elif jitter.get('gap') is not None:  # enough of both, but the thinning took too little Japanese off
+            gap = 100 * jitter['gap']
+            lines.append(f'  Thinned passages have only {gap:.1f} points less Japanese than untouched ones: too close to '
+                         f'measure the effect ({100 * THIN_MIN_GAP:.1f} needed).' if gap > 0 else
+                         f'  Thinned passages have no less Japanese than untouched ones ({-gap:.1f} points more): the '
+                         "effect can't be measured yet.")
+        else:
+            lines.append(f'  Not enough of either yet to measure the effect ({THIN_MIN_PASSAGES} each).')
+    else:
+        lines.append('No randomly thinned passages since thinning took free words only (extension 0.9.0, 2026-10-20).')
+    if before and before['thinned']['n'] and before['untouched']['n']:
+        t, u = before['thinned'], before['untouched']
+        effect = (f'; about {before["effect"] / 100:+.1%} screen time per word per point of Japanese'
+                  if before['effect'] is not None else '')
+        lines.append(f'  Before, when thinning scaled the budget too: {t["n"]} thinned at {100 * t["share"]:.1f}% '
+                     f'Japanese, {t["msPerWord"]} ms/word; {u["n"]} untouched at {100 * u["share"]:.1f}%, '
+                     f'{u["msPerWord"]} ms/word{effect}.')
+    return lines
 
 
 CLASS_NAMES = {'costly': 'costly words', 'free': 'free words', 'topical': 'topical words',
@@ -874,26 +1435,7 @@ def unlisted_text(summary):
             f'{summary["words"]} words): {top}')
 
 
-# ---- the dial ----
-
-def peek_rate(rows, contexts, now_ms):
-    """Browser peeks per 100 words shown over the last RATE_DAYS days: (rate or None, words shown, peeks). Passages
-    shown without Japanese (blank) have nothing to peek at and don't count."""
-    since = now_ms - RATE_DAYS * DAY_MS
-    shown = sum(c['words'] or 0 for c in contexts.values()
-                if c['surface'] == 'browser' and c['shown_at'] and c['shown_at'] >= since and c['annotations'])
-    peeks = sum(1 for r in rows if r['surface'] == 'browser' and r['kind'] in ('peek', 'flip') and r['at'] >= since)
-    return (100 * peeks / shown if shown else None), shown, peeks
-
-
-def steer(controller, challenge, rate, shown, today):
-    """Once a day: move scale by sqrt(target / realized) so realized peeks approach the dial."""
-    controller = dict(controller or {'scale': 1.0, 'day': ''})
-    if challenge > 0 and rate is not None and shown >= RATE_MIN_WORDS and controller.get('day') != today:
-        scale = controller.get('scale', 1.0) * math.sqrt(challenge / max(rate, 0.05))
-        controller = {'scale': round(min(SCALE_RANGE[1], max(SCALE_RANGE[0], scale)), 3), 'day': today}
-    return controller
-
+# ---- the challenge: normal's lookup budget ----
 
 def challenge_of(state):
     value = (state.get('prefs') or {}).get('challenge', 0)
@@ -951,14 +1493,66 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
+MODEL = 'fit 1'  # the reading model is chosen again when this changes (knowledge.json "reading")
+
+
+class Estimate:
+    """A word as the status moves read it (plan_moves, bounds): k, sd, evidence weight n, its opens in the last
+    RECENT_DAYS days (times), its last command's time."""
+    __slots__ = ('k', 'sd', 'n', 'recent', 'command_at')
+
+    def __init__(self, k, sd, n=0.0, recent=(), command_at=None):
+        self.k, self.sd, self.n, self.recent, self.command_at = k, sd, n, list(recent), command_at
+
+
+def word_stats(log, now_ms):
+    """Per word, what the log says besides the fit: {ja: {obs, opened, recent (times of its opens in the last
+    RECENT_DAYS days), last (its last observation or command), history (its last 30 observations: at, surface, y, w),
+    command_at}}."""
+    out = {}
+    for event in log.events:
+        if not hasattr(event, 'obs'):
+            s = out.setdefault(event.word, {'obs': 0, 'opened': 0, 'recent': [], 'last': None, 'history': []})
+            s['command_at'] = s['last'] = event.at
+            continue
+        for o in event.obs:
+            s = out.setdefault(o.word, {'obs': 0, 'opened': 0, 'recent': [], 'last': None, 'history': []})
+            s['obs'] += 1
+            s['last'] = event.at
+            if o.y > 0:
+                s['opened'] += 1
+                if event.at >= now_ms - RECENT_DAYS * DAY_MS:
+                    s['recent'].append(event.at)
+            s['history'].append({'at': event.at, 'surface': event.surface, 'y': o.y, 'w': round(o.weight, 2)})
+            del s['history'][:-30]
+    return out
+
+
+def prior_table(fit):
+    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by status,
+    plus interval times ln(1 + days); without one, by status; and the sd of each kind (prior_estimate)."""
+    shared = fit.shared()
+    return {'card': {s: shared[f'card {s}'] for s in STATUSES}, 'interval': shared['interval'],
+            'none': {s: shared[s] for s in STATUSES}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
+
+
 def refresh(now=None):
-    """Replay the gloss log, steer the dial, apply guarded status moves, write knowledge.json. One at a time; returns
-    the new knowledge, or None when another refresh is running. With a collector set, the collector does this and
-    the cache here is refreshed instead (hub.py)."""
+    """Fit the gloss log (Fit), apply guarded status moves, write knowledge.json. One at a time; returns the new
+    knowledge, or None when another refresh is running. With a collector set, the collector does this and the cache
+    here is refreshed instead (hub.py).
+
+    knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's), mu (its prior mean), free
+    (known at a glance, with hysteresis against the last refresh's flag: free_flag), n (evidence weight), obs, opened,
+    recent (opens in the last RECENT_DAYS days), last and history; offset (the web's 0, chat's fitted); fit (the
+    shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
+    sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
+    today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
+    last of those days, which today's records carry on from; unlisted; the evidence moves and veto."""
     if fwlib.collector_url():
         import hub
         ok, error = hub.sync(scan=False)
         return dict(load(), synced=ok, syncError=error)
+    import evaluate  # the log as the fit reads it (evaluate.extract); evaluate imports this module
     now = now if now is not None else time.time()
     now_ms, today = int(now * 1000), time.strftime('%Y-%m-%d', time.localtime(now))
     with fwlib.locked(LOCK, blocking=False) as got:
@@ -967,25 +1561,64 @@ def refresh(now=None):
         rows, contexts = feedback.load(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
-        listed = inflection.lexicon(state['words']).entry  # every lexicon word, queue words too
+        match = inflection.lexicon(state['words']).entry  # every lexicon word, queue words too
         intervals, commands = anki_intervals(), read_commands()
         reading = previous.get('reading')
-        if not isinstance(reading, dict) or reading.get('day') != today:  # the reading model's grid, once a day
-            reading = dict(tune(rows, contexts, listed, intervals, commands, now_ms), day=today)
-        records = []
-        words, offset = replay(rows, contexts, listed, intervals, commands, now_ms, reading['pace'], reading['top'],
-                               shown=records)
-        rate, shown, peeks = peek_rate(rows, contexts, now_ms)
-        challenge = challenge_of(state)
-        controller = steer(previous.get('controller'), challenge, rate, shown, today)
+        fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == MODEL
+        pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
+        log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
+        if not fresh:  # the reading model, once a day
+            reading = dict(tune(log, now_ms), day=today, model=MODEL)
+            pace, top = reading['pace'], reading['top']
+        known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
+        start = None
+        if (previous.get('fit') or {}).get('model') == MODEL:  # start from the last refresh's fit
+            start = {'shared': previous['fit'].get('shared'), 'widths': previous['fit'].get('widths'),
+                     'k': {ja: e['k'] for ja, e in known.items() if isinstance(e, dict) and e.get('n')}}
+        fit = Fit(log, now_ms, pace, top, start=start)
+        stats = word_stats(log, now_ms)
+        flags = free_flags(fit, [w['ja'] for w in state['words']],
+                           {ja: e['free'] for ja, e in known.items() if isinstance(e, dict)
+                            and isinstance(e.get('free'), bool)})
+        sentences = sentence_events(rows, contexts, now_ms, pace, top)
+        prices = sentence_prices(sentences, now_ms)
+        changes, challenge = feedback.intensity_changes(feedback.default_path()), challenge_of(state)
+        since = now_ms - CALIBRATION_DAYS * DAY_MS
+        keys = day_keys(log, rows, changes, since, now_ms, pace, top, challenge)
+        cached = previous.get('daily') if isinstance(previous.get('daily'), dict) else {}
+        done = {day: cached[day]['totals'] for day, key in keys.items()
+                if isinstance(cached.get(day), dict) and cached[day].get('key') == key}
+        # the free flags to carry: at the start of the last day summed, else the last refresh's
+        carried = previous.get('dailyFree') if isinstance(previous.get('dailyFree'), dict) else {}
+        flags_then = carried.get('free') if carried.get('day') in done and isinstance(carried.get('free'), dict) else \
+            {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+        records, starts = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags_then,
+                                         fit.state(), set(done))
+        totals = dict(done, **day_totals(records, changes, challenge))
+        daily = {day: {'key': key, 'totals': totals[day]} for day, key in keys.items() if day in totals}
+        last = max((day for day in starts if day in daily), default=None)
+        daily_free = {'day': last, 'free': {ja: f for ja, f in starts[last].items() if ja in fit.index}} if last \
+            else carried if carried.get('day') in daily else {}
+        words = {}
+        for w in state['words']:
+            ja = w['ja']
+            k, sd = fit.estimate(ja)
+            words[ja] = {'k': round(k, 3), 'sd': round(sd, 3), 'mu': round(fit.prior(ja)[0], 3), 'free': flags[ja],
+                         'n': 0.0, 'obs': 0}
+            s, i = stats.get(ja), fit.index.get(ja)
+            if s:  # a word the log has something on
+                words[ja].update(n=round(fit.n[i], 2) if i is not None else 0.0, obs=s['obs'], opened=s['opened'],
+                                 recent=len(s['recent']), last=s['last'], history=s['history'])
         history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
         today_counts = {}
         for m in history:
             if m.get('day') == today:
                 today_counts[m['to']] = today_counts.get(m['to'], 0) + 1
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
-        # with the dial off, the day rules alone move words, as before adaptive difficulty
-        moves, veto = ([], []) if shrank or not challenge else plan_moves(state, words, today_counts, now_ms)
+        # with no challenge set, the day rules alone move words, as before adaptive difficulty
+        estimates = {ja: Estimate(e['k'], e['sd'], e['n'], (stats.get(ja) or {}).get('recent', ()),
+                                  (stats.get(ja) or {}).get('command_at')) for ja, e in words.items()}
+        moves, veto = ([], []) if shrank or not challenge else plan_moves(state, estimates, today_counts, now_ms)
         applied = []
         if moves:
             with fwlib.editing() as live:
@@ -996,18 +1629,19 @@ def refresh(now=None):
                         applied.append({'day': today, 'word': ja, 'from': before, 'to': after})
         knowledge = {
             'updated': now, 'rows': len(rows),
-            'offset': {s: round(v, 3) for s, v in offset.items()},
-            'challenge': challenge, 'controller': controller,
-            'budget': round(challenge * controller.get('scale', 1.0), 3) if challenge else 0,
-            'rate': {'per100': round(rate, 2) if rate is not None else None, 'shownWords': shown, 'peeks': peeks,
-                     'days': RATE_DAYS},
-            'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
-            'calibration': calibrate(rows, contexts, feedback.intensity_changes(feedback.default_path()), now_ms,
-                                     shown=records, challenge=challenge),
-            'unlisted': unlisted(rows, listed, now_ms),
-            'words': {ja: {'k': round(w.k, 3), 'n': round(w.n, 2), 'sd': round(w.sd, 3), 'mu': round(w.mu, 2),
-                           'obs': w.obs, 'opened': w.opened, 'recent': len(w.recent), 'last': w.last,
-                           'history': w.history} for ja, w in words.items()},
+            'offset': {'browser': 0.0, 't3': round(fit.theta[T3], 3)},
+            'fit': {'model': MODEL, 'shared': fit.shared(),
+                    'sd': {name: round(sd, 4) for name, sd in zip(SHARED_NAMES, fit.theta_sd)},
+                    'widths': {kind: round(w, 4) for kind, w in fit.widths.items()}, 'pace': pace, 'top': top,
+                    'words': len(fit.words), 'terms': len(fit.terms[0]), 'iterations': fit.iterations,
+                    'seconds': round(fit.seconds, 3)},
+            'prior': prior_table(fit),
+            'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
+            'challenge': challenge, 'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
+            'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
+            'daily': daily, 'dailyFree': daily_free,
+            'unlisted': unlisted(rows, match, now_ms),
+            'words': words,
         }
         fwlib.write_json(path(), knowledge)
         return knowledge
@@ -1025,9 +1659,32 @@ def start_refresh():
 
 
 def word_estimate(knowledge, ja, surface='browser'):
-    """(p, k, sd) for a word, or None without evidence."""
+    """(p, k, sd) for a word, or None when knowledge.json has nothing on it. p is its lookup chance on the surface,
+    kept on its free flag's side of fwlib.FREE_P when it has one (free_flag): the flag, with its hysteresis, says
+    whether the word is known at a glance, and the chance how likely a lookup is otherwise. So a planner comparing p
+    with FREE_P (weave.lists) agrees with the flag."""
     entry = (knowledge.get('words') or {}).get(ja)
     if not entry:
         return None
     offset = (knowledge.get('offset') or {}).get(surface, 0.0)
-    return sigmoid(offset - entry['k']), entry['k'], entry['sd']
+    p = sigmoid(offset - entry['k'])
+    if isinstance(entry.get('free'), bool):
+        p = min(p, fwlib.FREE_P * 0.999) if entry['free'] else max(p, fwlib.FREE_P)
+    return p, entry['k'], entry['sd']
+
+
+def prior_estimate(knowledge, status, interval=None):
+    """(k, sd) a word without an estimate in knowledge.json assumes, from its "prior" (prior_table): by its Anki
+    interval and status, else its status. None when knowledge.json has no prior."""
+    table = knowledge.get('prior')
+    if not isinstance(table, dict):
+        return None
+    x, kind = features(interval, 'learning' if status in ('active', 'shaky') else
+                       'known' if status == 'known' else 'new')
+    try:
+        mean = sum(value * (table['interval'] if name == 'interval' else
+                            table['card'][name[5:]] if name.startswith('card ') else table['none'][name])
+                   for name, value in x.items())
+        return mean, table['sd'][kind]
+    except (KeyError, TypeError):
+        return None

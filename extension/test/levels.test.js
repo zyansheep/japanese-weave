@@ -106,6 +106,19 @@ describe('choosing swaps', () => {
     const nowhere = validateSwaps(1, [{ o: 'never', f: 'もう', ctx: 'never' }, { o: 'a', f: '大きい', ctx: '' }], words);
     expect(planSwaps(2, nowhere, text, words).plan).toMatchObject({ limit: 0, candidates: 0 });
   });
+  test("the host's free flag decides what is free, whatever k says: its hysteresis keeps one lookup from flipping a word", () => {
+    const flagged = words.map((w) => (w.ja === 'もう' ? { ...w, k: 2.0, sd: 0.5, free: true }
+      : w.ja === 'でも' ? { ...w, k: 4.0, sd: 0.5, free: false } : w));
+    const one = (f) => swaps.filter((s) => s.f === f);
+    // もう: a lookup chance of 0.12, over FREE_P, but free: kept at no cost, with no budget at all
+    expect(planSwaps(2, one('もう'), text, flagged, { budgetPer100: 0 }).swaps.map((s) => s.f)).toEqual(['もう']);
+    // でも: 0.018, under FREE_P, but not free: it costs its chance, and a budget of 0 keeps it out
+    expect(planSwaps(2, one('でも'), text, flagged, { budgetPer100: 0 }).swaps).toEqual([]);
+    // without the flag, k decides
+    const plain = flagged.map(({ free: _free, ...w }) => w);
+    expect(planSwaps(2, one('もう'), text, plain, { budgetPer100: 0 }).swaps).toEqual([]);
+    expect(planSwaps(2, one('でも'), text, plain, { budgetPer100: 0 }).swaps.map((s) => s.f)).toEqual(['でも']);
+  });
   test('the random thinning keeps each free word with chance jitter, from JITTER_MIN (0.2) to 1, and leaves the budget', () => {
     const one = swaps.slice(0, 1); // でも, known
     const kept = Array.from({ length: 2000 }, (_, seed) => planSwaps(2, one, text, words, { seed, jitter: 0.6 }).swaps.length);

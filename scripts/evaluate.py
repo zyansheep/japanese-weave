@@ -1,7 +1,7 @@
 """Model evaluation (NEXT_STEPS step 3, PLAN.md section 10): any model of lookup chances scored on the gloss log, day by
-day, against today's. Python 3.9+, standard library only.
+day, against each other. Python 3.9+, standard library only.
 
-extract() turns a log into what knowledge.replay learns from, by exactly its rules (knowledge.timeline and
+extract() turns a log into what the models learn from, by exactly the replay's rules (knowledge.timeline and
 knowledge.observed: showings and episodes, read chances from time on screen, the line rule, glances, T3 noise,
 sentence translations), each observation with what a model may use and what the scoring needs. evaluate() scores
 models prequentially by day: for each day d, every model is fitted on the events before d's local midnight and then
@@ -20,8 +20,9 @@ The interface. A model is an object with
                      read only the events it hasn't seen yet: log.origin is the same object for every day of one log.
     predict(obs)     q = P(lookup | read) for one Observation, a number in (0, 1), at obs.at on obs.surface.
 
-A Log has events (each a Command or a Group), intervals (Anki intervals by word: today's prior), words (the word
-state's entries: ja, kana, status, added, changed), pace and top (the fixed reading model), and origin.
+A Log has events (each a Command or a Group), intervals (Anki intervals by word), words (the word state's entries:
+ja, kana, status, added, changed), pace and top (the fixed reading model), and origin. knowledge.refresh fits the
+same Log of the whole log.
 
   Command      at, word (its entry), kind: 'known' or 'learn'
   Group        one showing or episode: at (when it was scored), surface ('browser' or 't3'), key (surface, view,
@@ -34,9 +35,9 @@ state's entries: ja, kana, status, added, changed), pace and top (the fixed read
                knowledge._chance(ms, words, share, pace, top), for a model that fits its own pace and cap); read;
                status (the word's that day: 'known', 'learning' or 'new', status_at)
 
-today's model (knowledge.Online, fed the log in replay's order) and a constant one are here; the one fitter of
-NEXT_STEPS step 4, refitted on the whole log each day, is a model like them. CURRENT names the model knowledge.py
-runs, which the convergence test checks.
+The models: "fit", the one fitter (knowledge.Fit, NEXT_STEPS step 4), refitted on everything before each day;
+"today", the online updates it replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance
+per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
 the model's own q against fwlib.FREE_P), the mean log loss and seen/expected opens with a 90% interval from resampling
@@ -44,7 +45,8 @@ days; for each other model, the paired loss difference against the first, day by
 resampling days (free and costly by the first model's q); on a simulated log (tools/sim), the true chances' loss too:
 the floor no model can beat.
 
-  python3 scripts/evaluate.py [--home DIR] [--models today,constant] [--truth FILE] [--skip DAYS] [--pace MS --top X]
+  python3 scripts/evaluate.py [--home DIR] [--models today,fit,constant] [--truth FILE] [--skip DAYS]
+                              [--pace MS --top X]
 """
 import argparse
 import bisect
@@ -60,7 +62,7 @@ import fwlib  # noqa: E402
 import inflection  # noqa: E402
 import knowledge  # noqa: E402
 
-READ_FLOOR = 0.05   # the least read chance a prediction uses (as knowledge.tune): an open far down still happens
+READ_FLOOR = knowledge.READ_FLOOR  # the least read chance a prediction uses: an open far down still happens
 CLASSES = ('all', 'browser', 't3', 'known', 'learning', 'new', 'form', 'free', 'costly')
 NAMES = {'browser': 'web', 't3': 'chat'}
 TRUTH = 'truth.jsonl'
@@ -110,32 +112,15 @@ class Log:
         return [o for e in self.events if isinstance(e, Group) and not e.episode for o in e.obs]
 
 
-def day_of(at):
-    return time.strftime('%Y-%m-%d', time.localtime(at / 1000))
+day_of = knowledge.day_of
+status_at = knowledge.status_at  # a word's status on a day, from the word state's added and changed days
 
 
-def day_start(day):
-    """Local midnight of a 'YYYY-MM-DD' day, in ms."""
-    return int(time.mktime(time.strptime(day, '%Y-%m-%d')) * 1000)
+day_start = knowledge.day_start
 
 
 def next_day(day):
     return day_of(day_start(day) + 36 * 3_600_000)  # past a daylight-saving change too
-
-
-def status_at(word, day):
-    """A word's status on `day` ('YYYY-MM-DD'): 'known', 'learning' (active or shaky) or 'new' (not introduced yet),
-    from the word state's added and changed days. Before it was added it was new; from its last change on, its status
-    now; in between, where it most likely came from: a known word was learning (it graduated), a shaky word known (two
-    peek days make a known word shaky), an active word learning. None for a word the state doesn't have."""
-    if word is None:
-        return None
-    status = word.get('status')
-    if status == 'queue' or not word.get('added') or day < word['added']:
-        return 'new'
-    if day >= (word.get('changed') or ''):
-        return 'known' if status == 'known' else 'learning'
-    return 'known' if status == 'shaky' else 'learning'
 
 
 def is_form(written, entry, word=None):
@@ -241,8 +226,24 @@ class Constant:
         return self.q.get(obs.surface, self.START)
 
 
-MODELS = {'today': Today, 'constant': Constant}
-CURRENT = 'today'  # the model knowledge.py runs; step 4's one fitter replaces it
+class Fitted:
+    """The one fitter (knowledge.Fit, NEXT_STEPS step 4): a penalized maximum-likelihood fit of every event before the
+    day, at the log's reading pace and cap, each day starting from the day before's. frozen: the shared parameters and
+    prior widths held at their priors."""
+
+    def __init__(self, frozen=False):
+        self.frozen, self.last = frozen, None
+        self.name = 'fit, priors held' if frozen else 'fit'
+
+    def fit(self, log, until):
+        self.last = knowledge.Fit(log, until, start=self.last.state() if self.last else None, frozen=self.frozen)
+
+    def predict(self, obs):
+        return self.last.q(obs.word, obs.surface, obs.form)
+
+
+MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted}
+CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 
 def current():
@@ -413,7 +414,7 @@ def report_text(result, log):
 
 def add_arguments(parser):
     parser.add_argument('--home', help='the state dir (default: this one); a simulated one from tools/sim works too')
-    parser.add_argument('--models', default='today,constant',
+    parser.add_argument('--models', default='today,fit,constant',
                         help=f'comma-separated, the first is the reference: {", ".join(MODELS)}')
     parser.add_argument('--truth', help=f"a simulated log's ground truth (default: the state dir's {TRUTH}, if any)")
     parser.add_argument('--skip', type=int, default=0, metavar='DAYS', help='leave the first days unscored')
