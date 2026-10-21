@@ -971,6 +971,21 @@ class Hub(Home):
                 weave.main([])
         self.assertEqual(brief, [0, -1])
 
+    def test_brief_records_wait_in_the_outbox_and_reach_the_collector(self):
+        fwlib.load_state()
+        payload = json.dumps({'session_id': 's1', 'prompt': 'Hi', 'transcript_path': str(self.home / 'none.jsonl')})
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(payload)), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+        self.assertEqual([op['kind'] for op in hub.pending()], ['brief'])  # the hook never waits on the network
+        self.assertEqual(hub.sync(scan=False), (True, None))
+        self.assertEqual(hub.pending(), [])
+        briefs = feedback.chat_briefs(self.server_home / 'interactions.sqlite')
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs], [('s1', True, len(context))])
+        self.assertEqual([k for k, _ in self.ops()], ['seed', 'brief'])
+        self.assertEqual(self.served()['words'], fwlib.load_state()['words'])  # it changed nothing
+
     def test_changes_wait_here_while_the_collector_is_down(self):
         fwlib.load_state()
         word = self.learning(self.served())[0]
@@ -1986,6 +2001,58 @@ class OncePerChat(Home):
                     self.assertLess(len(later), len(old) + len(learning), (known, markup, level))
                     self.assertLess(len(later) - len(learning), 1500, (known, markup, level))
                     self.assertFalse(plan['whole'])
+
+
+class BriefRecords(Home):
+    """Each chat reply's brief is kept as a record of what it was offered, like a web passage's plan."""
+
+    def hook(self, session='s1', **extra):
+        payload = dict({'session_id': session, 'prompt': 'Next.', 'transcript_path': str(self.home / 'none.jsonl')},
+                       **extra)
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def test_every_reply_has_a_record_joined_by_chat_and_time(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01', known_top=60))
+        before = int(time.time() * 1000)
+        first, second = self.hook(), self.hook()
+        self.hook('codex-1', turn_id='turn-9')
+        briefs = feedback.chat_briefs()
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs],
+                         [('s1', True, len(first)), ('s1', False, len(second)), ('codex-1', True, briefs[2]['chars'])])
+        b = briefs[0]
+        learning = [w['ja'] for w in fwlib.introduced(fwlib.load_state()) if w['status'] == 'active']
+        self.assertEqual(sorted(ja for ja, _ in b['offered']), sorted(learning))
+        self.assertTrue(all(abs(p - knowledge.sigmoid(-knowledge.prior(None))) < 0.001 for _, p in b['offered']))
+        self.assertEqual((b['level'], b['intensity'], b['budget'], b['arms'], b['known']), (0, 1.0, 0.5, {}, 60))
+        self.assertAlmostEqual(b['expected'], b['ask'] * b['offered'][0][1], places=2)
+        self.assertEqual(briefs[2]['turn'], 'turn-9')
+        self.assertEqual([b['session'] for b in feedback.chat_briefs(session='codex-1')], ['codex-1'])
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[1]['at'] + 5000), briefs[1])  # the latest before it
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[0]['at']), briefs[0])
+        self.assertIsNone(feedback.brief_for(briefs, 's1', before - 1))
+        self.assertIsNone(feedback.brief_for(briefs, 's9', briefs[1]['at']))
+        self.assertEqual(weave.compose(fwlib.load_state(), {}, level=intensity.FULL)[2].keys() & {'budget', 'expected'},
+                         set())  # full has no budget
+        self.assertTrue(intensity.LEVELS)
+
+    def test_bad_records_are_refused(self):
+        good = hub.stamp({'kind': 'brief', 'session': 's1', 'level': 0, 'intensity': 1.0, 'offered': [['問題', 0.27]],
+                          'arms': {}, 'known': 3, 'whole': True, 'chars': 4000, 'budget': 0.5, 'ask': 2, 'expected': 0.54})
+        self.assertIsNone(hub.validate(good))
+        self.assertIsNone(hub.validate(dict(good, level=3, arms={'問題': 'held'}, turn='t-1')))
+        for bad in (dict(good, level=True), dict(good, level=4), dict(good, offered=[['問題', 1.5]]),
+                    dict(good, offered=[['問題']]), dict(good, session='a b'), dict(good, arms=[]),
+                    dict(good, whole='yes'), dict(good, chars=-1), dict(good, budget=float('nan')), dict(good, note='x'),
+                    dict(good, intensity=0), {k: v for k, v in good.items() if k != 'known'}):
+            self.assertIsNotNone(hub.validate(bad), bad)
+        self.assertEqual(hub.run(good), {'ok': True})
+        self.assertEqual(hub.run(good), {'ok': True, 'duplicate': True})  # a resend is kept once
+        self.assertFalse(hub.run(dict(good, uid='other', level=9))['ok'])
+        self.assertFalse((fwlib.home() / 'state.json').exists())  # a record changes no word state
 
 
 class Examples(unittest.TestCase):

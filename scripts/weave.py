@@ -2,7 +2,8 @@
 """UserPromptSubmit hook: prints a short Japanese Weave brief as additional context for the next reply.
 
 The hook's context stays in the conversation, so a chat gets the whole brief (its rules and every known word by name)
-once, and on later turns a short reminder with what changed (chat_turn).
+once, and on later turns a short reminder with what changed (chat_turn). Each brief is also kept as a record of what
+the reply was offered: a `brief` op (hub.py).
 
 Usage: weave.py --hook   (reads the hook JSON on stdin, prints hook JSON)
        weave.py          (prints the plain brief, for checking: a chat's first turn)
@@ -763,7 +764,22 @@ def main(argv):
     if notice:
         out['systemMessage'] = notice  # shown to the user, outside the brief
     print(json.dumps(out, ensure_ascii=False), flush=True)
+    if session:
+        keep_plan(plan, session, len(text), data.get('turn_id'))
     return 0
+
+
+def keep_plan(plan, session, chars, turn=None):
+    """Keeps what this reply was offered as a brief op (hub.keep): the plan (compose), the chat's session id, the
+    brief's length and, from Codex, the turn id. Never waits long and never fails the hook: a lost record only
+    leaves a gap in the log."""
+    try:
+        record = dict(plan, kind='brief', session=session, chars=chars)
+        if threads.valid_session(turn):
+            record['turn'] = turn
+        hub.keep(record)
+    except Exception as error:
+        print(f'Japanese Weave: brief not recorded ({error.__class__.__name__})', file=sys.stderr)
 
 
 if __name__ == '__main__':
