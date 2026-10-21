@@ -20,7 +20,8 @@
                                                      or review, not new or suspended) at the front of the
                                                      list; mature cards (interval >= N days, default 21)
                                                      become known unless --no-known
-  fw.py status                                       stage, word counts, learning words, looked-up words next in
+  fw.py status                                       stage, labels (from the model), learning words, new words
+                                                     today and whether the budget goes unspent
   fw.py log [N]                                      the latest N gloss peeks and flips (default 20), with how
                                                      long each stayed open and the glossed words around it
                                                      (from the collector when one is set)
@@ -31,8 +32,8 @@
                                                      always-on machine (its own plugin uses it directly);
                                                      install: a systemd user service running the installed copy
                                                      (enable lingering so it runs logged out)
-  fw.py known WORD...                                mark words as known
-  fw.py learn WORD...                                put words back in the learning set (shaky)
+  fw.py known WORD...                                mark words as known (at once; the model takes it as evidence)
+  fw.py learn WORD...                                put words back in the learning set (likewise)
   fw.py stage N|auto                                 pin the stage (1-4) or let it follow known words
   fw.py pause | resume                               stop or restart Japanese in chat and on websites
   fw.py glosses abbr|footer                          T3 Code chats: gloss each Japanese word in an <abbr> shown
@@ -57,12 +58,11 @@
                                                      without a lookup: about 60 words sampled by frequency and 6
                                                      made-up ones, one at a time in a terminal, y or n (--list and
                                                      --answers: the same in a chat); monthly (scripts/probe.py)
-  fw.py refresh                                      rescan chat transcripts and apply the promotion rules
-                                                     (with a collector: send them and anything queued, and
-                                                     refresh the cached state)
+  fw.py refresh                                      rescan chat transcripts, refit the model and label the
+                                                     words from it (with a collector: send them and anything
+                                                     queued, and refresh the cached state)
   fw.py setup --codex [--dry-run]                    also add the chat hook to Codex CLI (~/.codex or $CODEX_HOME)
-  fw.py export [--claude-ai | --chatgpt] [--log-day] paste-ready block for claude.ai preferences or ChatGPT
-  fw.py log-chat-day                                 opt-in: count today as exposure for your learning words
+  fw.py export [--claude-ai | --chatgpt]            paste-ready block for claude.ai preferences or ChatGPT
   fw.py check                                        verify the state, extension folder and native host
   fw.py uninstall [--codex] [--dry-run]              remove the native host manifests (and the Codex hook)
 """
@@ -532,19 +532,36 @@ def uninstall(args):
 def status(_args):
     state, error = hub.current()
     stale_note(error)
-    by = {}
+    know = knowledge.load()
+    today = fwlib.today()
+    by, hidden = {}, 0
     for w in state['words']:
-        by.setdefault(w['status'], []).append(w)
+        if fwlib.hidden(w, today):
+            hidden += 1
+        else:
+            by.setdefault(w['status'], []).append(w)
     stage = fwlib.stage_for(state)
     print(f'Japanese Weave: Stage {stage}{" (pinned)" if state.get("stage_pinned") else ""}'
           f'{", PAUSED" if state.get("paused") else ""}')
-    print(f'  known {len(by.get("known", []))}, learning {len(by.get("active", []))}, '
-          f'shaky {len(by.get("shaky", []))}, not yet introduced {len(by.get("queue", []))}')
-    chat = (fwlib.read_json(fwlib.home() / 'exposure.json', {}) or {}).get('words', {})
-    for name in ('shaky', 'active'):
-        for w in by.get(name, []):
-            days = len(fwlib.exposure_days(w, chat))
-            print(f'  {name:6} {w["ja"]} = {w["en"]}, "{w["hint"]}"  (seen on {days} day{"s" if days != 1 else ""})')
+    labels = state.get('labels') or {}
+    source = (f'labels from the model since {labels.get("since")}' if labels.get('from') == 'model' else
+              f'labels from the day-count rules again since {labels.get("since")}' if labels.get('from') == 'rules' else
+              'labels from the day-count rules until the next refresh')
+    print(f'  known {len(by.get("known", []))}, learning {len(by.get("active", []))}'
+          + (f', shaky {len(by["shaky"])}' if by.get('shaky') else '')
+          + f', not yet introduced {len(by.get("queue", []))} ({source})')
+    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    for w in by.get('shaky', []) + by.get('active', []):
+        entry = entries.get(w['ja'])
+        chance = f'lookup chance {knowledge.sigmoid(-entry["k"]):.2f}' if isinstance(entry, dict) and 'k' in entry \
+            else 'no estimate yet'
+        arm = fwlib.arm_label(w, today)
+        print(f'  {w["status"]:6} {w["ja"]} = {w["en"]}, "{w["hint"]}"  ({chance}'
+              + (f'; delayed start: {arm}' if arm else '') + ')')
+    if hidden:
+        print(f'  and {plural(hidden, "word")} held back for the delayed-start experiment (not named, so they stay '
+              'unseen: fw.py experiment)')
+    print('  ' + intake_line(state, know, today))
     looked = fwlib.looked_up()
     lined_up = sorted((w for w in by.get('queue', []) if w['ja'] in looked), key=lambda w: -looked[w['ja']])
     if lined_up:
@@ -553,6 +570,21 @@ def status(_args):
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
     print(probe.status_line(state))
+
+
+def intake_line(state, know, today):
+    """New words today, and whether the lookup budget went unspent (knowledge.json "spend", knowledge.spending)."""
+    taken = fwlib.taken_today(state, today)
+    spend = know.get('spend') if isinstance(know.get('spend'), dict) else None
+    head = f'new words today: {taken} of at most {fwlib.NEW_PER_DAY}'
+    if not spend:
+        return head + ' (how much of the budget goes unspent comes with the next refresh)'
+    names = {'browser': 'the web', 't3': 'chat'}
+    parts = [f'{names.get(surface, surface)} {v["share"]:.0%} of {v["budget"]:g} over {plural(v["plans"], "plan")}'
+             for surface, v in spend.items() if v.get('plans') and v.get('share') is not None]
+    verdict = 'unspent, so new words come in' if knowledge.unspent(spend) else 'spent, so no new words for now'
+    return (f'{head}; the plans of the last {knowledge.SPEND_HOURS} hours asked for '
+            + ('; '.join(parts) if parts else 'nothing (no reading)') + f' of their lookup budget: {verdict}')
 
 
 def stale_note(error):
@@ -691,9 +723,8 @@ def pause(value):
 
 
 def export_cmd(args):
-    result = hub.submit({'kind': 'exported', 'target': 'chatgpt' if args.chatgpt else 'claude-ai',
-                         'log_day': bool(args.log_day)})
-    state, logged = fwlib.load_state(), result.get('logged', 0)
+    hub.submit({'kind': 'exported', 'target': 'chatgpt' if args.chatgpt else 'claude-ai'})
+    state = fwlib.load_state()
     if args.chatgpt:
         about, respond = export.chatgpt(state)
         print(f'ChatGPT > Settings > Personalization > Custom instructions. Each field holds {export.CHATGPT_LIMIT} '
@@ -704,15 +735,6 @@ def export_cmd(args):
         block = export.claude_ai(state)
         print(f'claude.ai > Settings > Profile > personal preferences. Replace the old Japanese Weave block '
               f'({len(block)} characters):\n\n{block}')
-    if logged:
-        print(f'\n(Counted today as chat exposure for {logged} learning words.)')
-
-
-def log_chat_day(_args):
-    result = hub.submit({'kind': 'chat_day'})
-    logged = result.get('logged', 0)
-    queued_note(result)
-    print(f'Counted today as chat exposure for {logged} learning words (never enough on its own to make a word known).')
 
 
 def refresh(_args):
@@ -750,7 +772,9 @@ def knowledge_cmd(args):
           + (f', form offset {fit["shared"]["form"]}' if 'shared' in fit else '')
           + (f'; reading {reading.get("pace")} ms a word, at most {reading.get("top")}' if reading else ''))
     status = {w['ja']: w['status'] for w in state['words']}
-    ranked = sorted(words.items(), key=lambda kv: -kv[1].get('n', 0))[:args.limit]
+    held = {w['ja'] for w in state['words'] if fwlib.hidden(w)}
+    ranked = sorted(((ja, e) for ja, e in words.items() if ja not in held), key=lambda kv: -kv[1].get('n', 0))
+    ranked = ranked[:args.limit]
     if ranked and ranked[0][1].get('n'):
         print('  most evidence (word, status, lookup chance on the web, evidence weight):')
     for ja, entry in ranked:
@@ -760,11 +784,9 @@ def knowledge_cmd(args):
         free = ', free' if entry.get('free') else ''
         print(f'    {ja}  {status.get(ja, "?"):<6} p {p:.2f}{free}  n {entry["n"]:.1f}  opened {entry["opened"]} of '
               f'{entry["obs"]}')
-    moves = know.get('moves') or []
+    moves = [m for m in know.get('moves') or [] if m.get('word') not in held]
     for m in moves[-5:]:
-        print(f'  moved {m["word"]}: {m["from"]} -> {m["to"]} on {m["day"]}')
-    if know.get('veto'):
-        print(f'  held back from graduating: {", ".join(know["veto"])}')
+        print(f'  labeled {m["word"]}: {m["from"]} -> {m["to"]} on {m["day"]}')
 
 
 def why(args):
@@ -777,7 +799,7 @@ def why(args):
     if not entry or not entry.get('obs', 1):
         prior = f' (its prior: k {entry["k"]} +- {entry["sd"]}{", known at a glance" if entry.get("free") else ""})' \
             if entry else ''
-        print(f'  no evidence in the gloss log yet: the day rules decide (3 exposure days without a peek){prior}')
+        print(f'  no evidence in the gloss log yet: its prior decides its label{prior}')
         return
     p = knowledge.sigmoid(-entry['k'])
     free = '; known at a glance' if fwlib.is_free(entry) else ''
@@ -789,9 +811,7 @@ def why(args):
               f'{" (glance)" if 0 < h["y"] < 1 else ""}  weight {h["w"]}' + (f'  -> k {h["k"]}' if 'k' in h else ''))
     for m in (know.get('moves') or []):
         if m['word'] == w['ja']:
-            print(f'  moved {m["from"]} -> {m["to"]} on {m["day"]}')
-    if w['ja'] in (know.get('veto') or []):
-        print('  held back from graduating: still peeked too often')
+            print(f'  labeled {m["from"]} -> {m["to"]} on {m["day"]}')
 
 
 def challenge_cmd(args):
@@ -931,9 +951,7 @@ def main(argv=None):
     target = p.add_mutually_exclusive_group()
     target.add_argument('--claude-ai', action='store_true')
     target.add_argument('--chatgpt', action='store_true')
-    p.add_argument('--log-day', action='store_true', help='also count today as exposure (see log-chat-day)')
     p.set_defaults(run=export_cmd)
-    sub.add_parser('log-chat-day').set_defaults(run=log_chat_day)
     args = parser.parse_args(argv)
     try:
         args.run(args)

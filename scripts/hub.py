@@ -8,18 +8,23 @@ the cache meanwhile, so the change shows at once; the next sync sends it. The ho
 the cache and starts a background sync (`fw.py refresh`) when the cache is a few minutes old.
 
 Ops (each also carries uid, day, at and machine; see stamp):
-  events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser (fwlib.apply_event)
-  mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands
+  events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser; kept in the ops log only:
+                                                       nothing counts days any more (fwlib.apply_event)
+  mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands: the label at once
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
              "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja]}]}   chat replies scanned on some machine
-  chat_day  {}                                         log-chat-day: today counts as assumed exposure
-  exported  {"target": "claude-ai"|"chatgpt", "log_day": bool}
+  chat_day  {}                                         from before the switch (log-chat-day): changes nothing now
+  exported  {"target": "claude-ai"|"chatgpt", "log_day"?: bool}   log_day changes nothing now
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
-  brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {}, "known", "whole", "chars",
+  labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null]], "probes": [[ja, outcome]],
+             "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
+                                                       labels from the model, the words taken in with their
+                                                       delayed-start arms, the probes' outcomes (fwlib.apply_labels)
+  brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {ja: arm}, "known", "whole", "chars",
              "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "turn"?}
                                                        what one chat reply was offered (weave.compose); a record only
   probe     {"via", "seconds", "weights", "top", "words": [[ja, id, band, weight, answer]], "fakes": [[ja, answer]],
@@ -151,6 +156,8 @@ def validate(op):
         if not threads.valid_session(op.get('session')) or not isinstance(op.get('off'), bool) \
                 or not text(op.get('source'), 20):
             return 'thread: {"session", "off": true|false, "source"}'
+    elif kind == 'labels':
+        return labels_error(op)
     elif kind == 'brief':
         return brief_error(op)
     elif kind == 'probe':
@@ -188,6 +195,35 @@ def brief_error(op):
     return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
                               '"known", "whole", "chars", "budget"?, "ask"?, "sentences"?, "sentencePrice"?, '
                               '"expected"?, "turn"?}')
+
+
+LABELS_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'labels', 'intake', 'probes', 'experiment'}
+
+
+def labels_error(op):
+    """What is wrong with a labels op (knowledge.decide), or None: label changes [[word, from, to]], words taken in
+    [[word, arm or null, draw or null]], probes [[word, {at, surface, y, read} or "missed"]] and the experiment's
+    seed when it starts."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 100
+    rows = lambda key, most, ok: key not in op or (isinstance(op[key], list) and len(op[key]) <= most
+                                                    and all(isinstance(r, list) and ok(r) for r in op[key]))
+    label = lambda r: (len(r) == 3 and word(r[0]) and r[1] in fwlib.STATUSES + ('shaky',)
+                       and r[2] in fwlib.STATUSES)
+    intake = lambda r: (len(r) == 3 and word(r[0]) and (r[1] is None and r[2] is None
+                                                         or r[1] in fwlib.ARMS and number(r[2]) and 0 <= r[2] < 1))
+    outcome = lambda o: o == 'missed' or (isinstance(o, dict) and set(o) == {'at', 'surface', 'y', 'read'}
+                                          and isinstance(o['at'], int) and o['surface'] in feedback.SURFACES
+                                          and number(o['y']) and 0 <= o['y'] <= 1
+                                          and number(o['read']) and 0 <= o['read'] <= 1)
+    seed = op.get('experiment')
+    good = (set(op) <= LABELS_FIELDS and rows('labels', 100_000, label)
+            and rows('intake', fwlib.NEW_PER_DAY, intake)
+            and rows('probes', 10_000, lambda r: len(r) == 2 and word(r[0]) and outcome(r[1]))
+            and (seed is None or isinstance(seed, dict) and set(seed) == {'seed'} and isinstance(seed['seed'], int)
+                 and not isinstance(seed['seed'], bool) and 0 <= seed['seed'] < 2 ** 32))
+    return None if good else ('labels: {"labels": [[word, from, to]], "intake": [[word, arm, draw]], "probes": '
+                              '[[word, outcome]], "experiment"?: {"seed"}}')
 
 
 PROBE_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands',
@@ -256,18 +292,15 @@ def apply(state, op):
     if kind == 'seed':
         return {'seeded': fwlib.seed_known(state, op['n'], day)}
     if kind == 'anki':  # the words reach the front of the list through anki.csv (run writes it first)
-        by_key = {fwlib.key(w['ja']): w for w in state['words']}  # thousands of words: one lookup each
-        entries = [e for e in (by_key.get(fwlib.key(name)) or fwlib.find(state, name) for name in op['known']) if e]
-        for e in entries:  # learning words keep learning; only words not introduced yet jump to known
-            if e['status'] == 'queue':
-                fwlib.set_status(e, 'known', day)
+        entries = fwlib.mark_known(state, op['known'], day)
         return {'words': len(op['words']), 'known': sum(e['status'] == 'known' for e in entries)}
-    if kind == 'chat_day':
-        return {'logged': export.log_chat_day(state, day)}
+    if kind == 'chat_day':  # it counted assumed exposure days, which nothing counts any more
+        return {'logged': 0}
     if kind == 'exported':
-        logged = export.log_chat_day(state, day) if op.get('log_day') else 0
         export.mark_exported(state, op['target'])
-        return {'logged': logged}
+        return {'logged': 0}
+    if kind == 'labels':
+        return fwlib.apply_labels(state, op, day)
     if kind == 'noticed':
         state.setdefault('exported', {})['noticed'] = True
         return {}
@@ -335,7 +368,7 @@ def _apply_here(op):
     if kind == 'probe':  # the gloss log lives where the state does
         import probe
         habit = probe.habit_here(op)
-    with fwlib.editing() as state:  # merges anki.csv into the list, applies, promotes, saves
+    with fwlib.editing() as state:  # merges anki.csv into the list, applies, sets the stage, saves
         result = apply(state, op)
         if habit is not None and result.get('kept'):
             result['habit'] = probe.attach(state, op['uid'], habit)
@@ -546,7 +579,7 @@ def sync(scan=True, timeout=TIMEOUT):
 
 
 def current(max_age=0, wait=True):
-    """The state to read: where it lives, with today's promotion applied; or the cache, refreshed first when older
+    """The state to read: where it lives (its stage brought up to date); or the cache, refreshed first when older
     than max_age seconds (wait False: refreshed in the background instead). Returns (state, error): error says why a
     stale cache couldn't be refreshed."""
     if not fwlib.collector_url():
@@ -683,7 +716,8 @@ def receive(body, db=None):
 
 
 def maintain():
-    """On the collector, every few minutes: today's promotion (a new day can graduate words) and fresh estimates."""
+    """On the collector, every few minutes: fresh estimates, and with them the labels, the day's new words and the
+    probes (knowledge.refresh)."""
     if not (fwlib.home() / 'state.json').exists():
         return
     with fwlib.editing():

@@ -132,7 +132,7 @@ class Brief(Home):
             self.assertNotIn('%', text)
             self.assertNotIn('per 100 words', text)
             self.assertIn('Plain English for code, commands, paths, numbers, names, IDs and option letters', text)
-            self.assertIn('zero Japanese, and no recall cue, for health, medication, legal, money', text)
+            self.assertIn('zero Japanese for health, medication, legal, money', text)
             self.assertIn('never in files, code, configs, commit or PR text, messages to other agents', text)
             self.assertIn('footer line', text)
             # the same brief as normal's but for the one line that lifts the budget
@@ -152,8 +152,6 @@ class Brief(Home):
         popover = weave.brief(self.state(3), {}, markup=True, level=intensity.FULL)
         self.assertIn('in a fully Japanese sentence wrap each word the same way', popover)
         self.assertNotIn('footer line', popover)
-        recall = {'ja': '結局', 'en': 'after all', 'hint': 'kekkyoku'}
-        self.assertIn('Recall: 結局?', weave.brief(self.state(), {}, recall, level=intensity.FULL))
 
     def test_full_with_hundreds_of_known_words_names_them(self):
         state = fwlib.new_state('2026-01-01')
@@ -203,9 +201,9 @@ class Hook(Home):
         self.assertIn('Chat replies: off until', self.fw('intensity', 'off'))
         until = fwlib.load_state()['prefs']['intensity_chat']['until']
         context, out = self.hook('Prove that the square root of 2 is irrational.', transcript_path=str(self.log))
-        self.assertEqual(context, weave.off_note(until))  # no brief, recall or calibration line
+        self.assertEqual(context, weave.off_note(until))  # no brief or calibration line
         self.assertNotIn('systemMessage', out)  # and no export notice
-        self.assertFalse((fwlib.home() / 'sessions.json').exists())  # nor a turn counted for the recall cue
+        self.assertFalse((fwlib.home() / 'sessions.json').exists())  # nor a turn counted
         self.assertEqual(self.hook('Next.', session='codex-1', turn_id='t1')[0], weave.off_note(until, codex=True))
         self.assertIn('Web pages: normal.', self.fw('intensity', 'browser'))  # the browser has its own level
         self.assertEqual(hub.change_intensity('chat', 1, 't3')[0]['level'], -2)  # one press heavier: Japanese again
@@ -214,11 +212,11 @@ class Hook(Home):
         self.assertIn('under budget', context)
         self.assertIn('systemMessage', out)
 
-    def test_full_keeps_the_recall_cue_and_drops_the_calibration_line(self):
+    def test_full_drops_the_calibration_line(self):
         self.assertIn('Chat replies: full (+3) until', self.fw('intensity', 'full'))
         context, out = self.hook('What is a monad?', transcript_path=str(self.log))
         self.assertIn(', turned to full for now by the user): ', context)
-        self.assertIn('Recall:', context)
+        self.assertNotIn('Recall:', context)
         self.assertNotIn('Your last reply', context)
         self.assertIn('systemMessage', out)
 

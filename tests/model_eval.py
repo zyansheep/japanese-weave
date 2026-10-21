@@ -52,8 +52,9 @@ def make_state(home, stage, known=None):
         fwlib.apply_event(state, w['ja'], 'known', '2026-09-01')
         days, n = ((8, 40) if i < count / 3 else (4, 12) if i < 2 * count / 3 else (1, 2))
         exposure['words'][w['ja']] = {'n': n, 'days': [f'2026-09-{d + 10:02d}' for d in range(days)]}
-    for day in range(2, 6):
-        fwlib.promote(state, f'2026-09-{day:02d}', {})
+    for day in range(2, 6):  # five new words a day, as while the budget goes unspent
+        fwlib.take_in(state, [[w['ja'], None, None] for w in fwlib.newcomers(state, {})[:fwlib.NEW_PER_DAY]],
+                      f'2026-09-{day:02d}')
     if fwlib.stage_for(state) != stage:  # e.g. 1,000 known words at Stage 3: pin it
         state['stage'], state['stage_pinned'] = stage, True
     fwlib.write_json(home / 'state.json', state)
