@@ -88,6 +88,8 @@ DEFAULTS = dict(
     # starting values from the word itself: None, or the true coefficients on knowledge.word_features' scale, with
     # 'base' (k0 of the reference word) and 'noise' (the SD of a word's own part); extra dictionary entries in the queue
     prior=None, extra=0,
+    extra_shown=True,           # False: the extra entries are never shown (chat's topical words and intake leave them
+                                # out), to see how the prior reaches words unlike any with evidence
 )
 PRIOR = dict(base=0.0, noise=0.8, rank=-1.2, length=-0.3, rare=-0.5, loan=-0.5, kana=0.3, katakana=0.8, mixed=0.0,
              verb=-0.3, adjective=0.0, adverb=-0.4, other=0.5, **{'kanji known': 0.8, 'all kanji known': 0.4})
@@ -246,10 +248,11 @@ class World:
             else:
                 w = TrueWord(row, 'queue', math.exp(rng.gauss(0, 0.8)), -rng.uniform(10, 100) * DAY, ease())
             self.words.append(w)
-        self.entries = {}
+        self.entries, self.extras = {}, []
         if c['prior'] is not None:
-            self.words += [TrueWord(row, 'queue', 0.0, None, ease())
+            self.extras = [TrueWord(row, 'queue', 0.0, None, ease())
                            for row in self._extra(c['extra'], in_lexicon | candidates)]
+            self.words += self.extras
             self.entries = knowledge.word_entries([w.row for w in self.words])
         self.by_ja = {w.ja: w for w in self.words}
         self.lexicon = inflection.Lexicon([w.row for w in self.words])
@@ -273,7 +276,8 @@ class World:
         rng.shuffle(weights)  # how often a known word comes up doesn't follow its stability
         for w, weight in zip(self.known, weights):
             w.weight = weight
-        self.queue = [w for w in self.words if w.status == 'queue']
+        hidden = set() if c['extra_shown'] else {id(w) for w in self.extras}
+        self.queue = [w for w in self.words if w.status == 'queue' and id(w) not in hidden]
         if c['prior'] is not None:  # chat's topical words come up by frequency: the queue in rank order
             self.queue.sort(key=lambda w: (self.entries.get(w.ja) or {}).get('rank') or 10 ** 9)
         for r, w in enumerate(self.queue):
@@ -304,17 +308,20 @@ class World:
         """Up to n dictionary entries outside the vocabulary and `taken` (fwlib.key of lexicon and candidates.csv
         words), spread evenly over the rest of the dictionary's ranks (katakana words too, which the lexicon leaves
         out): ranked ones of two characters or more that dictionary.find takes back to themselves and the
-        vocabulary's words don't take as a form, as rows (ja, en, hint, kana)."""
+        vocabulary's words don't take as a form, and none whose spelling or reading folds like another's (ボタン and
+        ぼたん), as rows (ja, en, hint, kana)."""
         if n <= 0:
             return []
         import dictionary
         d = dictionary.load()
         vocabulary = inflection.Lexicon([w.row for w in self.words])
         pool = [e for e in d if e['score'] and len(e['ja']) > 1 and fwlib.key(e['ja']) not in taken]
-        out = []
+        out, folded = [], set()
         for i in range(n):
             e = pool[int((i + 0.5) * len(pool) / n)]
-            if d.find(e['ja'], e['kana'], e['en']) is e and vocabulary.entry(e['ja']) is None:
+            keys = {inflection.fold(e['ja']), inflection.fold(e['kana'])}
+            if d.find(e['ja'], e['kana'], e['en']) is e and vocabulary.entry(e['ja']) is None and not keys & folded:
+                folded |= keys
                 out.append({'ja': e['ja'], 'en': e['en'], 'hint': e['romaji'], 'kana': e['kana']})
         return out
 

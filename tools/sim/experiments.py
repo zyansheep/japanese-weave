@@ -579,19 +579,19 @@ def _paired(days):
     return evaluate._mean_difference(days), interval, sum(1 for d, _n in days if d < 0), len(days)
 
 
-def _oracle(world, fit, names):
+def _oracle(world, fit, names, target=None):
     """Least squares of each featured word's true k on the first day (its log-odds of not looking it up when read, mood
-    1) on an intercept and its word features as the world drew them, over the fit's words of featured origin: what
-    the fit's coefficients would be with every word's k known."""
+    1), or its target ({ja: k}), on an intercept and its word features as the world drew them, over the fit's words
+    whose start the features drew: what the fit's coefficients would be with every word's k known."""
     known = knowledge.kanji_counts(w.ja for w in world.words if w.kind == 'known')
     xs, ys = [], []
     for ja in fit.words:
         w = world.by_ja.get(ja)
-        if w is None or w.k0 is None or world.entries.get(ja) is None:
+        if w is None or w.k0 is None or world.entries.get(ja) is None or (target is not None and ja not in target):
             continue
         x = knowledge.word_features(world.entries[ja], known)
         xs.append([1.0] + [x.get(n, 0.0) for n in names])
-        ys.append(w.k0)
+        ys.append(w.k0 if target is None else target[ja])
     k = len(names) + 1
     a = [[sum(r[i] * r[j] for r in xs) + (1e-6 if i == j else 0.0) for j in range(k)] for i in range(k)]
     b = [sum(r[i] * y for r, y in zip(xs, ys)) for i in range(k)]
@@ -617,17 +617,25 @@ def prior_run(seed, days, truth, extra, widths=(None,)):
                 result = evaluate.evaluate(log, models, evaluate.load_truth(Path(home) / logs.TRUTH))
                 models[1].fit(log, now)
                 out[width] = {'rows': result['rows'], 'fit': models[1].last, 'days': result['days']}
+                if width == widths[0]:  # each word's true k averaged over its showings, as the fit's k is
+                    truth, shown = evaluate.load_truth(Path(home) / logs.TRUTH), {}
+                    for o in log.scored():
+                        found = truth.get((o.key[0], o.key[1], o.key[2], o.word))
+                        if found:
+                            shown.setdefault(o.word, []).append(-stats.logit(found[0]))
+                    out['shown'] = {ja: stats.mean(ks) for ja, ks in shown.items()}
             finally:
                 knowledge.SHARED.clear()
                 knowledge.SHARED.update(saved)
     return out, world
 
 
-def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.3, None, 3.0), windows=(3, 5, 7, 10, 14, 21)):
+def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None, 1.0, 2.0),
+           windows=(3, 5, 7, 10, 14, 21), reach=True):
     """Starting values from the word itself (NEXT_STEPS step 13) on a world whose words start from their features
     (world.py, cfg prior; world.PRIOR the true coefficients): the fitted coefficients against the true ones and the
     oracle's, and the word features against the flat start (the prior by origin and Anki interval alone) on each
-    word's first exposures while new or learning, day by day."""
+    word's first exposures while new or learning, day by day; with reach, how far the prior reaches (prior_reach)."""
     from world import PRIOR
     truth = truth or PRIOR
     names = knowledge.WORD_FEATURES
@@ -638,18 +646,21 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.3, None, 
     lines = [f'Starting values from the word itself: {len(seeds)} seeds of {days} days, {extra} extra dictionary entries '
              f'in the queue. Each word not known starts at k0 = {truth["base"]} + sum beta x + {truth["noise"]} z '
              '(world.py). Coefficients of a fit of the whole log, with 90% intervals (+- 1.645 sd), against the '
-             'truth and the oracle (least squares of the true k on the first day on the features, over the same '
-             'words), per seed:']
-    lines.append(f'  {"feature":<16} {"true":>6}' + ''.join(f'  {"seed " + str(s) + " fit":>21} {"oracle":>7}'
+             'truth and two oracles, least squares over the same words on the features of their true k on the first '
+             'day (k0) and averaged over their showings (shown: what a k for all of a word\'s exposures, as the '
+             'fit\'s, can recover when reading and lookups teach), per seed:']
+    lines.append(f'  {"feature":<16} {"true":>6}' + ''.join(f'  {"seed " + str(s) + " fit":>21} {"k0":>6} {"shown":>6}'
                                                         for s, _r, _w in runs))
     oracles = [(_oracle(world, run[None]['fit'], names)) for _s, run, world in runs]
+    shown = [(_oracle(world, run[None]['fit'], names, run['shown'])) for _s, run, world in runs]
     for name in names:
         cells = ''
-        for (seed, run, world), (oracle, _n) in zip(runs, oracles):
+        for (seed, run, world), (oracle, _n), (seen, _m) in zip(runs, oracles, shown):
             fit = run[None]['fit']
             j = knowledge.SHARED_NAMES.index(name)
             mean, sd = fit.theta[j], fit.theta_sd[j]
-            cells += f'  {mean:+6.2f} ({mean - 1.645 * sd:+.2f} to {mean + 1.645 * sd:+.2f}) {oracle.get(name, 0):+7.2f}'
+            cells += (f'  {mean:+6.2f} ({mean - 1.645 * sd:+.2f} to {mean + 1.645 * sd:+.2f}) {oracle.get(name, 0):+6.2f}'
+                      f' {seen.get(name, 0):+6.2f}')
         lines.append(f'  {name:<16} {truth.get(name, 0.0):+6.2f}' + cells)
     lines.append('  featured words in each fit: ' + ', '.join(str(n) for _o, n in oracles))
     for width in widths:
@@ -685,4 +696,47 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.3, None, 
             interval = knowledge.day_interval(window, evaluate._mean_difference)
             hits += bool(len(window) == n and interval and interval[1] < 0)
         lines.append(f'  {n:>2} days: {hits} of {len(runs)}')
+    if reach:
+        lines.append(prior_reach(seeds, days, extra, truth))
+    return '\n'.join(lines)
+
+
+def prior_reach(seeds=(1, 2, 3), days=28, extra=2000, truth=None, bands=(1, 3000, 10_000, 30_000)):
+    """How far the prior reaches: a world whose extra dictionary entries are never shown (cfg extra_shown False), so
+    the coefficients are learned from the lexicon's words alone (most within the first 5,000 ranks), and the extra
+    entries' starting chances from a refresh's fit (two fits, the second with the first's free flags) against the
+    truth's, by rank band: mean predicted and true chance, and the mean error on the log-odds scale, flat and with
+    the word features."""
+    from world import PRIOR
+    truth = truth or PRIOR
+    sums = {}
+    for seed in seeds:
+        with tempfile.TemporaryDirectory() as home:
+            world, _ = logs.simulate(home, days, seed=seed, prior=truth, extra=extra, extra_shown=False)
+            now = world.time() + DAY
+            log = evaluate.load(home, now, knowledge.PACE_MS, knowledge.READ_MAX)
+            first = knowledge.Fit(log, now - DAY)
+            flags = knowledge.free_flags(first, [w['ja'] for w in log.words], {})
+            fits = {'flat': knowledge.Fit(log, now, plain=True), 'features': knowledge.Fit(log, now, free=flags)}
+            for w in world.extras:
+                rank = world.entries[w.ja]['rank']
+                band = next(b for b in bands[1:] if rank < b)
+                for name, fit in fits.items():
+                    k = fit.prior(w.ja)[0]
+                    s = sums.setdefault((band, name), [0, 0.0, 0.0, 0.0])
+                    s[0] += 1
+                    s[1] += knowledge.sigmoid(-k)
+                    s[2] += knowledge.sigmoid(-w.k0)
+                    s[3] += k - w.k0
+    lines = [f'How far the prior reaches ({len(seeds)} seeds of {days} days): {extra} dictionary entries never shown, '
+             'their starting chance from the fit of the rest (mean predicted against the true one), and the mean '
+             'error on the log-odds scale (predicted k - true k; positive: thought better known), by rank band:']
+    for low, high in zip(bands, bands[1:]):
+        cells = []
+        for name in ('flat', 'features'):
+            n, p, t, e = sums.get((high, name), [0, 0, 0, 0])
+            if n:
+                cells.append(f'{name} {p / n:.0%} against {t / n:.0%}, error {e / n:+.2f}')
+        if cells:
+            lines.append(f'  ranks {low:,} to {high - 1:,} ({sums[(high, "flat")][0]} words): ' + '; '.join(cells))
     return '\n'.join(lines)
