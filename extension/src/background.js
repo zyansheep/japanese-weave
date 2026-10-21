@@ -81,7 +81,7 @@ async function context() {
   const challenge = state?.challenge || 0;
   const revision = hashKey(JSON.stringify(['checks', CHECK_VERSION, data.epoch || '', settings, level, state?.version || '', paused,
     hasKey, origins, challenge, intensity.level]));
-  return { settings, level, revision, challenge, hasKey, paused, origins, stage: state?.stage || 0,
+  return { settings, level, revision, epoch: data.epoch || '', challenge, hasKey, paused, origins, stage: state?.stage || 0,
     intensity: { level: intensity.level, until: intensity.until } };
 }
 
@@ -133,6 +133,9 @@ async function nothing(msg, sender) {
 // when a sync brings a new word state. words: what validation checks candidates against (levels.js validateSwaps;
 // undefined for the bundled lists, which it knows by level).
 let piped = null;
+// A passage's answer in the cache: its key (pipeline.js answerKey) after the epoch, which Clear cache changes, so an
+// answer still on its way when the cache is cleared is never read.
+const answerId = (ctx, plan) => `${ctx.epoch}|${answerKey(plan)}`;
 async function pipelineOf(ctx) {
   const { wordState } = await store.get(['wordState']);
   const own = wordState?.words?.length ? wordState.words : null;
@@ -158,7 +161,7 @@ async function swaps(msg, sender) {
   const planned = items.map((i) => {
     const plan = planText(pipe, i.text);
     const keep = Array.isArray(i.keep) ? i.keep.filter((x) => x && typeof x === 'object').slice(0, 100) : [];
-    return { key: i.key, text: i.text, plan, keep, id: ctx.hasKey && needsCall(plan) ? answerKey(plan) : null };
+    return { key: i.key, text: i.text, plan, keep, id: ctx.hasKey && needsCall(plan) ? answerId(ctx, plan) : null };
   });
   const asked = planned.filter((p) => p.id);
   const stored = await cache.getMany(asked.map((p) => p.id));
@@ -301,9 +304,10 @@ async function readingIndex() {
   return reader.index;
 }
 
-// A passage the page says was read (content.js: a stay on screen long enough to log), counted once a day: the
+// A passage the page says was read (content.js: a stay on screen long enough to log), counted and queued for the host
+// once a day (where the counts are kept, each passage counts once in 30 days, as a chat reply does: fwlib.fold): the
 // dictionary entries its safe matches show and the doubtful ones the model confirmed (pipeline.js readingCounts), from
-// the cached answer or the call under way; none asked for just to count. Counts only: queued for the host, never text.
+// the cached answer or the call under way; none asked for just to count. Counts only, never text.
 async function read(msg, sender) {
   const ctx = await context();
   const text = msg.text;
@@ -317,7 +321,7 @@ async function read(msg, sender) {
   const plan = planText(pipe, text);
   let answer = null;
   if (ctx.hasKey && needsCall(plan)) {
-    const id = answerKey(plan);
+    const id = answerId(ctx, plan);
     const stored = (await cache.getMany([id]))[id] ?? (pending.has(id) ? await pending.get(id).promise.catch(() => null) : null);
     answer = loadAnswer(plan, stored);
   }

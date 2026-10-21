@@ -178,6 +178,20 @@ test('background: sure swaps at once, then the check; shared calls; Haiku with t
     expect(offered(await ask(1, [200], false), 200)).toBe(1);
     expect(offered(await ask(1, [200]), 200)).toBe(3);
 
+    // Clear cache while a call is under way: its answer is not read after the clear; the passage is asked again.
+    gate = opened();
+    const before400 = calls.length;
+    await ask(1, [400], false);
+    await until(() => calls.length > before400); // the call is out
+    await dispatch({ type: 'clearCache' }, popup);
+    gate.open(); gate = null;
+    await new Promise((r) => setTimeout(r, 50));
+    ({ revision } = await dispatch({ type: 'config' }, tab(1)));
+    const afterClear = calls.length;
+    expect((await ask(1, [400], false)).waiting).toEqual([item(400).key]);
+    await until(() => calls.length > afterClear);
+    expect(calls.length).toBe(afterClear + 1);
+
     // Without a key: the sure swaps, at once and final; no call.
     delete local.hostAnthropicKey;
     delete local.apiKey;
