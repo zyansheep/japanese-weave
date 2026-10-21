@@ -524,8 +524,9 @@ def intensity_changes(path=None):
 def chat_briefs(path=None, session=None):
     """What each chat reply was offered (brief ops, weave.compose), oldest first, one chat's or every chat's: {at, machine,
     session, level, intensity, budget, ask, sentences, expected (per 100 words; None at full), sentencePrice (None
-    before sentences were priced), offered: [[word, p]], arms, known, whole, chars, turn (Codex; else None)}. The hook
-    writes one as a prompt is sent, so a reply's is the last of its chat at or before the reply (brief_for)."""
+    before sentences were priced), offered: [[word, p]], arms, topical (the topical words offered, [[word, p]]; none
+    before there were any), known, whole, chars, turn (Codex; else None)}. The hook writes one as a prompt is sent, so
+    a reply's is the last of its chat at or before the reply (brief_for)."""
     con = connect(path)
     try:
         query = "SELECT at, machine, body FROM ops WHERE kind = 'brief'" + (' AND body LIKE ?' if session else '')
@@ -544,7 +545,7 @@ def chat_briefs(path=None, session=None):
                     'intensity': op.get('intensity'), 'budget': op.get('budget'), 'ask': op.get('ask'),
                     'sentences': op.get('sentences'), 'expected': op.get('expected'),
                     'sentencePrice': op.get('sentencePrice'), 'offered': op.get('offered') or [],
-                    'arms': op.get('arms') or {},
+                    'arms': op.get('arms') or {}, 'topical': op.get('topical') or [],
                     'known': op.get('known'), 'whole': op.get('whole'), 'chars': op.get('chars'), 'turn': op.get('turn')})
     return out
 

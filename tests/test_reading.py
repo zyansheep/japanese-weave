@@ -20,6 +20,7 @@ import fwlib  # noqa: E402
 import hub  # noqa: E402
 import knowledge  # noqa: E402
 import reading  # noqa: E402
+import weave  # noqa: E402
 
 # A dictionary of a few entries, in rank order: id, ja, kana, en, glosses (senses | glosses ;), pos, common, swap
 ENTRIES = [
@@ -37,7 +38,7 @@ ENTRIES = [
     (112, '削除', 'さくじょ', 'delete / removal', 'deletion;removal', 'n,vs', 3, 1),
     (113, '二人', 'ふたり', 'two people', 'two people;pair', 'n', 3, 1),
     (114, '関数', 'かんすう', 'function', 'function', 'n', 0, 1),
-    (115, '殆ど', 'ほとんど', 'almost / mostly', 'almost;mostly', 'adv', 3, 1),
+    (115, '殆ど', 'ほとんど', 'mostly / almost', 'mostly;almost', 'adv', 3, 1),
     (116, '構築', 'こうちく', 'build / construction', 'construction;building', 'n,vs', 3, 1),
 ]
 
@@ -51,9 +52,18 @@ def tiny(entries=ENTRIES):
     return '\n'.join(rows) + '\n'
 
 
-def line(text, day, sidechain=False):
-    return json.dumps({'type': 'assistant', 'isSidechain': sidechain, 'timestamp': day + 'T12:00:00',
+def line(text, day=None, sidechain=False):
+    return json.dumps({'type': 'assistant', 'isSidechain': sidechain, 'timestamp': (day or fwlib.today()) + 'T12:00:00',
                        'message': {'content': [{'type': 'text', 'text': text}]}})
+
+
+def prompt(text):
+    return json.dumps({'type': 'user', 'message': {'role': 'user', 'content': text}})
+
+
+def word(ja, status='queue', **extra):
+    return dict(fwlib.blank({'ja': ja, 'en': 'meaning', 'hint': 'hint', 'kana': ''}), status=status, origin='new',
+                **extra)
 
 
 class Home(unittest.TestCase):
@@ -278,6 +288,142 @@ class Intake(Home):
         # without counts of your reading, the list's order as before
         self.assertEqual(fwlib.newcomers(state, {}, ())[0]['ja'], next(w['ja'] for w in state['words']
                                                                          if w['status'] == 'queue'))
+
+
+class Topical(Home):
+    """Topical words in the chat brief: entries code finds in the chat's latest turns, offered with their odds."""
+
+    def test_recent_turns_are_the_prompts_and_replies_of_the_last_turns(self):
+        lines = [prompt('first question about the build'), line('first answer'), prompt('second question'),
+                 json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'update'}]}}),
+                 line('a subagent says delete', sidechain=True),
+                 json.dumps({'type': 'attachment', 'attachment': {'type': 'hook_additional_context',
+                                                                  'content': ['Japanese Weave (Stage 1): update']}}),
+                 line('second answer'), prompt('<command-name>/clear</command-name>'),
+                 line('Japanese Weave status: the update'), prompt('third question'), line('third answer')]
+        self.assertEqual(weave.recent_turns(lines, 'now this', turns=2),
+                         'second question\nsecond answer\nthird question\nthird answer\nnow this')
+        self.assertEqual(weave.recent_turns(lines, '', turns=9), 'first question about the build\nfirst answer\n'
+                         'second question\nsecond answer\nthird question\nthird answer')
+        self.assertEqual(weave.recent_turns(lines, 'now this', turns=9, most=20), 'answer\nnow this')  # whole words
+        codex = [json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+                                                                  'content': [{'type': 'input_text', 'text': 'hi'}]}})]
+        self.assertEqual(weave.recent_turns(codex + [None and '' or '{"broken'], 'go'), 'hi\ngo')
+
+    def test_topical_words_are_useful_priced_and_never_hidden(self):
+        reading.ensure()
+        today = fwlib.today()
+        state = {'words': [word('確認', 'known'), word('今', 'active'), word('削除'), word('ほとんど'),
+                           word('更新', 'active', added=today, arm={'arm': 'held', 'draw': 0.1, 'day': today,
+                                                                   'probe': fwlib.add_days(today, 21)})]}
+        self.assertTrue(fwlib.hidden(state['words'][-1]))
+        text = ('Please update the build, then delete the old build and check it: mostly done for two people. '
+                'The function state stays.')
+        know = {'offset': {'t3': 0.2}, 'words': {'削除': {'k': 0.0, 'sd': 0.5}}}
+        got = weave.topical_words(state, know, {'116': 3}, text)
+        self.assertEqual([w['ja'] for w in got], ['構築', '削除', 'ほとんど'])  # the reading repeats 構築: first
+        built, deleted, almost = got
+        self.assertEqual({k: built[k] for k in ('en', 'id', 'n', 'days')},
+                         {'en': 'build / construction', 'id': 116, 'n': 2, 'days': 3})
+        self.assertAlmostEqual(built['p'], knowledge.sigmoid(0.2 - knowledge.prior(None)))  # no estimate: the prior
+        self.assertAlmostEqual(deleted['p'], knowledge.sigmoid(0.2))  # its estimate, in chat
+        self.assertIs(almost['ja'], state['words'][3]['ja'])  # 殆ど is the state's ほとんど
+        self.assertEqual([w['ja'] for w in weave.topical_words(state, know, {'115': 5}, text, most=2)],
+                         ['ほとんど', '構築'])  # then the uses in the turns
+        know['words']['ほとんど'] = {'k': 4.0, 'sd': 0.3, 'free': True}  # known at a glance: free, not topical
+        self.assertNotIn('ほとんど', [w['ja'] for w in weave.topical_words(state, know, {}, text)])
+        with mock.patch.object(reading, 'INDEX', 'missing.sqlite'):
+            self.assertEqual(weave.topical_words(state, know, {}, text), [])  # no index yet: none
+
+    def test_the_brief_offers_them_with_odds_and_prices_them_with_the_learning_words(self):
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False,
+                 'words': [word('でも', 'known'), word('今', 'active', added='2026-10-01')]}
+        topical = [{'ja': '構築', 'en': 'build / construction', 'hint': 'kōchiku', 'kana': 'こうちく', 'p': 0.3},
+                   {'ja': '削除', 'en': 'delete / removal', 'hint': 'sakujo', 'kana': 'さくじょ', 'p': 0.5}]
+        text, after, plan = weave.compose(state, {}, topical=topical)
+        lines = text.split('\n')
+        self.assertEqual(lines[2], 'Topical, words from this conversation not taught yet (each counts as a learning '
+                                   'word in the amount above, and at most half of those a reply uses; use one only '
+                                   'where the English has exactly that meaning): often, about 1 in 3: 構築 = build / '
+                                   'construction, "kōchiku"; 削除 = delete / removal, "sakujo"')
+        prior = knowledge.sigmoid(-knowledge.prior(None))
+        mean = (prior + 0.3 + 0.5) / 3
+        self.assertEqual(plan['ask'], weave.per_100(0.41, [prior, 0.3, 0.5]))  # one amount over both
+        self.assertAlmostEqual(plan['expected'], plan['ask'] * mean + plan['sentences'] * 0.08, places=3)
+        self.assertEqual(plan['topical'], [['構築', 0.3], ['削除', 0.5]])
+        self.assertEqual(plan['offered'], [['今', round(prior, 3)]])
+        self.assertEqual(after['topical'], '構築\tこうちく\t0.3\n削除\tさくじょ\t0.5')
+        self.assertIsNone(hub.brief_error(hub.stamp(dict(plan, kind='brief', session='s1', chars=len(text)))))
+        self.assertIsNotNone(hub.brief_error(hub.stamp(dict(plan, kind='brief', session='s1', chars=1,
+                                                            topical=[['構築', 2]]))))
+        later = weave.compose(state, {}, had=after, topical=topical[:1])[0]  # a later turn lists them again
+        self.assertIn('Topical, words from this conversation', later)
+        alone = weave.compose(dict(state, words=state['words'][:1]), {}, topical=topical)[0]
+        self.assertIn('(each counts as a learning word in the amount above; use one', alone)  # no learning words
+
+    def test_a_first_turn_with_topical_words_still_fits(self):
+        """The first turn of the largest brief (1,500 known words, footer glosses or <abbr>, the longest feedback line)
+        with five topical words of long glosses: the known list gives up the room they take."""
+        state = fwlib.new_state('2026-01-01')
+        for i, w in enumerate(state['words']):
+            w.update(status='active' if i < 24 else 'known', added='2026-01-01')
+        topical = [{'ja': f'語{i}語', 'en': 'a fairly long gloss / and another one', 'hint': 'go', 'kana': 'ご',
+                    'p': 0.27} for i in range(weave.TOPICAL_MAX)]
+        tail = '\nYour last reply in this chat had ' + 'x' * 420
+        for markup in (False, True):
+            for level in (0, 2):
+                first, _, plan = weave.compose(state, {}, markup=markup, level=level, tail=tail, topical=topical)
+                self.assertLess(len(first) + len(tail), weave.BRIEF_MAX, (markup, level))
+                self.assertEqual(len(plan['topical']), weave.TOPICAL_MAX)
+
+    def test_the_feedback_line_counts_topical_words_as_their_own_class(self):
+        state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも', 'known'), word('今', 'active')]}
+        filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. '
+        reply = filler * 5 + 'Then the 構築 is done and 今 we ship.'
+        offered = [{'ja': '構築', 'kana': 'こうちく', 'p': 0.3}]
+        line_ = weave.calibration(reply, state, topical=offered)
+        self.assertIn('had 2 Japanese words in 99 (0 known, 1 learning, 1 topical, 0 off the lists)', line_)
+        expected = 100 * (knowledge.sigmoid(-knowledge.prior(None)) + 0.3) / 99  # each at its chance
+        self.assertIn(f'about {expected:.2f} expected lookups per 100 words', line_)
+        self.assertTrue(line_.endswith(': on budget.'), line_)
+        self.assertIn('(0 known, 1 learning, 1 off the lists)', weave.calibration(reply, state))  # not offered
+        two = weave.calibration(reply.replace('今', '構築'), state, topical=offered)
+        self.assertTrue(two.endswith(', and use no more topical words than learning words.'), two)
+
+    def test_the_hook_offers_records_and_remembers_them(self):
+        reading.ensure()
+        state = fwlib.new_state(fwlib.today())
+        today = fwlib.today()
+        held = next(w for w in state['words'] if w['ja'] == '更新')
+        held.update(status='active', added=today, arm={'arm': 'held', 'draw': 0.2, 'day': today,
+                                                     'probe': fwlib.add_days(today, 21)})
+        fwlib.save_state(state)
+        log = self.root / 'chat.jsonl'
+        log.write_text(prompt('Shall we update the build?') + '\n'
+                       + line('Yes: the update needs a clean build, then we delete the old build.') + '\n')
+
+        def hook(text):
+            payload = {'session_id': 's1', 'prompt': text, 'transcript_path': str(log)}
+            with mock.patch.object(weave, 'interactive', return_value=True), \
+                    mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                    mock.patch('sys.stdout', new=io.StringIO()) as out:
+                self.assertEqual(weave.main(['--hook']), 0)
+            return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+        first = hook('Then update the build again.')
+        topical = next(row for row in first.split('\n') if row.startswith('Topical, '))
+        self.assertIn('構築 = build / construct', topical)  # the list's own word, not taught yet
+        self.assertIn('削除 = delete / remove', topical)
+        self.assertNotIn('更新', first)  # held back by the experiment: nowhere
+        import feedback
+        record = feedback.chat_briefs(feedback.default_path())[-1]
+        self.assertEqual([ja for ja, _p in record['topical']], ['構築', '削除'])
+        self.assertNotIn('更新', json.dumps(record, ensure_ascii=False))
+        with open(log, 'a') as handle:
+            handle.write(line('The build passes and the cache is warm, so nothing else needs doing today. ' * 4
+                              + 'The 構築 is done.') + '\n')
+        second = hook('Thanks.')
+        self.assertIn('1 topical, 0 off the lists', second)
 
 
 if __name__ == '__main__':
