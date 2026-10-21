@@ -168,10 +168,9 @@ passage got followed the stage (the prompt asked for one in five from Stage 3, o
 
 The passage's plan records B, the lookups expected (the sum of p over every listed word shown, plus the price of each
 sentence shown) and the sentence price. Randomness is seeded by the passage and the day, so a page repaints the same
-way. Changing the challenge or the level repaints open pages;
-new estimates and the controller's daily budget apply to passages as they are painted, so words don't change under you
-while you read. Selection only chooses among the model's candidates, so a budget above what they can supply saturates
-(the controller's scale stops at 4).
+way. Changing the challenge or the level repaints open pages; new estimates and the controller's daily budget apply to
+passages as they are painted, so words don't change under you while you read. Selection only chooses among the model's
+candidates, so a budget above what they can supply saturates (the controller's scale stops at 4).
 
 ### The dial and the budget
 
@@ -266,33 +265,32 @@ turned off on its own (threads.py) stays off at any level.
 On the web, half the passages are also thinned at random by a share between 20% and 100% (levels.js jitterFor), which
 keeps each free word with that chance; the budget and the words it pays for are the same in thinned and untouched
 passages. Every passage's shown record carries its plan: the level, its factor, the share, the swaps kept, the
-candidates offered, the budget and the lookups expected. Because the thinning is random, comparing thinned and
-untouched passages measures what words known at a glance alone do to reading time and opens (PLAN.md row F). Until
-2026-10-20 the share ran from 50% to 100% and scaled the budget too: thinned passages came to 5.3% Japanese against
-6.5%, too little contrast to read, and what free words cost was mixed with what the budgeted ones do. The comparison counts only passages with candidates (thinning can't
-change the others) and includes those thinned to no Japanese at all, which are logged like the rest. Every press is a
-`set` op, so the ops log says how often and when the default felt wrong; one into off counts as lighter and one
-into full as heavier, like any other step. Presses less than a minute apart count as one decision, judged by where
-they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level that ran out counts as
-normal before the next press. `fw.py calibrate` reports both
-(knowledge.json "calibration"): screen time per word and opens per 100 words by the share of Japanese in a passage,
-starting with passages that got none, the thinned-versus-untouched effect (or how far the two groups' shares are
-from the 0.5 points it needs), the chat side (T3 messages with a word count: lookups per 100 words, how many
-messages had none, and the lookups of listed words the model expected, read chance from the stays times p before
-each message's update, against those seen: how well calibrated the model is on chat), and per surface the presses
-and hours spent away from normal. Many lighter presses mean the default is too heavy, and the slowdown curve says how
-much each extra point of Japanese costs.
+candidates offered, the budget and the lookups expected. Because the thinning is random, comparing thinned and untouched
+passages measures what words known at a glance alone do to reading time and opens (PLAN.md row F). Until 2026-10-20 the
+share ran from 50% to 100% and scaled the budget too: thinned passages came to 5.3% Japanese against 6.5%, too little
+contrast to read, and what free words cost was mixed with what the budgeted ones do. The comparison counts only passages
+with candidates (thinning can't change the others) and includes those thinned to no Japanese at all, which are logged
+like the rest. Every press is a `set` op, so the ops log says how often and when the default felt wrong; one into off
+counts as lighter and one into full as heavier, like any other step. Presses less than a minute apart count as one
+decision, judged by where they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level
+that ran out counts as normal before the next press. `fw.py calibrate` reports both (knowledge.json "calibration"):
+screen time per word and opens per 100 words by the share of Japanese in a passage, starting with passages that got
+none, the thinned-versus-untouched effect (or how far the two groups' shares are from the 0.5 points it needs), the chat
+side (T3 messages with a word count: lookups per 100 words, how many messages had none, and the lookups of listed words
+the model expected, read chance from the stays times p before each message's update, against those seen: how well
+calibrated the model is on chat), and per surface the presses and hours spent away from normal. Many lighter presses
+mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
 interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt, which the
-heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known,
-the passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words
-and the allowed grammar can say completely. planSwaps plans it the same way as the other levels with no budget, so
-nothing costs anything: every candidate the passage can place is shown, a sentence rather than the word swaps inside
-it, with no per-sentence cap, density cap or random thinning, and a word again where its English comes again (the
-plan says level 3, intensity 5, jitter 1, and has no budget). Both ends last 3 hours after the last press like the other levels; a press further at an end
-restarts the clock.
+heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known, the
+passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words and
+the allowed grammar can say completely. planSwaps plans it the same way as the other levels with no budget, so nothing
+costs anything: every candidate the passage can place is shown, a sentence rather than the word swaps inside it, with no
+per-sentence cap, density cap or random thinning, and a word again where its English comes again (the plan says level 3,
+intensity 5, jitter 1, and has no budget). Both ends last 3 hours after the last press like the other levels; a press
+further at an end restarts the clock.
 
 ## Inspecting
 

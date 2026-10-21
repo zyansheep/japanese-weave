@@ -218,17 +218,16 @@ both through the lab once before relying on them.
 ## Full intensity (+3)
 
 At the top of the reader's intensity scale the page gets all the Japanese the list allows. The amount paragraph is
-replaced: passages carry no target, and the model goes through each passage sentence by sentence, writing every
-sentence listed words and the grammar list can say completely as a sentence swap (at any stage), and then swapping
-every listed word, learning or known, whose listed meaning the passage says, in every place it says it (each with its
-own `c`), pronouns included; since prompt 6 also inside the sentences it wrote whole, which +1 and +2 may leave in
-English. Each passage's hints come with every spelling found and how many places
-(`"watashi = i: I (3 places)"`, in Japanese script in the prompt), as places owed a swap unless a meaning rule forbids it. "Skip a
-passage if a swap would make it hard to follow" is left out; the meaning rules and the validation are the same.
-`planSwaps` shows everything that validates and can be placed, with no ceiling or thinning: a sentence rather than the
-word swaps inside it, and a word again where its English comes again. Since prompt 5 the heavier
-levels pick from this answer too (below), so it is asked once for +1, +2 and full, in calls of 3 passages for Haiku
-(`FULL_BATCH` in `models.js`), and has its own cache.
+replaced: passages carry no target, and the model goes through each passage sentence by sentence, writing every sentence
+listed words and the grammar list can say completely as a sentence swap (at any stage), and then swapping every listed
+word, learning or known, whose listed meaning the passage says, in every place it says it (each with its own `c`),
+pronouns included; since prompt 6 also inside the sentences it wrote whole, which +1 and +2 may leave in English. Each
+passage's hints come with every spelling found and how many places (`"watashi = i: I (3 places)"`, in Japanese script in
+the prompt), as places owed a swap unless a meaning rule forbids it. "Skip a passage if a swap would make it hard to
+follow" is left out; the meaning rules and the validation are the same. `planSwaps` shows everything that validates and
+can be placed, with no ceiling or thinning: a sentence rather than the word swaps inside it, and a word again where its
+English comes again. Since prompt 5 the heavier levels pick from this answer too (below), so it is asked once for +1, +2
+and full, in calls of 3 passages for Haiku (`FULL_BATCH` in `models.js`), and has its own cache.
 
 ## Intensity levels measured (2026-10-19)
 
@@ -332,9 +331,9 @@ web level is a lookup budget (`scripts/intensity.py` BUDGETS, mirrored in `level
 model offered it, at every level but off, and spends 0.15, 0.3, 0.5, 0.8 or 1.2 lookups per 100 words (-2..+2) on the
 rest, at most one of those a sentence up to normal and two when heavier. The random thinning keeps each known word with
 the passage's share (20% to 100% since 2026-10-20, 50% to 100% before) and leaves its budget alone (before, it scaled
-the budget by the same share); full is unchanged. The prompt and its per-passage `target` are
-unchanged too, so the target now only says how many swaps to offer: with known words free, what the model offers is
-what bounds them. The lab's "ceiling" column still computes the old rule.
+the budget by the same share); full is unchanged. The prompt and its per-passage `target` are unchanged too, so the
+target now only says how many swaps to offer: with known words free, what the model offers is what bounds them. The
+lab's "ceiling" column still computes the old rule.
 
 Since 2026-10-20 a whole sentence is priced too: it costs the chance its translation is opened if it is read
 (`SENTENCE_PRICE`, 0.08, until the native host sends a fitted one), plus the lookup chances of any of its words not
