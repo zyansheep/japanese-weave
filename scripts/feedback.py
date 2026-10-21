@@ -14,8 +14,11 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 how the amount was chosen ("plan", JSON {level: the reader's intensity -3..3, intensity: its factor,
                 jitter: the passage's random factor (1: none), limit: swaps kept (before 2026-10-20: allowed),
                 candidates: swaps the model offered, and since then budget: lookups the passage could spend on words
-                not known at a glance (none at full), expected: lookups predicted if it is read}); seq orders changes
-                for export
+                not known at a glance (none at full), expected: lookups predicted if it is read; plans with
+                sentencePrice, the lookups a whole sentence was priced at, are later still: their jitter is the share
+                of free swaps kept and leaves the budget alone (before, it thinned every swap and scaled the budget),
+                and candidates counts those the passage can place}); seq orders changes for export. A sentence's
+                closing mark (。) among the glossed words stands for its translation (in the browser since then too)
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
