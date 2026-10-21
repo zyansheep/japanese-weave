@@ -341,7 +341,8 @@ Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE
 local Claude Code and Codex transcripts to count exposure and words from your reading, and sends only counts (to your
 collector, if you set one), never the text. The extension sends
 readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
-(free-tier Gemini keys allow Google to train on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
+(free-tier Gemini keys allow Google to train on prompts); without a key no text leaves the browser. Of what you read on
+those sites it sends the plugin counts per dictionary entry and a hash of each passage, never the text. Private sites start off even when every site is on: webmail and messaging, AI chat, password
 managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;
 the popup can turn any of them on). It talks to the plugin through a native messaging host that only this extension
 may call.
