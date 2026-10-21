@@ -214,7 +214,9 @@ in the browser (a toast on the page and the toolbar badge show the level) and in
 (for chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each
 press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
 default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
-down or up.
+down or up. It also checks the model, per surface and class of word (costly, free, whole sentences, words off the
+list): the lookups per 100 words read it expected against those you made, with a 90% interval from resampling days,
+and the budget in the same unit.
 
 **In chat, a level is a lookup budget**: how many lookups per 100 words you put up with, spent only on words you
 don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,
@@ -243,7 +245,8 @@ of reach still holds here at once), and forgotten 60 days after its last change.
 turned off as a lighter press.
 
 `fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
-one word's estimate and every observation behind it. The design, with its sources:
+one word's estimate and every observation behind it; `fw.py evaluate` scores the model on your log day by day, each
+day predicted from the days before, against a constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
 
 ## Privacy
@@ -259,7 +262,8 @@ may call.
 ## Develop
 
 ```sh
-python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex
+python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex, yardsticks
+python3 tools/sim/run.py all                     # the simulated reader's experiments (about a minute)
 python3 scripts/make_blocks.py                   # regenerate blocks/ and extension/src/starter.js
 cd extension && bun install && bun test           # extension (happy-dom)
 sh tools/make-icons.sh                            # redraw the extension's icons from tools/icons/icon.svg
