@@ -12,7 +12,9 @@
 //
 // WORDS: a copy of a word state: its words' glosses as listed and their dictionary entries' glosses (INTRODUCED=1:
 // only known, active and shaky words). ALL=1: also every swappable dictionary entry. DRY=1: count the pairs and
-// estimate the cost from the cache's calls so far, without calling. MODEL (claude-haiku-5-5), BATCH (80 pairs a call),
+// estimate the cost from the cache's calls so far, without calling. SAMPLES=1,2: independent samples, each asking the
+// pairs in another order; a pair is safe only if every sample finds it safe. CONFIRM=1: a later sample asks only the
+// pairs the earlier ones found safe. PROMPT: an older prompt's number. MODEL (claude-haiku-5-5), BATCH (80 pairs a call),
 // PARALLEL (4 calls at once), THINKING=0 (no thinking). CACHE: the answers (default
 // ~/.cache/japanese-weave-build/senses-<prompt version>-<model><-nothink>.jsonl). OUT: the flags file (data/senses.tsv);
 // NOWRITE=1 leaves it alone. Every call's tokens and cost go to SPEND_LOG (tools/prompt-lab/spend.mjs), which also
@@ -223,21 +225,30 @@ async function main() {
       }
     }
   }
-  const todo = new Map(samples.map((n) => [n, sampleOrder(judge, n).filter((p) => !final.has(p.key) && !caches.get(n).has(p.key))]));
-  const asks = [...todo.values()].reduce((a, l) => a + l.length, 0);
+  // what a sample still has to ask; with CONFIRM, a later sample asks only the pairs every earlier one found safe (a
+  // pair is safe only if every sample says so, so the others are settled)
+  const confirm = !!env.CONFIRM;
+  const todoFor = (n) => sampleOrder(judge, n).filter((p) => !final.has(p.key) && !caches.get(n).has(p.key) &&
+    (!confirm || samples.slice(0, samples.indexOf(n)).every((m) => caches.get(m).get(p.key) === 's')));
+  // with CONFIRM, a later sample's count is of what the earlier ones have found safe so far
+  const asks = samples.reduce((a, n) => a + todoFor(n).length, 0);
   const perPair = callsSoFar.length ? callsSoFar.reduce((a, c) => a + c.usd, 0) / callsSoFar.reduce((a, c) => a + c.pairs, 0) : null;
   console.log(`prompt ${version}, ${samples.length} sample${samples.length > 1 ? 's' : ''}; ${words.length} words${env.ALL ? ' and every swappable entry' : ''}: ` +
     `${judge.length + closed.length} pairs, ${closed.length} closed-class (doubtful, not asked), ${judge.length} to judge, ${asks} to ask` +
+    (confirm && samples.length > 1 ? ' in the first sample, then the ones it finds safe' : '') +
     (perPair ? `; about $${(perPair * asks).toFixed(3)} at $${(perPair * 1000).toFixed(4)} per 1,000 pairs so far` : ''));
 
-  if (asks && !env.DRY) {
+  if (asks && !env.DRY) { // with CONFIRM and nothing cached, the first sample's pairs
     const key = readFileSync(env.ANTHROPIC_KEY_FILE || '', 'utf8').trim();
     if (!key) throw new Error('set ANTHROPIC_KEY_FILE to a file holding the key');
     const log = spendLog();
-    const queue = samples.flatMap((n) => batches(todo.get(n), size).map((batch) => ({ n, batch })));
-    let next = 0;
     let done = 0;
     let stop = false;
+    // one sample after another, so a confirming sample knows what the earlier ones found
+    for (const sample of samples) {
+    if (stop) break;
+    const queue = batches(todoFor(sample), size).map((batch) => ({ n: sample, batch }));
+    let next = 0;
     await Promise.all(Array.from({ length: parallel }, async () => {
       while (next < queue.length && !stop) {
         const { n, batch } = queue[next++];
@@ -260,19 +271,22 @@ async function main() {
         }
       }
     }));
+    }
     process.stderr.write('\n');
   }
 
-  // a pair is safe when every sample says so; it is written once every sample has judged it
+  // a pair is safe when every sample says so, doubtful as soon as one doesn't; it is written once that is settled
   for (const p of judge) {
-    if (final.has(p.key) || !samples.every((n) => caches.get(n).has(p.key))) continue;
-    final.set(p.key, samples.every((n) => caches.get(n).get(p.key) === 's') ? 's' : 'd');
+    if (final.has(p.key)) continue;
+    const said = samples.map((n) => caches.get(n).get(p.key));
+    if (said.includes('d')) final.set(p.key, 'd');
+    else if (said.every((f) => f === 's')) final.set(p.key, 's');
   }
   const flagged = judge.filter((p) => final.has(p.key));
   const safe = flagged.filter((p) => final.get(p.key) === 's').length;
   console.log(`judged ${flagged.length} of ${judge.length}: ${safe} safe (${((100 * safe) / Math.max(1, flagged.length)).toFixed(1)}%), ` +
     `${flagged.length - safe} doubtful`);
-  if (samples.length > 1) {
+  if (samples.length > 1 && !confirm) {
     const both = judge.filter((p) => samples.every((n) => caches.get(n).has(p.key)));
     const agree = both.filter((p) => new Set(samples.map((n) => caches.get(n).get(p.key))).size === 1).length;
     const each = samples.map((n) => `${both.filter((p) => caches.get(n).get(p.key) === 's').length}`).join(', ');
