@@ -638,7 +638,8 @@ CONTEXT_MS = 3_600_000     # an earlier showing in the same page view or T3 wind
 CLOCK_PASSES = 2           # fits, each weighing the showings for the clock by the chances the one before found
 NO_FLOOR = 1.0             # a fit with nothing to start from also starts from this floor (log odds), above every word
 FLOOR_STEP = 0.5           # the most the floor moves in one Newton step
-SPACING_P = 0.10           # a costly word whose current chance is under this waits (PLAN.md section 5, rule 2)
+SPACING_P = 0.10           # a costly word waits while recency holds its chance under this and its long-term chance
+                           # isn't (PLAN.md section 5, rule 2; under it all along, it is cheap and never waits)
 
 
 def last_reads(history, at, view=None):
@@ -1727,10 +1728,13 @@ def refresh(now=None):
     knowledge, or None when another refresh is running. With a collector set, the collector does this and the cache
     here is refreshed instead (hub.py).
 
-    knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's), mu (its prior mean), free
-    (known at a glance, with hysteresis against the last refresh's flag: free_flag), n (evidence weight), obs, opened,
-    recent (opens in the last RECENT_DAYS days), last and history; offset (the web's 0, chat's fitted); fit (the
-    shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
+    knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's: the long-term knowledge),
+    mu (its prior mean), free (known at a glance on its long-term chance, with hysteresis against the last refresh's
+    flag: free_flag), n (evidence weight), obs, opened, recent (opens in the last RECENT_DAYS days), last and history,
+    and read (when it was last read: [shown, chance] per showing of the last LONG_DAYS, word_reads; a consumer gets its
+    current chance from it, current_chance); offset (the web's 0, chat's fitted); recency (the floor, the context
+    offset, LONG_DAYS, SOFT_MIN and SPACING_P); fit (the shared parameters with their sd, the prior widths, and
+    whether it started from nothing, as the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices;
     sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
     today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
     last of those days, which today's records carry on from; unlisted; the evidence moves and veto."""
@@ -1758,11 +1762,12 @@ def refresh(now=None):
             pace, top = reading['pace'], reading['top']
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
         start = None
-        if (previous.get('fit') or {}).get('model') == MODEL:  # start from the last refresh's fit
+        if fresh and (previous.get('fit') or {}).get('model') == MODEL:  # start from the last refresh's fit; the
+            # day's first fits from nothing, from two floors (Fit), in case the data now favour the other
             start = {'shared': previous['fit'].get('shared'), 'widths': previous['fit'].get('widths'),
                      'k': {ja: e['k'] for ja, e in known.items() if isinstance(e, dict) and e.get('n')}}
         fit = Fit(log, now_ms, pace, top, start=start)
-        stats = word_stats(log, now_ms)
+        stats, reads = word_stats(log, now_ms), word_reads(log, fit, now_ms)
         flags = free_flags(fit, [w['ja'] for w in state['words']],
                            {ja: e['free'] for ja, e in known.items() if isinstance(e, dict)
                             and isinstance(e.get('free'), bool)})
@@ -1795,6 +1800,10 @@ def refresh(now=None):
             if s:  # a word the log has something on
                 words[ja].update(n=round(fit.n[i], 2) if i is not None else 0.0, obs=s['obs'], opened=s['opened'],
                                  recent=len(s['recent']), last=s['last'], history=s['history'])
+            read = [[shown, round(chance, 3)] for shown, chance, _same in (reads.get(ja) or ((), 1.0))[0]
+                    if chance >= 0.001]
+            if read:  # when it was last read, for its current chance (current_chance)
+                words[ja]['read'] = read
         history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
         today_counts = {}
         for m in history:
@@ -1820,8 +1829,11 @@ def refresh(now=None):
                     'sd': {name: round(sd, 4) for name, sd in zip(SHARED_NAMES, fit.theta_sd)},
                     'widths': {kind: round(w, 4) for kind, w in fit.widths.items()}, 'pace': pace, 'top': top,
                     'words': len(fit.words), 'terms': len(fit.terms[0]), 'iterations': fit.iterations,
+                    'cold': start is None,
                     'seconds': round(fit.seconds, 3)},
             'prior': prior_table(fit),
+            'recency': {'floor': round(fit.theta[FLOOR], 4), 'context': round(fit.theta[CONTEXT], 4),
+                        'days': LONG_DAYS, 'softMin': SOFT_MIN, 'spacing': SPACING_P},
             'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
             'challenge': challenge, 'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
             'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
@@ -1844,19 +1856,38 @@ def start_refresh():
                      start_new_session=True, env=dict(os.environ))
 
 
-def word_estimate(knowledge, ja, surface='browser'):
+def current_chance(entry, recency, now_ms, offset=0.0):
+    """A knowledge.json word's P(lookup | read) at now_ms (ms) on a surface (its offset), in a new page or reply: its
+    long-term knowledge k a share of the way back since it was last read (since_read of its "read": [shown, chance it
+    was the last read] for its showings of the last LONG_DAYS), under the fit's floor (knowledge.json "recency").
+    Without them, its long-term chance."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    floor = recency.get('floor') if isinstance(recency, dict) else None
+    reads = [(r[0], r[1], False) for r in entry.get('read') or []
+             if isinstance(r, list) and len(r) == 2 and number(r[0]) and number(r[1])]
+    if not reads or not number(floor) or now_ms is None:
+        return sigmoid(offset - entry['k'])
+    u, _s = since_read(reads, max(0.0, 1 - sum(chance for _at, chance, _same in reads)), now_ms)
+    return sigmoid(offset + recency_log_odds(entry['k'], u, floor))
+
+
+def word_estimate(knowledge, ja, surface='browser', now_ms=None):
     """(p, k, sd) for a word, or None when knowledge.json has nothing on it. p is its lookup chance on the surface,
-    kept on its free flag's side of fwlib.FREE_P when it has one (free_flag): the flag, with its hysteresis, says
-    whether the word is known at a glance, and the chance how likely a lookup is otherwise. So a planner comparing p
-    with FREE_P (weave.lists) agrees with the flag."""
+    kept on its free flag's side of fwlib.FREE_P (free_flag; without a flag, its long-term chance's side): the flag,
+    with its hysteresis, says whether the word is known at a glance, judged on its long-term chance, and p how likely
+    a lookup is otherwise. So a planner comparing p with FREE_P (weave.lists) agrees with the flag. With now_ms, a word
+    that isn't free gets its current chance (current_chance), still at least FREE_P: one read an hour ago is near the
+    floor, under SPACING_P, and waits (weave.lists); it isn't free."""
     entry = (knowledge.get('words') or {}).get(ja)
     if not entry:
         return None
     offset = (knowledge.get('offset') or {}).get(surface, 0.0)
     p = sigmoid(offset - entry['k'])
-    if isinstance(entry.get('free'), bool):
-        p = min(p, fwlib.FREE_P * 0.999) if entry['free'] else max(p, fwlib.FREE_P)
-    return p, entry['k'], entry['sd']
+    if entry['free'] if isinstance(entry.get('free'), bool) else p < fwlib.FREE_P:
+        return min(p, fwlib.FREE_P * 0.999), entry['k'], entry['sd']
+    if now_ms is not None:
+        p = current_chance(entry, knowledge.get('recency'), now_ms, offset)
+    return max(p, fwlib.FREE_P), entry['k'], entry['sd']
 
 
 def prior_estimate(knowledge, status, interval=None):

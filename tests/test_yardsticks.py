@@ -2,11 +2,13 @@
 reader (tools/sim) and the convergence check every model change must pass. Run: python -m unittest
 tests/test_yardsticks.py"""
 import json
+import math
 import os
 from pathlib import Path
 import statistics
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -341,6 +343,142 @@ class Refresh(Home):
         chat = second['calibration']['classes']['t3']['classes']['sentences']
         self.assertGreater(chat['expected'], 0)  # whole sentences are priced
         self.assertTrue(0 < second['sentencePrice']['t3'] < 1)
+
+
+class Recency(Home):
+    """NEXT_STEPS step 10: the shared recency term (knowledge.recency_log_odds) on a clock that weighs each showing by
+    the chance it was read (knowledge.last_reads, read_clocks); free and known judged on the long-term chance, cost on
+    the current one, and the spacing wait (PLAN.md section 5, rules 1 and 2)."""
+    NOW = 1_800_000_000_000
+    FLOOR = knowledge.logit(0.02)
+
+    def test_the_clock_weighs_each_showing_by_the_chance_it_was_read(self):
+        at, view = self.NOW, ('t3', 'c')
+        history = [(at - 3 * DAY, 1.0, ('browser', 'a')), (at - 2 * HOUR, 0.5, ('t3', 'b')),
+                   (at - HOUR // 2, 0.2, view)]
+        reads, rest = knowledge.last_reads(history, at, view)
+        self.assertEqual([round(chance, 3) for _shown, chance, _same in reads], [0.2, 0.4, 0.4])  # 0.8 0.5, 0.8 0.5 1
+        self.assertEqual(([same for *_x, same in reads], rest), ([True, False, False], 0.0))
+        u, same = knowledge.since_read(reads, rest, at)
+        days = knowledge.LONG_DAYS * 24
+        self.assertAlmostEqual(u, 0.2 * 0.5 / days + 0.4 * 2 / days + 0.4 * 72 / days)
+        self.assertAlmostEqual(same, 0.2)
+        # a showing surely skipped doesn't reset the clock; one a week old or more is as if never read
+        skipped = [(at - 3 * DAY, 1.0, ('browser', 'a')), (at - HOUR, 0.0, view)]
+        self.assertAlmostEqual(knowledge.since_read(*knowledge.last_reads(skipped, at), at)[0], 3 / 7)
+        self.assertEqual(knowledge.since_read(*knowledge.last_reads([(at - 8 * DAY, 1.0, view)], at), at), (1.0, 0.0))
+
+    def test_an_unopened_showing_of_a_word_not_known_was_most_likely_skipped(self):
+        at, key = self.NOW, ('browser', 'v', 'p')
+        events = []
+        for i, (y, read) in enumerate(((0.0, 0.6), (0.0, 0.6))):
+            group = evaluate.Group(at + i * HOUR, 'browser', key[:1] + (f'v{i}', 'p'), False, [])
+            group.obs.append(evaluate.Observation(at=group.at, day=evaluate.day_of(group.at), surface='browser',
+                                                  key=group.key, episode=False, word='w', written='w', form=False, y=y,
+                                                  weight=read, near=0.0, ms=1, words=1, share=1.0, read=read))
+            events.append(group)
+        log = evaluate.Log(events, {}, [{'ja': 'w', 'kana': '', 'status': 'active', 'added': '', 'changed': ''}])
+        second = events[1].obs[0]
+        for q, u in ((0.0, 0.6 / 168 + 0.4), (0.9, None)):  # known: read with its read chance; not: barely at all
+            clock = knowledge.read_clocks(log, log.pace, log.top, lambda o, u, s: q)[id(second)]
+            r = 0.6 * (1 - q) / (1 - 0.6 * q)
+            self.assertAlmostEqual(clock[0], r / 168 + (1 - r))
+        self.assertGreater(knowledge.read_clocks(log, log.pace, log.top, lambda o, u, s: 0.9)[id(second)][0], 0.85)
+
+    def test_right_after_a_read_the_chance_falls_to_the_floor(self):
+        self.assertEqual(knowledge.recency_log_odds(1.1, 1.0, self.FLOOR), -1.1)  # a week on: the long term
+        self.assertAlmostEqual(knowledge.recency_log_odds(1.1, 0.0, self.FLOOR), self.FLOOR, places=4)
+        halfway = knowledge.recency_log_odds(1.1, 0.5, self.FLOOR)
+        self.assertAlmostEqual(math.exp(halfway), (0.02 + math.exp(-1.1)) / 2 * (1 - 1e-4), places=3)
+        self.assertAlmostEqual(knowledge.recency_log_odds(6.0, 0.0, self.FLOOR), -6.0, places=3)  # known better than it
+
+    def test_the_fit_recovers_a_floor_and_the_long_term_chance(self):
+        """80 words at 30% a week after a read and 2% (in odds) right after, read each time they are shown at
+        exponential gaps (a mean of 12 hours): the fit's floor and long-term chances land near the truth."""
+        import random
+        rng = random.Random(4)
+        t0, events, words = self.NOW, [], []
+        long_term = 0.3 / 0.7
+        for w in range(80):
+            at, last = t0, None
+            for i in range(40):
+                at += int(rng.expovariate(1 / 12) * HOUR)
+                u = 1.0 if last is None else min(1.0, (at - last) / (7 * DAY))
+                odds = 0.02 + (long_term - 0.02) * u
+                y = 1.0 if rng.random() < odds / (1 + odds) else 0.0
+                group = evaluate.Group(at, 'browser', ('browser', f'v{w}-{i}', 'p'), False, [])
+                group.obs.append(evaluate.Observation(at=at, day=evaluate.day_of(at), surface='browser', key=group.key,
+                                                      episode=False, word=f'w{w}', written=f'w{w}', form=False, y=y,
+                                                      weight=1.0, near=1.0, ms=1, words=1, share=1.0, read=0.7))
+                events.append(group)
+                last = at
+            words.append({'ja': f'w{w}', 'kana': '', 'status': 'active', 'added': '', 'changed': ''})
+        events.sort(key=lambda e: e.at)
+        until = events[-1].at + HOUR
+        fit = knowledge.Fit(evaluate.Log(events, {}, words), until)
+        self.assertLess(abs(fit.theta[knowledge.FLOOR] - math.log(0.02)), math.log(2))
+        self.assertLess(abs(statistics.median(fit.estimate(f'w{w}')[0] for w in range(80)) + math.log(long_term)),
+                        math.log(1.5))
+        stale = knowledge.Fit(evaluate.Log(events, {}, words), until, recency=False)  # without it: the mean over gaps
+        self.assertGreater(statistics.median(stale.estimate(f'w{w}')[0] for w in range(80)), -math.log(0.2))
+
+    def know(self, now):
+        hour, recency = HOUR, {'floor': self.FLOOR, 'days': knowledge.LONG_DAYS}
+        entry = lambda k, free, ago: {'k': k, 'sd': 0.3, 'free': free, 'obs': 5, 'read': [[now - ago, 1.0]]}
+        return {'offset': {'browser': 0.0, 't3': 0.0}, 'recency': recency,
+                'words': {'結局': entry(1.1, False, hour), '多分': entry(1.1, False, 84 * hour),
+                          '今': entry(4.0, True, hour), '中': entry(2.4, False, hour), '一緒に': entry(2.0, False, hour)}}
+
+    def test_a_learning_word_read_an_hour_ago_is_neither_free_nor_in_the_brief(self):
+        import weave
+        now = int(time.time() * 1000)
+        know = self.know(now)
+        state = {'stage': 3, 'stage_pinned': True, 'paused': False,
+                 'words': [dict(word_entry(ja, status), added='2026-10-01') for ja, status in
+                           (('結局', 'active'), ('多分', 'active'), ('今', 'known'), ('中', 'shaky'),
+                            ('一緒に', 'active'))]}
+        free, learning, p = weave.lists(state, {}, know, now_ms=now)
+        self.assertEqual(([w['ja'] for w in free], [w['ja'] for w in learning]), (['今'], ['多分', '中']))
+        # 結局 waits: an hour after a read it is near the floor, though its long-term chance is 25%; free is judged on
+        # that, so it isn't free either. 一緒に (12% long-term) waits too, until it is back over SPACING_P (5.5 days).
+        # 多分, read 3.5 days ago, is halfway back (in odds above the floor). 中 isn't free (8.3% long-term, its flag
+        # still out) but is cheap all along: it never waits, else a word in the free line's hysteresis would never be
+        # shown again
+        self.assertLess(knowledge.current_chance(know['words']['結局'], know['recency'], now), 0.03)
+        self.assertEqual(knowledge.word_estimate(know, '結局', 't3', now)[0], fwlib.FREE_P)
+        self.assertAlmostEqual(knowledge.word_estimate(know, '結局', 't3')[0], knowledge.sigmoid(-1.1))
+        halfway = p['多分'] / (1 - p['多分'])
+        self.assertAlmostEqual(halfway, 0.02 + (math.exp(-1.1) - 0.02) / 2, places=3)
+        self.assertGreater(p['多分'], knowledge.SPACING_P)
+        self.assertNotIn('結局', weave.brief(state, {}, know=know))
+        self.assertIn('多分', weave.brief(state, {}, know=know))
+        # the next turn's line on the last reply still counts 結局 as a learning word, not as off the lists
+        self.assertIn('結局', [w['ja'] for w in weave.lists(state, {}, know, now_ms=now, wait=False)[1]])
+
+    def test_knowledge_json_says_when_each_word_was_last_read(self):
+        world, _ = logs.simulate(self.home, 3, seed=5)
+        now = world.time() / 1000 + 3600
+        with fwlib.using_home(self.home):
+            know = knowledge.refresh(now)
+        self.assertTrue(know['fit']['cold'])  # the day's first fit starts from nothing, from two floors
+        self.assertEqual(set(know['recency']), {'floor', 'context', 'days', 'softMin', 'spacing'})
+        read = {ja: e for ja, e in know['words'].items() if e.get('read')}
+        self.assertGreater(len(read), 50)
+        for entry in read.values():
+            self.assertTrue(all(at < now * 1000 and 0 < chance <= 1 for at, chance in entry['read']))
+            self.assertLessEqual(sum(chance for _at, chance in entry['read']), 1.002)  # each rounded to 0.001
+            current = knowledge.current_chance(entry, know['recency'], int(now * 1000))
+            self.assertLessEqual(current, knowledge.sigmoid(-entry['k']) + 1e-9)  # under the long term, or at it
+        import fw_host
+        with fwlib.using_home(self.home):
+            words = [dict(w) for w in world.state()['words']]
+            reply = fw_host.adaptive(world.state(), words)
+        self.assertEqual(reply['recency'], {'floor': know['recency']['floor'], 'days': knowledge.LONG_DAYS})
+        self.assertEqual({w['ja'] for w in words if 'read' in w}, set(read))
+
+
+def word_entry(ja, status):
+    return {'ja': ja, 'en': 'meaning', 'hint': 'hint', 'status': status, 'changed': '', 'days': [], 'last_bad': ''}
 
 
 class Stats(unittest.TestCase):
