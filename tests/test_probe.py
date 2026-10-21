@@ -335,6 +335,20 @@ class Collector(Home):
         self.assertFalse(refused['results'][0]['ok'])
         self.assertIn('probe:', refused['results'][0]['error'])
 
+    def test_a_probe_made_while_the_collector_is_away_shows_at_once_and_goes_with_the_next_sync(self):
+        url = fwlib.collector_url()
+        self.fw('probe', '--list', '--seed', '5')  # fetches the first copy of the state
+        (fwlib.home() / 'collector').write_text('http://127.0.0.1:9\n')  # nothing listens there
+        out = self.fw('probe', '--answers', 'none')
+        self.assertIn('Kept here', out)
+        self.assertEqual(len(fwlib.load_state()['probes']), 1)  # in the cache at once
+        self.assertIn('last probe', self.fw('status'))
+        (fwlib.home() / 'collector').write_text(url + '\n')
+        self.assertEqual(hub.sync(), (True, None))
+        with fwlib.using_home(self.server_home):
+            self.assertEqual(len(fwlib.load_state(create=False)['probes']), 1)
+        self.assertEqual(len(fwlib.load_state()['probes']), 1)  # the collector's copy, not a second one
+
 
 class Command(Home):
     def test_list_then_answers_then_history_and_status(self):
