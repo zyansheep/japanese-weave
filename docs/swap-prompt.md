@@ -858,7 +858,7 @@ full's, per revision) are cleared once.
 
 **Fresh2 through the extension's own worker** (`tools/prompt-lab/worker-lab.mjs`: the worker as pages ask it, its own
 batching, calls, cache and picking, with the host's reply for the snapshot's 324 introduced words from `words.py`, and
-Haiku 5.5 at low effort), scored as `check-lab.mjs` scores (the placing and judging are shared, in `oracle.mjs`):
+Haiku 5.5 at low effort), scored as `check-lab.mjs` scores (the placing and judging are shared, in `judge.mjs`):
 
 | fresh2 (34 passages, 184 places) | Coverage at full | Wrong at full, wrong / judged | Normal: the worker's day / without thinning | $ per 1,000 passages | s a call (max) | All answers in |
 |---|---|---|---|---|---|---|

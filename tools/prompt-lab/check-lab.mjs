@@ -33,7 +33,8 @@ import { parse as parseDictionary } from '../../extension/src/dictionary.js';
 import { planPassage, needsCall, requestChecks, candidatesOf, CHECK_VERSION, DENSE_MAX_WORDS } from '../../extension/src/verify.js';
 import { planSwaps, wordCount, INTENSITY_FULL } from '../../extension/src/levels.js';
 import { hashKey } from '../../extension/src/hash.js';
-import { judgedPassage, overlaps, placeSwaps, judgeSwaps } from './oracle.mjs';
+import { judgedPassage, overlaps } from './oracle.mjs';
+import { placeSwaps, judgeSwaps } from './judge.mjs';
 import { spendLog, meter } from './spend.mjs';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
@@ -126,7 +127,7 @@ async function run(seed) {
 // A passage's candidates from a run's answer (none for a passage that needed no call: its safe options alone).
 const candidates = (id, answer) => candidatesOf(plans.get(id), answer && { picks: new Map(answer.picks), swaps: answer.swaps }, words);
 
-// Where swaps land and how they are judged (oracle.mjs), each word swap's kind from the span it sits on.
+// Where swaps land and how they are judged (judge.mjs), each word swap's kind from the span it sits on.
 const placed = (p, swaps, all = false) => placeSwaps(p, swaps, all);
 const judge = (p, j, shown) => judgeSwaps(j, shown, plans.get(p.id).spans.map((m) => m.span));
 

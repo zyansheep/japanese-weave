@@ -21,7 +21,8 @@ import { pipelineFor, planText, answerKey, loadAnswer } from '../../extension/sr
 import { buildIndex, matchText } from '../../extension/src/matcher.js';
 import { parseSenses } from '../../extension/src/senses.js';
 import { planPassage } from '../../extension/src/verify.js';
-import { judgedPassage, placeSwaps, judgeSwaps } from './oracle.mjs';
+import { judgedPassage } from './oracle.mjs';
+import { placeSwaps, judgeSwaps } from './judge.mjs';
 import { spendLog, meter } from './spend.mjs';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
