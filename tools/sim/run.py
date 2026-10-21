@@ -15,6 +15,8 @@ models and designs against the truth (experiments.py). Python 3.9+, standard lib
   python3 tools/sim/run.py calibration-days    days calibrate needs to tell a calibrated model from one off by 20%
   python3 tools/sim/run.py delayed-start       power of the delayed-start experiment (PLAN.md section 7)
   python3 tools/sim/run.py recurrence          whether words nominated by the reader's text come back (section 6)
+  python3 tools/sim/run.py priors              starting values from the word itself (step 13): coefficients
+                                               against the truth, and against the flat start on first exposures
   python3 tools/sim/run.py log DIR [--days N] [--seed S]
                                                a simulated state dir (interactions.sqlite, state.json, anki.csv,
                                                truth.jsonl, and knowledge.json from the replay) for
@@ -47,6 +49,7 @@ EXPERIMENTS = {
     'calibration-days': experiments.calibration_days,
     'delayed-start': experiments.delayed_start,
     'recurrence': experiments.recurrence,
+    'priors': experiments.priors,
 }
 
 

@@ -24,6 +24,16 @@ The world: known words (Anki words whose intervals track their stability, and th
 learning words that come in from the front of the queue a day at a time and graduate after learn_days, queue words
 that chat uses with the conversation's topic, words off the list, and whole sentences. REALISTIC volumes match the
 live log: web about 8,000 words shown and 5 lookups a day, chat about 12,000 words and 35 to 40 lookups.
+
+Starting values from the word itself (NEXT_STEPS step 13; `prior`, off by default): every word has its entry in
+data/dictionary.tsv, and `extra` more entries spread over the dictionary's ranks join the queue, which is then in rank
+order. Each word not known starts from k0 = base + sum_j beta_j x_j + noise z, z standard normal, x its word features
+on the prior's scale (knowledge.word_features: rank, kanji known at a glance in the known words, script, part of
+speech, length, rare, loan), beta the dict `prior`. k0 is the log-odds of not looking it up: its chance when read,
+q0 = sigmoid(-k0), sets its recall R0 = (habit - q0) / (habit - check), so q0 is held between check and habit; a word
+with R0 = 0 was never met, any other was last met 10 to 100 days before the first day, with the stability that leaves
+it at R0 then (an Anki card's interval follows it). Known words are known whatever they are like, as before: their
+chance sits at check.
 """
 import csv
 import math
@@ -75,7 +85,12 @@ DEFAULTS = dict(
     # web: sessions of passages
     web_sessions=6, web_passages=40, web_gap=1, web_words=(30, 0.4), web_japanese=1.3, web_learning_p=0.15,
     web_budget=0.5,             # the plan's budget per 100 words, logged with each passage
+    # starting values from the word itself: None, or the true coefficients on knowledge.word_features' scale, with
+    # 'base' (k0 of the reference word) and 'noise' (the SD of a word's own part); extra dictionary entries in the queue
+    prior=None, extra=0,
 )
+PRIOR = dict(base=0.0, noise=0.8, rank=-1.2, length=-0.3, rare=-0.5, loan=-0.5, kana=0.3, katakana=0.8, mixed=0.0,
+             verb=-0.3, adjective=0.0, adverb=-0.4, other=0.5, **{'kanji known': 0.8, 'all kanji known': 0.4})
 REALISTIC = {}  # the defaults are tuned to the live log's volumes (run.py volumes)
 
 
@@ -96,13 +111,14 @@ def day_name(at):
 class TrueWord:
     """One word's true memory and what the word state says about it."""
     __slots__ = ('row', 'ja', 'kind', 'S', 'last', 'ease', 'interval', 'form', 'weight', 'status', 'added',
-                 'changed', 'born', 'reads', 'lookups', 'shown')
+                 'changed', 'born', 'reads', 'lookups', 'shown', 'k0')
 
     def __init__(self, row, kind, S, last, ease, interval=None):
         self.row, self.ja, self.kind, self.S, self.last, self.ease = row, row['ja'], kind, S, last, ease
         self.interval, self.form, self.weight = interval, None, 1.0
         self.status, self.added, self.changed, self.born = 'queue', '', '', None
         self.reads = self.lookups = self.shown = 0
+        self.k0 = None  # with starting values from features: the true k on the first day (World._start_from_features)
 
     def recall(self, t):
         if self.S <= 0 or self.last is None:
@@ -203,9 +219,10 @@ class World:
         self.day = 0
         lexicon = fwlib.read_lexicon(fwlib.LEXICON)
         in_lexicon = {fwlib.key(w['ja']) for w in lexicon}
-        extra = []
+        extra, candidates = [], set()
         with open(CANDIDATES, encoding='utf-8', newline='') as handle:
             for r in csv.DictReader(handle):
+                candidates.add(fwlib.key(r['ja']))
                 if r['ja'] and fwlib.key(r['ja']) not in in_lexicon:
                     extra.append({'ja': r['ja'], 'en': r['en'], 'hint': r['hint'], 'kana': r.get('kana') or ''})
         anki_rows = extra[:c['anki_known'] + c['anki_queue']]
@@ -229,6 +246,11 @@ class World:
             else:
                 w = TrueWord(row, 'queue', math.exp(rng.gauss(0, 0.8)), -rng.uniform(10, 100) * DAY, ease())
             self.words.append(w)
+        self.entries = {}
+        if c['prior'] is not None:
+            self.words += [TrueWord(row, 'queue', 0.0, None, ease())
+                           for row in self._extra(c['extra'], in_lexicon | candidates)]
+            self.entries = knowledge.word_entries([w.row for w in self.words])
         self.by_ja = {w.ja: w for w in self.words}
         self.lexicon = inflection.Lexicon([w.row for w in self.words])
         for w in self.words:
@@ -239,17 +261,21 @@ class World:
         for w in self.offlist:
             if rng.random() < c['offlist_seen']:
                 w.S, w.last = math.exp(math.log(5.0) + rng.gauss(0, 1)), -rng.uniform(1, 30) * DAY
-        t0 = local_midnight(self.start)
+        t0 = self.t0 = local_midnight(self.start)
         for w in self.words + self.offlist:  # the clock starts at the first day's midnight
             w.last = None if w.last is None else t0 + w.last
             if w.kind == 'known':
                 w.status, w.added, w.changed = 'known', self.start, self.start
+        if c['prior'] is not None:
+            self._start_from_features(t0)
         self.known = [w for w in self.words if w.kind == 'known']
         weights = [1 / (r + 1) ** c['zipf_known'] for r in range(len(self.known))]
         rng.shuffle(weights)  # how often a known word comes up doesn't follow its stability
         for w, weight in zip(self.known, weights):
             w.weight = weight
         self.queue = [w for w in self.words if w.status == 'queue']
+        if c['prior'] is not None:  # chat's topical words come up by frequency: the queue in rank order
+            self.queue.sort(key=lambda w: (self.entries.get(w.ja) or {}).get('rank') or 10 ** 9)
         for r, w in enumerate(self.queue):
             w.weight = 1 / (r + 1) ** c['zipf_queue']
         for r, w in enumerate(self.offlist):
@@ -268,11 +294,53 @@ class World:
         if w is None:
             return None
         self.queue.remove(w)
-        if w.S <= 0 and rng.random() >= c['learn_new'] / max(c['queue_new'], 1e-9):
+        if w.S <= 0 and c['prior'] is None and rng.random() >= c['learn_new'] / max(c['queue_new'], 1e-9):
             w.S, w.last = math.exp(math.log(3.0) + 0.8 * rng.gauss(0, 1)), born - rng.uniform(5, 60) * DAY
         w.kind, w.status, w.added, w.changed, w.born = 'learning', 'active', day, day, born
         self.learning.append(w)
         return w
+
+    def _extra(self, n, taken):
+        """Up to n dictionary entries outside the vocabulary and `taken` (fwlib.key of lexicon and candidates.csv
+        words), spread evenly over the rest of the dictionary's ranks (katakana words too, which the lexicon leaves
+        out): ranked ones of two characters or more that dictionary.find takes back to themselves and the
+        vocabulary's words don't take as a form, as rows (ja, en, hint, kana)."""
+        if n <= 0:
+            return []
+        import dictionary
+        d = dictionary.load()
+        vocabulary = inflection.Lexicon([w.row for w in self.words])
+        pool = [e for e in d if e['score'] and len(e['ja']) > 1 and fwlib.key(e['ja']) not in taken]
+        out = []
+        for i in range(n):
+            e = pool[int((i + 0.5) * len(pool) / n)]
+            if d.find(e['ja'], e['kana'], e['en']) is e and vocabulary.entry(e['ja']) is None:
+                out.append({'ja': e['ja'], 'en': e['en'], 'hint': e['romaji'], 'kana': e['kana']})
+        return out
+
+    def _start_from_features(self, t0):
+        """Every word not known starts from its features (the module docstring; cfg prior)."""
+        c, rng = self.cfg, self.rng
+        truth = dict(c['prior'])
+        base, noise = truth.pop('base', 0.0), truth.pop('noise', 0.0)
+        known = knowledge.kanji_counts(w.ja for w in self.words if w.kind == 'known')
+        for w in self.words + self.offlist:
+            if w.kind == 'known':
+                continue
+            entry = self.entries.get(w.ja)
+            x = knowledge.word_features(entry, known) if entry else {}
+            k0 = base + sum(truth.get(name, 0.0) * value for name, value in x.items()) + noise * rng.gauss(0, 1)
+            q0 = 1 / (1 + math.exp(min(30.0, max(-30.0, k0))))
+            recall = (c['habit'] - q0) / (c['habit'] - c['check'])
+            if recall <= 0:
+                w.S, w.last = 0.0, None
+            else:
+                days = rng.uniform(10, 100)
+                w.S, w.last = F * days / (min(recall, 0.999) ** (1 / C) - 1), t0 - days * DAY
+            if w.interval is not None:
+                w.interval = w.S * math.exp(c['anki_noise'] * rng.gauss(0, 1))
+            q = w.chance(t0, c)
+            w.k0 = math.log((1 - q) / q)
 
     def time(self, day=None):
         """Local midnight of a simulated day (default: the next one to simulate)."""
