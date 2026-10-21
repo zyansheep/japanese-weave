@@ -1852,6 +1852,24 @@ class Budget(Home):
         self.assertEqual(weave.calibration(filler * 5, state, level=intensity.FULL), '')
         self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
 
+    def test_the_free_flag_decides_what_is_known_at_a_glance(self):
+        know = self.know({'でも': 1.5, '中': 4.0, '多分': 1.5})
+        know['words']['でも']['free'] = True  # p 0.18 but free: one lookup didn't take it out
+        know['words']['中']['free'] = False  # p 0.018 but not free: not yet clearly known again
+        self.assertEqual({ja: fwlib.is_free(e) for ja, e in know['words'].items()},
+                         {'でも': True, '中': False, '多分': False})
+        self.assertLess(knowledge.word_estimate(know, 'でも', 't3')[0], fwlib.FREE_P)
+        self.assertEqual(knowledge.word_estimate(know, '中', 't3')[0], fwlib.FREE_P)
+        self.assertAlmostEqual(knowledge.word_estimate(know, '多分', 't3')[0], knowledge.sigmoid(-1.5))  # no flag
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False,
+                 'words': [word('でも'), word('中'), word('多分', 'active')]}
+        free, learning, _p = weave.lists(state, {}, know)
+        self.assertEqual(([w['ja'] for w in free], [w['ja'] for w in learning]), (['でも'], ['多分', '中']))
+        fwlib.write_json(fwlib.home() / 'knowledge.json', know)
+        self.assertEqual(fwlib.settled_words(), {'でも'})
+        know['words']['でも']['obs'] = 0  # free by its prior alone: the log has nothing on it
+        self.assertEqual(fwlib.settled_words(know), set())
+
     def test_words_known_at_a_glance_leave_their_learning_slot(self):
         state = fwlib.new_state('2026-10-01')
         for day in ('2026-10-02', '2026-10-03', '2026-10-04'):

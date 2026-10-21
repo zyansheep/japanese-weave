@@ -297,6 +297,43 @@ class Simulator(Home):
         self.assertLess(abs(seen - expected), 3 * expected ** 0.5)
 
 
+class Refresh(Home):
+    def test_a_refresh_fits_once_and_reuses_the_days_before(self):
+        world, _ = logs.simulate(self.home, 3, seed=5)
+        now = world.time() / 1000 + 3600  # an hour into the next day: nothing shown yet today
+        fits = []
+        real = knowledge.Fit
+
+        class Counted(real):
+            def __init__(self, log, until, *args, **kwargs):
+                fits.append(until)
+                super().__init__(log, until, *args, **kwargs)
+
+        with fwlib.using_home(self.home), mock.patch.object(knowledge, 'Fit', Counted):
+            first = knowledge.refresh(now)
+            grid = len(first['reading']['grid'])
+            self.assertEqual(len(fits), grid + 1 + 3)  # the reading model's grid, the fit, one for each day before
+            self.assertEqual(sorted(first['daily']), sorted({evaluate.day_of(at) for at in fits[grid + 1:]}))
+            fits.clear()
+            second = knowledge.refresh(now + 60)
+        self.assertEqual(fits, [int((now + 60) * 1000)])  # only the fit itself: the days before are summed already
+        self.assertEqual(second['calibration']['classes'], first['calibration']['classes'])
+        self.assertEqual(second['dailyFree']['day'], max(first['daily']))
+        words = second['words']
+        self.assertEqual(len(words), len(world.state()['words']))  # every word, with its fitted prior if nothing else
+        self.assertTrue(all(isinstance(e['free'], bool) and e['sd'] > 0 for e in words.values()))
+        self.assertEqual(second['offset']['browser'], 0.0)
+        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd'})
+        for status in ('active', 'known', 'queue'):
+            k, sd = knowledge.prior_estimate(second, status)
+            self.assertEqual((k, sd), (second['prior']['none'][{'active': 'learning', 'queue': 'new'}.get(status, status)],
+                                       second['prior']['sd']['none']))
+        self.assertIsNone(knowledge.prior_estimate({}, 'known'))
+        chat = second['calibration']['classes']['t3']['classes']['sentences']
+        self.assertGreater(chat['expected'], 0)  # whole sentences are priced
+        self.assertTrue(0 < second['sentencePrice']['t3'] < 1)
+
+
 class Stats(unittest.TestCase):
     def test_rank_correlation_and_logistic_regression(self):
         self.assertAlmostEqual(stats.spearman([1, 2, 3, 4], [10, 20, 30, 45]), 1.0)

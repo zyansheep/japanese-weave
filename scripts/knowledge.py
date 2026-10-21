@@ -1047,8 +1047,8 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
     fit before: start, a fit's state, for the first), the free flags carried from day to day (free_flags, from flags,
     else the priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events).
-    done: days to skip (their sums are known)."""
-    out, flags, day, standing = [], dict(flags or {}), None, None
+    done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
     for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:
             continue
@@ -1057,9 +1057,10 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
             fit = Fit(log, day_start(day), pace, top, start=start)
             start = fit.state()
             flags.update(free_flags(fit, fit.words, flags))
+            starts[day] = dict(flags)
             standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)))
         out.append(shown_record(at, surface, context, items, standing, match, pace, top))
-    return out
+    return out, starts
 
 
 def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
@@ -1545,7 +1546,8 @@ def refresh(now=None):
     recent (opens in the last RECENT_DAYS days), last and history; offset (the web's 0, chat's fitted); fit (the
     shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
     sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
-    today (day_totals), reused while the day's key holds (day_keys); unlisted; the evidence moves and veto."""
+    today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
+    last of those days, which today's records carry on from; unlisted; the evidence moves and veto."""
     if fwlib.collector_url():
         import hub
         ok, error = hub.sync(scan=False)
@@ -1586,11 +1588,17 @@ def refresh(now=None):
         cached = previous.get('daily') if isinstance(previous.get('daily'), dict) else {}
         done = {day: cached[day]['totals'] for day, key in keys.items()
                 if isinstance(cached.get(day), dict) and cached[day].get('key') == key}
-        records = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences,
-                                 {ja: e['free'] for ja, e in known.items() if isinstance(e, dict)
-                                  and isinstance(e.get('free'), bool)}, fit.state(), set(done))
+        # the free flags to carry: at the start of the last day summed, else the last refresh's
+        carried = previous.get('dailyFree') if isinstance(previous.get('dailyFree'), dict) else {}
+        flags_then = carried.get('free') if carried.get('day') in done and isinstance(carried.get('free'), dict) else \
+            {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+        records, starts = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags_then,
+                                         fit.state(), set(done))
         totals = dict(done, **day_totals(records, changes, challenge))
         daily = {day: {'key': key, 'totals': totals[day]} for day, key in keys.items() if day in totals}
+        last = max((day for day in starts if day in daily), default=None)
+        daily_free = {'day': last, 'free': {ja: f for ja, f in starts[last].items() if ja in fit.index}} if last \
+            else carried if carried.get('day') in daily else {}
         words = {}
         for w in state['words']:
             ja = w['ja']
@@ -1631,7 +1639,7 @@ def refresh(now=None):
             'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
             'challenge': challenge, 'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
             'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
-            'daily': daily,
+            'daily': daily, 'dailyFree': daily_free,
             'unlisted': unlisted(rows, match, now_ms),
             'words': words,
         }
