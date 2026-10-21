@@ -590,11 +590,11 @@ def intake_line(state, know, today):
     if not spend:
         return head + ' (how much of the budget goes unspent comes with the next refresh)'
     names = {'browser': 'the web', 't3': 'chat'}
-    parts = [f'{names.get(surface, surface)} {v["share"]:.0%} of {v["budget"]:g} over {plural(v["plans"], "plan")}'
-             for surface, v in spend.items() if v.get('plans') and v.get('share') is not None]
-    verdict = 'unspent, so new words come in' if knowledge.unspent(spend) else 'spent, so no new words for now'
-    return (f'{head}; the plans of the last {knowledge.SPEND_HOURS} hours asked for '
-            + ('; '.join(parts) if parts else 'nothing (no reading)') + f' of their lookup budget: {verdict}')
+    parts = [f'{names.get(surface, surface)}\'s {plural(v["plans"], "plan")} would spend {v["share"]:.0%} of their '
+             f'{v["budget"]:.1f} lookups' for surface, v in spend.items() if v.get('plans') and v.get('share') is not None]
+    verdict = ('the budget goes unspent, so new words come in' if knowledge.unspent(spend) else
+               'no new words for now' if parts else 'no reading, so no new words')
+    return f'{head}; over the last {knowledge.SPEND_HOURS} hours ' + ('; '.join(parts) + ': ' if parts else '') + verdict
 
 
 def stale_note(error):
