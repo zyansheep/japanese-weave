@@ -300,8 +300,50 @@ The order is right (frequent words of known kanji lowest, rare words of unknown 
 because BCCWJ counts it as 日本 and 語), but the spread is far too narrow: 斡旋 or 追徴 would be looked up most times,
 not one in five. Until dictionary words are shown, the coefficients only know the lexicon's range, and the data says
 little even there; the simulated reader above shows the same, less so. The monthly probe (NEXT_STEPS step 7), known
-or not for words sampled across ranks, would be the evidence to pin the rank slope down before dictionary words are
-offered, once its marks feed the fit (they don't yet).
+or not for words sampled across ranks, is the evidence to pin the rank slope down before dictionary words are offered.
+
+### The probe's answers in the fit
+
+Each answer of a monthly probe (probe.py, state["probes"]) is an observation of its own kind
+(knowledge.probe_answers): recognition out of context, answered on purpose, is not a lookup while reading. A word
+answered not known counts as an event with chance r q, one answered known as 1 - r q, where q = sigmoid(probe - k), k
+the word's long-term knowledge (no recency: a probe is no reading, and moves no clock) and probe a shared offset of its
+own, held toward 0 with an sd of 1 (it is about the lookup habit, PLAN.md row R: a word not recognised in reading is
+looked up only some of the time), and r = 1 - f, f the share of made-up words the reader claimed in the probes of the
+year before the fit, as the probe's own correction for guessing has it (so a "yes" counts for less when the reader
+over-claims). Made-up words and skipped words are no observations. The answers weigh like any evidence (half every 30
+days). An answered word is the word state's when it has the entry (by its JMdict id, else its spelling), else the
+entry itself, with its word features; knowledge.json keeps those words too ("probed", with the entry's id), and
+reading.starting_k takes their k for topical words and intake. `fw.py evaluate --models noprobe,fit` compares the fit
+without the answers.
+
+In a test fit (tests/test_probe.py) an answer moves its own word (known: k up; not known: down by about 0.7 for a word
+with no other evidence) and the others only through the shared parameters, by under 0.1.
+
+The probe stays the check on the model: its estimate of the goal is computed from its answers alone, as before, and
+the model is set beside it only as it stood before the probe (the probe's "listed" share, from the labels when it was
+drawn; in the simulated reader, a fit made just before the next probe, scored on that probe's answers).
+
+On the simulated reader (`tools/sim/run.py priors`: the reader answers a probe of 60 words and 6 made-up ones the
+evening before the first day and after the last, from its true recall, claiming 10% of the words it doesn't
+recognise and of the made-up ones), over 3 seeds of 28 days:
+
+- The rank coefficient barely moves: -0.73, -0.92, -1.10 without the first probe's answers, -0.78, -0.91, -1.13 with
+  them (true -1.20, sd about 0.2). Fifty-four answers are little beside the 700 words with reading evidence.
+- How far the prior reaches (entries never shown): the error of the starting values on the log-odds scale, ranks 1 to
+  2,999 from +0.59 to +0.56, ranks 3,000 to 9,999 from +0.73 to +0.63, ranks 10,000 to 29,999 from +0.70 to +0.58
+  (the flat start: +0.67, +1.55, +1.90). The probe's offset takes most of the rest: it is fitted at +0.64 to +0.72
+  (sd 0.43), where the simulated reader has none. With the offset held at its true 0 (prior sd 0.05) the errors would
+  be +0.49, +0.52 and +0.46; with sd 0.25, +0.51, +0.55, +0.49. The live reader's offset is not 0 (it is the lookup
+  habit), so the prior stays wide and the offset is learned from words with both kinds of evidence.
+- First exposures of new and learning words: -0.0009 per observation (-0.0041 to +0.0025), better on 53 of 84 days;
+  on all observations -0.0002. No detectable gain on the reading log yet.
+- The next probe, predicted by a fit just before it: log loss per answer 0.448 without the first probe's answers and
+  0.452 with them (60 answers a seed, within noise); the goal, true 68%, is 70 to 72% by the probe's own answers,
+  72 to 76% by the fit without and 62 to 66% by the fit with them.
+
+Over-claiming is taken from the made-up words, 6 a probe, so a reader who claims 10% shows 0 of 6 more often than
+not (two seeds here): the fit then reads every "yes" at face value, as the probe's own estimate does.
 
 ### Recency: the long-term chance and the current one
 
@@ -462,6 +504,30 @@ defaults. On the live log of 2026-10-20 the profile has no maximum in the plausi
 to 5,000 ms a word at a cap of 0.7 and beyond. Time on screen there doesn't say how much was read the way the model assumes
 (stays include time the reader spent elsewhere, and every chat reply's paragraph words so far are estimates from a
 backfill, PLAN.md row I), so the defaults stay until the reading data can be trusted.
+
+Since `fit 5` each surface has its own reading model, tuned one after the other (the web, then chat, each over its
+own grid with the other's held) over a wider grid, 150 to 5,000 ms and caps 0.1 to 0.9; pace and top may be
+{surface: value} wherever the log is read (knowledge.by_surface). On the 2026-10-20 snapshot the web's profile has a
+maximum inside the grid, 1,000 ms a word at a cap of 0.2, 10.7 log likelihood units above the defaults: a web page
+stays on screen while other passages are read or it is skimmed. Chat's keeps rising to the grid's edge (5,000 ms, cap
+0.8). A surface's model is ready once it has 60 opens, beats the defaults by 3 units and lies inside the grid, but it
+is only reported (knowledge.json "reading" ready), not used, while knowledge.SURFACE_TUNING is off: k is on the web's
+scale, so a new web reading model rescales every word at once. On the snapshot with the web ready (30 opens instead of
+60), the web's words read fall from 16,596 to 3,354, the chat offset moves from +0.27 to -0.58, and the free set falls
+from 366 words to 68; calibrate becomes web costly 1.00 (0.78-1.63), free 4.42 (0.00-5.24), all 1.40 (0.76-2.84),
+chat costly 1.00 (0.90-1.12), all 1.09 (0.94-1.20). Which scale the free line is judged on has to be settled first.
+
+Why calibrate shows the web over-predicted on the snapshot (all 0.57, 0.35-0.93; costly 0.56, free 0.58; chat all
+1.18): one page. On the evening of 10-16 a page 16% in Japanese drew 20 of the web's 51 interactions, all on known
+words, 6 of them flips back to English, so the days after it are predicted from a fit that learned that evening: seen
+over expected by day is 15.6/13.1 on 10-16, then 6.6/19.1, 2.6/5.1, 4.0/12.7 and 3.0/5.7 (0.38 over 10-17 to 10-20).
+Fitted without that page, the web comes to 0.93 (0.62-1.16). Each candidate alone barely moves the web's ratio: a web
+offset that floats (chat's prior sd 0.5 to 5) 0.57, short web peeks counted whole 0.58, no recency 0.57, no line rule
+on the web 0.56, an offset per day 0.59, a lookup habit drifting by day 0.58 to 0.62, the share of Japanese in the
+passage as a covariate 0.61 (although on later days passages at 10% Japanese or more draw 2.6% lookups per word read
+against 1.3% for sparser ones), and an offset per page 0.67 to 0.74 (with chat to 1.23-1.28). On the simulated reader
+the per-surface tune keeps the true 300 ms and 0.7 on the web (its best points beat the defaults by only 1.0 to 1.5),
+and recovery, harness and recency are as before apart from the reading model's line.
 
 ### Correcting for "only engaged episodes are seen" (T3 messages without a word count)
 
@@ -641,33 +707,53 @@ named (5 turns at 1,500).
 
 Each brief also lists up to 5 topical words (weave.topical_words, TOPICAL_MAX), after the learning words: dictionary
 entries the code matcher finds in the chat's last three turns (weave.recent_turns: the prompt being sent, then the
-user's prompts and Claude's main-thread replies back to the third prompt before it, at most 8,000 characters, the
-latest kept; tool results and the hook's own text are no turns), as the reading counts find them (reading.py, under
-"Words from your reading" below), but by the main-meaning rule even with the sense flags: Claude places a topical word
-only where the English has its meaning, so it is the sense check, and the flags, strict enough for code to swap a word
-alone, call "update" as 更新 doubtful. Only words worth offering: an entry that can
-stand in for English (the dictionary's swap flag), not a number, counter or katakana word; with no spelling in use,
-known or learning, and none hidden by the delayed-start experiment (fwlib.hidden); and not known at a glance (p under
-8%: the next refresh labels it known). Each is the state's word when it has one (a word not introduced yet), else the
-entry itself, and its p is its estimate in chat when knowledge.json has one, else the starting value of a word without
-history (reading.starting_k: knowledge.prior_estimate with its dictionary entry, the prior by the word's own
-features). The ones the user's reading repeats come first (on 3 days or more of the last 30: the
-ones intake nominates), then common entries (JMdict's common flag), each by its uses in the turns, then by general
-frequency. They are listed with their odds as the learning words are, and they are costly words too: the amount of
-learning words is figured over both, and a reply may make at most half of the learning words it uses topical. At
-normal the budget buys about 2 costly words per 100 words, 6 in a 300-word reply, so 5 to choose from, at most 3 used,
-leaves the learning words, whose spacing is the plan's, most of the budget (PLAN.md row K). The line takes about 360
-characters on every turn: on the 2026-10-21 state (Stage 3, 366 known, footer glosses or `<abbr>`, with the longest
-feedback line) a whole brief went from 8,041 to 8,403 characters (8,585 to 8,948 with `<abbr>`) and a later one from
-2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is left. The hook finds them in 12 to
-49 ms on the user's chats (the reading index, below, read for the turns' words only); measured through the hook on a
-synthetic 2 MB transcript (15 runs, three times), the median hook went from 153 to 176 ms. Without the index (not
-built yet) there are none. On eight of the user's recent chats the lists were, by gloss: haiku, check, experiment,
-dictionary, wiring; environment, check, experiment, tonight, tool; check, no longer, method, science, mainly; check,
-value, fail, funds, link; check, method, secret, update, command; history, kanji, new word, check, example; together,
-history, diagnose, together with, headache; check, example, flag, normal, output. "check" (確認, a word the rules name)
-recurs as the reading repeats it; "link" as 一環 is a wrong sense Claude has to pass over, and "headache" came from a
-health chat, where the rules ask for no Japanese at all.
+user's prompts and Claude's main-thread replies back to the third prompt before it, at most 8,000 characters, the latest
+kept; tool results and the hook's own text are no turns), as the reading counts find them (reading.py, under "Words from
+your reading" below), by the main meaning with the sense flags as an order (Which sense, below): Claude places a topical
+word only where the English has its meaning, but its main meaning is often not the one a technical chat means, and the
+flags alone, strict enough for code to swap a word, call "update" as 更新 doubtful. Only words worth offering: an entry
+that can stand in for English (the dictionary's swap flag), not a number, counter or katakana word; with no spelling in
+use, known or learning, and none hidden by the delayed-start experiment (fwlib.hidden); not a medical, legal or
+financial entry by its first sense's JMdict field (weave.SENSITIVE_FIELDS: med, pharm, dent, vet, psy, anat, physiol,
+embryo, law, finc, stockm; data/dictionary.tsv's field); and not known at a glance (p under 8%: the next refresh labels
+it known). None at all when the turns are about a topic the brief keeps free of Japanese (weave.zero_japanese: health,
+medication, legal, money, safety, emergency, driving): a term that means that topic alone ("doctor", "dose", "headache",
+"lawyer", "mortgage", "911"), or terms of three families that a reply about code also uses ("diagnosis", "symptom",
+"side effect", "stock", "debt", "surgery"...). The extension's page guard (levels.js isZeroJapanese) has one list for a
+short passage, but on chat its families fire on the talk of code: "investigate" (its invest\w*) came up in 162 of the
+user's 381 chats. On the user's 3,638 prompts (2026-10-21) the chat guard turns off the topical words of 138 (3.8%, in
+32 chats), 681 of 16,739 offers (4.1%); of 60 of those turns judged by hand, 29 were about health, legal or money
+matters, 27 next to them (research on vaccines, an article on immigration, a story with a lawsuit), and 4 were about
+code (7%, 95% interval 3% to 16%). With two families enough, 6.3% of the prompts lost their topical words, and 26 of 60
+judged were about code. The field filter drops 9 offers more (自閉症 "autism", 脳 "brain").
+
+Which sense: matches the sense flags (data/senses.tsv) call safe for the English they matched come first, and a doubtful
+one only after them; in a technical chat (weave.is_technical: a fenced code block, two code spans, or a matched entry
+whose first sense is computing; 86% of the user's prompts) a doubtful match is dropped unless its own first sense is
+technical (comp, internet or math: 変数 "variable", 関数 "function"). On a synthetic chat about recursion the main-meaning
+rule alone offered 額 for "stack frame", 奥 for "back up the stack" and 価値 for a variable's "value". On 40 of the user's
+briefs, judged by hand (177 and 145 offers), wrong senses fell from 41% (34% to 48%) to 19% (14% to 27%), and offers per
+prompt from 4.6 to 3.9 (3.6 with the guard and the field filter). What remains wrong is mostly safe words in a computing
+sense (図書館 "library", 読者 "reader"); right doubtful words are lost in technical chats (解決 "solve", 更新 "update"). Each is
+the state's word when it has one (a word not introduced yet), else the entry itself, and its p is its estimate in chat
+when knowledge.json has one, else the starting value of a word without history (reading.starting_k:
+knowledge.prior_estimate with its dictionary entry, the prior by the word's own features). The ones the user's reading
+repeats come first (on 3 days or more of the last 30: the ones intake nominates), then common entries (JMdict's common
+flag), each by its uses in the turns, then by general frequency. They are listed with their odds as the learning words
+are, and they are costly words too: the amount of learning words is figured over both, and a reply may make at most half
+of the learning words it uses topical. At normal the budget buys about 2 costly words per 100 words, 6 in a 300-word
+reply, so 5 to choose from, at most 3 used, leaves the learning words, whose spacing is the plan's, most of the budget
+(PLAN.md row K). The line takes about 360 characters on every turn: on the 2026-10-21 state (Stage 3, 366 known, footer
+glosses or `<abbr>`, with the longest feedback line) a whole brief went from 8,041 to 8,403 characters (8,585 to 8,948
+with `<abbr>`) and a later one from 2,101 to 2,463; a whole brief stays under 9,500 since the known line takes what is
+left. The hook finds them in 12 to 49 ms on the user's chats (the reading index, below, read for the turns' words only);
+measured through the hook on a synthetic 2 MB transcript (15 runs, three times), the median hook went from 153 to 176
+ms. Without the index (not built yet) there are none. On eight of the user's recent chats the lists were, by gloss:
+haiku, check, experiment, dictionary, wiring; environment, check, experiment, tonight, tool; check, no longer, method,
+science, mainly; check, value, fail, funds, link; check, method, secret, update, command; history, kanji, new word,
+check, example; together, history, diagnose, together with, headache; check, example, flag, normal, output. "check" (確認,
+a word the rules name) recurs as the reading repeats it; "link" as 一環 is a wrong sense Claude has to pass over, and
+"headache" came from a health chat, where the rules ask for no Japanese at all.
 
 Each brief is kept as a record of what its reply was offered: a `brief` op (hub.py), which changes nothing and goes to
 the ops table where the state lives, through the outbox with a collector. Its fields follow a web passage's plan:
