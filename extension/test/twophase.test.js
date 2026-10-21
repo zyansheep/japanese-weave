@@ -23,23 +23,29 @@ test('two paintings: sure swaps at once, the answer without moving what the read
     away: 'The old dog sleeps by the warm window, but only in the morning.', // a sure swap; off screen when the answer comes
     seen: 'Our new dog runs to the park, but he never stays there long.', // a sure swap; on screen when the answer comes
     bare: 'I always forget my umbrella when it rains in the evening.', // nothing sure
+    left: 'A tired dog waits at the door, but the mail is late again.', // a sure swap, seen and left before the answer
+    late: 'One more dog sleeps in the sun, but only after lunch today.', // a sure swap, seen when the view ends
   };
   const word = (o, f, ctx) => ({ o, f, g: o, h: '', ctx, word: f, status: 'known' });
   const plan = (limit, candidates) => ({ level: 0, intensity: 1, jitter: 1, limit, candidates, budget: 0.06, spent: 0, expected: 0.1, sentencePrice: 0.08 });
-  const sure = { away: [word('dog', '犬', 'old dog sleeps')], seen: [word('dog', '犬', 'new dog runs')], bare: [] };
+  const sure = { away: [word('dog', '犬', 'old dog sleeps')], seen: [word('dog', '犬', 'new dog runs')], bare: [],
+    left: [word('dog', '犬', 'tired dog waits')], late: [word('dog', '犬', 'more dog sleeps')] };
   // the full plans: away's day thins the dog out and takes others; seen's appended plan keeps its dog
   const full = {
     away: { swaps: [word('old', '古い', 'The old dog'), word('but', 'でも', 'window, but only')], plan: plan(2, 3) },
     seen: { swaps: [word('new', '新しい', 'Our new dog'), word('but', 'でも', 'park, but he')], plan: plan(2, 3),
       appended: { swaps: [sure.seen[0], word('but', 'でも', 'park, but he')], plan: plan(2, 3) } },
     bare: { swaps: [word('umbrella', '傘', 'my umbrella when')], plan: plan(1, 1) },
+    left: { swaps: [word('but', 'でも', 'door, but the')], plan: plan(1, 2),
+      appended: { swaps: [sure.left[0], word('but', 'でも', 'door, but the')], plan: plan(2, 2) } },
   };
   const name = (text) => Object.keys(texts).find((k) => texts[k] === text);
   const sent = [];
   let answer; // resolves the page's wait request
+  const pageListeners = [];
   const runtime = {
     id: 'fw-test',
-    onMessage: { addListener: () => {} },
+    onMessage: { addListener: (fn) => pageListeners.push(fn) },
     sendMessage: async (msg) => {
       sent.push(msg);
       if (msg.type === 'config') return config;
@@ -69,16 +75,17 @@ test('two paintings: sure swaps at once, the answer without moving what the read
   const logged = (kind) => sent.filter((m) => m.type === 'interaction' && m.kind === kind);
   const of = (records) => records.map((m) => Object.keys(texts).find((k) => hashKey(texts[k]) === m.context));
   try {
-    win.document.body.innerHTML = `<main>${Object.entries(texts).map(([k, t]) => `<p id="${k}">${t}</p>`).join('')}</main>`;
+    win.document.body.innerHTML = `<main>${Object.entries(texts).filter(([k]) => k !== 'late').map(([k, t]) => `<p id="${k}">${t}</p>`).join('')}</main>`;
     const t0 = Date.now();
     await import('../src/content.js?twophase');
     await wait();
     const p = (k) => win.document.querySelector(`#${k}`);
     const ja = (k) => [...p(k).querySelectorAll('.fw-word')].map((s) => s.textContent);
     // At once: the sure swaps; the page asks again for the rest, with what it shows
-    expect([ja('away'), ja('seen'), ja('bare')]).toEqual([['犬'], ['犬'], []]);
+    expect([ja('away'), ja('seen'), ja('bare'), ja('left')]).toEqual([['犬'], ['犬'], [], ['犬']]);
     const asked = sent.find((m) => m.type === 'swaps' && m.wait);
-    expect(asked.items.map((i) => [name(i.text), i.keep.map((s) => s.f)])).toEqual([['away', ['犬']], ['seen', ['犬']], ['bare', []]]);
+    expect(asked.items.map((i) => [name(i.text), i.keep.map((s) => s.f)])).toEqual([['away', ['犬']], ['seen', ['犬']], ['bare', []],
+      ['left', ['犬']]]);
     expect(Date.now() - t0).toBeLessThan(1000);
 
     // The reader has "seen" on screen, reads it, and its dog comes into view: no shown record, no stay yet.
@@ -88,10 +95,18 @@ test('two paintings: sure swaps at once, the answer without moving what the read
     const visibility = io.findLast((o) => !o.options.rootMargin && o.options.threshold.length === 2);
     win.document.dispatchEvent(user(new win.MouseEvent('pointermove', { bubbles: true })));
     sight('seen', true);
+    sight('left', true);
+    const seenAt = Date.now();
     const dog = p('seen').querySelector('.fw-word');
-    visibility.cb([{ target: dog, isIntersecting: true, intersectionRatio: 1 }]);
+    const leftDog = p('left').querySelector('.fw-word');
+    visibility.cb([{ target: dog, isIntersecting: true, intersectionRatio: 1 }, { target: leftDog, isIntersecting: true, intersectionRatio: 1 }]);
     await wait(1200);
     expect(logged('shown')).toHaveLength(0);
+    // "left" is read and scrolled past before the answer: its stay waits with it
+    sight('left', false);
+    visibility.cb([{ target: leftDog, isIntersecting: false, intersectionRatio: 0 }]);
+    await wait(20);
+    expect(logged('visible')).toHaveLength(0);
     // a peek while awaiting is logged as it happens
     dog.dispatchEvent(user(new win.MouseEvent('mouseover', { bubbles: true })));
     await wait(800);
@@ -108,23 +123,48 @@ test('two paintings: sure swaps at once, the answer without moving what the read
     expect(p('seen').querySelector('.fw-word')).toBe(dog);
     // bare: painted now
     expect(ja('bare')).toEqual(['傘']);
+    // left: seen and left, so its sure painting was its last for this view: unchanged, and now its record and its stay
+    // go out, with the time it was first seen and the plan of what was on the page
+    expect(ja('left')).toEqual(['犬']);
+    expect(p('left').querySelector('.fw-word')).toBe(leftDog);
     expect(p('seen').textContent).toBe('Our new 犬 runs to the park, でも he never stays there long.');
     // its shown record now, with the plan of what is on the page; the stay before the answer is not logged, but read
-    expect(of(logged('shown'))).toEqual(['seen']);
-    expect(logged('shown')[0]).toMatchObject({ plan: full.seen.appended.plan, annotations: [['犬', 0, 0], ['でも', 0, 0]] });
-    expect(logged('visible')).toHaveLength(0);
+    expect(of(logged('shown')).sort()).toEqual(['left', 'seen']);
+    const shownOf = (k) => logged('shown').find((m) => m.context === hashKey(texts[k]));
+    expect(shownOf('seen')).toMatchObject({ plan: full.seen.appended.plan, annotations: [['犬', 0, 0], ['でも', 0, 0]] });
+    expect(shownOf('left')).toMatchObject({ plan: plan(1, 1), annotations: [['犬', 0, 0]] });
+    expect(Math.abs(shownOf('left').at - seenAt)).toBeLessThan(100);
+    expect(of(logged('visible'))).toEqual(['left']);
+    expect(logged('visible')[0]).toMatchObject({ annotations: [['犬', 0, 0]] });
+    expect(logged('visible')[0].ms).toBeGreaterThanOrEqual(1000);
     const reads = sent.filter((m) => m.type === 'read');
-    expect(reads).toEqual([{ type: 'read', text: texts.seen }]);
+    expect(reads).toEqual([{ type: 'read', text: texts.left }, { type: 'read', text: texts.seen }]);
     // the stay since the answer is the last painting's
     await wait(1100);
     sight('seen', false);
     await wait(20);
-    expect(of(logged('visible'))).toEqual(['seen']);
-    expect(logged('visible')[0].annotations).toEqual([['犬', 0, 0], ['でも', 0, 0]]);
+    expect(of(logged('visible'))).toEqual(['left', 'seen']);
+    expect(logged('visible')[1].annotations).toEqual([['犬', 0, 0], ['でも', 0, 0]]);
     // read again in this page load: not sent again; English topics kept out are never sent
     sight('seen', true); await wait(1100); sight('seen', false); await wait(20);
-    expect(sent.filter((m) => m.type === 'read')).toHaveLength(1);
+    expect(sent.filter((m) => m.type === 'read')).toHaveLength(2);
     expect(JSON.stringify(sent.filter((m) => m.type === 'interaction'))).not.toContain('umbrella');
+
+    // The view ends (a new config: the level changed) while a passage awaits, after its Japanese was seen: its sure
+    // painting was its last, so its record and its stay go out.
+    const late = win.document.createElement('p');
+    late.id = 'late';
+    late.textContent = texts.late;
+    win.document.querySelector('main').append(late);
+    await wait();
+    expect(ja('late')).toEqual(['犬']);
+    sight('late', true);
+    visibility.cb([{ target: p('late').querySelector('.fw-word'), isIntersecting: true, intersectionRatio: 1 }]);
+    await wait(1100);
+    for (const fn of pageListeners) fn({ type: 'config', config: { ...config, revision: 'r2' } });
+    await wait(20);
+    expect(shownOf('late')).toMatchObject({ plan: plan(1, 1), annotations: [['犬', 0, 0]] });
+    expect(logged('visible').filter((m) => m.context === hashKey(texts.late))).toHaveLength(1);
   } finally {
     await win.happyDOM.close();
     Object.assign(globalThis, saved);
