@@ -672,7 +672,9 @@ def last_reads(history, at, view=None):
 def since_read(reads, rest, at):
     """(u, s) from last_reads: u, how far the word is back toward its long-term chance at `at`, the mean over when it
     was last read of min(1, time since / LONG_DAYS), never read (in the last LONG_DAYS) counting 1; s, the chance it
-    was last read in the same context."""
+    was last read in the same context. The week is every word's: a memory strength per word (NEXT_STEPS step 16) would
+    give each word its own time scale here, grown by the reads read_clocks weighs, and current_chance and levels.js
+    currentChance would take it from knowledge.json with "read"."""
     u, s = rest, 0.0
     for shown, chance, same in reads:
         u += chance * min(1.0, max(0.0, (at - shown) / (LONG_DAYS * DAY_MS)))
