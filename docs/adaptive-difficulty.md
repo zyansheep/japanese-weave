@@ -467,14 +467,14 @@ simulated reader's power (tools/sim experiments.delayed_start) at the showings a
 A simulated check, end to end: the tools/sim reader for 7 weeks, shown only what the state offers (its visible
 learning words in chat and on the web, topical words only from words not taken in, and one web showing of each due
 probe a day), with the real refresh each morning taking 5 words a day in while the web's plans left 70% of their budget
-unspent. 245 words came in (123 held, 122 shown); over 2,635 hidden word-days no hidden word was in a chat brief's
-lists or record, the browser's words or the log. 135 probes came due and were recorded, none before its probe day, a
-median of 0.43 days after it began (at most 0.92). Shown words got 2.1 showings a day (1.2 read) in their shown days.
-The analysis read the outcome back: held words were looked up at 10 of 69 probes (14%), shown ones at 1 of 66 (2%):
-z -2.76, p 0.01, and the logistic regression gives the shown arm -2.72 on the log-odds scale (se 1.09, p 0.01). At 2.1
-showings a day the simulated power at 80 words a side is 45%, 80% and 96% as a reading strengthens memory by 0, 0.03
-and 0.1 (rho), and 4% when exposure teaches nothing; at 5 new words a day the first 80 a side are due their probe
-about 8 weeks after the experiment starts.
+unspent. 245 words came in (115 held, 130 shown); over 2,482 hidden word-days no hidden word was in a chat brief's
+lists or record, the browser's words or the log. 135 probes were recorded, none before its probe day, a median of 0.43
+days after it began (at most 1.4). Shown words got 2.0 showings a day (1.1 read) in their shown days. The analysis
+read the outcome back: held words were looked up at 17 of 65 probes (26%), shown ones at 4 of 70 (6%): z -3.27, p
+0.001, and the logistic regression gives the shown arm -1.74 on the log-odds scale (se 0.59, p 0.003). At 2.0 showings
+a day the simulated power at 80 words a side is 33%, 68% and 91% as a reading strengthens memory by 0, 0.03 and 0.1
+(rho), and 4% when exposure teaches nothing: lower than PLAN.md's 73% to 95%, which assumed 4.6 showings a day. At 5
+new words a day the first 80 a side are due their probe about 8 weeks after the experiment starts.
 
 ### The switch, and undoing it
 
