@@ -259,7 +259,7 @@ describe('the reading index and the reading counts', () => {
     expect(failing).toEqual({ sent: 0, error: 'unknown message type' });
     expect((await storage.get([READING_KEY]))[READING_KEY]).toHaveLength(2);
     const sent = [];
-    expect(await flushReading({ storage, send: async (msg) => { sent.push(msg); return { ok: true, counted: 2 }; } })).toEqual({ sent: 2, counted: 2 });
+    expect(await flushReading({ storage, send: async (msg) => { sent.push(msg); return { ok: true, taken: 2 }; } })).toEqual({ sent: 2, taken: 2 });
     expect(sent).toEqual([{ type: 'reading', passages: [item, { ...item, day: '2026-10-22' }] }]);
     expect((await storage.get([READING_KEY]))[READING_KEY]).toEqual([]);
   });

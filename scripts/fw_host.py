@@ -13,10 +13,11 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
   {"type": "readingIndex"}              -> {"ok": true, "version", "entries": [[id, pos, "gloss;gloss"]]}: the safe
                                             glosses of every swappable dictionary entry (webdata.reading_index), for
                                             counting what the browser reads; asked for when "reading" changes
-  {"type": "reading", "passages": [{"d", "day", "entries": {entry id: times}}]} -> {"ok": true, "counted": n,
+  {"type": "reading", "passages": [{"d", "day", "entries": {entry id: times}}]} -> {"ok": true, "taken": n,
                                             "queued"?: true}: the dictionary entries passages read on the web showed
                                             (counts only, never text), into the same daily store as chat's: an
-                                            exposure op (hub.py), on the collector when one is set (hub.validate there)
+                                            exposure op (hub.py), on the collector when one is set (hub.validate there);
+                                            the store keeps each passage once in 30 days, as a chat reply (fwlib.fold)
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
   {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
                                         -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
@@ -55,6 +56,7 @@ MAX_EVENTS = 500
 MAX_READ = 500             # passages a reading message may carry
 MAX_READ_ENTRIES = 2000    # entries one passage may count (a passage is at most 2,000 characters)
 WEB_DIGEST = re.compile(r'^web:[0-9a-f]{8,48}$')
+ENTRY_ID = re.compile(r'^[1-9][0-9]{0,11}$')
 STATE_MAX_AGE = 60
 
 
@@ -98,9 +100,9 @@ def handle(message):
             return {'ok': False, 'error': 'passages must be a list'}
         replies = [r for r in (web_reply(p) for p in passages[:MAX_READ]) if r]
         if not replies:
-            return {'ok': True, 'counted': 0}
+            return {'ok': True, 'taken': 0}
         result = hub.submit({'kind': 'exposure', 'replies': replies}, wait=False)  # a collector's: sent by a sync
-        return {'ok': True, 'counted': len(replies), **({'queued': True} if result.get('queued') else {})}
+        return {'ok': True, 'taken': len(replies), **({'queued': True} if result.get('queued') else {})}
     if kind == 'events':
         events = message.get('events')
         if not isinstance(events, list):
@@ -172,7 +174,7 @@ def web_reply(passage):
         return None
     if not isinstance(entries, dict) or not 0 < len(entries) <= MAX_READ_ENTRIES:
         return None
-    if not all(isinstance(k, str) and k.isdigit() and len(k) <= 12 and isinstance(n, int) and not isinstance(n, bool)
+    if not all(isinstance(k, str) and ENTRY_ID.match(k) and isinstance(n, int) and not isinstance(n, bool)
                and 1 <= n <= 1000 for k, n in entries.items()):
         return None
     return {'d': d, 'day': min(day, fwlib.today()), 'words': [], 'entries': entries}

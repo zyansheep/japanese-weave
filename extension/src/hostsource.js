@@ -153,7 +153,7 @@ export async function flushReading({ storage, send }) {
     if (!reply?.ok) throw new Error(reply?.error || 'host refused the reading counts');
     const now = await storage.get([READING_KEY]);
     await storage.set({ [READING_KEY]: (now[READING_KEY] || []).slice(pending.length) });
-    return { sent: pending.length, counted: reply.counted };
+    return { sent: pending.length, taken: reply.taken };
   } catch (e) {
     return { sent: 0, error: String(e?.message || e) };
   }

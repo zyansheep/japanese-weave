@@ -115,19 +115,20 @@ class Counts(Home):
         bad = [self.passage(d='0011'), self.passage(d='web:XYZ'), self.passage(day='2026-02-30'), 'text',
                self.passage(entries={'x': 1}), dict(self.passage(), entries={'1361110': 0}),
                dict(self.passage(), entries={}), dict(self.passage(), entries={'1361110': True}),
-               dict(self.passage(), entries={str(n): 1 for n in range(1, fw_host.MAX_READ_ENTRIES + 2)})]
+               dict(self.passage(), entries={str(n): 1 for n in range(1, fw_host.MAX_READ_ENTRIES + 2)}),
+               dict(self.passage(), entries={'²': 1}), dict(self.passage(), entries={'007': 1})]
         reply = fw_host.handle({'type': 'reading', 'passages': [
             dict(self.passage('web:aaaa0000aaaa0000'), entries={'1361110': 2, '1464900': 1}),
             dict(self.passage('web:bbbb0000bbbb0000', yesterday), entries={'1361110': 1}),
             dict(self.passage('web:cccc0000cccc0000', future), entries={'1214000': 1}),  # a clock ahead: today
         ] + bad})
-        self.assertEqual(reply, {'ok': True, 'counted': 3})
+        self.assertEqual(reply, {'ok': True, 'taken': 3})
         again = fw_host.handle({'type': 'reading', 'passages': [self.passage('web:aaaa0000aaaa0000')]})
-        self.assertEqual(again, {'ok': True, 'counted': 1})  # sent again (a lost reply): counted once (fwlib.fold)
+        self.assertEqual(again, {'ok': True, 'taken': 1})  # sent again (a lost reply, another day): counted once
         index = fwlib.read_json(fwlib.home() / 'exposure.json')
         self.assertEqual(index['reading'], {yesterday: {'1361110': 1}, today: {'1361110': 2, '1464900': 1, '1214000': 1}})
         self.assertEqual(index['readingDays'], {'1361110': 2, '1464900': 1, '1214000': 1})
-        self.assertEqual(fw_host.handle({'type': 'reading', 'passages': bad}), {'ok': True, 'counted': 0})
+        self.assertEqual(fw_host.handle({'type': 'reading', 'passages': bad}), {'ok': True, 'taken': 0})
         self.assertFalse(fw_host.handle({'type': 'reading', 'passages': 'nope'})['ok'])
         self.assertNotIn('text', json.dumps(index))  # counts and digests only
 
@@ -158,7 +159,7 @@ class OnTheCollector(Home):
         today = fwlib.today()
         reply = fw_host.handle({'type': 'reading', 'passages': [
             {'d': 'web:1234abcd1234abcd', 'day': today, 'entries': {'1361110': 3}}]})
-        self.assertEqual(reply, {'ok': True, 'counted': 1, 'queued': True})  # the browser never waits on the network
+        self.assertEqual(reply, {'ok': True, 'taken': 1, 'queued': True})  # the browser never waits on the network
         self.assertEqual([op['kind'] for op in hub.pending()], ['exposure'])
         self.assertEqual(hub.sync(scan=False), (True, None))
         self.assertEqual(hub.pending(), [])

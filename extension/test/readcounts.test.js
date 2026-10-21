@@ -35,7 +35,7 @@ test('background: reading counts, from the host\'s index and the model\'s check,
           natives.push(msg);
           if (msg.type === 'state') return { ok: true, version: 'w.1', stage: 3, paused: false, prefs: {}, words, reading: { version: 'r1' } };
           if (msg.type === 'readingIndex') return index;
-          return { ok: true, counted: msg.passages?.length };
+          return { ok: true, taken: msg.passages?.length };
         },
       },
       tabs: { query: async () => [], sendMessage: async () => {} },
