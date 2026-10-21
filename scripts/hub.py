@@ -375,7 +375,9 @@ def flush(url=None, timeout=TIMEOUT):
         if reply is None:
             break
         for op, result in zip(batch, reply['results']):
-            if not result.get('ok'):  # malformed, or it failed there: resending won't help
+            # malformed, or it failed there: resending won't help. A record refused (by a collector older than its
+            # kind, say) is only a gap in the log, so it goes quietly.
+            if not result.get('ok') and op.get('kind') not in RECORDS:
                 print(f'Japanese Weave: the collector refused a queued {op.get("kind")} change: '
                       f'{result.get("error")}', file=sys.stderr)
             sent.add(op.get('uid'))

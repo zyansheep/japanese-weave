@@ -985,6 +985,10 @@ class Hub(Home):
         self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs], [('s1', True, len(context))])
         self.assertEqual([k for k, _ in self.ops()], ['seed', 'brief'])
         self.assertEqual(self.served()['words'], fwlib.load_state()['words'])  # it changed nothing
+        hub.queue(hub.stamp({'kind': 'brief', 'session': 's1'}))  # refused there (as by an older collector): dropped
+        with mock.patch('sys.stderr', new=io.StringIO()) as err:
+            self.assertEqual(hub.flush(), (True, 1))
+        self.assertEqual(err.getvalue(), '')
 
     def test_changes_wait_here_while_the_collector_is_down(self):
         fwlib.load_state()
