@@ -368,6 +368,17 @@ def _opened(surface, notes, items):
     return opened
 
 
+def _in_english(notes, opened):
+    """The indexes of the annotations read in English: those of a sentence whose whole-sentence translation (its end,
+    a PUNCTUATION annotation) was opened, back to the previous sentence end."""
+    excluded = set()
+    for index in opened:
+        if notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
+            start = max((i for i in range(index) if notes[i][0] in PUNCTUATION), default=-1)
+            excluded.update(range(start + 1, index))
+    return excluded
+
+
 def observations(surface, context, items, listed, read=None):
     """[(entry, y, weight)] for the lexicon words of one passage or message. listed: a set of words, or a function
     from a glossed word (perhaps a conjugated form) to its entry (matcher).
@@ -389,11 +400,7 @@ def observed(surface, context, items, listed, read=None):
     opened = _opened(surface, notes, items)
     if not opened and read is None:
         return []
-    excluded = set()
-    for index in opened:
-        if notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
-            start = max((i for i in range(index) if notes[i][0] in PUNCTUATION), default=-1)
-            excluded.update(range(start + 1, index))
+    excluded = _in_english(notes, opened)
     line = _line_height([n[2] for n in notes])
     lowest = max(notes[i][2] for i in opened) if opened else None
     best = {}
@@ -417,6 +424,64 @@ def observed(surface, context, items, listed, read=None):
         if old is None or (y, weight) > (old[0], old[1]):
             best[word] = (y, weight, index, near)
     return [(word, y, weight, index, near) for word, (y, weight, index, near) in best.items()]
+
+
+def speed_units(surface, context, items, listed):
+    """The reading times of a passage or message shown, for the speed term (Fit, SPEED): one per browser passage, one
+    per paragraph of a T3 message (the distinct bands of its stays, the longest stayed first where bands overlap, as
+    words_read takes them). Each is (ms, words, japanese, listed, active, dwell): active, its time on screen while a
+    reader could have been reading it (its stays added: time away, idle or with media playing is already left out);
+    dwell, the time its glosses were open (each open's, at most SPEED_DWELL_MS; T3 peeks under T3_NOISE_MS don't
+    count), time spent on the gloss, not the text; ms, active less dwell; words, its word count (in T3 the
+    paragraph's, as stay_chance takes it); japanese, its glossed words (sentence ends left out); listed, the lexicon
+    entries of its glossed words, each once, opened or not: the time is the reading's, before anything was opened or
+    not (the fit's lookups are already conditioned on it, through the read chance), so selecting the words left
+    unopened would select those in passages read too briefly to open anything. A passage or paragraph with under
+    SPEED_MIN_MS left, or without a word count, gives none: it wasn't read, or not long enough to say."""
+    match = matcher(listed)
+    notes = context['annotations']
+    dwell = {}
+    for row in items:  # the opens _opened counts, with their time open
+        if surface == 't3' and row['kind'] == 'peek' and row['dwell_ms'] < T3_NOISE_MS:
+            continue
+        index = row['position'] if 0 <= row['position'] < len(notes) and notes[row['position']][0] == row['word'] \
+            else next((i for i, n in enumerate(notes) if n[0] == row['word']), None)
+        if index is not None:
+            dwell[index] = dwell.get(index, 0) + min(max(row['dwell_ms'] or 0, 0), SPEED_DWELL_MS)
+    line = _line_height([n[2] for n in notes])
+
+    def unit(indexes, active, words):
+        if not words or words <= 0:
+            return None
+        spent = sum(dwell.get(i, 0) for i in indexes)
+        if active - spent < SPEED_MIN_MS:
+            return None
+        found = []
+        for i in indexes:
+            word = match(notes[i][0])
+            if word is not None and word not in found:
+                found.append(word)
+        japanese = sum(1 for i in indexes if not is_sentence(notes[i][0]))
+        return active - spent, words, japanese, tuple(found), active, spent
+
+    if surface != 't3':
+        found = unit(range(len(notes)), context.get('active') or 0, context.get('words') or 0)
+        return [found] if found else []
+    stays = [s for s in context.get('stays') or [] if s['height'] > 0]
+    bands = {}
+    for s in stays:
+        bands[(s['y'], s['height'])] = bands.get((s['y'], s['height']), 0) + s['ms']
+    taken, out = [], []
+    slack = min(line / 2, SLACK_PX)
+    for (y, height), _ms in sorted(bands.items(), key=lambda kv: -kv[1]):
+        if any(y < ty + th and ty < y + height for ty, th in taken):
+            continue
+        taken.append((y, height))
+        ms, words, _share = paragraph_reading(context, y, line)
+        found = unit([i for i, n in enumerate(notes) if y - slack <= n[2] < y + height], ms, words)
+        if found:
+            out.append(found)
+    return out
 
 
 # ---- the online model the fit replaced (evaluate.py's "today") ----
@@ -754,6 +819,35 @@ LOW_FLOOR = math.log(0.02) # and from this one: a lookup 2% of the time right af
 FLOOR_STEP = 0.5           # the most the floor moves in one Newton step
 SPACING_P = 0.10           # a costly word waits while recency holds its chance under this and its long-term chance
                            # isn't (PLAN.md section 5, rule 2; under it all along, it is cheap and never waits)
+
+# Reading speed as evidence (NEXT_STEPS step 19; docs/adaptive-difficulty.md, Reading speed as evidence). Every
+# passage's or paragraph's time on screen (speed_units: its stays added, the glosses' time taken off) is an observation
+# of its own: log ms is a Student-t with SPEED_NU degrees of freedom and a scale per surface (spread) around
+#     pace_s + group + length_s ln(words / SPEED_WORDS) + (japanese J + unknown U) / words
+# J its glossed words, U the sum over its lexicon words of sigmoid(-k), their long-term chance of a lookup: how many
+# words it held that the reader doesn't know. So a slow paragraph moves its words toward unknown and a fast one toward
+# known, by unknown q (1 - q) / words each. This is the time given the words, P(time | k); the lookups' likelihood is
+# already given the time (their read chances come from it), so the two multiply into the joint. group is the page's
+# (a browser view) or the T3 message's own pace, a random intercept held toward 0 by an sd fitted by EM (toward
+# SPEED_GROUP_SD, with SPEED_GROUP_WEIGHT groups' worth of weight): the passages of a page, and a message's
+# paragraphs, are on screen together, so their times move together and say little about which of them was slow.
+# japanese and unknown are in words of reading time per word (unknown 10: a word sure to be unknown costs as long as
+# reading ten more). The term counts SPEED_WEIGHT, and unknown is held toward 0 by its prior: time on screen can't
+# outweigh the lookups. Off (SPEED False) until the replay shows it predicts lookups better on the live log
+# (docs/adaptive-difficulty.md says what result switches it on); `fw.py evaluate --models nospeed,speed` compares.
+SPEED = False
+SPEED_NU = 4               # the Student-t's degrees of freedom on log time: skims and pages left open are its tails
+SPEED_WORDS = 20           # the reference length of the pace intercepts
+SPEED_MIN_MS = MIN_ACTIVE_MS  # a passage or paragraph with less time than this (glosses' time off) gives no evidence
+SPEED_DWELL_MS = 30_000    # an open's gloss time taken off its paragraph's time, at most
+SPEED_WEIGHT = 1.0         # how much a passage's or paragraph's time counts, against an observation's 1
+SPEED_CAP = 1.0            # the most information time may give a word, against what its lookups and prior give it
+SPEED_GROUP_SD = 0.5       # the prior sd of a page's or message's own pace on log time: fitted, held toward this
+SPEED_GROUP_WEIGHT = 5     # with this many groups' worth of weight
+SPEED_SHARED = {'pace web': (math.log(SPEED_WORDS * PACE_MS), 2.0), 'pace chat': (math.log(SPEED_WORDS * PACE_MS), 2.0),
+                'length web': (1.0, 1.0), 'length chat': (1.0, 1.0), 'japanese': (0.0, 5.0), 'unknown': (0.0, 10.0),
+                'spread web': (0.0, 1.0), 'spread chat': (0.0, 1.0)}
+SPEED_NAMES = tuple(SPEED_SHARED)
 
 
 def last_reads(history, at, view=None):
@@ -1147,12 +1241,23 @@ class Fit:
     from the free words with evidence before `until` (observations or a command), the word itself left out: a word free
     by its prior alone doesn't count, so no chain of priors can make words free, and the flags are from before the
     fit, so it never reads its own output (docs/adaptive-difficulty.md). plain: no word features (the prior by origin
-    and Anki interval alone), for comparison."""
+    and Anki interval alone), for comparison.
+
+    speed (default SPEED): the passages' and paragraphs' reading times are observations too (_speed_pass; their
+    shared parameters, SPEED_SHARED, follow the lookup model's in theta and names), in two stages (_speed_alone): the
+    fit without them; then their parameters with every word held there, each page's or message's own pace profiled
+    out (alpha) and its sd fitted by EM (group_sd); then the fit again with them added at those parameters, so the
+    words move with their reading times, but the time term's own parameters never move with the words."""
 
     def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, free=None, plain=False,
-                 recency=True, probes=True):
+                 recency=True, probes=True, speed=None):
         self.until, self.day, self.frozen, self.plain = until, day_of(until - 1), frozen, plain
         self.recency, self.probes = recency, probes
+        self.speed = SPEED if speed is None else speed
+        self.names = SHARED_NAMES + (SPEED_NAMES if self.speed else ())
+        self.priors = dict(SHARED, **SPEED_SHARED) if self.speed else SHARED
+        self.group_sd, self.groups, self.alpha, self.speed_sd, self._timed = SPEED_GROUP_SD, {}, [], {}, False
+        self._temper = None
         self.pace, self.top = pace or log.pace, top or log.top
         self.intervals = log.intervals
         self.by_ja = {w['ja']: w for w in log.words}
@@ -1165,30 +1270,108 @@ class Fit:
         started = time.time()
         start = start or {}
         shared = {} if frozen else start.get('shared') or {}
-        theta = [shared.get(name, SHARED[name][0]) for name in SHARED_NAMES]
+        if self.speed and not frozen and (start.get('cut') or {}).get('shared'):  # the fit without the term first
+            shared = dict(shared, **start['cut']['shared'])
+        theta = [shared.get(name, self.priors[name][0]) for name in self.names]
+        self._group_start = start['group'] if self.speed and not frozen and start.get('group') else SPEED_GROUP_SD
         widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
         cold = recency and not frozen and not shared  # nothing to start from: from a low floor and a high one
         passes = CLOCK_PASSES if cold or frozen else 1  # from an earlier fit, its chances weigh the clock already
-        self._fit(log, [LOW_FLOOR if j == FLOOR and cold else v for j, v in enumerate(theta)], widths,
-                  start.get('k') or {}, passes)
+        cut = ((start.get('cut') or {}).get('k') or start.get('k') or {}) if self.speed else start.get('k') or {}
+        self._fit(log, [LOW_FLOOR if j == FLOOR and cold else v for j, v in enumerate(theta)], widths, cut, passes,
+                  start.get('k') or {})
         if cold:
             first = dict(self.__dict__)
-            self._fit(log, [NO_FLOOR if j == FLOOR else v for j, v in enumerate(theta)], widths,
-                      start.get('k') or {}, passes)
+            self._fit(log, [NO_FLOOR if j == FLOOR else v for j, v in enumerate(theta)], widths, cut, passes,
+                      start.get('k') or {})
             if first['objective'] <= self.objective:
                 self.__dict__.update(first)
         self.seconds = time.time() - started
 
-    def _fit(self, log, theta, widths, before, passes):
+    def _fit(self, log, theta, widths, before, passes, timed=None):
         """Fits from theta, the widths and before ({ja: k}; the others from their priors): with recency, `passes`
-        times, each with the clock weighed by the chances the fit before found (the first, by the start's)."""
+        times, each with the clock weighed by the chances the fit before found (the first, by the start's). With
+        speed, then the term's two stages (_speed_alone), the second from timed ({ja: k} of the last fit with it)."""
         self.theta, self.widths, self.k, self.var = list(theta), dict(widths), [], []
+        self.group_sd, self._timed, self._temper = self._group_start, False, None
         self._terms(log, read_clocks(log, self.pace, self.top, self._chance(before)) if self.recency else {})
         self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
         self.iterations = self._run()
         for _ in range(passes - 1 if self.recency else 0):
             self._terms(log, read_clocks(log, self.pace, self.top, self._chance()))
             self.iterations += self._run()
+        if self.speed and self.units and not self.frozen:  # the reading times' parameters, from the words as the lookups
+            # put them; then each unit tempered so that time gives no word more than SPEED_CAP times what its lookups
+            # and prior give it; then the words again, with the reading times
+            self.cut = {'k': dict(zip(self.words, self.k)), 'shared': dict(zip(SHARED_NAMES, self.theta))}
+            self.theta = self._speed_alone(self.k, self.theta)
+            room = [SPEED_CAP * i / x if x > 0 else math.inf for x, i in zip(self._speed_most(), self.info)]
+            self._temper = [min([1.0] + [room[w] for w in unit[6]]) for unit in self.units]
+            self._timed = True
+            self.k = [(timed or {}).get(ja, k) for ja, k in zip(self.words, self.k)]
+            self.iterations += self._run()
+
+    def _speed_most(self):
+        """The most information the reading times could give each word at the term's parameters: its paragraphs'
+        expected information times (unknown q (1 - q) / words)^2 at q (1 - q) = 1/4, its largest, whatever its k."""
+        nu, b = SPEED_NU, self.theta[self.names.index('unknown')]
+        sigma = [math.exp(2 * max(-10.0, min(10.0, self.theta[self.names.index(name)])))
+                 for name in ('spread web', 'spread chat')]
+        most = [0.0] * len(self.k)
+        for t3, _group, _y, _length, _jw, iw, ws, v in self.units:
+            x = v * (nu + 1) / ((nu + 3) * sigma[t3]) * (b * iw / 4) ** 2
+            for w in ws:
+                most[w] += x
+        return most
+
+    def _speed_alone(self, k, theta):
+        """Stage one of the speed term (SPEED): its parameters, and the groups' sd, with every word held at k (the
+        fit's without the term): Newton's method on them alone, each held by its prior (SPEED_SHARED), with EM for the
+        groups' sd (as for the widths, toward SPEED_GROUP_SD by SPEED_GROUP_WEIGHT groups). Returns theta with them;
+        speed_sd has their sd. Fitted jointly with the words, the term is not identified: the larger unknown, the less
+        a word's k must move to explain a paragraph's time, until time explains itself through the words (on the
+        2026-10-20 snapshot's first day, unknown 33 and time 63% of all the words' information); with the words held,
+        unknown is how well the lookups' chances predict reading time, which time can't inflate."""
+        idx = [self.names.index(name) for name in SPEED_NAMES]
+        theta, n, m = list(theta), len(k), len(theta)
+
+        def objective(theta):
+            g, h = [0.0] * m, [[0.0] * m for _ in range(m)]
+            total = self._speed_pass(k, theta, [0.0] * n, [0.0] * n, g, h)
+            for j, name in zip(idx, SPEED_NAMES):
+                mean, sd = self.priors[name]
+                total += 0.5 * ((theta[j] - mean) / sd) ** 2
+                g[j] += (theta[j] - mean) / sd ** 2
+                h[j][j] += 1 / sd ** 2
+            return total, [g[j] for j in idx], [[h[a][b] for b in idx] for a in idx]
+
+        total, g, h = objective(theta)
+        last = None
+        for _ in range(FIT_ITERATIONS):
+            step, t = _solve(h, [-x for x in g]), 1.0
+            while True:
+                trial = list(theta)
+                for j, x in zip(idx, step):
+                    trial[j] += t * x
+                found = objective(trial)
+                if found[0] <= total + 1e-9 or t < 1e-3:
+                    break
+                t /= 2
+            theta, (total, g, h) = trial, found
+            new = math.sqrt((sum(a * a + 1 / i for a, i in zip(self.alpha, self._group_info))
+                             + SPEED_GROUP_WEIGHT * SPEED_GROUP_SD ** 2) / (len(self.alpha) + SPEED_GROUP_WEIGHT))
+            widened, change = abs(new - self.group_sd), new - self.group_sd
+            before, last = last, change
+            if before and change * before > 0 and abs(change) < abs(before):  # EM creeps: jump toward its limit
+                change /= 1 - min(0.95, change / before)
+            self.group_sd = max(0.01, self.group_sd + change)
+            if widened > WIDTH_TOLERANCE / 10:
+                total, g, h = objective(theta)
+            if t * max(abs(x) for x in step) < FIT_TOLERANCE and widened < WIDTH_TOLERANCE:
+                break
+        columns = [_solve(h, [1.0 if i == j else 0.0 for i in range(len(idx))]) for j in range(len(idx))]
+        self.speed_sd = {name: math.sqrt(max(0.0, columns[j][j])) for j, name in enumerate(SPEED_NAMES)}
+        return theta
 
     def _chance(self, before=None):
         """chance(observation, u, s) for read_clocks: its P(lookup | read) by this fit, or with before ({ja: k}) by
@@ -1224,10 +1407,13 @@ class Fit:
 
     def _terms(self, log, clocks):
         """The pooled terms (word, chat, form, y, read weight, u, s: weight) and episodes from the log's events before
-        until, each observation at its clock (read_clocks; without one, at its long-term chance), and the commands."""
+        until, each observation at its clock (read_clocks; without one, at its long-term chance), and the commands;
+        with speed, the reading times (units: (chat, group, ln ms, ln(words / SPEED_WORDS), japanese / words, 1 /
+        words, the lexicon words, weight), a group being a page or T3 message)."""
         pooled, self.episodes, self.commands = {}, [], []
         same = (self.pace, self.top) == (log.pace, log.top)
         self.n = [0.0] * len(self.words)
+        units, groups = [], {}
         for event in log.events:
             if event.at >= self.until:
                 break
@@ -1235,6 +1421,11 @@ class Fit:
             if not hasattr(event, 'obs'):  # a command
                 self.commands.append((self._word(event.word), event.kind, decay))
                 continue
+            for ms, count, japanese, listed, _active, _dwell in getattr(event, 'units', ()) if self.speed else ():
+                t3 = event.surface == 't3'
+                group = groups.setdefault(event.key if t3 else event.key[:2], len(groups))
+                units.append((t3, group, math.log(ms), math.log(count / SPEED_WORDS), japanese / count, 1 / count,
+                              tuple(self._word(ja) for ja in listed), decay * SPEED_WEIGHT))
             chosen = []
             for o in event.obs:
                 i = self._word(o.word)
@@ -1255,6 +1446,12 @@ class Fit:
         keys = list(pooled)
         self.terms = tuple(tuple(key[j] for key in keys) for j in range(7)) + (tuple(pooled[key] for key in keys),)
         self._probe_terms(log)
+        before = dict(zip(self.groups, self.alpha))  # each group's own pace starts where the last pass left it
+        self.units, self.groups = units, groups
+        self.alpha = [before.get(key, 0.0) for key in groups]
+        self.group_units = [[] for _ in groups]
+        for j, unit in enumerate(units):
+            self.group_units[unit[1]].append(j)
 
     def _probe_terms(self, log):
         """The monthly probes' answers before until (probe_log), pooled by word and answer: probe_terms (word, y:
@@ -1402,7 +1599,128 @@ class Fit:
                 g[FORM] += e if f else 0.0
                 g[FLOOR] += e * dfl
                 g[CONTEXT] += e * x
+        if self.speed and self._timed:
+            total += self._speed_pass(k, theta, grad, info, g, h)
         return total, grad, info, joins, g, h
+
+    def _speed_pass(self, k, theta, grad, info, g, h):
+        """The reading times' part of _pass (SPEED_SHARED): adds their gradient and expected information to the words'
+        and shared parameters', and returns their negative log likelihood with the groups' prior. A unit's log ms is a
+        Student-t (SPEED_NU) around mu = pace_s + alpha_g + length_s ln(words / SPEED_WORDS) + (japanese J + unknown U)
+        / words, U = the sum of sigmoid(-k_w) over its words, with scale e^spread_s. Each group's own pace alpha_g, held
+        toward 0 by N(0, group_sd^2), is profiled out: solved for (by Fisher scoring, from where the last pass left it),
+        so the gradient is the partial one there (the envelope theorem), and the information is the profile's: each
+        group's sums with every parameter, times their transpose, over its own information, taken off. Of the
+        information that joins words, to each other (two words of one paragraph or group) or to these parameters, only
+        each word's own diagonal is kept: kept, the joins to the parameters without those to each other leave the
+        information indefinite (a paragraph of two words: [[a2, 0, ac], [0, b2, bc], [ac, bc, c2]] has determinant
+        -a2 b2 c2). It is small beside each word's prior, so the Newton step converges all the same, and the Laplace sd
+        of a word or of these parameters leaves out only the other's uncertainty."""
+        nu, exp, log = SPEED_NU, math.exp, math.log
+        pw, pc, lw, lc, jj, uu, sw, sc = (self.names.index(name) for name in SPEED_NAMES)
+        b, tau2, units = theta[uu], self.group_sd ** 2, self.units
+        if self._timed and self._temper:  # each unit tempered (_fit)
+            units = [unit[:7] + (unit[7] * c,) for unit, c in zip(units, self._temper)]
+        sigma = (exp(max(-10.0, min(10.0, theta[sw]))), exp(max(-10.0, min(10.0, theta[sc]))))
+        variance = (sigma[0] ** 2, sigma[1] ** 2)
+        scale = (nu + 1) / (nu + 3)
+        rests, xs_of, qs_of = [], [], []
+        for t3, _group, y, length, jw, iw, ws, _v in units:
+            qs = [1 / (1 + exp(-30.0 if k[w] < -30.0 else 30.0 if k[w] > 30.0 else k[w])) for w in ws]
+            ux = sum(qs) * iw
+            pace, slope = (theta[pc], theta[lc]) if t3 else (theta[pw], theta[lw])
+            rests.append(y - pace - slope * length - theta[jj] * jw - b * ux)  # the residual but for alpha
+            xs_of.append(ux)
+            qs_of.append(qs)
+        total, alpha = 0.0, self.alpha
+        for i, members in enumerate(self.group_units):  # each group's own pace: the t's location, with its prior
+            if not members:
+                continue
+            a, s2 = alpha[i], variance[units[members[0]][0]]  # a group is a page or a message: one surface
+            found = [(rests[j], units[j][7] * (nu + 1)) for j in members]
+            d2 = 1 / tau2 + sum(units[j][7] for j in members) * scale / s2  # the expected information: fixed
+            ns2 = nu * s2
+            for _ in range(30):
+                d1 = a / tau2
+                for r0, vn in found:
+                    r = r0 - a
+                    d1 -= vn * r / (ns2 + r * r)
+                step = d1 / d2
+                a -= step
+                if -1e-7 < step < 1e-7:
+                    break
+            alpha[i] = a
+            total += 0.5 * a * a / tau2
+        # per surface, sums over its units: the spread's gradient and information; the gradient of the mean's
+        # parameters (pace, length, japanese, unknown: x = 1, length, J / words, U / words) and their information
+        moments = ([0.0] * 16, [0.0] * 16)
+        sums = [[1 / tau2, [0.0] * 4, {}] for _ in self.group_units]  # per group: its information, and with the rest
+        info_time = self._speed_info = {}
+        for j, (t3, group, _y, length, jw, iw, ws, v) in enumerate(units):
+            s, s2, r = sigma[t3], variance[t3], rests[j] - alpha[group]
+            total += v * (0.5 * (nu + 1) * log(1 + r * r / (nu * s2)) + log(s))
+            d = -v * (nu + 1) * r / (nu * s2 + r * r)  # d(-log likelihood) / d mu
+            i = v * scale / s2  # its expected information
+            ux = xs_of[j]
+            il, ij, iu = i * length, i * jw, i * ux
+            m = moments[t3]
+            m[0] += v * (1 - (nu + 1) * r * r / (nu * s2 + r * r))
+            m[1] += v * 2 * nu / (nu + 3)
+            m[2] += d
+            m[3] += d * length
+            m[4] += d * jw
+            m[5] += d * ux
+            m[6] += i
+            m[7] += il
+            m[8] += ij
+            m[9] += iu
+            m[10] += il * length
+            m[11] += il * jw
+            m[12] += il * ux
+            m[13] += ij * jw
+            m[14] += ij * ux
+            m[15] += iu * ux
+            mine = sums[group]
+            mine[0] += i
+            ps = mine[1]
+            ps[0] += i
+            ps[1] += il
+            ps[2] += ij
+            ps[3] += iu
+            if not b:
+                continue
+            joined = mine[2]
+            for w, q in zip(ws, qs_of[j]):
+                xw = -b * q * (1 - q) * iw  # d mu / d k_w
+                ixw = i * xw
+                grad[w] += d * xw
+                info[w] += ixw * xw
+                info_time[w] = info_time.get(w, 0.0) + ixw * xw
+                joined[w] = joined.get(w, 0.0) + ixw
+        for t3, m in enumerate(moments):
+            spread, params = (sc, (pc, lc, jj, uu)) if t3 else (sw, (pw, lw, jj, uu))
+            g[spread] += m[0]
+            h[spread][spread] += m[1]
+            for a in range(4):
+                g[params[a]] += m[2 + a]
+            square = ((m[6], m[7], m[8], m[9]), (m[7], m[10], m[11], m[12]), (m[8], m[11], m[13], m[14]),
+                      (m[9], m[12], m[14], m[15]))
+            for a in range(4):
+                for c in range(4):
+                    h[params[a]][params[c]] += square[a][c]
+        for i, (a_info, ps, words) in enumerate(sums):  # the profile over each group's own pace
+            members = self.group_units[i]
+            if not members:
+                continue
+            params = (pc, lc, jj, uu) if units[members[0]][0] else (pw, lw, jj, uu)
+            for a in range(4):
+                for c in range(4):
+                    h[params[a]][params[c]] -= ps[a] * ps[c] / a_info
+            for w, xw in words.items():
+                info[w] -= xw * xw / a_info
+                info_time[w] -= xw * xw / a_info
+        self._group_info = [x[0] for x in sums]
+        return total
 
     def _priors(self, k, theta, grad, info, g, h):
         """Adds the priors' and commands' terms to the derivatives; returns their part of the objective."""
@@ -1429,6 +1747,12 @@ class Fit:
             total += 0.5 * ((theta[j] - mean) / sd) ** 2
             g[j] += (theta[j] - mean) / sd ** 2
             h[j][j] += 1 / sd ** 2
+        for j in range(len(SHARED_NAMES), len(theta)):  # the speed term's: set by _speed_alone, held here
+            g[j] = 0.0
+            for row in h:
+                row[j] = 0.0
+            h[j] = [0.0] * len(theta)
+            h[j][j] = 1.0
         return total
 
     def _objective(self, k, theta, data=None):
@@ -1497,7 +1821,7 @@ class Fit:
                 break
         self.k, self.theta, self.objective = k, theta, total
         _dk, _dt, joins, schur = self._step(k, grad, info, joined, g, h)
-        self.var = [1 / x for x in info]
+        self.var, self.info = [1 / x for x in info], list(info)
         self.theta_sd = [0.0] * len(theta)
         if schur is not None:  # Laplace: the diagonal of the inverse information
             columns = [_solve(schur, [1.0 if i == j else 0.0 for i in range(len(theta))]) for j in range(len(theta))]
@@ -1535,12 +1859,26 @@ class Fit:
         return 1 - self.probe_read * sigmoid(self.theta[PROBE] - self.estimate(ja)[0])
 
     def shared(self):
-        return {name: round(v, 4) for name, v in zip(SHARED_NAMES, self.theta)}
+        return {name: round(v, 4) for name, v in zip(self.names, self.theta)}
+
+    def speed_summary(self):
+        """The speed term as fitted (None without it): its shared parameters with their sd, the groups' sd, how many
+        passages and paragraphs (units) and groups it read, and how much of the words' information came from it: the
+        largest share of any word's, and the share of all of it."""
+        if not self.speed:
+            return None
+        shares = [(x, self.info[i]) for i, x in getattr(self, '_speed_info', {}).items()] if self._timed else []
+        return {'shared': {n: round(self.theta[self.names.index(n)], 4) for n in SPEED_NAMES},
+                'sd': {n: round(getattr(self, 'speed_sd', {}).get(n, SPEED_SHARED[n][1]), 4) for n in SPEED_NAMES},
+                'group': round(self.group_sd, 4), 'units': len(self.units), 'groups': len(self.groups),
+                'words': len(shares), 'most': round(max((x / max(t, 1e-12) for x, t in shares), default=0.0), 4),
+                'share': round(sum(x for x, _t in shares) / max(sum(self.info), 1e-12), 4)}
 
     def state(self):
         """What a later fit may start from."""
-        return {'shared': dict(zip(SHARED_NAMES, self.theta)), 'widths': dict(self.widths),
-                'k': dict(zip(self.words, self.k))}
+        found = {'shared': dict(zip(self.names, self.theta)), 'widths': dict(self.widths),
+                 'k': dict(zip(self.words, self.k))}
+        return dict(found, group=self.group_sd, cut=dict(getattr(self, 'cut', {}))) if self.speed else found
 
 
 def nested_loglik(log, fit, pace, top):
@@ -1571,18 +1909,19 @@ def nested_loglik(log, fit, pace, top):
 
 
 def tune(log, until, free=None):
-    """The reading model by profile likelihood, one per surface ({surface: pace}, {surface: top}): over the grid
-    PACES x READ_MAXES of one surface, the other's held at what it has, the whole log is fitted at each point (Fit,
-    starting from the point before, without recency: pace and cap are about time on screen, and dozens of fits with it
-    would take most of a refresh on a long log) and scored by the likelihood of what was opened under the reading model
-    the read chances come from (nested_loglik, both surfaces). The web first, then chat. Each search scores every other
-    point first (the defaults among them), then the neighbours of the best until it stays. A surface keeps the defaults
-    until it has TUNE_MIN_OPENS opens, its best pair beats the defaults by TUNE_MARGIN, and it lies inside the grid: on
-    its edge the likelihood has no maximum in the plausible range, a sign the reading model doesn't fit (on the live log
-    of 2026-10-20 chat's keeps rising past 5,000 ms a word), and uses it only with SURFACE_TUNING (else it is ready,
-    reported, and the defaults stay). The surfaces differ: a web page stays on screen while it is skimmed or not read
-    at all. Returns {pace, top (per surface), tuned (whether any surface uses its own), ready, best, inside, opens (per
-    surface), grid (every point scored: surface, pace, top, loglik)}. free: the free flags the fits take (Fit)."""
+    """The reading model by profile likelihood, one per surface ({surface: pace}, {surface: top}): over the grid PACES x
+    READ_MAXES of one surface, the other's held at what it has, the whole log is fitted at each point (Fit, starting
+    from the point before, without recency: pace and cap are about time on screen, and dozens of fits with it would take
+    most of a refresh on a long log; nor the speed term, whose times read no read chance) and scored by the likelihood
+    of what was opened under the reading model the read chances come from (nested_loglik, both surfaces). The web first,
+    then chat. Each search scores every other point first (the defaults among them), then the neighbours of the best
+    until it stays. A surface keeps the defaults until it has TUNE_MIN_OPENS opens, its best pair beats the defaults by
+    TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible range, a sign
+    the reading model doesn't fit (on the live log of 2026-10-20 chat's keeps rising past 5,000 ms a word), and uses it
+    only with SURFACE_TUNING (else it is ready, reported, and the defaults stay). The surfaces differ: a web page stays
+    on screen while it is skimmed or not read at all. Returns {pace, top (per surface), tuned (whether any surface uses
+    its own), ready, best, inside, opens (per surface), grid (every point scored: surface, pace, top, loglik)}. free:
+    the free flags the fits take (Fit)."""
     pace, top = {s: PACE_MS for s in SURFACES}, {s: READ_MAX for s in SURFACES}
     grid, start = [], None
     out = {'tuned': False, 'best': {}, 'inside': {}, 'opens': {}, 'ready': {}}
@@ -1595,7 +1934,7 @@ def tune(log, until, free=None):
             nonlocal start
             if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
                 p, t = dict(pace, **{surface: PACES[i]}), dict(top, **{surface: READ_MAXES[j]})
-                fit = Fit(log, until, p, t, start=start, free=free, recency=False)
+                fit = Fit(log, until, p, t, start=start, free=free, recency=False, speed=False)
                 start = fit.state()
                 scores[(i, j)] = nested_loglik(log, fit, p, t)
                 grid.append({'surface': surface, 'pace': PACES[i], 'top': READ_MAXES[j],
@@ -1709,7 +2048,7 @@ def day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers=Non
         end = day_start(day) + DAY_MS + 3 * 3_600_000  # past a daylight-saving change, then back to midnight
         end = day_start(day_of(end))
         n = bisect.bisect_left(ats, end)
-        out[day] = (f'{MODEL} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
+        out[day] = (f'{model_name()} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
                     f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}'
                     + (f' {bisect.bisect_left(offers.times, end)}' if offers is not None and offers.times else ''))
         day = day_of(end)
@@ -2196,6 +2535,11 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
+def model_name():
+    """MODEL, and ' speed' while SPEED is on: switching the speed term redoes the daily sums and fits from nothing."""
+    return MODEL + (' speed' if SPEED else '')
+
+
 MODEL = 'fit 5'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
                  # term, with the prior by origin and word features; fit 4: the monthly probes' answers; fit 5: a
                  # reading model per surface)
@@ -2273,7 +2617,7 @@ def refresh(now=None):
         match = inflection.lexicon(state['words']).entry  # every lexicon word, queue words too
         intervals, commands = anki_intervals(), read_commands()
         reading = previous.get('reading')
-        fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == MODEL
+        fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == model_name()
         pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
         log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top,
                                state.get('probes'))
@@ -2282,10 +2626,10 @@ def refresh(now=None):
         log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
                                                     and isinstance(e.get('id'), int)})
         if not fresh:  # the reading model, once a day
-            reading = dict(tune(log, now_ms, before), day=today, model=MODEL)
+            reading = dict(tune(log, now_ms, before), day=today, model=model_name())
             pace, top = reading['pace'], reading['top']
         start = None
-        if fresh and (previous.get('fit') or {}).get('model') == MODEL:  # start from the last refresh's fit; the
+        if fresh and (previous.get('fit') or {}).get('model') == model_name():  # start from the last refresh's fit; the
             # day's first fits from nothing, from two floors (Fit), in case the data now favour the other
             start = {'shared': previous['fit'].get('shared'), 'widths': previous['fit'].get('widths'),
                      'k': {ja: e['k'] for ja, e in known.items() if isinstance(e, dict) and e.get('n')}}
@@ -2360,12 +2704,12 @@ def refresh(now=None):
         knowledge = {
             'updated': now, 'rows': len(rows),
             'offset': {'browser': 0.0, 't3': round(fit.theta[T3], 3)},
-            'fit': {'model': MODEL, 'shared': fit.shared(),
+            'fit': {'model': model_name(), 'shared': fit.shared(),
                     'sd': {name: round(sd, 4) for name, sd in zip(SHARED_NAMES, fit.theta_sd)},
                     'widths': {kind: round(w, 4) for kind, w in fit.widths.items()}, 'pace': pace, 'top': top,
                     'words': len(fit.words), 'terms': len(fit.terms[0]), 'iterations': fit.iterations,
                     'cold': start is None,
-                    'seconds': round(fit.seconds, 3)},
+                    'seconds': round(fit.seconds, 3), **({'speed': fit.speed_summary()} if fit.speed else {})},
             'prior': prior_table(fit),
             'recency': {'floor': round(fit.theta[FLOOR], 4), 'context': round(fit.theta[CONTEXT], 4),
                         'days': LONG_DAYS, 'softMin': SOFT_MIN, 'spacing': SPACING_P},

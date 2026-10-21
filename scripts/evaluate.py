@@ -29,7 +29,9 @@ same Log of the whole log.
   Command      at, word (its entry), kind: 'known' or 'learn'
   Group        one showing or episode: at (when it was scored), surface ('browser' or 't3'), key (surface, view,
                context), episode (True for an episode), obs (its Observations), shown (when it was shown: its shown
-               record, else its first interaction, else at; the recency clock reads it, knowledge.read_clocks)
+               record, else its first interaction, else at; the recency clock reads it, knowledge.read_clocks),
+               units (a showing's reading times, knowledge.speed_units: one per browser passage or T3 paragraph read
+               long enough, for the speed term; an episode has none)
   Observation  at, day ('YYYY-MM-DD', local), surface, key, episode; word (the lexicon entry), written (the
                annotation), form (written is a conjugated form of word, not the word or its reading); y (1 opened,
                knowledge.GLANCE_Y a glance, 0 not opened); weight (replay's: 1 opened, else the larger of near and
@@ -43,9 +45,10 @@ The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STE
 everything before each day, each observation at its clock (knowledge.read_clocks: the log up to its showing); "step4",
 the same fit without recency, every observation at the word's long-term chance; "flat", the fit with the prior by
 origin and Anki interval alone, without the word features (NEXT_STEPS step 13); "noprobe", the fit without the
-monthly probes' answers (knowledge.probe_answers); "today", the online updates the fit replaced (knowledge.Online, fed
-the log in replay's order); and "constant", one chance per surface. CURRENT names the
-model knowledge.py runs, which the convergence test checks.
+monthly probes' answers (knowledge.probe_answers); "speed" and "nospeed", the fit with and without the passages' and
+paragraphs' reading times as evidence (knowledge.SPEED, NEXT_STEPS step 19; "fit" has them when knowledge.SPEED is
+set); "today", the online updates the fit replaced (knowledge.Online, fed the log in replay's order); and "constant",
+one chance per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
 the model's own q against fwlib.FREE_P; first: each word's first FIRST exposures, where its prior decides most), the
@@ -88,11 +91,12 @@ class Observation:
 
 
 class Group:
-    __slots__ = ('at', 'surface', 'key', 'episode', 'obs', 'shown')
+    __slots__ = ('at', 'surface', 'key', 'episode', 'obs', 'shown', 'units')
 
-    def __init__(self, at, surface, key, episode, obs, shown=None):
+    def __init__(self, at, surface, key, episode, obs, shown=None, units=()):
         self.at, self.surface, self.key, self.episode, self.obs = at, surface, key, episode, obs
         self.shown = shown if shown is not None else at
+        self.units = units
 
 
 class Command:
@@ -180,7 +184,8 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
         line = knowledge._line_height([n[2] for n in notes])
         day, surface, episode = day_of(at), key[0], kind == knowledge.EPISODE
         shown = context.get('shown_at') or (items[0]['at'] if items else at)  # when it was read, for the clock
-        group = Group(at, surface, key, episode, [], min(shown, at))
+        group = Group(at, surface, key, episode, [], min(shown, at),
+                      () if episode else tuple(knowledge.speed_units(surface, context, items, match)))
         for ja, y, weight, index, near in found:
             written, _x, y_pos = notes[index]
             ms, count, share = knowledge.reading(surface, context, y_pos, line) or (0, 0, 1.0)
@@ -270,9 +275,9 @@ class Fitted:
     frozen: the shared parameters and prior widths held at their priors. plain: the prior without the word features
     (by origin and Anki interval alone), the flat start the word features are compared with."""
 
-    def __init__(self, frozen=False, plain=False, recency=True, probes=True):
+    def __init__(self, frozen=False, plain=False, recency=True, probes=True, speed=None):
         self.frozen, self.plain, self.recency, self.last, self.flags, self.origin = frozen, plain, recency, None, {}, None
-        self.probes = probes
+        self.probes, self.speed = probes, speed
         self.name = (('fit, priors held' if frozen else 'flat' if plain else 'fit') + ('' if recency else ', no recency')
                      + ('' if probes else ', no probe'))
 
@@ -281,7 +286,7 @@ class Fitted:
             self.origin, self.last, self.flags = log.origin, None, {}
         start = self.last.state() if self.last and not self.recency else None  # with recency, from nothing each day
         self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, free=self.flags, plain=self.plain,
-                                  recency=self.recency, probes=self.probes)
+                                  recency=self.recency, probes=self.probes, speed=self.speed)
         self.flags = knowledge.free_flags(self.last, list(dict.fromkeys([w['ja'] for w in log.words] +
                                                                          self.last.words)), self.flags)
         self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
@@ -301,8 +306,14 @@ class Stale(Fitted):
         self.name = 'step4'
 
 
+def named(model, name):
+    model.name = name
+    return model
+
+
 MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale, 'flat': lambda: Fitted(plain=True),
-          'noprobe': lambda: Fitted(probes=False)}
+          'noprobe': lambda: Fitted(probes=False), 'speed': lambda: named(Fitted(speed=True), 'speed'),
+          'nospeed': lambda: named(Fitted(speed=False), 'nospeed')}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 
