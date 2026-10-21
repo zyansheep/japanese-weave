@@ -122,6 +122,17 @@ def is_number(entry):
     return bool(NUMERAL.search(entry['ja'])) and bool(NUMBER_WORD.search(entry['en'].lower()))
 
 
+# Grammar, not vocabulary: an expression led by a particle or the copula (という, について, だった, ではない). It
+# is part of a sentence's frame, so "would you read it without a lookup" means little out of context. A connector
+# that is also a conjunction (だから) or an expression that is also a noun or adverb (それから, 何も) stays.
+GRAMMAR_POS = ({'exp'}, {'exp', 'adj-i'})
+GRAMMAR_LEAD = ('に', 'と', 'の', 'で', 'だ', 'じゃ', 'よ', 'か', 'もの')
+
+
+def is_grammar(entry):
+    return set(entry['pos']) in GRAMMAR_POS and entry['ja'].startswith(GRAMMAR_LEAD)
+
+
 def population(d=None, counts=None, top=TOP):
     """The items a probe draws from, heaviest first: [{ja, ids, rank, weight}], one per spelling. Weights are
     1/score among the swappable entries ranked within top, or with counts ({entry id: times in your reading}) the
@@ -129,7 +140,7 @@ def population(d=None, counts=None, top=TOP):
     d = d or dictionary.load()
     items = {}
     for e in d:
-        if not e['swap'] or is_number(e):
+        if not e['swap'] or is_number(e) or is_grammar(e):
             continue
         if counts is None:
             if e['rank'] > top or not e['score']:

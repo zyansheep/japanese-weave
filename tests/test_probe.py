@@ -71,6 +71,10 @@ class Population(unittest.TestCase):
         self.assertNotIn('三時', items)
         self.assertIn('一緒', items)  # a numeral inside a word that means something else
         self.assertIn('十分', items)
+        for grammar in ('という', 'のです', 'だった', 'ではない'):  # particle- or copula-led expressions
+            self.assertNotIn(grammar, items)
+        for word in ('だから', 'それから', '何も', 'もう少し'):  # a connector, and expressions that are also words
+            self.assertIn(word, items)
         self.assertFalse(any(re.fullmatch('[ァ-ヺー]+', ja) for ja in items))  # katakana words aren't swappable
         weights = [it['weight'] for it in FRAME.items]
         self.assertEqual(weights, sorted(weights, reverse=True))
