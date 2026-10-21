@@ -504,8 +504,12 @@ read), the web 0.08 (no sentence ends logged before that day). The native host s
 
 ## Choosing words (browser)
 
-Selection happens when results are read from the cache, not when the model is called: the cache keeps every validated
-candidate, so changing estimates, the budget or the level never pays for new model calls.
+The candidates are found by code and checked by a model (docs/swap-prompt.md, "The web pipeline"): every place one of
+your words could go, the sure ones taken by code and the doubtful ones settled by one model call per batch of
+passages, whose answer is cached by what was asked. One candidate set serves every level, so changing estimates, the
+budget or the level never pays for a model call; selection happens on it each time a page asks. The sure candidates
+come at once and the model's when its answer does; a passage the reader has already had on screen keeps the swaps it
+shows, which are taken first below (in the budget as they were planned), and only gains.
 
 A level is a lookup budget (scripts/intensity.py BUDGETS, mirrored in levels.js): the lookups per 100 words the reader
 puts up with, spent only on words not known at a glance and on whole sentences in Japanese. Planning assumes the
@@ -520,7 +524,7 @@ words * passage words / 100 (the random thinning, below, leaves it alone), and o
    recency) and a mean lookup chance p: its long-term chance for a word known at a glance, else its current one at
    the time of planning (levels.js currentChance, as knowledge.current_chance). A word is known at a glance when its
    free flag says so (with hysteresis, above), else when its long-term chance is under 0.08 (fwlib FREE_P). A word or
-   phrase whose words are all known at a glance is free: shown wherever the model offered it, bigger swaps first, at
+   phrase whose words are all known at a glance is free: shown wherever it is a candidate, bigger swaps first, at
    every level but off, except that the random thinning keeps each with probability jitter.
 2. The others cost the sum of p over their words not known at a glance, at their current chances; a whole sentence
    also costs its price, the chance its translation is opened if it is read (below). One with a word recency holds
@@ -544,8 +548,8 @@ words * passage words / 100 (the random thinning, below, leaves it alone), and o
    next candidate). A part stops at its first candidate that doesn't fit. A part whose candidates ran out first hands
    what it has left to the other, which goes on from where it stopped. Then each part's first candidate that didn't
    fit is admitted with probability remaining / cost (so short passages still get learning words in expectation). A
-   sentence left English keeps the free words the model offered inside it.
-5. The popup's density, when set, caps the total, budgeted candidates first; without it there is no other ceiling.
+   sentence left English keeps the free words inside it that are candidates.
+5. There is no other ceiling: the popup's density cap went with the old prompt (2026-10-21).
 
 The price of a whole sentence comes from the native host (`sentencePrice`, the web's from knowledge.json: The price
 of a whole sentence, above); without a host it is levels.js SENTENCE_PRICE, 0.08, which is also the fitted price's
@@ -567,8 +571,9 @@ The passage's plan records B, what the swaps kept within it cost (spent, from ex
 (the sum of p over every listed word shown, plus the price of each sentence shown), the sentence price, and the
 delayed-start arm of each word shown that has one (arms). Randomness is seeded by the passage and the day, so a page repaints the same
 way. Changing the challenge or the level repaints open pages; new estimates apply to passages as they are painted,
-so words don't change under you while you read. Selection only chooses among the model's candidates, so a budget above
-what they can supply saturates.
+so words don't change under you while you read. Selection only chooses among the candidates, which code now finds
+wherever your words fit (83% to 88% of the judged places on fresh passages at full), so a budget saturates only on
+passages that say little your words can.
 
 ### The challenge: normal's budget
 
@@ -778,6 +783,16 @@ forms of "be" head 60 KB each of phrases, "is wrong" and the like) is stored by 
 only the second words it has. It is built in the background in about 5 seconds (reading.ensure), once per dictionary,
 English data and sense flags; the hook only reads it.
 
+The web counts into the same store (docs/swap-prompt.md, "The web pipeline", reading counts). A passage read on a page
+(a stay on screen long enough to log) is counted once a day by the extension's worker: the safe glosses of every
+swappable entry (the native host sends them once per version of the dictionary and flags files), the most frequent
+entry per span and never closed-class English, as chat's rule with the flags; then the words in use where the span's
+option is safe or the model's check picked it. Only the counts go to the host, which sends them as an exposure op
+where the state lives, each passage a reply with its digest (`web:` and the text's hash), so a passage counts once
+there as a reply does. Safe glosses alone, without the doubtful phrases chat's longest match also weighs, count
+somewhat more: on the lab's 151 passages every swappable entry chat's rule found (167 matches) and 23 more, mostly
+right ("the same" as 同じ, where chat's rule takes 同 "the said" and counts nothing).
+
 A word is eligible once it came up on 3 different days of the last 30 (fwlib.ELIGIBLE_DAYS, READING_DAYS), can stand
 in for English (swap), isn't a number, has no spelling in use (known or learning, hidden ones included) and isn't known
 at a glance by its starting value (reading.starting_k under 8%: labeled known, not taught). The eligible ones come in
@@ -929,13 +944,13 @@ slowdown curve says how much each extra point of Japanese costs.
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
-interactions are logged, since there is no Japanese to measure. Full (+3) has its own cache and prompt, which the
-heavier levels (+1, +2) pick from too: no per-passage target, a candidate for every listed word, learning or known, the
-passage says in its listed sense (in every place it says it), and a sentence swap for every sentence listed words and
-the allowed grammar can say completely. planSwaps plans it the same way as the other levels with no budget, so nothing
-costs anything: every candidate the passage can place is shown, a sentence rather than the word swaps inside it, with no
-per-sentence cap, density cap or random thinning, and a word again where its English comes again (the plan says level 3,
-intensity 5, jitter 1, and has no budget). Both ends last 3 hours after the last press like the other levels; a press
+interactions are logged, since there is no Japanese to measure. Full (+3) picks from the same candidates as every
+level (since 2026-10-21; before, it had its own cache and prompt, which +1 and +2 picked from): every place one of your
+words, learning or known, fits in its listed sense, in every place the passage says it, and a sentence swap for every
+sentence your words and the allowed grammar can say completely. planSwaps plans it the same way as the other levels
+with no budget, so nothing costs anything: every candidate the passage can place is shown, a sentence rather than the
+word swaps inside it, with no per-sentence cap or random thinning, and a word again where its English comes again (the
+plan says level 3, intensity 5, jitter 1, and has no budget). Both ends last 3 hours after the last press like the other levels; a press
 further at an end restarts the clock.
 
 ## Inspecting

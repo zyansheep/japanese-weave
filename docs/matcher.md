@@ -5,8 +5,9 @@ a passage that a word could take, with all its options, and a model only settles
 12). This is the index and the matcher, in JavaScript (`extension/src/matcher.js`) and Python (`scripts/matcher.py`),
 and a lab that scores it (`tools/prompt-lab/matcher-lab.mjs`); then the sense flags that say which of its options code
 may take alone (below). The model's check is `extension/src/verify.js`, described and measured in
-[swap-prompt.md](swap-prompt.md) ("Code finds the places, a model checks them"). Nothing in the extension uses any of it
-yet; the web planner still takes the model's swaps.
+[swap-prompt.md](swap-prompt.md) ("Code finds the places, a model checks them"). Since 2026-10-21 they are how the
+extension finds its candidates (swap-prompt.md, "The web pipeline"), with each word's glosses and safe glosses from the
+native host.
 
 ## What it does
 
