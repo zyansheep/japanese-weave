@@ -327,8 +327,8 @@ state and whether each "done when" is met):
 - the monthly probe.
 
 Left: the live check (2 to 4 weeks of data), the experiment's readout (about 8 weeks), a memory strength per word
-(after 60 days and a positive readout), reading speed as evidence (behind a switch), and the deferred single planner
-and chat replay lab.
+(after 60 days and a positive readout), and the deferred single planner and chat replay lab. Reading speed as
+evidence is built and off: it found no gain in simulation or on the snapshot, and waits for its gate.
 
 ## 10. How we test
 

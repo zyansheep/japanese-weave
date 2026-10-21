@@ -33,7 +33,7 @@ lab's judged passages (lab, fresh, fresh2).
 | 16 Per-word memory strength | Waiting: needs 60 days of log and a positive step 15; its place in the code is marked | Not yet |
 | 17 One planner, two executors | Deferred: a large refactor that changes exploration (draws per word per refresh instead of per passage); worth doing only after the live check shows the two planners disagree in a way that costs | Not started |
 | 18 Prompt iteration | Web: done in the labs (three prompt versions, two fresh sets). Chat: a replay lab would spend the user's Claude limits; deferred | Partly |
-| 19 Reading speed as evidence | In progress, behind a switch that stays off until the replay shows a gain | Not yet |
+| 19 Reading speed as evidence | Built, off (`knowledge.SPEED`): in the sim it recovers the effect and fits nothing on a null reader, but it doesn't improve predictions, since one paragraph's time says little about any one word; on the snapshot it is slightly worse. docs/adaptive-difficulty.md gives the rule for turning it on | Built; gate not passed |
 
 ## Now: fix what is broken, build the yardsticks, start the slow experiment (days to two weeks)
 
