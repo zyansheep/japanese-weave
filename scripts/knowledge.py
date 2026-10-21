@@ -29,8 +29,9 @@ counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of t
 corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
 computed from its answers alone, so it remains the check on the model. Each word's uncertainty is the fit's curvature
 (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
-The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online updates it replaced
-are the Online class, kept as evaluate.py's "today" for comparison.
+Each passage's or paragraph's time on screen can be evidence too (SPEED, off until the replay shows a gain: Fit's
+speed, speed_units). The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online
+updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese

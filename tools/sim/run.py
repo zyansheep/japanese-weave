@@ -28,7 +28,8 @@ models and designs against the truth (experiments.py). Python 3.9+, standard lib
                                                against an oracle's that knows every word's chance, and the fit
                                                with it against the fit without, by day and class, on a reader
                                                whose time doesn't depend on words not recognised, and on two
-                                               whose time does (about an hour)
+                                               whose time does (a few hours; experiments.speed(processes=12)
+                                               runs the seeds and readers at once, in about fifteen minutes)
   python3 tools/sim/run.py log DIR [--days N] [--seed S]
                                                a simulated state dir (interactions.sqlite, state.json, anki.csv,
                                                truth.jsonl, and knowledge.json from the replay) for

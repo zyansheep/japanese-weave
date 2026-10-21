@@ -568,6 +568,146 @@ prior worth 25 sentences read. The read chance is time on screen alone, as calib
 agrees with the price on the days it was fitted on. On the 2026-10-20 log: chat 0.109 (25.9 opens over 232 sentences
 read), the web 0.08 (no sentence ends logged before that day). The native host sends the web's to the extension.
 
+### Reading speed as evidence (built, off: knowledge.SPEED)
+
+NEXT_STEPS step 19. A slow paragraph probably held words the reader doesn't know, and every paragraph has a time on
+screen, so time is evidence even where nothing was opened. The term is built and measured, and stays off until the
+replay shows it predicts lookups better on the live log (the switch, at the end of this section).
+
+The term. Every browser passage shown and every paragraph of a T3 message with a word count (knowledge.speed_units) is
+a reading time: its stays on screen added, less the time its glosses were open. Its log is a Student-t with 4 degrees
+of freedom and a scale per surface (spread) around
+
+    pace_s + group + length_s ln(words / 20) + (japanese J + unknown U) / words
+
+- J, its glossed words (sentence ends left out); U, the sum over its lexicon words of sigmoid(-k), each word's
+  long-term chance of a lookup on the web's scale: how many words it held that the reader doesn't know.
+- japanese and unknown are in words of reading time per word: unknown 10 means a word sure to be looked up costs as
+  long as reading ten more.
+- group, the page's (a browser view) or the T3 message's own pace: a random intercept, held toward 0 by an sd fitted
+  by EM (toward 0.5, with 5 groups' worth of weight) and profiled out of the fit.
+
+A slow paragraph moves each of its words toward unknown, and a fast one toward known, by unknown q (1 - q) / words
+times its residual. This is the likelihood of the time given the words, P(time | k): the lookups' likelihood is already
+given the time (their read chances come from it), so the two multiply into the joint.
+
+The hard parts, and what the term does about each:
+
+- Paragraphs never read. A stay's ms leaves out time away (page hidden, window not focused), idle (no input for 30 s)
+  and with media playing. A passage or paragraph with under 1 s left once its glosses' time is off gives nothing
+  (SPEED_MIN_MS), and so does one on screen for less than the time reading it takes at the reading model's pace
+  (SPEED_THROUGH): its time says how much of it was read, not how fast. Counted, a fast paragraph reads as "its words
+  are known" when they were skipped: on the simulated reader with 40 words of time a word not recognised, counting
+  them cost new and learning words' first exposures 0.0014 per observation a day; left out, -0.0004.
+- Scrolling past and several paragraphs on screen at once. The extension logs time on screen, not time read: a web
+  page's passages are on screen together, and a chat message's paragraphs with each other. On the 2026-10-20 snapshot a
+  web passage's time grows with its words to the power 0.58, a T3 paragraph's hardly at all (0.03): it is the message's
+  time. The pace per page or message takes what they share (its sd 0.81 on log time there; on the simulated reader,
+  whose true one is 0.3 and whose paragraphs aren't on screen together, 0.15 to 0.17, the read-through rule keeping the
+  slower paragraphs, and 0.25 to 0.30 counting every one), so the term learns from differences within a page or
+  message, and from those between them only as far as the groups' sd allows. Which of a page's passages held
+  the unknown word stays blurred.
+- Lookups inside the paragraph. Each open's time open (at most 30 s, SPEED_DWELL_MS; T3 peeks under 0.3 s are the mouse
+  passing) comes off the paragraph's time: that time was spent on the gloss, and the open is evidence of its own. The
+  opened words stay in U with the rest. Tried first, U over the unopened words with the opens as a covariate of their
+  own: on a simulated reader who looks up half the words it doesn't recognise, each costing 10 words of time, unknown
+  came out -3.9 (sd 2.6; one seed of 10 days). An unopened word is a collider, set by the word and by the time: a
+  passage read too briefly to open anything leaves every word unopened.
+- Several stays. A passage's stays add up (feedback.load's active); a T3 paragraph's are those of its band, as
+  stay_chance takes them, the longest stayed first where bands overlap.
+- Page type and length. A pace and a length slope per surface, and the group per page or message.
+- Heavy tails. The Student-t on log time: a page left open for an hour counts like a slow paragraph, not like forty.
+- Identification. Fitted jointly with the words, unknown is not identified: the larger it is, the less a word's k must
+  move to explain a paragraph's time, until time explains itself through the words. On the snapshot's first day (117
+  paragraphs) the joint fit put unknown at 33 and drew 63% of all the words' information from time, and the replay
+  was worse by 0.0023 per observation. So the fit runs in stages (Fit._speed_alone): the fit without the term; the
+  term's parameters with every word held where the lookups put it (unknown held toward 0 by an sd of 10 words); the fit
+  again with the term at those parameters. The words move with their times; the term's parameters never move with the
+  words. And each paragraph is tempered so that its words get from time at most SPEED_CAP (1) times the information
+  their lookups and prior give them, counted at the largest q (1 - q) a word could have: time can at most halve a
+  word's variance. On the snapshot time gives 0.35% of all the words' information, at most 11% of any word's.
+- Simplifications. U takes each word's long-term chance on the web's scale (no recency, no chat offset; pace and
+  unknown take up the difference in scale); words off the list count in J only; the information that joins two words
+  of one paragraph, or a word to the term's parameters, is left out of the Newton step and the Laplace sd (kept, the
+  joins to the parameters without those between the words leave the information indefinite).
+
+On the simulated reader. tools/sim's reader can be given a reading time (world.py cfg speed): after a passage or
+message is read, the time on screen of each passage or paragraph grows by the pace (300 ms) times 1 for each Japanese
+word read, plus `unknown` for each word read and not recognised, looked up or not, plus each lookup's time open, and all
+of it is scaled by a pace per page or message (sd 0.3 on log time). The reading is drawn as before, so a seed reads and
+looks up the same words with or without it; only the times differ. `run.py speed` (3 seeds of 28 days per reader)
+fits the term on the whole log, and again with every word at its true chance (the oracle: what the term would find if
+it knew every word), and compares the fit with the term against the fit without it, each day predicted from the days
+before. unknown, fitted and the oracle's, then the fit with the term minus the fit without it in log loss per
+observation a day (mean over the 84 days of the three seeds, sd of a day, days better):
+
+| reader | unknown, by seed (sd) | oracle's | all | learning | first exposures | known |
+|---|---|---|---|---|---|---|
+| no effect | -0.4 (1.0), +0.2 (1.2), -1.6 (1.4) | -1.4, +1.9, -2.1 | +0.00001 (0.0001), 43 | +0.0001 (0.0008), 41 | +0.0000 (0.0012), 37 | +0.00000 (0.00003), 42 |
+| 10 words, looked up 90% | +2.3 (1.0), +1.2 (1.2), -0.1 (1.3) | +2.3, +3.6, +0.3 | +0.00001 (0.0001), 44 | +0.0001 (0.0008), 42 | -0.0001 (0.0012), 50 | +0.00000 (0.00003), 35 |
+| 10 words, looked up 50% | +3.9 (1.8), +0.3 (1.4), +0.2 (1.4) | +1.5, +4.9, +3.8 | +0.00002 (0.0003), 43 | +0.0002 (0.0013), 33 | -0.0003 (0.0022), 42 | +0.00003 (0.0002), 41 |
+| 40 words, looked up 90% | +7.8 (1.0), +4.7 (1.2), +4.3 (1.3) | +10.4, +9.2, +7.2 | +0.00001 (0.0003), 41 | -0.0002 (0.0022), 49 | -0.0004 (0.0036), 43 | +0.00004 (0.0001), 27 |
+| tight, no effect | +0.5 (0.5), +1.2 (0.5), +0.4 (0.5) | +0.7, +1.3, +0.6 | -0.00000 (0.0002), 37 | +0.0000 (0.0007), 36 | +0.0001 (0.0009), 34 | -0.00000 (0.00003), 45 |
+| tight, 10 words | +1.8 (0.5), +4.3 (0.7), +3.2 (0.6) | +3.9, +5.4, +3.9 | +0.00019 (0.0014), 40 | +0.0003 (0.0054), 43 | +0.0005 (0.0135), 39 | +0.00013 (0.0009), 39 |
+| tight, 40 words | +5.5 (0.7), +4.2 (0.6), +4.6 (0.5) | +12.3, +12.9, +11.3 | +0.00001 (0.0008), 42 | -0.0005 (0.0026), 52 | -0.0012 (0.0051), 44 | +0.00015 (0.0007), 36 |
+
+"10 words": a word read and not recognised costs 10 words of time (3 s); the reader looks up 90% (its usual habit) or
+50% of the words it doesn't recognise. "tight": time on screen within an sd of 0.3 on log time of the time reading
+the paragraph takes, against 1 on the web and 0.8 in chat for the others; the tight readers were run with every
+paragraph counted, SPEED_THROUGH 0. First exposures: a new or learning word's first three.
+
+The term finds no effect where there is none and an effect where there is one, at a third to three quarters of the
+oracle's (the words' chances it divides time among are estimates), and it changes nothing that matters: time gives
+0.01% to 1.2% of the words' information. The simulated reader's time on screen already varies with how much of it
+was read (an sd of 1 on log time on the web, 0.8 in chat, the live log's spread too), so a word that costs 3 s is a
+small part of a paragraph's time.
+
+Even where time on screen tracks the reading closely (the tight readers) and a word not recognised costs 12 s, the
+gains stay within the noise: first exposures -0.0012 a day (sd 0.005), learning words -0.0005, known +0.00015, better
+on about half the days. The fitted unknown is a third to a half of the oracle's there, but that is not what holds it
+back: with unknown set to the oracle's, the fit with the term gets worse, all +0.0012 a day and first exposures +0.011
+on the tight reader with 40 words (+0.0008 and +0.003 on the usual one). The words' chances the term divides a
+paragraph's time among are estimates, and the more weight time gets, the more it moves the wrong words: the
+attenuated unknown of the first stage is the safer one. The term's limit is how little one paragraph's time says
+about any one of its words.
+
+On the snapshot (2026-10-20, a copy; `fw.py evaluate --models nospeed,speed`, 5 days scored, the first with nothing to
+fit on). Fitted on the whole log, unknown is 3.5 (sd 1.75), japanese -0.20 (0.18), the length slopes 0.58 (web) and
+0.03 (chat), the groups' sd 0.81, from 1,443 of the 1,995 passages and paragraphs on screen a second or more (the rest
+too briefly to be read through); fitted on the days before each day, unknown is 3.4 (7.3), 6.8 (4.0), 1.6 (3.1) and
+1.6 (2.6). The term against the fit without it, log loss per observation with a 90% interval from resampling days:
+all +0.0004 (+0.0000 to +0.0010), better on 0 of 5 days; web +0.0001 (-0.0000 to +0.0002); chat +0.0008 (+0.0001 to
++0.0024); known +0.0002 (+0.0000 to +0.0003); learning -0.0001 (-0.0005 to +0.0002), better on 2; new +0.0022 (-0.0001
+to +0.0068); first (any word's first three exposures) +0.0009 (+0.0001 to +0.0029). Most of the loss is one day's new
+words (10-18: +0.011). calibrate per class (a refresh of a copy with the term on and off) moves by 0.04 at most: web
+costly 0.60 (0.36-0.97) against 0.56 (0.30-0.99), free 0.55 against 0.58, all 0.56 against 0.57; chat costly 1.23
+against 1.24, free 1.04 against 1.07, off-list 1.07 against 1.05, all 1.18 with and without. Four days that differ
+can't say much: at the live log's daily spread (sd 0.0006 on learning words, 0.004 on first exposures) and the
+simulated effect sizes, a 90% interval would need months.
+
+The cost. On the snapshot, with the CPU idle: a fit from nothing takes 2.1 s with the term against 1.3 s without, one
+from the last refresh's 0.45 s against 0.13 s (the fit without the term runs again first, from the words the term had
+moved); a refresh, 8.3 s against 6.8 s for the day's first (which also chooses the reading model, without the term)
+and 0.7 s against 0.4 s after. On a simulated log of 28 days a fit from nothing takes about twice as
+long with the term (8 to 25 s against 4 to 13 s, several runs at once).
+
+The switch. Set knowledge.SPEED (knowledge.model_name then adds " speed", so the next refresh fits from nothing and
+redoes the daily sums) once `fw.py evaluate --models nospeed,speed` on the live log, with at least 28 days scored of
+which at least 14 carry T3 paragraph word counts (NEXT_STEPS step 1; until then a T3 paragraph's words are estimated
+from its height), shows all of:
+
+1. on first exposures (first) or on learning words, the 90% interval of the daily difference lies below 0, and the
+   other of the two has a mean at or below 0;
+2. on known words and on all, the interval's upper end is at most +0.0002 per observation;
+3. unknown, fitted on the whole log with the term on (knowledge.Fit(..., speed=True).speed_summary(), or
+   knowledge.json fit.speed once on), is above 0 by 2 sd or more: time tracks the lookups' chances at all;
+4. calibrate per class from a refresh of a copy of the state dir with SPEED set has no class outside 0.83-1.2 that is
+   inside it with SPEED off.
+
+28 days, not fewer: the simulated reader's daily differences have an sd of 0.0008 on learning words and 0.0012 on
+first exposures with an effect it can find, so an interval excludes 0 within a month only if the gain is about 0.0003
+a day or more, several times what any simulated reader showed.
+
 ## Choosing words (browser)
 
 Selection happens when results are read from the cache, not when the model is called: the cache keeps every validated
@@ -1035,7 +1175,8 @@ further at an end restarts the clock.
   looked-up words lined up to come in next; `fw.py calibrate`: the model per class against what happened, and the 30
   words opened most in the last 30 days that the word list doesn't have, which is what chat replies slip in beyond it.
 - `fw.py relabel --dry-run` and `fw.py experiment`: The switch, and the delayed-start experiment (above).
-- `fw.py evaluate [--models step4,fit,flat,today,constant]`: models scored on the log day by day (Checking the model).
+- `fw.py evaluate [--models step4,fit,flat,today,constant,nospeed,speed]`: models scored on the log day by day (Checking
+  the model).
 
 ## Checking the model
 
@@ -1114,8 +1255,9 @@ recency term, refitted from nothing each day, as the day's first refresh fits, w
 before as a refresh carries them (evaluate.CURRENT, the model knowledge.py runs), each observation at its clock (the log
 up to its showing); "step4" is the same fit without recency, the first model and the reference by default; "flat" is
 the fit without the word features, the prior by origin and Anki interval alone; "today" is knowledge.Online, exactly
-the old replay's updates; "constant" is one chance per surface. The harness holds the reading model fixed, so the fit
-runs at the log's pace and cap there.
+the old replay's updates; "constant" is one chance per surface; "speed" and "nospeed" are the fit with and without the
+reading times as evidence, whatever knowledge.SPEED says ("fit" follows it; Reading speed as evidence, above). The
+harness holds the reading model fixed, so the fit runs at the log's pace and cap there.
 
 On the 2026-10-20 log (5 days scored) the fit with recency predicts as version 2 does (Recency, above). Version 2
 against today's model, in log loss per observation with a 90% interval from resampling days: all -0.0013 (-0.0035 to
@@ -1140,9 +1282,10 @@ convergence of one word, recovery per class at 1, 2 and 4 weeks (and the reading
 offset against a true surface difference, the harness on a simulated log, the recency term against the truth (its
 floor, context and decay, on the reader, one whose reading refreshes recall but never strengthens it, and an inert
 one, `inert=True`, whose memory nothing changes), the calibration window, the power of the delayed-start experiment,
-recurrence intake, and starting values from the word itself (with `prior`, every word has its dictionary entry and
-words not known start from their features; Starting values from the word itself, above). `run.py log DIR` writes a
-simulated state dir to look at.
+recurrence intake, starting values from the word itself (with `prior`, every word has its dictionary entry and words
+not known start from their features; Starting values from the word itself, above), and reading speed as evidence (with
+`speed`, each passage's or paragraph's time on screen grows with what was read in it; Reading speed as evidence,
+above). `run.py log DIR` writes a simulated state dir to look at.
 
 tests/test_yardsticks.py holds the check every model change must pass: a word starting at 27% whose true chance is
 5%, shown 3 times a day, crosses 8% within 300 exposures. The fit passes it twice: as fitted (the prior learns from the
@@ -1234,3 +1377,13 @@ Step 10, the shared recency term:
   shown again).
 - Not in it: learning from reading. A shared learning rate didn't earn its place on the simulated reader; the memory
   strength per word (NEXT_STEPS step 16) is where that goes.
+
+Step 19, reading speed as evidence (built, off until the switch above):
+
+- A paragraph's time on screen is the likelihood of the time given its words, over every word in it, opened or not:
+  the lookups are already conditioned on the time, and selecting the unopened words selects briefly read paragraphs.
+- The glosses' time comes off; a page's or message's own pace is a random intercept, since their paragraphs are on
+  screen together; a Student-t takes the long tails; paragraphs not on screen long enough to be read through count for
+  nothing.
+- The term's parameters are fitted with the words held, then the words with the term: jointly, time explained itself
+  through the words. Each paragraph is tempered so that time gives no word more than its lookups and prior do.
