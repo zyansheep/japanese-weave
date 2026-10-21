@@ -216,11 +216,13 @@ whole log, redone on every refresh, which starts each word from its Anki interva
 opened and didn't. Each intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal):
 words you know at a glance (under an 8% chance, judged with a margin for doubt so one lookup doesn't change it) are free
 and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most one per sentence, on web
-pages and in chat. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted from
-your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the budget
-and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the command
-above, or the popup) is normal's budget. While one is set, strong evidence also moves words between learning and known,
-a few a day. Why it works this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
+pages and in chat. Once your log shows that a word's chance falls right after you read it and climbs back over a week,
+the fit follows that too: known at a glance is judged on the chance a week on, a lookup costs the chance now, and a word
+read too recently waits. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted
+from your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the
+budget and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the
+command above, or the popup) is normal's budget. While one is set, strong evidence also moves words between learning and
+known, a few a day. Why it works this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.
