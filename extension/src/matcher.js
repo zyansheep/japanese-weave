@@ -222,10 +222,10 @@ const bare = (w) => w.replace(/n't$/, '').replace(/'(s|re|ve|ll|d|m)$/, '');
 // options: the entries (as given to buildIndex) in their order there; glosses: for each option, the English alternative
 // of its gloss it matched (the word as listed: "think" for "thought", "exist" for "there is"); function: every word of
 // the span is a closed-class word (data/english.json "function"; "there's" as "there"). start and end index the text as
-// JavaScript strings do
-// (UTF-16 code units).
-export function matchText(index, text) {
-  const { tokens, seps } = tokenize(String(text ?? ''));
+// JavaScript strings do (UTF-16 code units).
+export function matchText(index, input) {
+  const text = String(input ?? '');
+  const { tokens, seps } = tokenize(text);
   const { root, rules, entries, kinds } = index;
   const candidates = [];
   const add = (i, j, end, last, hits) => {
