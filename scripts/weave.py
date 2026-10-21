@@ -51,11 +51,12 @@ DEFAULT_SWAPS = 12  # known connectors and adverbs (the base list's tier A), fir
 BRIEF_MAX = 9500
 # The known words named besides the default swaps take at most this many characters, the most useful in chat first
 # (priority); the others are still known, just not named (capped). From Stage 3 (150 known words, so any list the
-# cap shortens, unless the stage is pinned lower), the rest of a whole brief takes at most about 4,900: the rules
-# 2,970 characters with <abbr> glosses (footer glosses are shorter), 24 learning words up to 900, a probe line up to
-# 200, the default swaps 360, the feedback line on the last reply 430 and the known line's own words 220. So a
-# whole brief stays under BRIEF_MAX at any number of known words; a pinned lower stage's longer rules can push the
-# last few named words to the next turn. 250 to 290 words fit: on the 2026-10-20 state all 255 known at a glance,
+# cap shortens, unless the stage is pinned lower), the rest of a whole brief takes at most about 5,500: the rules
+# 2,970 characters with <abbr> glosses (footer glosses are shorter), 24 learning words up to 900, the topical words
+# up to about 600 (TOPICAL_MAX), a probe line up to 200, the default swaps 360, the feedback line on the last reply
+# 430 and the known line's own words 220. So a whole brief stays under BRIEF_MAX at any number of known words, the
+# known line taking what is left; a pinned lower stage's longer rules, or long topical glosses, can push the last few
+# named words to the next turn. 250 to 290 words fit: on the 2026-10-20 state all 255 known at a glance,
 # 285 of 422 with 500 known and 255 of 1,318 with 1,500 (base-list meanings run longer than the Anki ones).
 KNOWN_ROOM = 4400
 RECUR_DAYS = 2  # a known word that came up in the user's chat replies on this many days is named first
