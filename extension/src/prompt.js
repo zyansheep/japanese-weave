@@ -62,7 +62,7 @@ const FULL = 'The reader asked for FULL Japanese: everything the list can say, w
 
 // The rules come first and the word lists last, known words before learning words (whose order changes as words are
 // shown during the day), so consecutive calls share a long prefix that Gemini caches. With the plugin's word state,
-// learning words (active, then shaky; unshown today first) are the target and known words fill in. Without it, the level's bundled list. Katakana loanwords are left out: on an English page they teach nothing.
+// learning words (unshown today first) are the target and known words fill in. Without it, the level's bundled list. Katakana loanwords are left out: on an English page they teach nothing.
 // percent: the share of words to swap; 0: the level's rule. Either way each passage comes with its target
 // (buildUserContent). Every sentence the list can say is asked for at every stage. full: the answer the heavier
 // intensities and full pick from, every swap the list allows, whatever the percent.

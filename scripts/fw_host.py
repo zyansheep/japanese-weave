@@ -3,7 +3,8 @@
 
 Messages (JSON, 4-byte native-endian length prefix, one per line of conversation):
   {"type": "ping"}                      -> {"ok": true, "host": 1}
-  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status}],
+  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status,
+                                            arm?}] (none the delayed-start experiment hides: fwlib.public_state),
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
                                             (gemini_key by setup, anthropic_key by hand)}

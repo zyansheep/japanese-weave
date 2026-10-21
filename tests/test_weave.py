@@ -1245,7 +1245,7 @@ class Hub(Home):
         rev = fwlib.read_json(fwlib.home() / hub.SYNCED)['rev']
         with fwlib.using_home(self.server_home):
             with fwlib.editing():
-                pass  # promotion with nothing to promote: nothing rewritten
+                pass  # nothing to change: nothing rewritten
             self.assertEqual(hub.snapshot(rev), (200, {'ok': True, 'rev': rev, 'unchanged': True}))
             hub.submit({'kind': 'set', 'stage': 2})
             self.assertNotIn('unchanged', hub.snapshot(rev)[1])
