@@ -165,6 +165,9 @@ test('two paintings: sure swaps at once, the answer without moving what the read
     await wait(20);
     expect(shownOf('late')).toMatchObject({ plan: plan(1, 1), annotations: [['犬', 0, 0]] });
     expect(logged('visible').filter((m) => m.context === hashKey(texts.late))).toHaveLength(1);
+    // switched off, so no timer of this page outlives the test
+    for (const fn of pageListeners) fn({ type: 'config', config: { ...config, revision: 'r3', settings: { ...config.settings, enabled: false } } });
+    await wait(20);
   } finally {
     await win.happyDOM.close();
     Object.assign(globalThis, saved);
