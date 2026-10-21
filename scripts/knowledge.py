@@ -1531,9 +1531,8 @@ def probe_outcomes(state, log, today):
                 found[o.word] = {'at': int(event.at), 'surface': o.surface, 'y': round(o.y, 3),
                                  'read': round(max(o.read, READ_FLOOR) if o.y > 0 else o.read, 4)}
     out = [[ja, outcome] for ja, outcome in found.items()]
-    late = fwlib.days_between
     out += [[w['ja'], 'missed'] for w in state['words'] if w['ja'] in due and w['ja'] not in found
-            and late(w['arm']['probe'], today) >= fwlib.PROBE_WAIT]
+            and fwlib.days_between(w['arm']['probe'], today) >= fwlib.PROBE_WAIT]
     return out
 
 

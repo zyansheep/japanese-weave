@@ -506,7 +506,7 @@ def switch(state, day):
         return False
     for w in state['words']:
         old = {k: w.pop(k) for k in LEGACY_FIELDS if k in w}
-        w['legacy'] = dict(old, status=w['status'], added=w['added'], changed=w['changed'])
+        w['legacy'] = dict(old, status=w.get('status', 'queue'), added=w.get('added', ''), changed=w.get('changed', ''))
         w.setdefault('origin', legacy_origin(w))
     state['labels'] = {'from': 'model', 'since': day}
     if 'refilled' in state:
@@ -615,9 +615,9 @@ def draw(seed, ja):
 
 
 def assign(seed, ja):
-    """(arm, draw): held when the draw is under one half, else shown."""
+    """(arm, draw): held when the draw is under one half, else shown. The draw is kept to 6 places, under 1."""
     u = draw(seed, ja)
-    return ('held' if u < 0.5 else 'shown'), round(u, 6)
+    return ('held' if u < 0.5 else 'shown'), min(round(u, 6), 0.999999)
 
 
 def phase(word, day=None):
