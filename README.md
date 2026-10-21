@@ -52,13 +52,14 @@ level from [blocks/](blocks/level-01.md).
 ## What it does
 
 - **Claude Code, Codex and T3 Code**: a prompt hook gives the model your stage and word lists. The first turn of a
-  chat names every word you know at a glance, with its meaning; later turns carry a short reminder, the learning
-  words and only what changed, since the hook's text stays in the conversation. Every sentence stays an English
-  sentence; listed words drop in as written, with no particles or conjugation below Stage 3, suru-nouns standing
-  in for English verbs ("let me 確認 the logs"). New words get a footer gloss with romaji, and every third reply
-  opens with a recall cue. Never in code, files, commits or anything meant to be shared, and never in scripted runs
-  (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks for
-  a `t3 serve` parent and weaves there.
+  chat names the words you know at a glance that are most useful in chat, with their meanings; later turns carry a
+  short reminder, the learning words and only what changed, since the hook's text stays in the conversation. Most
+  sentences stay English sentences, with listed words dropped in as written (no particles or conjugation below Stage
+  3, suru-nouns standing in for English verbs: "let me 確認 the logs"), and a few are short Japanese sentences of
+  words you know, as many as your lookup budget pays for. New words get a footer gloss with romaji, and every third
+  reply opens with a recall cue. Never in code, files, commits or anything meant to be shared, and never in scripted
+  runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks
+  for a `t3 serve` parent and weaves there.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
   order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
   all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a
@@ -136,22 +137,21 @@ whose name contains NAME.
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
 
 In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
-glance goes in wherever the English has its meaning, and learning words go in as often as your intensity's lookup
-budget allows (see [Adaptive difficulty](#adaptive-difficulty)). The brief names the words you know at a glance on
-a chat's first turn: a dozen connectors and adverbs as default swaps, written in Japanese every time, then every other
-one with its meaning, the most useful in chat first (numbers and katakana words stay English). Later turns repeat the
-default swaps and name only the words that became known or stopped being known. The whole brief comes back after
-the chat is compacted (Claude Code and Codex mark it in the transcript) and every 20 turns, and anything that
-doesn't fit Claude Code's 10,000-character limit on hook text goes on the next turn. The stage sets the shape:
-
-| Stage | Shape of a chat reply |
-|---|---|
-| 1, 2 | English sentences with swapped words |
-| 3 | plus one short です/ます sentence in five, made of known words |
-| 4 | plus two in five |
+glance goes in wherever the English has its meaning, and learning words and short です/ます sentences of known words go
+in as often as your intensity's lookup budget allows, at any stage (see [Adaptive difficulty](#adaptive-difficulty)).
+The brief names the words you know at a glance on a chat's first turn: a dozen connectors and adverbs as default
+swaps, written in Japanese every time, then others with their meanings, the most useful in chat first: the ones that
+keep coming up in your chats, then the most common, then your Anki words (numbers and katakana words stay English).
+That list stops at about 250 to 290 words to stay inside Claude Code's 10,000-character limit on hook text; the words
+it leaves out are still known, just not named. Later turns repeat the default swaps and name only the words that
+became known or stopped being known. The whole brief comes back after the chat is compacted (Claude Code and Codex
+mark it in the transcript) and every 20 turns. Below Stage 3 every other sentence keeps English grammar, with listed
+words never conjugated and no particles around them.
 
 The claude.ai and ChatGPT blocks (`/japanese-weave:export`) can't see your lookups, so they still ask for a share
-of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4.
+of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4. They describe your known words as the most
+common words up to a rank in the base list, then name the known words past it, the more common first, as many as fit
+(ChatGPT's fields hold 1,500 characters).
 
 Japanese has no spaces, so chat exposure is counted with script-aware matching: a kanji word can't sit inside a
 longer kanji run (今 isn't counted in 今日), a kana word can't sit inside a kana run, and readings of three or more
@@ -208,8 +208,9 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each intensity
 level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a glance (under
 an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most
-one per sentence, on web pages and in chat. On web pages a whole sentence in Japanese costs too, about 0.08 lookups (how
-often a sentence's translation gets opened), and takes its sentence's one place. A challenge (`fw.py challenge 1.5`, the
+one per sentence, on web pages and in chat. A whole sentence in Japanese costs too, about 0.08 lookups (how often a
+sentence's translation gets opened), and takes its sentence's one place; sentences may take up to 18% of the budget and
+learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the
 command above, or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget
 until your real rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works
 this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
@@ -228,17 +229,19 @@ and opens by how much Japanese a passage had, and how often you turned it down o
 don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,
 when set, is normal's budget and scales the others). Words you know at a glance (under an 8% chance of a lookup)
 cost nothing and go in wherever they fit at every level but off, so lighter and heavier change the learning words
-only: the brief asks for as many per 100 words as spend about the budget, at most one in a sentence (two at heavier
-and much heavier), and the line on the last reply says whether it went over or under.
+and whole sentences only: the brief asks for as many per 100 words as spend about the budget (at normal about 1
+sentence per 100 words, the one in five it asked for at Stage 3 before), at most one learning word in a sentence (two
+at heavier and much heavier), and the line on the last reply says whether it went over or under, and with which.
 
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
 for 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
 means the hook sends only a one-line note to reply in plain English, until the time runs out, you press heavier,
 or you say "japanese back on" in any chat.
-Full has no budget: every sentence you could follow in plain Japanese (your known and learning words plus
-common grammar) is written in Japanese, and the sentences that must stay English (steps, code, commands, exact
-technical detail) swap in every known or learning word. A chat turned off with `off here` stays off at any level.
+In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
+known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English
+(steps, code, commands, exact technical detail) swap in every known or learning word, with no cap per sentence. A
+chat turned off with `off here` stays off at any level.
 `fw.py calibrate` counts a press into off as lighter and into full as heavier.
 
 **Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
