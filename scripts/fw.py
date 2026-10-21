@@ -48,7 +48,7 @@
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
                                                      much Japanese a passage had, your heavier/lighter presses,
                                                      and the words you opened that aren't in the word list
-  fw.py evaluate [--models today,fit,constant] [--home DIR] [--truth FILE] [--skip DAYS]
+  fw.py evaluate [--models step4,fit,today,constant] [--home DIR] [--truth FILE] [--skip DAYS]
                                                      score models of lookup chances on the gloss log, each day
                                                      predicted from the days before (scripts/evaluate.py; a
                                                      simulated reader's state dir from tools/sim works too)

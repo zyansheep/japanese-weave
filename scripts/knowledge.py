@@ -1,8 +1,14 @@
 """Adaptive difficulty: per-word knowledge estimated from the gloss interaction log (see docs/adaptive-difficulty.md).
 Python 3.9+, standard library only.
 
-Model: P(lookup | read) = sigmoid(offset_s + form - k_w). k_w is the reader's knowledge of a word on a log-odds scale;
-offset_s is 0 on the web (the reference) and fitted for chat; form is a fitted offset for a conjugated form of the word.
+Model: P(lookup | read) = sigmoid(offset_s + form + context s + recency_log_odds(k_w, u, floor)). k_w is the reader's
+long-term knowledge of a word on a log-odds scale, its chance a week after the last read; offset_s is 0 on the web (the
+reference) and fitted for chat; form is a fitted offset for a conjugated form of the word. The recency term (NEXT_STEPS
+step 10): right after a read the odds fall to a fitted floor shared by every word and climb back to the word's
+long-term odds over a week, u the share of the way back (since_read, from when the word was last read: read_clocks);
+context is an offset for a repeat in the same page or T3 window, s the chance the last read was there. Free and known
+are judged on the long-term chance, a lookup costs the current one (current_chance), and a costly word recency holds
+under SPACING_P waits.
 Every browser passage shown (its "shown" record) and every T3 message with a word count counts, opened or not. A word
 left unopened is evidence the reader knew it in proportion to the chance it was read: certain down to the lowest opened
 line (halving per line below it), else from time on screen against the time reading down to the word takes

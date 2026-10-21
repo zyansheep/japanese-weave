@@ -36,9 +36,11 @@ same Log of the whole log.
                knowledge._chance(ms, words, share, pace, top), for a model that fits its own pace and cap); read;
                status (the word's that day: 'known', 'learning' or 'new', status_at)
 
-The models: "fit", the one fitter (knowledge.Fit, NEXT_STEPS step 4), refitted on everything before each day;
-"today", the online updates it replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance
-per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
+The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STEPS steps 4 and 10), refitted on
+everything before each day, each observation at its clock (knowledge.read_clocks: the log up to its showing); "step4",
+the same fit without recency, every observation at the word's long-term chance; "today", the online updates the fit
+replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance per surface. CURRENT names the
+model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
 the model's own q against fwlib.FREE_P), the mean log loss and seen/expected opens with a 90% interval from resampling
@@ -46,7 +48,7 @@ days; for each other model, the paired loss difference against the first, day by
 resampling days (free and costly by the first model's q); on a simulated log (tools/sim), the true chances' loss too:
 the floor no model can beat.
 
-  python3 scripts/evaluate.py [--home DIR] [--models today,fit,constant] [--truth FILE] [--skip DAYS]
+  python3 scripts/evaluate.py [--home DIR] [--models step4,fit,today,constant] [--truth FILE] [--skip DAYS]
                               [--pace MS --top X]
 """
 import argparse
@@ -430,7 +432,7 @@ def report_text(result, log):
 
 def add_arguments(parser):
     parser.add_argument('--home', help='the state dir (default: this one); a simulated one from tools/sim works too')
-    parser.add_argument('--models', default='today,fit,constant',
+    parser.add_argument('--models', default='step4,fit,today,constant',
                         help=f'comma-separated, the first is the reference: {", ".join(MODELS)}')
     parser.add_argument('--truth', help=f"a simulated log's ground truth (default: the state dir's {TRUTH}, if any)")
     parser.add_argument('--skip', type=int, default=0, metavar='DAYS', help='leave the first days unscored')
