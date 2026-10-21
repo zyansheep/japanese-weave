@@ -20,7 +20,8 @@ Ops (each also carries uid, day, at and machine; see stamp):
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
   brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {}, "known", "whole", "chars",
-             "budget"?, "ask"?, "expected"?, "turn"?}   what one chat reply was offered (weave.compose); a record only
+             "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "turn"?}
+                                                       what one chat reply was offered (weave.compose); a record only
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
 log of everything that changed the word state sit side by side. Records (RECORDS) change nothing: they are kept in
 the ops table and nowhere else (hub.keep; feedback.chat_briefs reads them back).
@@ -155,12 +156,13 @@ def validate(op):
 
 
 BRIEF_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'session', 'level', 'intensity', 'offered', 'arms', 'known',
-                'whole', 'chars', 'budget', 'ask', 'expected', 'turn'}
+                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'turn'}
 
 
 def brief_error(op):
     """What is wrong with a brief record, as feedback._plan_ok checks a web passage's plan, or None. Amounts are per
-    100 words; full has no budget, ask or expected."""
+    100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
+    a web plan; briefs from before sentences were priced have none."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
@@ -175,10 +177,12 @@ def brief_error(op):
             and isinstance(arms, dict) and len(arms) <= 200
             and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())
             and count(op.get('known'), 100_000) and isinstance(op.get('whole'), bool) and count(op.get('chars'), 100_000)
-            and amount('budget') and amount('ask') and amount('expected')
+            and amount('budget') and amount('ask') and amount('sentences') and amount('expected')
+            and ('sentencePrice' not in op or (number(op['sentencePrice']) and 0 < op['sentencePrice'] <= 1))
             and ('turn' not in op or threads.valid_session(op['turn'])))
     return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
-                              '"known", "whole", "chars", "budget"?, "ask"?, "expected"?, "turn"?}')
+                              '"known", "whole", "chars", "budget"?, "ask"?, "sentences"?, "sentencePrice"?, '
+                              '"expected"?, "turn"?}')
 
 
 def apply(state, op):

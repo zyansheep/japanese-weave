@@ -2,9 +2,9 @@
 web pages ('browser'), with a keyboard shortcut (T3 Code, the extension), the popup or `fw.py intensity`. Python 3.9+,
 standard library only.
 
-A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 scale the usual
-amount; the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow;
-in chat, weave.py writes a brief of its own for it). Each change is a `set` op on the pref intensity_chat or
+A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 are lookup budgets;
+the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow: the
+same choices with no budget). Each change is a `set` op on the pref intensity_chat or
 intensity_browser ({level, until, at, source}), so the collector's ops table keeps every press: how often and when the
 reader turns it down or up is the evidence for whether the default amount is right (knowledge.py calibration)."""
 import time
@@ -23,6 +23,18 @@ NAMES = {OFF: 'off', -2: 'much lighter', -1: 'lighter', 0: 'normal', 1: 'heavier
 # budget and scales the others with it.
 BUDGETS = {-2: 0.15, -1: 0.3, 0: 0.5, 1: 0.8, 2: 1.2}
 PER_SENTENCE = {-2: 1, -1: 1, 0: 1, 1: 2, 2: 2}  # most budgeted (not-yet-known) words in one sentence
+# A whole sentence in Japanese costs its translation lookups: the chance a reader who reads it opens its translation,
+# whatever words it uses. knowledge.json's sentencePrice per surface once a fit makes one (sentence_price), else this,
+# as levels.js SENTENCE_PRICE says (keep them the same). Measured on chat, 2026-10-15 to 20: of the 439 sentence ends in
+# the 123 T3 replies with a word count, 24 were opened, 5.5% a sentence shown, 8.4% a sentence read when each is weighed
+# by its read chance (90% interval 5.4% to 11.4%).
+SENTENCE_PRICE = 0.08
+# The most of a level's budget whole sentences may take, on the web and in chat alike (split): learning words get the
+# rest, and what one of the two can't use goes to the other. Chosen so normal asks for as many sentences as the chat
+# brief did at Stage 3 before sentences were priced: one in five, about 1.1 per 100 words (about 5.5 prose sentences
+# in 100 words), which at 0.08 a sentence is 0.088 of normal's 0.5, a share of 0.176. At 0.18, normal pays for
+# 0.18 * 0.5 / 0.08 = 1.1 sentences per 100 words; much lighter for 0.34 and much heavier for 2.7.
+SENTENCE_SHARE = 0.18
 DURATION_MS = 3 * 3600 * 1000
 NORMAL = {'level': 0, 'until': 0, 'at': 0}
 
@@ -90,6 +102,25 @@ def budget(level, normal=None):
 
 def per_sentence(level):
     return PER_SENTENCE.get(level, PER_SENTENCE[0])
+
+
+def sentence_price(know, surface='t3'):
+    """Lookups a whole sentence in Japanese costs on a surface ('t3': chat, 'browser'): knowledge.json's sentencePrice
+    for it when the fit made one, else SENTENCE_PRICE."""
+    prices = (know or {}).get('sentencePrice') if isinstance(know, dict) else None
+    price = prices.get(surface) if isinstance(prices, dict) else None
+    ok = isinstance(price, (int, float)) and not isinstance(price, bool) and 0 < price <= 1
+    return float(price) if ok else SENTENCE_PRICE
+
+
+def split(budget, words_most, sentences_most):
+    """(learning words' part, whole sentences' part) of a budget: sentences up to SENTENCE_SHARE of it, learning words
+    the rest, and what one can't use goes to the other. words_most and sentences_most: the most each could spend
+    (None: no limit), so neither part passes it."""
+    cap = lambda x, most: x if most is None else min(x, most)
+    sentences = cap(SENTENCE_SHARE * budget, sentences_most)
+    words = cap(budget - sentences, words_most)
+    return words, cap(budget - words, sentences_most)
 
 
 def is_off(level):

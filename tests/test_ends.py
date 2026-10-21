@@ -120,22 +120,31 @@ class Brief(Home):
         words = [word('でも'), word('中'), word('最悪'), word('一緒に', 'active'), word('結局', 'shaky')]
         return {'stage': stage, 'stage_pinned': True, 'paused': False, 'words': words}
 
-    def test_full_has_no_target_and_keeps_the_rules(self):
+    def test_full_is_the_normal_brief_with_no_budget(self):
         for stage in (1, 2, 3, 4):
             text = weave.brief(self.state(stage), {}, level=intensity.FULL)
+            normal = weave.brief(self.state(stage), {})
             self.assertIn(f'Japanese Weave (Stage {stage}, turned to full for now by the user)', text)
-            self.assertIn('no percentage target or cap', text)
+            self.assertIn('There is no budget for now, and too little Japanese is the usual miss: write every sentence '
+                          'the user could follow fully in Japanese', text)
+            self.assertIn('swap every listed word, known or learning, into the other sentences wherever the English '
+                          'has its meaning, steps included, with no cap per sentence', text)
             self.assertNotIn('%', text)
-            self.assertNotIn('Under target', text)
-            self.assertIn('fully in Japanese', text)
-            self.assertIn('swapped in for every English word that has a word in the lists, known or learning', text)
+            self.assertNotIn('per 100 words', text)
             self.assertIn('Plain English for code, commands, paths, numbers, names, IDs and option letters', text)
             self.assertIn('zero Japanese, and no recall cue, for health, medication, legal, money', text)
             self.assertIn('never in files, code, configs, commit or PR text, messages to other agents', text)
             self.assertIn('footer line', text)
+            # the same brief as normal's but for the one line that lifts the budget
+            head, rest = text.split('\n', 1)
+            self.assertEqual(rest, normal.split('\n', 1)[1])
+            lift = lambda brief: brief.split('meaning. ', 1)[1].split('Leaving a known word', 1)[0]
+            self.assertEqual(head.replace(lift(head), '').replace(', turned to full for now by the user', ''),
+                             normal.split('\n')[0].replace(lift(normal), '').replace(
+                                 ', option letters and steps the user will follow', ' and option letters'))
         lines = weave.brief(self.state(2), {}, level=intensity.FULL).split('\n')
-        self.assertEqual(lines[1], 'Learning now (use each one wherever it fits): 結局 = meaning, "hint"; '
-                                   '一緒に = meaning, "hint"')
+        self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 4: '
+                                   '結局 = meaning, "hint"; 一緒に = meaning, "hint"')
         self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
                                    'meaning → でも')
         self.assertTrue(lines[3].endswith('has that meaning): 中 meaning; 最悪 meaning'), lines[3])
@@ -151,13 +160,18 @@ class Brief(Home):
         for w in state['words'][:fwlib.COLLAPSE_AT + 50]:
             fwlib.apply_event(state, w['ja'], 'known', '2026-01-01')
         state.update(stage=4, stage_pinned=True)
-        text, had, _ = weave.compose(state, {}, level=intensity.FULL)
+        text, had, plan = weave.compose(state, {}, level=intensity.FULL)
         self.assertIn('turned to full for now by the user', text)
         self.assertNotIn('roughly the', text)
         self.assertIn('Known, besides the default swaps', text)
-        normal = weave.compose(state, {}, had=had)[0]  # back to normal in the same chat: the same known list
+        self.assertNotIn('budget', plan)  # no budget, so nothing asked for and nothing expected
+        self.assertEqual(plan['sentencePrice'], intensity.SENTENCE_PRICE)
+        normal, _, plan = weave.compose(state, {}, had=had)  # back to normal in the same chat: the same brief
         self.assertIn('Known: as listed earlier in this chat. If', normal)
-        self.assertIn('the user is a native English speaker', normal)  # the rules at normal differ: whole again
+        self.assertIn('the Japanese Weave brief earlier in this chat still holds. This reply: each known word', normal)
+        # no learning words to spend on: whole sentences take the budget, up to weave.SENTENCES_MAX
+        self.assertIn('no learning words, only known ones; about 3 whole sentences per 100 words', normal)
+        self.assertEqual((plan['ask'], plan['sentences']), (0, weave.SENTENCES_MAX))
 
     def test_full_has_no_calibration_line(self):
         state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('今', 'active')]}

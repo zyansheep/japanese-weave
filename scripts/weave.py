@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook: prints a short Japanese Weave brief as additional context for the next reply.
 
-The hook's context stays in the conversation, so a chat gets the whole brief (its rules and every known word by name)
-once, and on later turns a short reminder with what changed (chat_turn). Each brief is also kept as a record of what
-the reply was offered: a `brief` op (hub.py).
+The hook's context stays in the conversation, so a chat gets the whole brief (its rules and the known words most useful
+in chat by name) once, and on later turns a short reminder with what changed (chat_turn). Each brief is also kept as a
+record of what the reply was offered: a `brief` op (hub.py).
 
 Usage: weave.py --hook   (reads the hook JSON on stdin, prints hook JSON)
        weave.py          (prints the plain brief, for checking: a chat's first turn)
@@ -32,17 +32,24 @@ SYNC_EVERY = 120  # with a collector: sync the cache in the background when it i
 # The claude.ai / ChatGPT blocks (export.py), which have no lookup model: per stage (target % of words in Japanese,
 # cap %, max Japanese words in one sentence). The chat brief spends a lookup budget instead (intensity.BUDGETS).
 STAGES = {1: (6, 10, 2), 2: (12, 20, 4), 3: (25, 35, 4), 4: (40, 55, 4)}
-SENTENCES = {3: 2, 4: 4}  # fully Japanese sentences in a ten-sentence reply, from Stage 3
-IN_TEN = {1: 'one sentence in ten', 2: 'one sentence in five', 3: 'three sentences in ten', 4: 'two sentences in five',
-          5: 'half the sentences', 6: 'three sentences in five'}
 TAIL = 2_000_000  # bytes at the end of a transcript searched for the last reply and the last compaction
 SHORT = 40  # replies with fewer prose words are too short to measure
 RECALL_EVERY = 3
-LEARN_MAX = 24  # below full: most learning words listed, best learning value first
+LEARN_MAX = 24  # most learning words listed, best learning value first, at every level
 DEFAULT_SWAPS = 12  # known connectors and adverbs (the base list's tier A), first first, named on every turn
 # Claude Code hands Claude at most 10,000 characters of a hook's context and puts the rest in a file it doesn't ask
-# Claude to read, so a brief stays under this; known words that don't fit are named on the next turn.
+# Claude to read, so a brief stays under this; a known word that doesn't fit is named on the next turn.
 BRIEF_MAX = 9500
+# The known words named besides the default swaps take at most this many characters, the most useful in chat first
+# (priority); the others are still known, just not named (capped). From Stage 3 (150 known words, so any list the
+# cap shortens, unless the stage is pinned lower), the rest of a whole brief takes at most about 4,900: the rules
+# 2,970 characters with <abbr> glosses (footer glosses are shorter by more than the recall cue), 24 learning words up
+# to 900, the default swaps 360, the feedback line on the last reply 430 and the known line's own words 220. So a
+# whole brief stays under BRIEF_MAX at any number of known words; a pinned lower stage's longer rules can push the
+# last few named words to the next turn. 250 to 290 words fit: on the 2026-10-20 state all 255 known at a glance,
+# 285 of 422 with 500 known and 255 of 1,318 with 1,500 (base-list meanings run longer than the Anki ones).
+KNOWN_ROOM = 4400
+RECUR_DAYS = 2  # a known word that came up in the user's chat replies on this many days is named first
 # A chat gets the whole brief again this many turns after it last did, in case the earlier one left the model's
 # context without a compaction the transcript shows (see chat_turn). In the user's transcripts the median chat had 3
 # prompts and 1 in 5 had over 20, and compactions came a median of 9 prompts apart, so a missed one costs at most
@@ -56,16 +63,24 @@ KATAKANA = re.compile('^[\u30a0-\u30ff\uff66-\uff9f]+$')
 # Learning words asked for per 100 words: the fewest and the most, and the most per word allowed in a sentence (about
 # five prose sentences in 100 words).
 PER_100, PER_SENTENCE_100 = (0.5, 8), 5
+# Whole sentences in Japanese asked for per 100 words at most: three in five, as the brief asked at its heaviest
+# before sentences were priced. What the budget would buy past this goes to learning words (intensity.split).
+SENTENCES_MAX = 3
 # Learning words by lookup chance: the least chance in each group.
 TIERS = ((0.2, 'often'), (0.12, 'sometimes'), (0.0, 'rarely'))
 OVER, UNDER = 1.5, 0.5  # the feedback line: expected lookups past this many times the budget are over or under it
 EXTRA = re.compile(r'\s*(?:\**recall:|.*\s=\s.*")', re.I)  # recall cue and footer gloss lines
 ABBR = re.compile(r'<abbr\b[^>]*>(.*?)</abbr>', re.I | re.S)  # T3 gloss markup: count the word, not its title
 # Japanese left over once the listed words are taken out, counted as off-list words: each run of kanji or katakana,
-# and below Stage 3 hiragana too, one word per two characters. From Stage 3 the hiragana is the particles and です/ます
-# that Japanese sentences put around listed words.
+# and below Stage 3 hiragana outside whole sentences too, one word per two characters. The hiragana in a whole sentence
+# is the particles and です/ます it puts around listed words; from Stage 3, so is any other.
 WORDLIKE = re.compile(f'[{fwlib.KANJI}]+|[\u30a1-\u30fa][\u30a1-\u30fa\u30fc]*|[\uff66-\uff9d][\uff66-\uff9f]*')
 HIRAGANA = re.compile('[\u3041-\u309f]')
+SENSES = re.compile(r'\s*/\s*')  # between a known word's senses, 'inside / during', written 'inside/during'
+# A whole sentence in Japanese: from a sentence break (an English one, a line break or a Japanese closing mark) to a
+# Japanese closing mark, with no Latin letters in between (see whole_sentences).
+CLAUSE = re.compile(r'[^.!?\n。？！]*[。？！]')
+LATIN = re.compile('[A-Za-z]')
 
 
 def exposure():
@@ -84,14 +99,6 @@ def exposure():
     if not fresh:
         knowledge.start_refresh()  # `fw.py refresh`, never waited on
     return data.get('words', {})
-
-
-def japanese_sentences(stage, level=0):
-    """Fully Japanese sentences in a ten-sentence reply at a stage (from Stage 3), scaled by the reader's intensity
-    (intensity.py: lighter or heavier for a while)."""
-    sentences = SENTENCES.get(min(stage, 4), 0)
-    f = intensity.factor(level)
-    return max(1, min(6, round(sentences * f))) if sentences and f != 1 else sentences
 
 
 def chance(word, know=None):
@@ -146,14 +153,29 @@ def most_per_100(level):
     return min(PER_100[1], PER_SENTENCE_100 * intensity.per_sentence(level))
 
 
+def rounded(n):
+    """An amount per 100 words as the brief says it: to the nearest half under 2, the nearest whole number above."""
+    return half_up(2 * n) / 2 if n < 2 else half_up(n)
+
+
 def per_100(budget, chances, most=PER_100[1]):
-    """Learning words per 100 words that spend about the budget: budget / their mean lookup chance, to the nearest half
-    under 2 and the nearest whole number from there, from PER_100's fewest to most. None without learning words."""
+    """Learning words per 100 words that spend about the budget: budget / their mean lookup chance, rounded, from
+    PER_100's fewest to most. None without learning words."""
     if not chances:
         return None
-    n = budget * len(chances) / sum(chances)
-    n = half_up(2 * n) / 2 if n < 2 else half_up(n)
-    return max(PER_100[0], min(most, n))
+    return max(PER_100[0], min(most, rounded(budget * len(chances) / sum(chances))))
+
+
+def amounts(budget, chances, price, level, sentences=True):
+    """(learning words per 100 words or None without any, whole sentences in Japanese per 100 words, the learning words'
+    part of the budget, the sentences' part): the budget split as intensity.split does on the web, sentences up to
+    intensity.SENTENCE_SHARE of it at price each and learning words the rest at their mean lookup chance (chances),
+    and what one can't use goes to the other. Learning words can spend at most most_per_100(level) of them, and nothing
+    without any; sentences at most SENTENCES_MAX, and nothing without words known at a glance to write them with
+    (sentences False)."""
+    mean = sum(chances) / len(chances) if chances else 0.0
+    words, whole = intensity.split(budget, most_per_100(level) * mean, SENTENCES_MAX * price if sentences else 0.0)
+    return per_100(words, chances, most_per_100(level)), rounded(whole / price), words, whole
 
 
 @functools.lru_cache(maxsize=1)
@@ -170,7 +192,7 @@ def base_list():
 
 
 def named_words(free):
-    """The words known at a glance the brief names: in the base list's order (most useful in chat first), then the
+    """The words known at a glance the brief may name: in the base list's order (most useful in chat first), then the
     others (Anki words) in list order. Numbers and katakana words stay out, since the brief asks for neither."""
     rank = base_list()
     words = [w for w in free if not NUMBER.match(w['ja']) and not KATAKANA.match(w['ja'])
@@ -186,29 +208,68 @@ def default_swaps(words):
     return [w for w in words if not tiered or rank.get(fwlib.key(w['ja']), (0, ''))[1] == 'A'][:DEFAULT_SWAPS]
 
 
-def entries(words, room):
-    """'ja en; ja en' for as many words as fit in room characters, and the words named."""
+def days_seen(seen, ja):
+    """Days a word came up in the user's chat replies (exposure)."""
+    entry = seen.get(ja) if isinstance(seen, dict) else None
+    days = entry.get('days') if isinstance(entry, dict) else None
+    return len(days) if isinstance(days, list) else 0
+
+
+def priority(words, seen=None):
+    """Words known at a glance in the order the brief names them, the most useful in chat first: those that came up in
+    the user's chat replies (seen, the exposure index) on RECUR_DAYS days or more, then the base list's others, then
+    the rest (Anki words, whose meanings are the cards' and often odd). Each group in the base list's order (frequency,
+    connectors and technical words early: its tier), the words it lacks by the days they came up, then in list order."""
+    rank, seen = base_list(), seen or {}
+
+    def key(w):
+        r, days = rank.get(fwlib.key(w['ja'])), days_seen(seen, w['ja'])
+        return 0 if days >= RECUR_DAYS else 1 if r else 2, r[0] if r else len(rank), -days
+
+    return sorted(words, key=key)
+
+
+def entry(w):
+    """A known word as the list names it: 'ja meaning', its senses joined by a slash, 'ずっと all along/by far'."""
+    return w['ja'] + ' ' + SENSES.sub('/', w['en'].strip())
+
+
+def capped(words, seen=None, room=KNOWN_ROOM):
+    """The first words by priority whose entries fit in room characters: the known words a brief may name."""
     out, size = [], 0
-    for w in words:
-        entry = f'{w["ja"]} {w["en"]}'
-        size += len(entry) + 2
+    for w in priority(words, seen):
+        size += len(entry(w)) + 2
         if size > room:
             break
-        out.append(entry)
+        out.append(w)
+    return out
+
+
+def entries(words, room):
+    """'ja meaning; ja meaning' for as many words as fit in room characters, and the words named."""
+    out, size = [], 0
+    for w in words:
+        size += len(entry(w)) + 2
+        if size > room:
+            break
+        out.append(entry(w))
     return '; '.join(out), words[:len(out)]
 
 
-def known_line(words, gone, first, room, swaps=True):
-    """The known words the chat hasn't been named yet, as many as fit in room characters: the whole list on a chat's
-    first turn, else the changes since (words newly known at a glance; gone: words no longer known at a glance) with a
-    pointer to the earlier list. Returns (line, words named, gone words named); the rest wait for the next turn."""
-    rest = lambda left: (f'; and {left} more, named next turn (until then keep the English for any word not named)'
-                         if left else '')
+def known_line(words, gone, first, room, swaps=True, more=0):
+    """The known words the chat hasn't been named yet (words, from capped), as many as fit in room characters: the
+    whole list on a chat's first turn, else the changes since (words newly known at a glance or newly among the most
+    useful; gone: words no longer known at a glance) with a pointer to the earlier list. more: the words known at a
+    glance left out of the list (capped). Returns (line, words named, gone words named); the rest of words wait for
+    the next turn."""
     if first:
         head = (f'Known{", besides the default swaps" if swaps else ""} (each Japanese word, then its meaning; write '
                 'the Japanese every time the English has that meaning): ')
-        text, named = entries(words, room - len(head) - len(rest(len(words))))
-        return head + (text or 'none') + rest(len(words) - len(named)), named, []
+        rest = lambda left: (f'; and {left:,} more the user knows, not named here: keep the English for any word '
+                             'not named' if left else '')
+        text, named = entries(words, room - len(head) - len(rest(len(words) + more)))
+        return head + (text or 'none') + rest(len(words) - len(named) + more), named, []
+    rest = lambda left: f'; and {left} more, named next turn' if left else ''
     out = 'Known: as listed earlier in this chat'
     lead = '; no longer known at a glance, so keep the English unless listed as learning: '
     tail = '. If you can no longer see that list, use only the Japanese words named in this message.'
@@ -226,18 +287,31 @@ def known_line(words, gone, first, room, swaps=True):
     return out + tail, named, dropped
 
 
-def rules(stage, level, markup, like, n, sentences):
-    """The brief's rules, in full: a chat's first turn, and any turn on which they change (see compose)."""
+def turned(level):
+    """', turned lighter for now by the user' and the like: what the reader's intensity is now (intensity.py)."""
+    if intensity.is_full(level):
+        return ', turned to full for now by the user'
+    return f', turned {intensity.NAMES[level]} for now by the user' if level else ''
+
+
+def per_100_text(n, what):
+    """'about 2 learning words per 100 words (6 in a 300-word reply)' for n 2 and what 'learning word'."""
+    return f'about {n:g} {what}{"" if n == 1 else "s"} per 100 words ({half_up(3 * n)} in a 300-word reply)'
+
+
+def rules(stage, level, markup, like, n, m):
+    """The brief's rules, in full: a chat's first turn, and any turn on which they change (see compose). n and m: the
+    learning words and whole sentences in Japanese asked for per 100 words (amounts); None at full, which has no
+    budget: then every sentence the user could follow is Japanese and every listed word goes in wherever it fits."""
     full = intensity.is_full(level)
     as_listed = ('Write each word exactly as listed (same kanji and kana), never conjugated, and with no particles, '
                  'です/ます or other Japanese grammar around it; adjectives go before their noun as listed ("a 新しい '
                  'build", "the 簡単 fix"); suru-nouns stand in for the English verb or noun ("let me 確認 the logs"). ')
     space = 'Put a space on each side of a Japanese word inside English text, as for an English word. '
-    fit = lambda instead: ('Use a word only where it means exactly what the English word would mean there; where one '
-                           f'doesn\'t fit, {instead} (だから only for "so" meaning therefore, never "so big"; でも and '
-                           'しかし only for "but" joining two ideas; もう for "already", まだ for "still" or "not yet"; 前 '
-                           'and 後 only before or after a noun or a time, never joining clauses; はい and いいえ only as '
-                           'answers). ')
+    fit = ('Use a word only where it means exactly what the English word would mean there; where one doesn\'t fit, '
+           'keep the English word (だから only for "so" meaning therefore, never "so big"; でも and しかし only for "but" '
+           'joining two ideas; もう for "already", まだ for "still" or "not yet"; 前 and 後 only before or after a noun '
+           'or a time, never joining clauses; はい and いいえ only as answers). ')
     plain = ('Plain English for code, commands, paths, numbers, names, IDs'
              + (' and option letters' if full else ', option letters and steps the user will follow')
              + ', and no Japanese right before a path; zero Japanese, and no recall cue, for health, medication, '
@@ -257,105 +331,95 @@ def rules(stage, level, markup, like, n, sentences):
                'No bold on Japanese words and no inline glosses or romaji. End the reply with one footer line glossing the '
                'learning words you used that are not glossed earlier in this chat, at most 8, with the romaji, like: '
                '(多分 = maybe, "tabun"); nothing to gloss, no footer.')
-    if full:
-        return (f'Japanese Weave (Stage {stage}, turned to full for now by the user): the user is a native English '
-                'speaker learning Japanese passively and wants, for now, all the Japanese they can follow, with no '
-                'percentage target or cap. Write every sentence of your chat reply that can be written fully in plain '
-                'Japanese the user would follow (the words in the lists below plus common grammar: particles, '
-                f'demonstratives, verb endings and plain desu/masu forms) fully in Japanese, {like} Sentences that '
-                'must stay English (steps the user will follow, code, commands, paths, exact technical detail, or '
-                'anything that needs a Japanese word not in the lists) stay English sentences, with the Japanese '
-                'swapped in for every English word that has a word in the lists, known or learning. '
-                f'{as_listed}No other Japanese words and no katakana loanwords. Too little Japanese is the usual miss, '
-                'so check each sentence as you write it: fully Japanese if it can be, otherwise every listed word '
-                'swapped in. '
-                + space + fit('keep the English word') + plain + glosses)
-    grammar = ('Every sentence stays an English sentence with Japanese words swapped in, like "The build passes 今, '
-               f'でも the cache is stale, だから I cleared it." {as_listed}No Japanese outside these lists and no '
-               'katakana loanwords; if a sentence starts turning Japanese, rewrite it in English. '
-               if stage < 3 else
-               f'About {IN_TEN[sentences]} should be fully Japanese '
-               f'({sentences} in a ten-sentence reply): short, plain です/ます sentences of known words, particles '
-               f'and これ/それ only, guessable from the English around them, {like} Steps stay English, so put the '
-               'Japanese sentences in the explanation, summary and advice around them. The other sentences stay '
-               'English with listed words swapped in as written, without particles. No other Japanese anywhere, '
-               'not even a common word, and no katakana loanwords; a sentence needing one stays English. ')
-    most = intensity.per_sentence(level)
-    ask = (f'Learning words cost a lookup now and then: about {n:g} per 100 words ({half_up(3 * n)} in a 300-word '
-           f'reply), at most {"one" if most == 1 else most} in a sentence, each where the English around it makes '
-           'its meaning clear, spread out. ' if n else 'No learning words right now, only known ones. ')
-    turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
-    return (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese '
+    if full:  # the one thing full says that normal doesn't: no budget
+        amount = ('There is no budget for now, and too little Japanese is the usual miss: write every sentence the '
+                  'user could follow fully in Japanese (listed words, known or learning, plus common grammar: '
+                  f'particles, demonstratives, verb endings and plain です/ます forms), {like} and swap every listed '
+                  'word, known or learning, into the other sentences wherever the English has its meaning, steps '
+                  'included, with no cap per sentence. ')
+    else:
+        most = intensity.per_sentence(level)
+        words = (per_100_text(n, 'learning word') + f', at most {"one" if most == 1 else most} in a sentence, each '
+                 'where the English around it makes its meaning clear, spread out' if n else
+                 'no learning words right now, only known ones')
+        sentences = (per_100_text(m, 'whole sentence') + ' fully in Japanese: short, plain です/ます sentences of '
+                     f'known words, particles and これ/それ only, guessable from the English around them, {like} Steps '
+                     'stay English, so put the Japanese sentences in the explanation, summary and advice around '
+                     'them. ' if m else 'no whole sentences in Japanese right now. ')
+        amount = ('Learning words and whole sentences in Japanese cost a lookup now and then (a sentence when the user '
+                  f'has to look up what it says), so they come in measured amounts: {words}; and {sentences}')
+    english = ('Every other sentence stays an English sentence with Japanese words swapped in, like "The build passes '
+               f'今, でも the cache is stale, だから I cleared it." {as_listed}' if stage < 3 else
+               'The other sentences stay English with listed words swapped in as written, without particles. ')
+    return (f'Japanese Weave (Stage {stage}{turned(level)}): the user is a native English speaker learning Japanese '
             'passively. Write your chat reply in English and swap in Japanese words from the lists below. Known '
             'words cost the user nothing, so write each one in Japanese wherever the English has its meaning. '
-            f'{ask}Leaving a known word in English is the usual miss, so check each sentence as you write '
-            f'it. {space}{grammar}{fit("keep the English word")}' + plain + glosses)
+            f'{amount}Leaving a known word in English is the usual miss, so check each sentence as you write it. '
+            f'{space}{english}No other Japanese anywhere, not even a common word, and no katakana loanwords; a '
+            f'sentence needing one stays English. {fit}{plain}{glosses}')
 
 
-def digest(stage, level, markup, n, sentences):
+def digest(stage, level, markup, n, m):
     """The rules on a chat's later turns: a pointer to the whole brief earlier in the chat, this reply's amounts, and
     the rules that matter most restated in a line."""
     full = intensity.is_full(level)
-    turned = (', turned to full for now by the user' if full else
-              f', turned {intensity.NAMES[level]} for now by the user' if level else '')
-    most = intensity.per_sentence(level)
+    english = ('the rest English with listed words swapped in as listed'
+               + (', never conjugated and without particles' if stage < 3 else ''))
     if full:
-        amount = ('every sentence the user could follow in plain Japanese (listed words plus common grammar) fully in '
-                  'Japanese, and the rest English with every listed word, known or learning, swapped in as listed')
+        amount = ('no budget: every sentence the user could follow fully in Japanese (listed words, known or learning, '
+                  f'plus common grammar), {english}, every one wherever the English has its meaning, steps included')
     else:
-        learn = (f'learning words about {n:g} per 100 words ({half_up(3 * n)} in a 300-word reply), at most '
-                 f'{"one" if most == 1 else most} in a sentence, where the English around each makes it clear' if n else
-                 'no learning words, only known ones')
-        shape = (f'about {IN_TEN[sentences]} fully Japanese ({sentences} in a ten-sentence reply): short, plain です/ます '
-                 'sentences of known words only, the rest English with listed words swapped in as listed'
-                 if stage >= 3 and sentences else 'English sentences with listed words swapped in as listed, never '
-                 'conjugated and without particles')
-        amount = (f'each known word in Japanese wherever the English has its meaning (leaving one in English is the '
-                  f'usual miss); {learn}; {shape}')
+        most = intensity.per_sentence(level)
+        learn = (per_100_text(n, 'learning word') + f', at most {"one" if most == 1 else most} in a sentence, where '
+                 'the English around each makes it clear' if n else 'no learning words, only known ones')
+        whole = (per_100_text(m, 'whole sentence') + ' fully in Japanese: short, plain です/ます sentences of known '
+                 'words only' if m else 'no whole sentences in Japanese')
+        amount = ('each known word in Japanese wherever the English has its meaning (leaving one in English is the '
+                  f'usual miss); {learn}; {whole}; {english}')
     gloss = ('each Japanese word in <abbr title="hiragana reading · meaning"> (kana-only words: just the meaning), as '
              'before' if markup else 'learning words you use glossed in one footer line with romaji, as before')
-    return (f'Japanese Weave (Stage {stage}{turned}): the Japanese Weave brief earlier in this chat still holds. This '
-            f'reply: {amount}. No other Japanese and no katakana loanwords; plain English for code, commands, paths, '
-            'numbers, names and steps the user will follow; Japanese only in your chat reply, never in files, code, '
-            'commits, messages to other agents or documents to share; none for health, medication, legal, money, '
-            f'safety or urgent topics; {gloss}.')
+    steps = ' and names' if full else ', names and steps the user will follow'
+    return (f'Japanese Weave (Stage {stage}{turned(level)}): the Japanese Weave brief earlier in this chat still '
+            f'holds. This reply: {amount}. No other Japanese and no katakana loanwords; plain English for code, '
+            f'commands, paths, numbers{steps}; Japanese only in your chat reply, never in files, code, commits, '
+            'messages to other agents or documents to share; none for health, medication, legal, money, safety or '
+            f'urgent topics; {gloss}.')
 
 
 def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None, tail='', room=BRIEF_MAX):
     """(brief, what the chat has after it, plan). had: what the chat already has from earlier turns, {known: the words
     named so far, rules: which rules}; None on its first turn (see chat_turn). Then the brief is whole: the rules, the
-    learning words and every known word by name. Later it is short: the rules as a digest (in full again when they
-    change: at or from full, at another stage, with other glosses or examples), the learning words, the default swaps
-    and the known words that changed. tail: what the caller adds (the feedback line), kept within room with the rest.
+    learning words, the default swaps and the known words by name, the most useful in chat first, as many as fit
+    KNOWN_ROOM (capped). Later it is short: the rules as a digest (in full again when they change: at another stage,
+    with other glosses or examples), the learning words, the default swaps and the known words that changed. tail:
+    what the caller adds (the feedback line), kept within room with the rest.
 
     markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each Japanese word carries its own
     gloss instead of a footer line. know: knowledge.json (adaptive difficulty): each word's lookup chance (chance),
     which splits the words in use into known at a glance and learning and orders the learning ones by learning value,
-    most useful first. level: the chat intensity in effect (intensity.py). Below full it is a lookup budget: known
-    words go in wherever they fit, and the learning words asked for are as many as spend about the budget (per_100).
-    At full there is no budget: every sentence that can be plain Japanese is, the rest swap in every listed word, and
-    every word in use that isn't known at a glance is listed as learning.
+    most useful first, and the price of a whole sentence in Japanese (intensity.sentence_price). level: the chat
+    intensity in effect (intensity.py). Below full it is a lookup budget: known words go in wherever they fit, and the
+    learning words and whole sentences asked for are as many as spend about the budget, split between them as on the
+    web (amounts). Full is the same brief with no budget: every sentence the user could follow in Japanese and every
+    listed word wherever it fits.
 
-    plan: what the reply was offered, as a web passage's plan (feedback.py): level, its factor, the budget and the
-    expected lookups per 100 words (none at full), the learning words asked for per 100 words (ask), the costly words
-    offered with their lookup chances, the delayed-start arms (none yet), the words known at a glance, and whether the
-    brief was whole."""
+    plan: what the reply was offered, as a web passage's plan (feedback.py): level, its factor, the price of a whole
+    sentence, the budget and the expected lookups per 100 words (none at full), the learning words and whole sentences
+    asked for per 100 words (ask, sentences), the costly words offered with their lookup chances, the delayed-start
+    arms (none yet), the words known at a glance, and whether the brief was whole."""
     stage = fwlib.stage_for(state)
     full = intensity.is_full(level)
-    free, learning, p = lists(state, seen, know, None if full else LEARN_MAX)
+    free, learning, p = lists(state, seen, know)
     like = examples(p)
-    sentences = japanese_sentences(stage, level)
-    budget = lookup_budget(state, level)
-    n = None if full else per_100(budget, [p[w['ja']] for w in learning], most_per_100(level))
-    key = hashlib.sha1(json.dumps([full, stage, markup, like], ensure_ascii=False).encode()).hexdigest()[:12]
-    sent = set(had['known']) if had and isinstance(had.get('known'), list) else None
-    head = (digest(stage, level, markup, n, sentences) if sent is not None and had.get('rules') == key else
-            rules(stage, level, markup, like, n, sentences))
-    entry = lambda w: f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
-    lines = [head, ('Learning now (use each one wherever it fits): ' + ('; '.join(map(entry, learning)) or 'none')
-                    if full else
-                    'Learning now, by how often the user looks one up: ' + learning_groups(learning, p, stage))]
     words = named_words(free)
+    price = intensity.sentence_price(know)
+    budget = lookup_budget(state, level)
+    n, m = (None, None) if full else amounts(budget, [p[w['ja']] for w in learning], price, level, bool(words))[:2]
+    key = hashlib.sha1(json.dumps([stage, markup, like], ensure_ascii=False).encode()).hexdigest()[:12]
+    sent = set(had['known']) if had and isinstance(had.get('known'), list) else None
+    head = (digest(stage, level, markup, n, m) if sent is not None and had.get('rules') == key else
+            rules(stage, level, markup, like, n, m))
+    lines = [head, 'Learning now, by how often the user looks one up: ' + learning_groups(learning, p, stage)]
     swaps = default_swaps(words)
     if swaps:
         lines.append('Default swaps (write the Japanese every time the English word has that meaning): '
@@ -365,18 +429,20 @@ def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None
            ] if recall and not markup else []  # with popover glosses every word already tests recall
     swapped = {w['ja'] for w in swaps}
     names = {w['ja'] for w in words}
-    unnamed = [w for w in words if w['ja'] not in swapped and (sent is None or w['ja'] not in sent)]
+    listed = capped([w for w in words if w['ja'] not in swapped], seen)
+    unnamed = [w for w in listed if sent is None or w['ja'] not in sent]
     gone = [] if sent is None else sorted(ja for ja in sent if ja not in names)
     left = room - sum(len(line) + 1 for line in lines + cue) - len(tail)
-    known, named, dropped = known_line(unnamed, gone, sent is None, left, bool(swaps))
+    known, named, dropped = known_line(unnamed, gone, sent is None, left, bool(swaps),
+                                       len(words) - len(swaps) - len(listed))
     lines += [known] + cue
     after = {'known': sorted(((sent or set()) - set(dropped)) | swapped | {w['ja'] for w in named}), 'rules': key}
     plan = {'level': level, 'intensity': intensity.factor(level),
             'offered': [[w['ja'], round(p[w['ja']], 3)] for w in learning], 'arms': {}, 'known': len(free),
-            'whole': sent is None}
+            'whole': sent is None, 'sentencePrice': round(price, 4)}
     if not full:
         mean = sum(p[w['ja']] for w in learning) / len(learning) if learning else 0
-        plan.update(budget=round(budget, 3), ask=n or 0, expected=round((n or 0) * mean, 3))
+        plan.update(budget=round(budget, 3), ask=n or 0, sentences=m, expected=round((n or 0) * mean + m * price, 3))
     return '\n'.join(lines), after, plan
 
 
@@ -477,36 +543,60 @@ def share(text, words):
     return listed + off_list, english_words(rest) + listed + off_list, learning, off_list
 
 
+def whole_sentences(rest):
+    """(whole sentences in Japanese, the text around them) in what uses left of a reply: each run from a sentence break
+    to a Japanese closing mark (。, ？ or ！) with no Latin letters in it (CLAUSE)."""
+    spans = [m.span() for m in CLAUSE.finditer(rest) if not LATIN.search(m.group())]
+    around, at = [], 0
+    for start, end in spans:
+        around.append(rest[at:start])
+        at = end
+    return len(spans), ' '.join(around + [rest[at:]])
+
+
 def calibration(text, state, level=0, know=None, seen=None):
-    """One line on the last reply in this chat: its Japanese words (known at a glance, learning, off the lists) and the
-    lookups they would cost per 100 words against the level's budget, so the next reply corrects toward it. Known
-    words are free; an off-list word costs a word's neutral prior. None at full (no budget) or off, or for a short
-    reply. know and seen as for brief, so the lists are the brief's."""
+    """One line on the last reply in this chat: its Japanese words (known at a glance, learning, off the lists) and
+    whole sentences in Japanese, and the lookups they would cost per 100 words against the level's budget, so the next
+    reply corrects toward it. Known words are free, named in the brief or not; an off-list word costs a word's neutral
+    prior and a whole sentence its price (intensity.sentence_price). None at full (no budget) or off, or for a short
+    reply. know and seen as for brief, so the lists and amounts are the brief's: over or under names the learning words
+    or the sentences, whichever spent past its part of the budget (amounts)."""
     if intensity.is_full(level) or intensity.is_off(level):
         return ''
     stage = fwlib.stage_for(state)
     found, rest = uses(text, fwlib.introduced(state))
-    stray = len(WORDLIKE.findall(rest)) + (len(HIRAGANA.findall(rest)) // 2 if stage < 3 else 0)
+    sentences, around = whole_sentences(rest)
+    stray = len(WORDLIKE.findall(rest)) + (len(HIRAGANA.findall(around)) // 2 if stage < 3 else 0)
     total = english_words(rest) + sum(found.values()) + max(stray, len(fwlib.JAPANESE.findall(rest)) // 2)
     if total < SHORT:
         return ''
-    free, learning, p = lists(state, seen, know)
-    free, learning = {w['ja'] for w in free}, {w['ja'] for w in learning}
+    free_words, learning_words, p = lists(state, seen, know)
+    free, learning = {w['ja'] for w in free_words}, {w['ja'] for w in learning_words}
     known = sum(n for ja, n in found.items() if ja in free)
     learned = sum(n for ja, n in found.items() if ja in learning)
     off_list = sum(n for ja, n in found.items() if ja not in free and ja not in learning) + stray
-    spent = (sum(p[ja] * n for ja, n in found.items() if ja not in free)
-             + stray * knowledge.sigmoid(-knowledge.prior(None)))
-    expected, budget = 100 * spent / total, lookup_budget(state, level)
-    # the most the brief asks for may spend less than the budget (most_per_100): "under" is under what it asks
-    reach = most_per_100(level) * sum(p[ja] for ja in learning) / len(learning) if learning else 0
+    price, budget = intensity.sentence_price(know), lookup_budget(state, level)
+    # the most the brief asks for may spend less than the budget: "under" is under what it asks
+    _, _, words_part, whole_part = amounts(budget, [p[ja] for ja in learning], price, level,
+                                           bool(named_words(free_words)))
+    words = 100 * (sum(p[ja] * n for ja, n in found.items() if ja not in free)
+                   + stray * knowledge.sigmoid(-knowledge.prior(None))) / total
+    whole = 100 * sentences * price / total
+    expected = words + whole
+    which = lambda off: ' and '.join(name for name, spent, part in (('learning words', words, words_part),
+                                                                    ('whole Japanese sentences', whole, whole_part))
+                                     if off(spent, part)) or 'learning words'
     verdict = ('it had Japanese outside the lists, so this time use no Japanese outside the lists' if off_list else
-               'over budget, so use fewer learning words this time' if expected > OVER * budget else
-               'under budget, so use more learning words this time unless the topic needs zero Japanese or the user '
-               'asked for none' if expected < UNDER * min(budget, reach) else 'on budget')
+               f'over budget, so use fewer {which(lambda spent, part: spent > OVER * part)} this time'
+               if expected > OVER * budget else
+               f'under budget, so use more {which(lambda spent, part: spent < UNDER * part)} this time unless the '
+               'topic needs zero Japanese or the user asked for none' if expected < UNDER * (words_part + whole_part)
+               else 'on budget')
     return (f'\nYour last reply in this chat had {known + learned + off_list} Japanese words in {total} ({known} known, '
-            f'{learned} learning, {off_list} off the lists): about {expected:.2f} expected lookups per 100 words against '
-            f'a budget of {round(budget, 2):g} (known words are free): {verdict}.')
+            f'{learned} learning, {off_list} off the lists) and {sentences} whole Japanese '
+            f'sentence{"" if sentences == 1 else "s"}: about {expected:.2f} expected lookups per 100 words against a '
+            f'budget of {round(budget, 2):g} (known words are free, a whole sentence costs {round(price, 3):g}): '
+            f'{verdict}.')
 
 
 def recall_word(state, entry):
