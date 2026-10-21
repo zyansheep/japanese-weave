@@ -13,7 +13,7 @@
 // GLOSSES=dictionary: the matcher indexes each word's dictionary glosses (data/dictionary.tsv) instead of its listed
 // gloss; GLOSSES=both: both. FLAGS: the sense flags (data/senses.tsv). MODEL (claude-haiku-5-5), BATCH (6), PARALLEL
 // (3), SEEDS: runs, each with its own order of the passages into calls ("1,2,3"). THINKING=0: no thinking; EFFORT:
-// Haiku's effort (low). PHRASES=0: the prompt without phrases; PHRASES=often: asked for wherever one fits.
+// Haiku's effort (low). PHRASES=0: the prompt without phrases; PHRASES=rare: only where one fits well (prompt 2).
 // SENTENCES=0: no dense sentences asked. MAXWORDS: the longest dense sentence (verify.js DENSE_MAX_WORDS). SAVE: a file
 // for the answers; REPLAY: such a file, scored again without calls. OFFLINE=1: no calls (the safe options alone).
 // VERBOSE=1: the wrong, unjudged and missed, and every sentence and phrase. SUMMARY: a file for the numbers as JSON.
@@ -77,7 +77,7 @@ const model = env.MODEL || 'claude-haiku-5-5';
 const BATCH = Number(env.BATCH || 6);
 const PARALLEL = Number(env.PARALLEL || 3);
 const thinking = env.THINKING !== '0';
-const phrases = env.PHRASES === '0' ? false : env.PHRASES === 'often' ? 'often' : true;
+const phrases = env.PHRASES === '0' ? false : env.PHRASES === 'rare' ? 'rare' : true;
 const effort = env.EFFORT || undefined;
 const SEEDS = (env.SEEDS || '1').split(',').map(Number);
 const variant = { model, batch: BATCH, thinking, effort: effort || 'low', phrases, sentences: options.sentences, maxWords: options.maxWords,
@@ -320,7 +320,7 @@ if (!env.REPLAY && !env.OFFLINE) for (const seed of SEEDS) runs.push(await run(s
 if (env.SAVE) writeFileSync(env.SAVE, JSON.stringify({ variant, runs }));
 if (env.OFFLINE) runs.push({ seed: 0, answers: {}, calls: [] });
 
-console.log(`\nThe pipeline: ${model}, ${BATCH} passages a call, thinking ${thinking ? `on (${effort || 'low'} effort)` : 'off'}, phrases ${phrases === 'often' ? 'often' : phrases ? 'on' : 'off'}, ` +
+console.log(`\nThe pipeline: ${model}, ${BATCH} passages a call, thinking ${thinking ? `on (${effort || 'low'} effort)` : 'off'}, phrases ${phrases === 'rare' ? 'rare' : phrases ? 'on' : 'off'}, ` +
   `dense sentences ${options.sentences ? `up to ${options.maxWords} words` : 'off'}, ${variant.glosses} glosses`);
 console.log('| Seed | Coverage: all / full / normal | Wrong: all (fn, content, groups) / full / normal | Unjudged | Sentences whole (all / full) | ' +
   'Picks made / answered / doubtful | Sentences asked / returned / valid | Phrases returned / valid | Calls | s a call (mean, max) | $ per 1,000 passages | No call |');

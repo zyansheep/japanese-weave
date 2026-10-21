@@ -16,7 +16,7 @@ import { candidatesFor as modelsFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS 
 import { COOLDOWN_MS } from './engine.js';
 
 // Bumped whenever the prompt or the answer changes shape, so cached answers from an older one aren't reused.
-export const CHECK_VERSION = 2;
+export const CHECK_VERSION = 3;
 
 const TOKEN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const bare = (w) => w.toLowerCase().replace(/’/g, "'").replace(/n't$/, '').replace(/'(s|re|ve|ll|d|m)$/, '');
@@ -129,11 +129,12 @@ const RULES = `- Each listed word only in its listed meaning: another word with 
 
 const GRAMMAR = `particles ${PARTICLES.join(' ')}; です and だ with their past and negative forms; verb and adjective endings (ます ました ません ない なかった た て ている たい); こと and の as nominalizers`;
 
-// How often to ask for phrases: 'often' says they teach what single words can't and asks for one wherever it fits;
-// true only where one fits well (none came back in 9 runs of prompt 2); false not at all. Measured in the lab.
+// How often to ask for phrases. true (prompt 3): they teach what single words can't, wherever one fits: 9 to 18 a run
+// of the lab's 79 passages, nearly all valid, for about a sixth more output. 'rare' (prompt 2): only where one fits
+// well, and none came back in 9 runs. false: not at all.
 const PHRASE_HOW = {
-  true: 'Only where one fits well; most passages have none.',
-  often: 'Phrases teach word order and particles, which single words can\'t, so give one wherever two or more neighbouring spans make a natural short phrase.',
+  true: 'Phrases teach word order and particles, which single words can\'t, so give one wherever two or more neighbouring spans make a natural short phrase.',
+  rare: 'Only where one fits well; most passages have none.',
 };
 // The system prompt. phrases: as PHRASE_HOW (true by default; false leaves the phrases out).
 export function buildCheckSystem({ phrases = true } = {}) {
