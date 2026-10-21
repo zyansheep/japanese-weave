@@ -139,6 +139,10 @@ class Counting(Home):
             self.assertIsNone(reading.Reader.open())  # new flags: out of date until built again
             reading.ensure()
             self.assertEqual(self.found(text), {'関数': 1, '状態': 1})  # only safe options count, the most frequent
+            reader = reading.Reader.open()
+            loose = {self.d.entry(i)['ja']: n for i, n in reader.found(text, flags=False).items()}
+            reader.close()
+            self.assertEqual(loose, whole)  # for words a model places itself, the main meaning, as without flags
         with mock.patch.object(reading, 'SENSES', flags), mock.patch.dict(sys.modules, {'senses': None}), \
                 mock.patch('sys.stderr', new=io.StringIO()) as err:
             reading.build()  # a flags file that can't be read: counted without flags, and said so

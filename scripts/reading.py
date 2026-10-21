@@ -47,7 +47,7 @@ DICTIONARY = ROOT / 'data' / 'dictionary.tsv'
 SENSES = ROOT / 'data' / 'senses.tsv'
 INDEX = 'reading-index.sqlite'
 INDEX_LOCK = 'reading-index.lock'
-VERSION = 1  # of the index's layout and the counting rule: a change rebuilds the index
+VERSION = 2  # of the index's layout and the counting rule: a change rebuilds the index
 # A first word whose subtree is larger than this many bytes is stored by its second words too: the 9 forms of "be"
 # head 60 KB each of phrases ("is wrong", "was born") and any text has some of them, so a text reads only the
 # second words it has. 335 first words, 17,638 second ones.
@@ -173,7 +173,7 @@ def build(path=None, d=None):
     for i in range(len(d)):
         e = d.entry(i)
         rows.append((i, e['id'], e['ja'], e['kana'], e['en'], e['romaji'], e['rank'], e['common'], int(e['swap']),
-                     ','.join(e['forms'])))
+                     ','.join(e['forms']), ','.join(e['pos']), e['loan'], ''.join(e['kanji'])))
     meta = {'signature': signature(), 'flags': marshal.dumps(safe is not None), 'kinds': marshal.dumps(index.kinds),
             'ids': marshal.dumps([r[1] for r in rows]), 'swap': bytes(r[8] for r in rows)}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,11 +186,12 @@ def build(path=None, d=None):
             con.execute('CREATE TABLE first (word TEXT PRIMARY KEY, tree BLOB)')
             con.execute('CREATE TABLE second (key TEXT PRIMARY KEY, tree BLOB)')
             con.execute('CREATE TABLE entry (i INTEGER PRIMARY KEY, id INTEGER, ja TEXT, kana TEXT, en TEXT, '
-                        'romaji TEXT, rank INTEGER, common INTEGER, swap INTEGER, forms TEXT)')
+                        'romaji TEXT, rank INTEGER, common INTEGER, swap INTEGER, forms TEXT, pos TEXT, loan TEXT, '
+                        'kanji TEXT)')
             con.executemany('INSERT INTO meta VALUES (?, ?)', meta.items())
             con.executemany('INSERT INTO first VALUES (?, ?)', trees)
             con.executemany('INSERT INTO second VALUES (?, ?)', children)
-            con.executemany('INSERT INTO entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+            con.executemany('INSERT INTO entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
         con.close()
         os.replace(temporary, path)
         temporary = None
@@ -322,14 +323,14 @@ class Reader:
             out.append((span, node))
         return out
 
-    def trusted(self, span, node):
-        """The entry a span counts for (its position), or None: never closed-class English; with sense flags the most
-        frequent option flagged safe; without, the most frequent option when this English is its main meaning, unless
-        a more frequent entry reaches it only by a rule's inflection. Here a model's check of a doubtful span would
-        name the option it confirms."""
+    def trusted(self, span, node, flags=True):
+        """The entry a span counts for (its position), or None: never closed-class English; with sense flags (the index
+        was built with them, and flags is True) the most frequent option flagged safe; without, the most frequent
+        option when this English is its main meaning, unless a more frequent entry reaches it only by a rule's
+        inflection. Here a model's check of a doubtful span would name the option it confirms."""
         if span['function'] or not node:
             return None
-        if self.flags:
+        if self.flags and flags:
             safe = {h['entry'] for h in node['hits'] if h['safe']}
             return next((i for i in span['options'] if i in safe), None)
         best = span['options'][0]
@@ -337,26 +338,32 @@ class Reader:
             return None
         return None if any(h['inflected'] == 2 and h['entry'] < best for h in node['hits']) else best
 
-    def found(self, text):
-        """{entry position: spans} for the English of a text (prose), trusted spans only."""
+    def found(self, text, flags=True):
+        """{entry position: spans} for the English of a text (prose), trusted spans only. flags False: by the main
+        meaning even when the index has sense flags, for words a model places itself (the chat's topical words: Claude
+        uses one only where the English has its meaning)."""
         out = collections.Counter()
         for span, node in self.spans(prose(text)):
-            i = self.trusted(span, node)
+            i = self.trusted(span, node, flags)
             if i is not None:
                 out[i] += 1
         return out
 
     def entries(self, positions):
-        """{position: {id, ja, kana, en, hint (romaji), rank, common, swap, forms}} for entries by position."""
+        """{position: {id, ja, kana, en, hint (romaji), rank, common, swap, forms, pos, loan, kanji}} for entries by
+        position: the dictionary's fields (dictionary.py) the brief and the starting values (knowledge.word_features)
+        read."""
         positions = list(positions)
         out = {}
         for start in range(0, len(positions), 500):
             chunk = positions[start:start + 500]
-            query = ('SELECT i, id, ja, kana, en, romaji, rank, common, swap, forms FROM entry WHERE i IN '
-                     f'({",".join("?" * len(chunk))})')
-            for i, id_, ja, kana, en, romaji, rank, common, swap, forms in self.con.execute(query, chunk):
+            query = ('SELECT i, id, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji FROM entry '
+                     f'WHERE i IN ({",".join("?" * len(chunk))})')
+            for i, id_, ja, kana, en, romaji, rank, common, swap, forms, pos, loan, kanji in self.con.execute(query,
+                                                                                                         chunk):
                 out[i] = {'id': id_, 'ja': ja, 'kana': kana, 'en': en, 'hint': romaji, 'rank': rank, 'common': common,
-                          'swap': bool(swap), 'forms': forms.split(',') if forms else []}
+                          'swap': bool(swap), 'forms': forms.split(',') if forms else [],
+                          'pos': pos.split(',') if pos else [], 'loan': loan or '', 'kanji': list(kanji or '')}
         return out
 
 
@@ -421,14 +428,13 @@ class Tally:
 def starting_k(know, entry, word=None):
     """A word's knowledge on the log-odds scale before it comes in (k: its lookup chance is sigmoid(offset - k)): its
     estimate in knowledge.json when the word state has it (every word of the state is scored, new ones too), else the
-    fitted prior of a new word without an Anki card (knowledge.prior_estimate), else the neutral prior. The prior by
-    the word's own features (NEXT_STEPS step 13, first half) takes the second place once it gives any dictionary entry
-    a starting value."""
+    starting value of a new word with this dictionary entry (knowledge.prior_estimate: the fitted prior by the word's
+    own features: frequency rank, kanji known, script, word type, length), else the neutral prior."""
     import knowledge
     estimate = ((know or {}).get('words') or {}).get(word['ja'] if word else entry['ja'])
     if word is not None and isinstance(estimate, dict) and isinstance(estimate.get('k'), (int, float)):
         return estimate['k']
-    prior = knowledge.prior_estimate(know or {}, 'new')
+    prior = knowledge.prior_estimate(know or {}, 'new', entry=entry)
     return prior[0] if prior else knowledge.prior(None)
 
 

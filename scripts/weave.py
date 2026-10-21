@@ -228,7 +228,7 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     if reader is None or not text:
         return []
     try:
-        found = reader.found(text)
+        found = reader.found(text, flags=False)  # Claude checks the sense as it places one
         entries = reader.entries(found)
     finally:
         if own:
