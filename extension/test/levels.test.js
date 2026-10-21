@@ -611,6 +611,7 @@ describe('word swaps where the word cannot go', () => {
     expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, "I have my mom's old car.")).toBe(false);
     expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, 'I have a picture of my dog.')).toBe(false);
     expect(misplaced({ o: 'have', f: 'いる', ctx: '' }, 'We have a dog.')).toBe(false);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'The release has a bug in the parser.')).toBe(false); // software
   });
   test('no "all" over a stretch of time; free-choice "anything" only where it is free', () => {
     expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I slept all day yesterday.')).toBe(true);

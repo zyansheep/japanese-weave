@@ -336,18 +336,19 @@ const FREE_CHOICE = /^(何|なん|誰|だれ|いつ|どこ|どれ|どちら|ど�
 const ALL_OF = new Set(['all', 'whole', 'entire']);
 // "dont" and the rest as typed without the apostrophe
 const NEGATED = /n't$|^(dont|didnt|doesnt|cant|wont|isnt|arent|wasnt|werent|couldnt|wouldnt|shouldnt|havent|hasnt|aint)$/;
-// People and animals (an open class: the common ones), with their plurals: what exists is iru, not aru.
+// People and animals (an open class: the common ones), with their plurals: what exists is iru, not aru. Not the words
+// the pages read here mostly use for software (a bug, a mouse, a client, a package manager, a fan).
 const LIVING_BASE = ['person', 'man', 'woman', 'guy', 'kid', 'child', 'baby', 'boy', 'girl', 'friend', 'family', 'parent',
   'mother', 'mom', 'mum', 'mommy', 'father', 'dad', 'daddy', 'son', 'daughter', 'brother', 'sister', 'sibling', 'wife',
   'husband', 'boyfriend', 'girlfriend', 'partner', 'cousin', 'aunt', 'uncle', 'grandma', 'grandpa', 'grandmother',
   'grandfather', 'grandparent', 'grandchild', 'grandson', 'granddaughter', 'nephew', 'niece', 'roommate', 'neighbor',
   'neighbour', 'coworker', 'colleague', 'boss', 'teacher', 'student', 'classmate', 'teammate', 'doctor', 'nurse',
-  'customer', 'client', 'user', 'fan', 'follower', 'reader', 'viewer', 'subscriber', 'employee', 'member', 'guest',
-  'visitor', 'stranger', 'adult', 'teen', 'teenager', 'toddler', 'twin', 'manager', 'buddy', 'folk', 'animal', 'pet',
-  'cat', 'kitten', 'kitty', 'dog', 'puppy', 'pup', 'horse', 'pony', 'cow', 'pig', 'sheep', 'goat', 'rabbit', 'bunny',
-  'hamster', 'mouse', 'rat', 'bird', 'parrot', 'duck', 'goose', 'owl', 'crow', 'snake', 'lizard', 'turtle', 'tortoise',
-  'frog', 'bear', 'lion', 'tiger', 'wolf', 'fox', 'deer', 'monkey', 'elephant', 'insect', 'bug', 'bee', 'ant', 'spider',
-  'butterfly', 'cockroach', 'roach', 'flea', 'worm', 'shark', 'whale', 'dolphin', 'squirrel', 'raccoon', 'mosquito', 'cattle'];
+  'customer', 'user', 'follower', 'subscriber', 'employee', 'member', 'guest', 'visitor', 'stranger', 'adult', 'teen',
+  'teenager', 'toddler', 'twin', 'buddy', 'folk', 'animal', 'pet', 'cat', 'kitten', 'kitty', 'dog', 'puppy', 'pup', 'horse',
+  'pony', 'cow', 'pig', 'sheep', 'goat', 'rabbit', 'bunny', 'hamster', 'rat', 'bird', 'parrot', 'duck', 'goose', 'owl',
+  'crow', 'snake', 'lizard', 'turtle', 'tortoise', 'frog', 'bear', 'lion', 'tiger', 'wolf', 'fox', 'deer', 'monkey',
+  'elephant', 'insect', 'bee', 'ant', 'spider', 'butterfly', 'cockroach', 'roach', 'flea', 'shark', 'whale', 'dolphin',
+  'squirrel', 'raccoon', 'mosquito', 'cattle'];
 const pluralsOf = (w) => (Object.hasOwn(ENGLISH.plurals, w) ? ENGLISH.plurals[w]
   : [/[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : /(s|sh|ch|x)$/.test(w) ? `${w}es` : `${w}s`]);
 const LIVING = new Set(LIVING_BASE.flatMap((w) => [w, ...pluralsOf(w)]));
