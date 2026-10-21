@@ -240,12 +240,17 @@ class Brief(Home):
         words = [word('でも'), word('中'), word('最悪'), word('一緒に', 'active'), word('結局', 'shaky'), word('何', 'queue')]
         return {'stage': stage, 'stage_pinned': True, 'paused': False, 'words': words}
 
-    def test_tiers(self):
-        self.assertEqual(weave.tier(word('でも'), self.seen), 'lot')
-        self.assertEqual(weave.tier(word('中'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('最悪'), self.seen), 'rare')
-        self.assertEqual(weave.tier(word('もっと'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('一緒に', 'active'), self.seen), 'learn')
+    def test_known_words_by_name_in_list_order_connectors_as_swaps(self):
+        words = [word('犬'), word('イタリア'), word('二'), word('四つ'), word('〜時'), word('最悪'), word('中'), word('もっと'),
+                 word('でも')]
+        words[4]['en'] = 'hour / o\'clock'
+        named = weave.named_words(words)  # the base list's order; Anki words (犬) after it; no numbers or katakana
+        self.assertEqual([w['ja'] for w in named], ['でも', '中', 'もっと', '最悪', '犬'])
+        self.assertEqual([w['ja'] for w in weave.default_swaps(named)], ['でも', 'もっと'])  # tier A only
+        many = fwlib.new_state('2026-10-01')['words'][:400]
+        swaps = weave.default_swaps(weave.named_words(many))
+        self.assertEqual(len(swaps), weave.DEFAULT_SWAPS)
+        self.assertEqual([w['ja'] for w in swaps[:6]], ['でも', 'もう', '今', '前', 'そして', 'だから'])
 
     def test_brief_text(self):
         lines = weave.brief(self.state(), self.seen).split('\n')
@@ -258,9 +263,11 @@ class Brief(Home):
         # no evidence yet: learning words at the neutral prior (about 1 in 4), known words free
         self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 4: '
                                    '結局 = meaning, "hint"; 一緒に = meaning, "hint"')
-        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
-                                   'meaning → でも; meaning → 中; meaning → 最悪')
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも')
+        self.assertEqual(lines[3], 'Known, besides the default swaps (each Japanese word, then its meaning; write the '
+                                   'Japanese every time the English has that meaning): 中 meaning; 最悪 meaning')
+        self.assertEqual(len(lines), 4)
         self.assertNotIn('何', '\n'.join(lines[1:]))  # queued words are not in use yet
         three = weave.brief(self.state(3), self.seen)
         self.assertIn('one sentence in five should be fully Japanese', three)
@@ -273,10 +280,12 @@ class Brief(Home):
 
     def test_recall_every_third_turn_shaky_first(self):
         state = self.state()
-        picks = [weave.next_recall(state, 's1') for _ in range(7)]
-        self.assertEqual([p and p['ja'] for p in picks], ['結局', None, None, '一緒に', None, None, None])
-        self.assertIsNone(weave.next_recall(state, None))
-        self.assertIn('Recall: 結局?', weave.brief(state, {}, picks[0]))
+        build = lambda had, pick: (pick and pick['ja'], {'known': [], 'rules': ''}, {})
+        picks = [weave.chat_turn(state, 's1', build)[0] for _ in range(7)]
+        self.assertEqual(picks, ['結局', None, None, '一緒に', None, None, None])
+        self.assertEqual([weave.chat_turn(state, 's2', build, recall=False)[0] for _ in range(4)], [None] * 4)  # <abbr>
+        self.assertEqual(fwlib.read_json(fwlib.home() / 'sessions.json')['s2']['n'], 4)  # turns count all the same
+        self.assertIn('Recall: 結局?', weave.brief(state, {}, {'ja': '結局', 'en': 'after all', 'hint': 'kekkyoku'}))
 
     def test_calibration(self):
         words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active'), word('もっと')]
@@ -303,6 +312,18 @@ class Brief(Home):
         self.assertIn('outside the lists', weave.calibration(listed, state))  # but no grammar below Stage 3
         overlap = [word('一緒'), word('一緒に'), word('今'), word('今日')]
         self.assertEqual(weave.share('Let us go 一緒に, 今日 then 一緒 it. ' * 6, overlap)[0], 18)  # 3 per sentence
+
+    def test_the_feedback_line_ignores_code(self):
+        state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('簡単', 'active')]}
+        filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. ' * 5
+        quoted = ['\n```json\n{"ja": "設定"}\n```\n', 'The row is `設定,せってい` now.', '\n~~~\n設定 問題\n~~~\n',
+                  '\n````md\n```\n設定\n```\n````\n', 'Use ``設定`s`` here.', '\n  ```\n  設定\n  ```\n',
+                  'The fix: ```設定 = 1``` there.', '\n```\n設定 問題 状況\n']  # the last one never closed
+        for code in quoted:  # Japanese quoted as data is not woven
+            self.assertIn('(0 known, 0 learning, 0 off the lists)', weave.calibration(filler + code, state), code)
+        self.assertIn('(1 known, 1 learning, 1 off the lists)',
+                      weave.calibration(filler + 'Then `設定` and 設定 and でも and 簡単 stay. ``x`` ~~~', state))
+        self.assertEqual(fwlib.strip_code('a ``b` c`` d ``e'), 'a   d ``e')  # same-length runs pair; a lone one is text
 
     def test_last_reply(self):
         log = self.home / 'chat.jsonl'
@@ -423,16 +444,30 @@ class Scale(Home):
         self.assertEqual(known, (band - set(missing) - {w['ja'] for w in state['words'][:n] if w['status'] in ('active', 'shaky')}) | set(extra))
 
     def test_brief_and_exports_stay_small(self):
+        later = {}
         for known in (50, 400, 1000):
             state = grown(known)
-            brief = weave.brief(state, {}, {'ja': 'でも', 'en': 'but', 'hint': 'demo'})
+            recall = {'ja': 'でも', 'en': 'but', 'hint': 'demo'}
+            first, had, _ = weave.compose(state, {}, recall, tail='x' * 300)
             about, respond = export.chatgpt(state)
             self.assertLessEqual(len(about), export.CHATGPT_LIMIT)
             self.assertLessEqual(len(respond), export.CHATGPT_LIMIT)
             self.assertLess(len(export.claude_ai(state)), 6000)
-            if known >= 400:
-                self.assertIn('most common Japanese words', brief)
-                self.assertLess(len(brief), 3400, known)
+            self.assertLessEqual(len(first) + 300, weave.BRIEF_MAX)  # Claude Code files away hook context over 10,000
+            self.assertNotIn('most common', first)
+            later[known] = weave.compose(state, {}, recall, had=had)[0]
+            if known >= 400:  # every known word named: what doesn't fit goes on the next turn
+                self.assertIn('more, named next turn', first)
+                self.assertIn('; also known: ', later[known])
+        for known in (400, 1000):
+            state = grown(known)
+            _, had, _ = weave.compose(state, {})
+            while True:  # once every known word was named, a later turn holds no list at all
+                text, had, _ = weave.compose(state, {}, had=had)
+                if 'also known' not in text:
+                    break
+            self.assertLess(len(text), 2400, known)
+            self.assertIn('Known: as listed earlier in this chat. If you can no longer see that list', text)
 
     def test_state_line_round_trips(self):
         for known in (30, 400):
@@ -928,15 +963,35 @@ class Hub(Home):
                          [('chat', 1, 't3'), ('chat', 2, 't3'), ('chat', 3, 't3'), ('chat', 3, 't3'),
                           ('chat', 0, 'command'), ('browser', -1, 'command')])
         brief = []
-        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+        compose = lambda *a, **k: brief.append(k['level']) or ('', {'known': [], 'rules': ''}, {})
+        with mock.patch.object(weave, 'compose', side_effect=compose):
             with mock.patch('sys.stdout', new=io.StringIO()):
                 weave.main([])
         self.assertEqual(brief, [0])
         hub.change_intensity('chat', -1, 't3')
-        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+        with mock.patch.object(weave, 'compose', side_effect=compose):
             with mock.patch('sys.stdout', new=io.StringIO()):
                 weave.main([])
         self.assertEqual(brief, [0, -1])
+
+    def test_brief_records_wait_in_the_outbox_and_reach_the_collector(self):
+        fwlib.load_state()
+        payload = json.dumps({'session_id': 's1', 'prompt': 'Hi', 'transcript_path': str(self.home / 'none.jsonl')})
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(payload)), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+        self.assertEqual([op['kind'] for op in hub.pending()], ['brief'])  # the hook never waits on the network
+        self.assertEqual(hub.sync(scan=False), (True, None))
+        self.assertEqual(hub.pending(), [])
+        briefs = feedback.chat_briefs(self.server_home / 'interactions.sqlite')
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs], [('s1', True, len(context))])
+        self.assertEqual([k for k, _ in self.ops()], ['seed', 'brief'])
+        self.assertEqual(self.served()['words'], fwlib.load_state()['words'])  # it changed nothing
+        hub.queue(hub.stamp({'kind': 'brief', 'session': 's1'}))  # refused there (as by an older collector): dropped
+        with mock.patch('sys.stderr', new=io.StringIO()) as err:
+            self.assertEqual(hub.flush(), (True, 1))
+        self.assertEqual(err.getvalue(), '')
 
     def test_changes_wait_here_while_the_collector_is_down(self):
         fwlib.load_state()
@@ -1417,7 +1472,8 @@ class Intensity(Home):
         self.assertIn('one sentence in ten', light)
         self.assertIn('about 3 per 100 words (9 in a 300-word reply), at most 2 in a sentence', heavy)
         for brief in (plain, light, heavy):
-            self.assertIn('Known (write the Japanese every time the English word has that meaning): meaning → でも', brief)
+            self.assertIn('Default swaps (write the Japanese every time the English word has that meaning): '
+                          'meaning → でも', brief)
 
     def test_the_native_host_saves_and_reads_the_browser_level(self):
         fwlib.save_state(fwlib.new_state(known_top=40))
@@ -1696,35 +1752,40 @@ class Budget(Home):
         self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 3: '
                                    '一緒に = meaning, "hint"; 中 = meaning, "hint" | sometimes, about 1 in 5: '
                                    '多分 = meaning, "hint"')
-        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
-                                   'meaning → でも; meaning → 最悪; meaning → 結局')
+        self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも; meaning → 結局')
+        self.assertTrue(lines[3].endswith('has that meaning): 最悪 meaning'), lines[3])
         # mean chance (0.27 + 0.38 + 0.18) / 3: 0.5 / 0.28 is 1.8, so 2 per 100 words
         self.assertIn('about 2 per 100 words (6 in a 300-word reply)', lines[0])
         none = weave.brief(state, {}, know=self.know({ja: 5.0 for ja in ('でも', '中', '最悪', '一緒に', '結局', '多分')}))
         self.assertIn('No learning words right now, only known ones.', none)
         self.assertIn('Learning now, by how often the user looks one up: none\n', none)
 
-    def test_band_names_the_band_words_not_known_at_a_glance(self):
+    def test_the_brief_names_every_word_known_at_a_glance(self):
         state = fwlib.new_state('2026-01-01', known_top=200)  # and the next 5 words come in as learning words
         state.update(stage=3, stage_pinned=True)
         often = [w['ja'] for w in state['words'][10:40]]  # known, but the gloss log says they are looked up a lot
-        brief = weave.brief(state, {}, know=self.know({ja: 1.0 for ja in often}))
-        free, learning, _ = weave.lists(state, {}, self.know({ja: 1.0 for ja in often}))
+        know = self.know({ja: 1.0 for ja in often})
+        lines = weave.brief(state, {}, know=know).split('\n')
+        free, learning, _ = weave.lists(state, {}, know)
         self.assertEqual(len(free), 170)
         self.assertEqual(len(learning), weave.LEARN_MAX)
-        lines = brief.split('\n')
-        self.assertTrue(lines[2].startswith('Default swaps: '), lines[2])
-        band = lines[3]
-        self.assertTrue(band.startswith('Known (if unsure a word is one of them, keep the English): roughly the 205 '
-                                        'most common Japanese words and phrases, except these, not known at a glance '
-                                        'yet: '), band)
-        named = band.split('yet: ')[1].rstrip('.').split(', ')
-        unlisted = [ja for ja in often if ja not in {w['ja'] for w in learning}]
-        self.assertEqual(named, unlisted)  # the 6 that didn't make the learning list; the 24 that did are listed there
-        self.assertTrue(all(ja in lines[1] for ja in often if ja not in unlisted))
-        self.assertNotIn('use freely', brief)
-        self.assertLess(len(brief), 3400)
-        self.assertEqual(fwlib.known_band(state), (205, [], []))  # the default still describes status known
+        self.assertTrue(lines[2].startswith('Default swaps (write the Japanese every time the English word has that '
+                                            'meaning): '), lines[2])
+        swaps = [pair.split(' → ')[1] for pair in lines[2].split(': ', 1)[1].split('; ')]
+        self.assertTrue(lines[3].startswith('Known, besides the default swaps (each Japanese word, then its meaning; '), lines[3])
+        named = [entry.split(' ')[0] for entry in lines[3].split('meaning): ', 1)[1].split('; ')]
+        expected = [w['ja'] for w in weave.named_words(free)]
+        self.assertEqual(sorted(swaps + named), sorted(expected))  # every one, each once, in the swaps or the list
+        self.assertEqual(len(expected), 170 - sum(bool(weave.NUMBER.match(w['ja']) or weave.KATAKANA.match(w['ja']))
+                                                  for w in free))
+        self.assertEqual(swaps, [w['ja'] for w in weave.named_words(free)
+                                 if weave.base_list()[fwlib.key(w['ja'])][1] == 'A'][:weave.DEFAULT_SWAPS])
+        self.assertFalse(set(often) & set(swaps + named))  # looked up a lot: not named as known
+        self.assertTrue(all(ja in lines[1] for ja in often if ja in {w['ja'] for w in learning}))
+        self.assertNotIn('most common', '\n'.join(lines))
+        self.assertLess(len('\n'.join(lines)), weave.BRIEF_MAX)
+        self.assertEqual(fwlib.known_band(state), (205, [], []))  # the exports' band still describes status known
 
     def test_learning_words_per_100_words_spend_the_budget(self):
         self.assertIsNone(weave.per_100(0.5, []))
@@ -1835,6 +1896,188 @@ class DamagedState(Home):
         self.path().write_text('nope', encoding='utf-8')
         fwlib.save_state(dict(before, paused=True))  # a save over a damaged file keeps the older good copy
         self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.PREVIOUS), before)
+
+
+class OncePerChat(Home):
+    """A chat gets the whole brief once, with every known word by name, and later only a digest and the changes."""
+
+    def setUp(self):
+        super().setUp()
+        state = grown(300)
+        state.update(stage=3, stage_pinned=True)
+        fwlib.save_state(state)
+        # a few known words looked up often enough to be learning words, so the learning list is full
+        learn = [w['ja'] for w in state['words'] if w['status'] == 'known'][40:70]
+        fwlib.write_json(fwlib.home() / 'knowledge.json', {'offset': {'t3': 0.0}, 'words': {
+            ja: {'k': 1.0 + i / 20, 'sd': 0.5} for i, ja in enumerate(learn)}})
+        self.log = self.home / 'chat.jsonl'
+        self.log.write_text(line('The build passes and the cache is warm, so nothing else needs doing today. ' * 4) + '\n')
+
+    def hook(self, session='s1', **extra):
+        payload = dict({'session_id': session, 'prompt': 'Next.', 'transcript_path': str(self.log)}, **extra)
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            self.assertEqual(weave.main(['--hook']), 0)
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def named(self, context):
+        """The known words a brief names: its default swaps and its known list (or the words it adds)."""
+        lines = context.split('\n')
+        swaps = [pair.split(' → ')[1] for pair in lines[2].split('meaning): ', 1)[1].split('; ')]
+        known = lines[3]
+        listed = (known.split('has that meaning): ', 1)[1] if known.startswith('Known, besides') else
+                  known.split('; also known: ', 1)[1].split('. If you', 1)[0] if '; also known: ' in known else '')
+        return swaps, [entry.split(' ')[0] for entry in listed.split('; ') if entry]
+
+    def test_the_known_list_goes_once_then_only_its_changes(self):
+        first = self.hook()
+        state, know = fwlib.load_state(), knowledge.load()
+        free = weave.lists(state, {}, know)[0]
+        swaps, listed = self.named(first)
+        self.assertEqual(sorted(swaps + listed), sorted(w['ja'] for w in weave.named_words(free)))
+        self.assertIn('the user is a native English speaker', first)
+        self.assertIn('Your last reply in this chat had', first)
+        second = self.hook()
+        self.assertIn('Known: as listed earlier in this chat. If you can no longer see that list', second)
+        self.assertIn('the Japanese Weave brief earlier in this chat still holds', second)
+        self.assertNotIn('the user is a native English speaker', second)
+        self.assertEqual(self.named(second), (swaps, []))  # the swaps every turn, the list once
+        self.assertIn('Your last reply in this chat had', second)
+        self.assertLess(len(second), len(first) / 3)
+        # a word becomes known at a glance, another stops being one: only they are named
+        newly = next(w for w in state['words'] if w['status'] == 'queue')
+        with fwlib.editing() as edited:
+            fwlib.apply_event(edited, newly['ja'], 'known')
+        fwlib.write_json(fwlib.home() / 'knowledge.json', dict(know, words=dict(know['words'], **{listed[0]: {'k': 1.1, 'sd': 0.5}})))
+        third = self.hook()
+        self.assertIn(f'; also known: {newly["ja"]} {newly["en"]}. If you', third)
+        self.assertIn(f'; no longer known at a glance, so keep the English unless listed as learning: {listed[0]};', third)
+        self.assertIn(f'{listed[0]} = ', third.split('\n')[1])  # it is a learning word now
+        fourth = self.hook()
+        self.assertNotIn(newly['ja'], fourth.split('\n')[3])  # said once
+        self.assertNotIn('no longer known', fourth)
+        self.assertIn('the user is a native English speaker', self.hook(session='s2'))  # another chat: its own list
+
+    def test_a_compaction_or_twenty_turns_bring_the_whole_brief_back(self):
+        whole = lambda context: context.split('\n')[3].startswith('Known, besides')
+        self.assertTrue(whole(self.hook()))
+        self.assertFalse(whole(self.hook()))
+        boundary = {'type': 'system', 'subtype': 'compact_boundary', 'uuid': 'c-1', 'isSidechain': False,
+                    'timestamp': '2026-10-20T12:00:00Z', 'content': 'Conversation compacted'}
+        with open(self.log, 'a') as file:
+            file.write(json.dumps(boundary) + '\n')
+        self.assertTrue(whole(self.hook()))  # what came before it, the earlier brief too, is gone
+        self.assertFalse(whole(self.hook()))  # the same compaction counts once
+        codex = {'timestamp': '2026-10-20T13:00:00Z', 'type': 'compacted', 'payload': {'message': '', 'window_id': 'w2'}}
+        with open(self.log, 'a') as file:
+            file.write(json.dumps(codex) + '\n')
+        self.assertTrue(whole(self.hook()))
+        turns = [whole(self.hook()) for _ in range(weave.FULL_EVERY)]
+        self.assertEqual(turns, [False] * (weave.FULL_EVERY - 1) + [True])  # in case the context lost it unseen
+        self.assertEqual(weave.compaction([json.dumps(boundary), 'not json "compacted"', line('"compact_boundary"')]),
+                         'c-1')
+        self.assertIsNone(weave.compaction([line('we talked about "compacted" logs')]))
+
+    def test_codex_and_chats_without_memory_still_get_a_brief(self):
+        first, second = self.hook('codex-1', turn_id='t1'), self.hook('codex-1', turn_id='t2')
+        self.assertIn('Known, besides', first)
+        self.assertIn('Known: as listed earlier in this chat', second)
+        self.assertIn('Known, besides', self.hook(None))  # no session id: whole every time
+        (fwlib.home() / 'sessions.json').write_text('{"s1": {"n": "x", "brief": [1]}, "s3": 5', encoding='utf-8')
+        self.assertIn('Known, besides', self.hook())  # a damaged memory: whole, as on a first turn
+        self.assertIn('Known: as listed', self.hook())  # and kept from then on
+        with mock.patch.object(weave, 'chat_turn', side_effect=OSError('read-only')):
+            self.assertIn('Known, besides', self.hook())
+        sessions = json.loads((fwlib.home() / 'sessions.json').read_text(encoding='utf-8'))
+        self.assertIsInstance(sessions['s1']['brief']['known'], str)  # one line per chat in the file
+        sessions['s1']['t'] = 'soon'
+        fwlib.write_json(fwlib.home() / 'sessions.json', sessions)
+        self.assertIn('Known: as listed', self.hook())  # a damaged time doesn't cost the chat its memory
+
+    def test_a_new_user_with_no_known_words(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01'))
+        fwlib.write_json(fwlib.home() / 'knowledge.json', {})
+        first, second = self.hook(), self.hook()
+        self.assertIn('\nKnown (each Japanese word, then its meaning; write the Japanese every time the English has '
+                      'that meaning): none', first)
+        self.assertNotIn('Default swaps', first)
+        self.assertNotIn('no longer known', second)
+        self.assertIn('\nKnown: as listed earlier in this chat. If', second)
+
+    def test_later_turns_stay_shorter_than_the_old_brief(self):
+        """Measured through the hook on a copy of the 2026-10-20 state (Stage 3, 293 words known at a glance, 24
+        learning words, <abbr> glosses as the user has them, with the feedback line): the old brief was 3,993
+        characters on every turn; now the first turn is 8,182 and later ones 2,226 (at full: 3,813 against 8,115 and
+        1,820). The old brief was the rules and the learning words plus a band or a list of known words, so a later
+        turn must stay under the first two alone, whatever the number of known words."""
+        for known in (150, 300, 800):
+            state = grown(known)
+            state.update(stage=3, stage_pinned=True)
+            for markup in (False, True):
+                for level in (0, -1, 1, intensity.FULL):
+                    _, had, _ = weave.compose(state, {}, markup=markup, level=level)
+                    while True:
+                        later, had, plan = weave.compose(state, {}, markup=markup, level=level, had=had)
+                        if 'also known' not in later:
+                            break
+                    head, learning = later.split('\n')[:2]
+                    old = weave.rules(3, level, markup, 'like "a" or "b"', plan.get('ask'), weave.japanese_sentences(3, level))
+                    self.assertLess(len(later), len(old) + len(learning), (known, markup, level))
+                    self.assertLess(len(later) - len(learning), 1500, (known, markup, level))
+                    self.assertFalse(plan['whole'])
+
+
+class BriefRecords(Home):
+    """Each chat reply's brief is kept as a record of what it was offered, like a web passage's plan."""
+
+    def hook(self, session='s1', **extra):
+        payload = dict({'session_id': session, 'prompt': 'Next.', 'transcript_path': str(self.home / 'none.jsonl')},
+                       **extra)
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def test_every_reply_has_a_record_joined_by_chat_and_time(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01', known_top=60))
+        before = int(time.time() * 1000)
+        first, second = self.hook(), self.hook()
+        self.hook('codex-1', turn_id='turn-9')
+        briefs = feedback.chat_briefs()
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs],
+                         [('s1', True, len(first)), ('s1', False, len(second)), ('codex-1', True, briefs[2]['chars'])])
+        b = briefs[0]
+        learning = [w['ja'] for w in fwlib.introduced(fwlib.load_state()) if w['status'] == 'active']
+        self.assertEqual(sorted(ja for ja, _ in b['offered']), sorted(learning))
+        self.assertTrue(all(abs(p - knowledge.sigmoid(-knowledge.prior(None))) < 0.001 for _, p in b['offered']))
+        self.assertEqual((b['level'], b['intensity'], b['budget'], b['arms'], b['known']), (0, 1.0, 0.5, {}, 60))
+        self.assertAlmostEqual(b['expected'], b['ask'] * b['offered'][0][1], places=2)
+        self.assertEqual(briefs[2]['turn'], 'turn-9')
+        self.assertEqual([b['session'] for b in feedback.chat_briefs(session='codex-1')], ['codex-1'])
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[1]['at'] + 5000), briefs[1])  # the latest before it
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[0]['at']), briefs[0])
+        self.assertIsNone(feedback.brief_for(briefs, 's1', before - 1))
+        self.assertIsNone(feedback.brief_for(briefs, 's9', briefs[1]['at']))
+        self.assertEqual(weave.compose(fwlib.load_state(), {}, level=intensity.FULL)[2].keys() & {'budget', 'expected'},
+                         set())  # full has no budget
+        self.assertTrue(intensity.LEVELS)
+
+    def test_bad_records_are_refused(self):
+        good = hub.stamp({'kind': 'brief', 'session': 's1', 'level': 0, 'intensity': 1.0, 'offered': [['問題', 0.27]],
+                          'arms': {}, 'known': 3, 'whole': True, 'chars': 4000, 'budget': 0.5, 'ask': 2, 'expected': 0.54})
+        self.assertIsNone(hub.validate(good))
+        self.assertIsNone(hub.validate(dict(good, level=3, arms={'問題': 'held'}, turn='t-1')))
+        for bad in (dict(good, level=True), dict(good, level=4), dict(good, offered=[['問題', 1.5]]),
+                    dict(good, offered=[['問題']]), dict(good, session='a b'), dict(good, arms=[]),
+                    dict(good, whole='yes'), dict(good, chars=-1), dict(good, budget=float('nan')), dict(good, note='x'),
+                    dict(good, intensity=0), {k: v for k, v in good.items() if k != 'known'}):
+            self.assertIsNotNone(hub.validate(bad), bad)
+        self.assertEqual(hub.run(good), {'ok': True})
+        self.assertEqual(hub.run(good), {'ok': True, 'duplicate': True})  # a resend is kept once
+        self.assertFalse(hub.run(dict(good, uid='other', level=9))['ok'])
+        self.assertFalse((fwlib.home() / 'state.json').exists())  # a record changes no word state
 
 
 class Examples(unittest.TestCase):

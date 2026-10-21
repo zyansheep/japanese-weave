@@ -244,7 +244,8 @@ class Unreachable(Home):
         out = self.fw('intensity', 'normal', 'here', '--session', 's1')
         self.assertIn('Note: collector unreachable; queued.', out)
         self.assertIn('Japanese Weave (Stage', self.hook('And a Hilbert space?')[0])
-        self.assertEqual([op['off'] for op in hub.pending()], [True, False])
+        self.assertEqual([op['off'] for op in hub.pending() if op['kind'] == 'thread'], [True, False])
+        self.assertEqual([op['session'] for op in hub.pending() if op['kind'] == 'brief'], ['s1'])  # waits too
 
 
 class Collector(Home):

@@ -136,24 +136,28 @@ class Brief(Home):
         lines = weave.brief(self.state(2), {}, level=intensity.FULL).split('\n')
         self.assertEqual(lines[1], 'Learning now (use each one wherever it fits): 結局 = meaning, "hint"; '
                                    '一緒に = meaning, "hint"')
-        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
-                                   'meaning → でも; meaning → 中; meaning → 最悪')
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも')
+        self.assertTrue(lines[3].endswith('has that meaning): 中 meaning; 最悪 meaning'), lines[3])
+        self.assertEqual(len(lines), 4)
         popover = weave.brief(self.state(3), {}, markup=True, level=intensity.FULL)
         self.assertIn('in a fully Japanese sentence wrap each word the same way', popover)
         self.assertNotIn('footer line', popover)
         recall = {'ja': '結局', 'en': 'after all', 'hint': 'kekkyoku'}
         self.assertIn('Recall: 結局?', weave.brief(self.state(), {}, recall, level=intensity.FULL))
 
-    def test_full_with_hundreds_of_known_words_names_the_band(self):
+    def test_full_with_hundreds_of_known_words_names_them(self):
         state = fwlib.new_state('2026-01-01')
         for w in state['words'][:fwlib.COLLAPSE_AT + 50]:
             fwlib.apply_event(state, w['ja'], 'known', '2026-01-01')
         state.update(stage=4, stage_pinned=True)
-        text = weave.brief(state, {}, level=intensity.FULL)
+        text, had, _ = weave.compose(state, {}, level=intensity.FULL)
         self.assertIn('turned to full for now by the user', text)
-        self.assertIn('Known (use freely, never gloss): roughly the', text)
-        self.assertNotIn('Known (write the Japanese every time', text)
+        self.assertNotIn('roughly the', text)
+        self.assertIn('Known, besides the default swaps', text)
+        normal = weave.compose(state, {}, had=had)[0]  # back to normal in the same chat: the same known list
+        self.assertIn('Known: as listed earlier in this chat. If', normal)
+        self.assertIn('the user is a native English speaker', normal)  # the rules at normal differ: whole again
 
     def test_full_has_no_calibration_line(self):
         state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('今', 'active')]}

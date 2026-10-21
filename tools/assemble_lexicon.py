@@ -4,7 +4,8 @@
 Each reviewed row has a tier: A (connectors and adverbs that replace an English word), T (words technical chat
 uses), B (everyday words), C (poor fits), X (dropped), and the candidate's frequency score (geometric mean of its
 JPDB and BCCWJ ranks). Teaching order is that score scaled by tier, so connectors and technical words come early and
-poor fits late; the list is cut at SIZE words.
+poor fits late; the list is cut at SIZE words. The tier goes into the list too: the chat brief's default swaps are its
+known A words (scripts/weave.py).
 
   python3 tools/assemble_lexicon.py
 """
@@ -25,10 +26,11 @@ def main():
     for r in kept:
         if r['ja'] not in seen:
             seen.add(r['ja'])
-            out.append({'ja': r['ja'], 'en': r['en'].strip(), 'hint': r['hint'].strip(), 'kana': r['kana']})
+            out.append({'ja': r['ja'], 'en': r['en'].strip(), 'hint': r['hint'].strip(), 'kana': r['kana'],
+                        'tier': r['tier']})
     out = out[:SIZE]
     with open(ROOT / 'data' / 'lexicon.csv', 'w', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['ja', 'en', 'hint', 'kana'])
+        writer = csv.DictWriter(f, fieldnames=['ja', 'en', 'hint', 'kana', 'tier'], lineterminator='\n')
         writer.writeheader()
         writer.writerows(out)
     print(f'{len(out)} words -> data/lexicon.csv')

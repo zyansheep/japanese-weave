@@ -35,7 +35,8 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                   trace    the mouse path over a message (T3): ms: its span; detail {"points": [[ms since at, x, y]]}
 
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
-                and the op as JSON
+                and the op as JSON; also records that change nothing, such as what each chat reply was offered (kind
+                "brief", read back by chat_briefs)
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
 the peek rate). With a collector configured (setup --collector), the native host forwards items to it instead (see
@@ -132,10 +133,10 @@ def default_path():
     return fwlib.home() / DB_NAME
 
 
-def connect(path=None):
+def connect(path=None, timeout=10):
     path = Path(path or default_path())
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), timeout=10)
+    con = sqlite3.connect(str(path), timeout=timeout)
     con.execute('PRAGMA journal_mode=WAL')
     con.executescript(TABLES)
     version = con.execute('PRAGMA user_version').fetchone()[0]
@@ -511,6 +512,42 @@ def intensity_changes(path=None):
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],
                             'until': value.get('until') or 0, 'source': value.get('source') or ''})
     return out
+
+
+def chat_briefs(path=None, session=None):
+    """What each chat reply was offered (brief ops, weave.compose), oldest first, one chat's or every chat's: {at, machine,
+    session, level, intensity, budget, ask, expected (per 100 words; None at full), offered: [[word, p]], arms, known,
+    whole, chars, turn (Codex; else None)}. The hook writes one as a prompt is sent, so a reply's is the last of its
+    chat at or before the reply (brief_for)."""
+    con = connect(path)
+    try:
+        query = "SELECT at, machine, body FROM ops WHERE kind = 'brief'" + (' AND body LIKE ?' if session else '')
+        rows = con.execute(query + ' ORDER BY at', (f'%"session": "{session}"%',) if session else ()).fetchall()
+    finally:
+        con.close()
+    out = []
+    for at, machine, body in rows:
+        try:
+            op = json.loads(body)
+        except ValueError:
+            continue
+        if session and op.get('session') != session:
+            continue
+        out.append({'at': at, 'machine': machine, 'session': op.get('session'), 'level': op.get('level'),
+                    'intensity': op.get('intensity'), 'budget': op.get('budget'), 'ask': op.get('ask'),
+                    'expected': op.get('expected'), 'offered': op.get('offered') or [], 'arms': op.get('arms') or {},
+                    'known': op.get('known'), 'whole': op.get('whole'), 'chars': op.get('chars'), 'turn': op.get('turn')})
+    return out
+
+
+def brief_for(briefs, session, at):
+    """The brief a chat reply was written under: the last of its chat (session id) sent at or before the reply's time
+    (ms), from chat_briefs; None when there is none."""
+    found = None
+    for b in briefs:
+        if b['session'] == session and b['at'] <= at and (found is None or b['at'] >= found['at']):
+            found = b
+    return found
 
 
 def request(url, body=None, timeout=5):

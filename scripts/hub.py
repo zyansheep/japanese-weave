@@ -19,12 +19,16 @@ Ops (each also carries uid, day, at and machine; see stamp):
   exported  {"target": "claude-ai"|"chatgpt", "log_day": bool}
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
+  brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {}, "known", "whole", "chars",
+             "budget"?, "ask"?, "expected"?, "turn"?}   what one chat reply was offered (weave.compose); a record only
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
-log of everything that changed the word state sit side by side.
+log of everything that changed the word state sit side by side. Records (RECORDS) change nothing: they are kept in
+the ops table and nowhere else (hub.keep; feedback.chat_briefs reads them back).
 """
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -57,6 +61,8 @@ MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
 PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed',  # applied to the cache while queued
                'thread')
+RECORDS = ('brief',)       # ops only kept in the ops table: they change nothing in the word state
+RECORD_TIMEOUT = 2         # seconds a record waits for the database here before it is dropped
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
 MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')  # a machine's own state
 BEFORE = 'before-collector'  # where a machine's own state is kept when it first takes the collector's
@@ -141,9 +147,38 @@ def validate(op):
         if not threads.valid_session(op.get('session')) or not isinstance(op.get('off'), bool) \
                 or not text(op.get('source'), 20):
             return 'thread: {"session", "off": true|false, "source"}'
+    elif kind == 'brief':
+        return brief_error(op)
     elif kind not in ('chat_day', 'noticed'):
         return f'unknown op {kind!r}'
     return None
+
+
+BRIEF_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'session', 'level', 'intensity', 'offered', 'arms', 'known',
+                'whole', 'chars', 'budget', 'ask', 'expected', 'turn'}
+
+
+def brief_error(op):
+    """What is wrong with a brief record, as feedback._plan_ok checks a web passage's plan, or None. Amounts are per
+    100 words; full has no budget, ask or expected."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
+    amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
+    offered, arms = op.get('offered'), op.get('arms')
+    good = (set(op) <= BRIEF_FIELDS and threads.valid_session(op.get('session'))
+            and isinstance(op.get('level'), int) and not isinstance(op['level'], bool) and op['level'] in intensity.LEVELS
+            and number(op.get('intensity')) and 0 < op['intensity'] <= 5
+            and isinstance(offered, list) and len(offered) <= 200
+            and all(isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1
+                    for o in offered)
+            and isinstance(arms, dict) and len(arms) <= 200
+            and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())
+            and count(op.get('known'), 100_000) and isinstance(op.get('whole'), bool) and count(op.get('chars'), 100_000)
+            and amount('budget') and amount('ask') and amount('expected')
+            and ('turn' not in op or threads.valid_session(op['turn'])))
+    return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
+                              '"known", "whole", "chars", "budget"?, "ask"?, "expected"?, "turn"?}')
 
 
 def apply(state, op):
@@ -204,6 +239,16 @@ def run(op, db=None):
     error = validate(op)
     if error:
         return {'ok': False, 'error': error}
+    if op['kind'] in RECORDS:  # nothing to apply, so no wait for the ops lock (an Anki sync holds it for a while)
+        con = feedback.connect(db, timeout=RECORD_TIMEOUT)
+        try:
+            with con:
+                added = con.execute('INSERT OR IGNORE INTO ops (uid, at, machine, kind, body) VALUES (?, ?, ?, ?, ?)',
+                                    (op['uid'], op['at'], str(op.get('machine') or ''), op['kind'],
+                                     json.dumps(op, ensure_ascii=False))).rowcount
+        finally:
+            con.close()
+        return {'ok': True} if added else {'ok': True, 'duplicate': True}
     with fwlib.locked(OPS_LOCK):
         con = feedback.connect(db)
         try:
@@ -274,6 +319,19 @@ def submit(op, wait=True):
     return result
 
 
+def keep(op):
+    """Keeps a record (RECORDS) without waiting on the network or the ops lock: with a collector it joins the outbox
+    and goes with the next sync; else it goes into the ops table here. Returns its result."""
+    op = stamp(op)
+    error = validate(op)
+    if error:
+        raise ValueError(error)
+    if fwlib.collector_url():
+        queue(op)
+        return {'ok': True, 'queued': True}
+    return run(op)
+
+
 def post(url, ops, timeout=TIMEOUT):
     """The collector's reply to a batch of ops, or None when it didn't take them (unreachable, no state yet)."""
     reply = feedback.request(f'{url.rstrip("/")}/v1/ops', {'machine': socket.gethostname()[:64], 'ops': ops},
@@ -317,7 +375,9 @@ def flush(url=None, timeout=TIMEOUT):
         if reply is None:
             break
         for op, result in zip(batch, reply['results']):
-            if not result.get('ok'):  # malformed, or it failed there: resending won't help
+            # malformed, or it failed there: resending won't help. A record refused (by a collector older than its
+            # kind, say) is only a gap in the log, so it goes quietly.
+            if not result.get('ok') and op.get('kind') not in RECORDS:
                 print(f'Japanese Weave: the collector refused a queued {op.get("kind")} change: '
                       f'{result.get("error")}', file=sys.stderr)
             sent.add(op.get('uid'))

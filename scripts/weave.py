@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook: prints a short Japanese Weave brief as additional context for the next reply.
 
+The hook's context stays in the conversation, so a chat gets the whole brief (its rules and every known word by name)
+once, and on later turns a short reminder with what changed (chat_turn). Each brief is also kept as a record of what
+the reply was offered: a `brief` op (hub.py).
+
 Usage: weave.py --hook   (reads the hook JSON on stdin, prints hook JSON)
-       weave.py          (prints the plain brief, for checking)
+       weave.py          (prints the plain brief, for checking: a chat's first turn)
 """
+import csv
+import functools
+import hashlib
 import json
 import math
 import os
@@ -28,15 +35,24 @@ STAGES = {1: (6, 10, 2), 2: (12, 20, 4), 3: (25, 35, 4), 4: (40, 55, 4)}
 SENTENCES = {3: 2, 4: 4}  # fully Japanese sentences in a ten-sentence reply, from Stage 3
 IN_TEN = {1: 'one sentence in ten', 2: 'one sentence in five', 3: 'three sentences in ten', 4: 'two sentences in five',
           5: 'half the sentences', 6: 'three sentences in five'}
-LOT, SOME = (6, 30), (3, 10)  # chat exposure (distinct days, replies) for the "seen a lot" and "sometimes" tiers
-TAIL = 2_000_000  # bytes at the end of a transcript searched for the last reply
+TAIL = 2_000_000  # bytes at the end of a transcript searched for the last reply and the last compaction
 SHORT = 40  # replies with fewer prose words are too short to measure
 RECALL_EVERY = 3
-# Most known words listed per tier at full, so the brief stays small at Stages 3-4 (hundreds of known words).
-LIMITS = {'rare': 24, 'some': 60, 'lot': 80}
-# Below full: words known at a glance listed (until the band takes over), the first ones as swaps; most learning words
-# listed, best learning value first.
-KNOWN_SWAPS, KNOWN_MAX, LEARN_MAX = 40, 150, 24
+LEARN_MAX = 24  # below full: most learning words listed, best learning value first
+DEFAULT_SWAPS = 12  # known connectors and adverbs (the base list's tier A), first first, named on every turn
+# Claude Code hands Claude at most 10,000 characters of a hook's context and puts the rest in a file it doesn't ask
+# Claude to read, so a brief stays under this; known words that don't fit are named on the next turn.
+BRIEF_MAX = 9500
+# A chat gets the whole brief again this many turns after it last did, in case the earlier one left the model's
+# context without a compaction the transcript shows (see chat_turn). In the user's transcripts the median chat had 3
+# prompts and 1 in 5 had over 20, and compactions came a median of 9 prompts apart, so a missed one costs at most
+# about two compactions' worth of turns without the list; the whole brief is about 3.7 later ones (8,182 against
+# 2,226 characters on the 2026-10-20 state), so this adds about 300 characters a turn.
+FULL_EVERY = 20
+MEMORY_KEPT = 50  # chats whose known list sessions.json keeps, the newest; an older one gets the whole brief again
+# The brief names no numbers and no katakana words: it asks for plain English for numbers and no katakana loanwords.
+NUMBER = re.compile('^〜|^[〇一二三四五六七八九十百千万億]+つ?$')
+KATAKANA = re.compile('^[\u30a0-\u30ff\uff66-\uff9f]+$')
 # Learning words asked for per 100 words: the fewest and the most, and the most per word allowed in a sentence (about
 # five prose sentences in 100 words).
 PER_100, PER_SENTENCE_100 = (0.5, 8), 5
@@ -102,9 +118,9 @@ def examples(chances):
     return f'like "{a}" or "{b}"'
 
 
-def lists(state, seen=None, know=None):
-    """The word lists below full: (known at a glance, in lexicon order; learning, best learning value first, at most
-    LEARN_MAX; {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
+def lists(state, seen=None, know=None, most=LEARN_MAX):
+    """The word lists: (known at a glance, in list order; learning, best learning value first, at most `most` (None:
+    all); {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
     whatever the status; every other word in use is learning, known ones too."""
     seen = seen or {}
     p = {w['ja']: chance(w, know) for w in fwlib.introduced(state)}
@@ -112,7 +128,7 @@ def lists(state, seen=None, know=None):
     learning = sorted((w for w in fwlib.introduced(state) if p[w['ja']] >= fwlib.FREE_P),
                       key=lambda w: (-knowledge.learning_value(p[w['ja']]), w['status'] != 'shaky',
                                      -seen.get(w['ja'], {}).get('n', 0)))
-    return free, learning[:LEARN_MAX], p
+    return free, learning[:most], p
 
 
 def lookup_budget(state, level=0):
@@ -140,33 +156,82 @@ def per_100(budget, chances, most=PER_100[1]):
     return max(PER_100[0], min(most, n))
 
 
-def tier(word, seen):
-    """'learn' for active and shaky words; known words by chat exposure: 'lot', 'some' or 'rare' (uncountable: 'some')."""
-    if word['status'] != 'known':
-        return 'learn'
-    count = seen.get(word['ja'])
-    if count is None:
-        return 'some'
-    days, replies = len(count['days']), count['n']
-    if days >= LOT[0] and replies >= LOT[1]:
-        return 'lot'
-    return 'some' if days >= SOME[0] and replies >= SOME[1] else 'rare'
+@functools.lru_cache(maxsize=1)
+def base_list():
+    """{key: (rank, tier)} for the base word list (data/lexicon.csv): its order, connectors and the words technical chat
+    uses first, and its tier (A: connectors and adverbs, T: technical, B: everyday, C: poor fits;
+    tools/assemble_lexicon.py). Empty when it can't be read."""
+    try:
+        with open(fwlib.LEXICON, encoding='utf-8', newline='') as file:
+            rows = [r for r in csv.DictReader(file) if (r.get('ja') or '').strip()]
+    except (OSError, ValueError, csv.Error):
+        return {}
+    return {fwlib.key(r['ja']): (i, (r.get('tier') or '').strip()) for i, r in enumerate(rows)}
 
 
-def brief(state, seen, recall=None, markup=False, know=None, level=0):
-    """The per-turn instructions. markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each
-    Japanese word carries its own gloss instead of a footer line. know: knowledge.json (adaptive difficulty): each
-    word's lookup chance (chance), which splits the words in use into known at a glance and learning and orders the
-    learning ones by learning value, most useful first. level: the chat intensity in effect (intensity.py). Below full
-    it is a lookup budget: known-at-a-glance words go in wherever they fit, and the learning words asked for are as
-    many as spend about the budget (per_100). At full there is no budget: every sentence that can be plain Japanese
-    is, and the rest swap in every listed word."""
-    stage = fwlib.stage_for(state)
+def named_words(free):
+    """The words known at a glance the brief names: in the base list's order (most useful in chat first), then the
+    others (Anki words) in list order. Numbers and katakana words stay out, since the brief asks for neither."""
+    rank = base_list()
+    words = [w for w in free if not NUMBER.match(w['ja']) and not KATAKANA.match(w['ja'])
+             and not w['en'].startswith('counter')]
+    return sorted(words, key=lambda w: rank.get(fwlib.key(w['ja']), (len(rank), ''))[0])
+
+
+def default_swaps(words):
+    """The first DEFAULT_SWAPS of the named words that are connectors or adverbs (tier A), else, with a base list
+    without tiers, the first of them in its order."""
+    rank = base_list()
+    tiered = any(t for _, t in rank.values())
+    return [w for w in words if not tiered or rank.get(fwlib.key(w['ja']), (0, ''))[1] == 'A'][:DEFAULT_SWAPS]
+
+
+def entries(words, room):
+    """'ja en; ja en' for as many words as fit in room characters, and the words named."""
+    out, size = [], 0
+    for w in words:
+        entry = f'{w["ja"]} {w["en"]}'
+        size += len(entry) + 2
+        if size > room:
+            break
+        out.append(entry)
+    return '; '.join(out), words[:len(out)]
+
+
+def known_line(words, gone, first, room, swaps=True):
+    """The known words the chat hasn't been named yet, as many as fit in room characters: the whole list on a chat's
+    first turn, else the changes since (words newly known at a glance; gone: words no longer known at a glance) with a
+    pointer to the earlier list. Returns (line, words named, gone words named); the rest wait for the next turn."""
+    rest = lambda left: (f'; and {left} more, named next turn (until then keep the English for any word not named)'
+                         if left else '')
+    if first:
+        head = (f'Known{", besides the default swaps" if swaps else ""} (each Japanese word, then its meaning; write '
+                'the Japanese every time the English has that meaning): ')
+        text, named = entries(words, room - len(head) - len(rest(len(words))))
+        return head + (text or 'none') + rest(len(words) - len(named)), named, []
+    out = 'Known: as listed earlier in this chat'
+    lead = '; no longer known at a glance, so keep the English unless listed as learning: '
+    tail = '. If you can no longer see that list, use only the Japanese words named in this message.'
+    dropped, size = [], len(out) + len(lead) + len(tail)
+    for ja in gone:
+        size += len(ja) + 2
+        if size > room:
+            break
+        dropped.append(ja)
+    if dropped:
+        out += lead + ', '.join(dropped)
+    text, named = entries(words, room - len(out) - len('; also known: ') - len(tail) - len(rest(len(words))))
+    if text:
+        out += '; also known: ' + text + rest(len(words) - len(named))
+    return out + tail, named, dropped
+
+
+def rules(stage, level, markup, like, n, sentences):
+    """The brief's rules, in full: a chat's first turn, and any turn on which they change (see compose)."""
     full = intensity.is_full(level)
     as_listed = ('Write each word exactly as listed (same kanji and kana), never conjugated, and with no particles, '
                  'です/ます or other Japanese grammar around it; adjectives go before their noun as listed ("a 新しい '
                  'build", "the 簡単 fix"); suru-nouns stand in for the English verb or noun ("let me 確認 the logs"). ')
-    like = examples({w['ja']: chance(w, know) for w in fwlib.introduced(state)})
     space = 'Put a space on each side of a Japanese word inside English text, as for an English word. '
     fit = lambda instead: ('Use a word only where it means exactly what the English word would mean there; where one '
                            f'doesn\'t fit, {instead} (だから only for "so" meaning therefore, never "so big"; でも and '
@@ -187,29 +252,13 @@ def brief(state, seen, recall=None, markup=False, know=None, level=0):
                'wrap the closing 。 or ？ in an <abbr> whose title is the English translation of the whole sentence, like '
                '<abbr title="もんだい · problem">問題</abbr>は<abbr title="せってい · settings">設定</abbr>です'
                '<abbr title="The problem is the settings.">。</abbr> The user hovers or clicks to see a title, so add no '
-               'footer.\n'
+               'footer.'
                if markup else
                'No bold on Japanese words and no inline glosses or romaji. End the reply with one footer line glossing the '
                'learning words you used that are not glossed earlier in this chat, at most 8, with the romaji, like: '
-               '(多分 = maybe, "tabun"); nothing to gloss, no footer.\n')
+               '(多分 = maybe, "tabun"); nothing to gloss, no footer.')
     if full:
-        entry = lambda w: w['ja'] if w['status'] == 'known' else f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
-        def usefulness(w):
-            if not know or w['status'] == 'known':
-                return 0
-            estimate = knowledge.word_estimate(know, w['ja'], 't3')
-            return -knowledge.learning_value(estimate[0] if estimate else 0.5)
-        words = sorted(fwlib.introduced(state),
-                       key=lambda w: (usefulness(w), w['status'] != 'shaky', -seen.get(w['ja'], {}).get('n', 0)))
-        def picked(name):
-            found = [w for w in words if tier(w, seen) == name]
-            if name == 'rare':  # least exposure first, so fading words get pushed back in
-                found.sort(key=lambda w: seen.get(w['ja'], {}).get('n', 0))
-            return found[:LIMITS.get(name)]
-        group = lambda name, show=entry: '; '.join(show(w) for w in picked(name)) or 'none'
-        banded = sum(w['status'] == 'known' for w in state['words']) >= fwlib.COLLAPSE_AT
-        known = '; '.join(f'{w["en"]} → {w["ja"]}' for name in ('rare', 'some', 'lot') for w in picked(name)) or 'none'
-        text = (f'Japanese Weave (Stage {stage}, turned to full for now by the user): the user is a native English '
+        return (f'Japanese Weave (Stage {stage}, turned to full for now by the user): the user is a native English '
                 'speaker learning Japanese passively and wants, for now, all the Japanese they can follow, with no '
                 'percentage target or cap. Write every sentence of your chat reply that can be written fully in plain '
                 'Japanese the user would follow (the words in the lists below plus common grammar: particles, '
@@ -220,42 +269,120 @@ def brief(state, seen, recall=None, markup=False, know=None, level=0):
                 f'{as_listed}No other Japanese words and no katakana loanwords. Too little Japanese is the usual miss, '
                 'so check each sentence as you write it: fully Japanese if it can be, otherwise every listed word '
                 'swapped in. '
-                + space + fit('keep the English word') + plain + glosses
-                + f'Learning now (use each one wherever it fits): {group("learn")}\n'
-                + (band_line(state) if banded else
-                   f'Known (write the Japanese every time the English word has that meaning): {known}'))
+                + space + fit('keep the English word') + plain + glosses)
+    grammar = ('Every sentence stays an English sentence with Japanese words swapped in, like "The build passes 今, '
+               f'でも the cache is stale, だから I cleared it." {as_listed}No Japanese outside these lists and no '
+               'katakana loanwords; if a sentence starts turning Japanese, rewrite it in English. '
+               if stage < 3 else
+               f'About {IN_TEN[sentences]} should be fully Japanese '
+               f'({sentences} in a ten-sentence reply): short, plain です/ます sentences of known words, particles '
+               f'and これ/それ only, guessable from the English around them, {like} Steps stay English, so put the '
+               'Japanese sentences in the explanation, summary and advice around them. The other sentences stay '
+               'English with listed words swapped in as written, without particles. No other Japanese anywhere, '
+               'not even a common word, and no katakana loanwords; a sentence needing one stays English. ')
+    most = intensity.per_sentence(level)
+    ask = (f'Learning words cost a lookup now and then: about {n:g} per 100 words ({half_up(3 * n)} in a 300-word '
+           f'reply), at most {"one" if most == 1 else most} in a sentence, each where the English around it makes '
+           'its meaning clear, spread out. ' if n else 'No learning words right now, only known ones. ')
+    turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
+    return (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese '
+            'passively. Write your chat reply in English and swap in Japanese words from the lists below. Known '
+            'words cost the user nothing, so write each one in Japanese wherever the English has its meaning. '
+            f'{ask}Leaving a known word in English is the usual miss, so check each sentence as you write '
+            f'it. {space}{grammar}{fit("keep the English word")}' + plain + glosses)
+
+
+def digest(stage, level, markup, n, sentences):
+    """The rules on a chat's later turns: a pointer to the whole brief earlier in the chat, this reply's amounts, and
+    the rules that matter most restated in a line."""
+    full = intensity.is_full(level)
+    turned = (', turned to full for now by the user' if full else
+              f', turned {intensity.NAMES[level]} for now by the user' if level else '')
+    most = intensity.per_sentence(level)
+    if full:
+        amount = ('every sentence the user could follow in plain Japanese (listed words plus common grammar) fully in '
+                  'Japanese, and the rest English with every listed word, known or learning, swapped in as listed')
     else:
-        free, learning, p = lists(state, seen, know)
-        sentences = japanese_sentences(stage, level)
-        grammar = ('Every sentence stays an English sentence with Japanese words swapped in, like "The build passes 今, '
-                   f'でも the cache is stale, だから I cleared it." {as_listed}No Japanese outside these lists and no '
-                   'katakana loanwords; if a sentence starts turning Japanese, rewrite it in English. '
-                   if stage < 3 else
-                   f'About {IN_TEN[sentences]} should be fully Japanese '
-                   f'({sentences} in a ten-sentence reply): short, plain です/ます sentences of known words, particles '
-                   f'and これ/それ only, guessable from the English around them, {like} Steps stay English, so put the '
-                   'Japanese sentences in the explanation, summary and advice around them. The other sentences stay '
-                   'English with listed words swapped in as written, without particles. No other Japanese anywhere, '
-                   'not even a common word, and no katakana loanwords; a sentence needing one stays English. ')
-        n = per_100(lookup_budget(state, level), [p[w['ja']] for w in learning], most_per_100(level))
-        most = intensity.per_sentence(level)
-        ask = (f'Learning words cost a lookup now and then: about {n:g} per 100 words ({half_up(3 * n)} in a 300-word '
-               f'reply), at most {"one" if most == 1 else most} in a sentence, each where the English around it makes '
-               'its meaning clear, spread out. ' if n else 'No learning words right now, only known ones. ')
-        turned = f', turned {intensity.NAMES[level]} for now by the user' if level else ''
-        text = (f'Japanese Weave (Stage {stage}{turned}): the user is a native English speaker learning Japanese '
-                'passively. Write your chat reply in English and swap in Japanese words from the lists below. Known '
-                'words cost the user nothing, so write each one in Japanese wherever the English has its meaning. '
-                f'{ask}Leaving a known word in English is the usual miss, so check each sentence as you write '
-                f'it. {space}{grammar}{fit("keep the English word")}'
-                + plain + glosses
-                + 'Learning now, by how often the user looks one up: '
-                + learning_groups(learning, p, stage) + '\n'
-                + (glance_band(state, free, learning) if len(free) >= fwlib.COLLAPSE_AT else glance_list(free)))
-    if recall and not markup:  # with popover glosses every word already tests recall, so no extra lines
-        text += (f'\nIf this reply is longer than a few sentences, open it with "Recall: {recall["ja"]}?" on its own line '
-                 f'and end it, after the footer, with: Recall: {recall["ja"]} = {recall["en"]}, "{recall["hint"]}"')
-    return text
+        learn = (f'learning words about {n:g} per 100 words ({half_up(3 * n)} in a 300-word reply), at most '
+                 f'{"one" if most == 1 else most} in a sentence, where the English around each makes it clear' if n else
+                 'no learning words, only known ones')
+        shape = (f'about {IN_TEN[sentences]} fully Japanese ({sentences} in a ten-sentence reply): short, plain です/ます '
+                 'sentences of known words only, the rest English with listed words swapped in as listed'
+                 if stage >= 3 and sentences else 'English sentences with listed words swapped in as listed, never '
+                 'conjugated and without particles')
+        amount = (f'each known word in Japanese wherever the English has its meaning (leaving one in English is the '
+                  f'usual miss); {learn}; {shape}')
+    gloss = ('each Japanese word in <abbr title="hiragana reading · meaning"> (kana-only words: just the meaning), as '
+             'before' if markup else 'learning words you use glossed in one footer line with romaji, as before')
+    return (f'Japanese Weave (Stage {stage}{turned}): the Japanese Weave brief earlier in this chat still holds. This '
+            f'reply: {amount}. No other Japanese and no katakana loanwords; plain English for code, commands, paths, '
+            'numbers, names and steps the user will follow; Japanese only in your chat reply, never in files, code, '
+            'commits, messages to other agents or documents to share; none for health, medication, legal, money, '
+            f'safety or urgent topics; {gloss}.')
+
+
+def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None, tail='', room=BRIEF_MAX):
+    """(brief, what the chat has after it, plan). had: what the chat already has from earlier turns, {known: the words
+    named so far, rules: which rules}; None on its first turn (see chat_turn). Then the brief is whole: the rules, the
+    learning words and every known word by name. Later it is short: the rules as a digest (in full again when they
+    change: at or from full, at another stage, with other glosses or examples), the learning words, the default swaps
+    and the known words that changed. tail: what the caller adds (the feedback line), kept within room with the rest.
+
+    markup: the chat renders <abbr> titles on hover or click (see abbr_glosses), so each Japanese word carries its own
+    gloss instead of a footer line. know: knowledge.json (adaptive difficulty): each word's lookup chance (chance),
+    which splits the words in use into known at a glance and learning and orders the learning ones by learning value,
+    most useful first. level: the chat intensity in effect (intensity.py). Below full it is a lookup budget: known
+    words go in wherever they fit, and the learning words asked for are as many as spend about the budget (per_100).
+    At full there is no budget: every sentence that can be plain Japanese is, the rest swap in every listed word, and
+    every word in use that isn't known at a glance is listed as learning.
+
+    plan: what the reply was offered, as a web passage's plan (feedback.py): level, its factor, the budget and the
+    expected lookups per 100 words (none at full), the learning words asked for per 100 words (ask), the costly words
+    offered with their lookup chances, the delayed-start arms (none yet), the words known at a glance, and whether the
+    brief was whole."""
+    stage = fwlib.stage_for(state)
+    full = intensity.is_full(level)
+    free, learning, p = lists(state, seen, know, None if full else LEARN_MAX)
+    like = examples(p)
+    sentences = japanese_sentences(stage, level)
+    budget = lookup_budget(state, level)
+    n = None if full else per_100(budget, [p[w['ja']] for w in learning], most_per_100(level))
+    key = hashlib.sha1(json.dumps([full, stage, markup, like], ensure_ascii=False).encode()).hexdigest()[:12]
+    sent = set(had['known']) if had and isinstance(had.get('known'), list) else None
+    head = (digest(stage, level, markup, n, sentences) if sent is not None and had.get('rules') == key else
+            rules(stage, level, markup, like, n, sentences))
+    entry = lambda w: f'{w["ja"]} = {w["en"]}' + (f', "{w["hint"]}"' if stage <= 2 else '')
+    lines = [head, ('Learning now (use each one wherever it fits): ' + ('; '.join(map(entry, learning)) or 'none')
+                    if full else
+                    'Learning now, by how often the user looks one up: ' + learning_groups(learning, p, stage))]
+    words = named_words(free)
+    swaps = default_swaps(words)
+    if swaps:
+        lines.append('Default swaps (write the Japanese every time the English word has that meaning): '
+                     + '; '.join(f'{w["en"]} → {w["ja"]}' for w in swaps))
+    cue = [f'If this reply is longer than a few sentences, open it with "Recall: {recall["ja"]}?" on its own line and '
+           f'end it, after the footer, with: Recall: {recall["ja"]} = {recall["en"]}, "{recall["hint"]}"'
+           ] if recall and not markup else []  # with popover glosses every word already tests recall
+    swapped = {w['ja'] for w in swaps}
+    names = {w['ja'] for w in words}
+    unnamed = [w for w in words if w['ja'] not in swapped and (sent is None or w['ja'] not in sent)]
+    gone = [] if sent is None else sorted(ja for ja in sent if ja not in names)
+    left = room - sum(len(line) + 1 for line in lines + cue) - len(tail)
+    known, named, dropped = known_line(unnamed, gone, sent is None, left, bool(swaps))
+    lines += [known] + cue
+    after = {'known': sorted(((sent or set()) - set(dropped)) | swapped | {w['ja'] for w in named}), 'rules': key}
+    plan = {'level': level, 'intensity': intensity.factor(level),
+            'offered': [[w['ja'], round(p[w['ja']], 3)] for w in learning], 'arms': {}, 'known': len(free),
+            'whole': sent is None}
+    if not full:
+        mean = sum(p[w['ja']] for w in learning) / len(learning) if learning else 0
+        plan.update(budget=round(budget, 3), ask=n or 0, expected=round((n or 0) * mean, 3))
+    return '\n'.join(lines), after, plan
+
+
+def brief(state, seen, recall=None, markup=False, know=None, level=0, had=None):
+    """The brief alone (compose): with had None, a chat's first turn."""
+    return compose(state, seen, recall, markup, know, level, had)[0]
 
 
 def abbr_glosses(state, host_check=None):
@@ -264,46 +391,6 @@ def abbr_glosses(state, host_check=None):
     if (state.get('prefs') or {}).get('chat_glosses') != 'abbr':
         return False
     return (host_check or t3_host)()
-
-
-DEFAULT_SWAPS = 12  # in band mode: the top-ranked known words (connectors and adverbs) written in Japanese every time
-
-
-def cut(words):
-    return ', '.join(words[:fwlib.EXCEPTIONS_MAX]) + (f' and {len(words) - fwlib.EXCEPTIONS_MAX} more'
-                                                     if len(words) > fwlib.EXCEPTIONS_MAX else '')
-
-
-def default_swaps(words, head='Default swaps (write the Japanese every time the English word has that meaning)'):
-    return (f'{head}: ' + '; '.join(f'{w["en"]} → {w["ja"]}' for w in words[:DEFAULT_SWAPS]) + '\n') if words else ''
-
-
-def band_line(state):
-    """The known words at full, as a band (fwlib.known_band)."""
-    n, missing, extra = fwlib.known_band(state)
-    return default_swaps([w for w in state['words'] if w['status'] == 'known']) + (
-        f'Known (use freely, never gloss): roughly the {n} most common Japanese words and phrases'
-        + (f', except these not learned yet: {cut(missing)}' if missing else '')
-        + (f'; also known: {cut(extra)}' if extra else '') + '.')
-
-
-def glance_band(state, free, learning):
-    """Below full, from fwlib.COLLAPSE_AT words known at a glance: those words as a band. Every word in the band that
-    isn't one of them (not introduced yet, or looked up too often) and isn't listed as learning is named."""
-    n, missing, extra = fwlib.known_band(state, {w['ja'] for w in free}, {w['ja'] for w in learning})
-    return default_swaps(free, 'Default swaps') + (
-        'Known (if unsure a word is one of them, keep the English): roughly the '
-        f'{n} most common Japanese words and phrases'
-        + (f', except these, not known at a glance yet: {cut(missing)}' if missing else '')
-        + (f'; also known: {cut(extra)}' if extra else '') + '.')
-
-
-def glance_list(free):
-    """Below full, under fwlib.COLLAPSE_AT words known at a glance: the most common as swaps, then more by name."""
-    rest = free[KNOWN_SWAPS:KNOWN_MAX]
-    return ('Known (write the Japanese every time the English word has that meaning): '
-            + ('; '.join(f'{w["en"]} → {w["ja"]}' for w in free[:KNOWN_SWAPS]) or 'none')
-            + (f'; also {", ".join(w["ja"] for w in rest)}' if rest else ''))
 
 
 def learning_groups(learning, p, stage):
@@ -321,22 +408,48 @@ def learning_groups(learning, p, stage):
     return ' | '.join(groups) or 'none'
 
 
-def last_reply(path):
-    """Text of the latest main-thread assistant reply in a Claude Code transcript, or None."""
+def tail_lines(path):
+    """The complete lines of the last TAIL bytes of a transcript."""
     with open(path, 'rb') as file:
         size = file.seek(0, 2)
         file.seek(max(0, size - TAIL))
         if size > TAIL:
             file.readline()  # skip the cut line
-        lines = [raw.decode('utf-8', 'replace') for raw in file]
-    texts = [text for _, text in fwlib.replies(lines) if text.strip()]
+        return [raw.decode('utf-8', 'replace') for raw in file]
+
+
+def last_reply(path, lines=None):
+    """Text of the latest main-thread assistant reply in a Claude Code or Codex transcript, or None."""
+    texts = [text for _, text in fwlib.replies(tail_lines(path) if lines is None else lines) if text.strip()]
     return texts[-1] if texts else None
 
 
+def compaction(lines):
+    """The latest compaction in transcript lines, by its id (else its time), or None: Claude Code writes a system
+    line with subtype compact_boundary, Codex a line of type compacted. What came before it is out of the model's
+    context, earlier briefs included."""
+    mark = None
+    for line in lines:
+        if '"compact_boundary"' not in line and '"compacted"' not in line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get('type') == 'compacted' or (item.get('type') == 'system'
+                                               and item.get('subtype') == 'compact_boundary'):
+            payload = item.get('payload') if isinstance(item.get('payload'), dict) else {}
+            mark = str(item.get('uuid') or payload.get('window_id') or item.get('timestamp') or len(lines))[:100]
+    return mark
+
+
 def uses(text, words):
-    """({ja: uses} for the words a reply uses, the prose left once they are taken out). Code, links, glosses and the
-    recall cue are skipped. Longest first, each match removed before the next search: 一緒に is not also 一緒."""
-    prose = fwlib.norm(fwlib.CODE.sub(' ', ABBR.sub(r'\1', text)))
+    """({ja: uses} for the words a reply uses, the prose left once they are taken out). Code (fwlib.strip_code), links,
+    glosses and the recall cue are skipped. Longest first, each match removed before the next search: 一緒に is not also
+    一緒."""
+    prose = fwlib.norm(fwlib.strip_code(ABBR.sub(r'\1', text)))
     rest = '\n'.join(line for line in prose.split('\n') if not EXTRA.match(line))
     found = {}
     for word in sorted(words, key=lambda w: -len(w['ja'])):
@@ -396,26 +509,51 @@ def calibration(text, state, level=0, know=None, seen=None):
             f'a budget of {round(budget, 2):g} (known words are free): {verdict}.')
 
 
-def next_recall(state, session):
-    """Every third turn in a chat (1st, 4th, ...): the recall word, shaky first, then active, not yet used here."""
-    if not session:
+def recall_word(state, entry):
+    """Every third turn in a chat (1st, 4th, ...): the recall word, shaky first, then active, not yet used here; entry:
+    the chat's sessions.json entry, its turn already counted."""
+    if (entry['n'] - 1) % RECALL_EVERY:
         return None
+    recalled = entry['recalled'] if isinstance(entry.get('recalled'), list) else []
+    pool = [w for w in fwlib.introduced(state) if w['status'] in ('shaky', 'active')]
+    pick = next((w for w in pool if w['ja'] not in recalled), None)
+    if pick:
+        entry['recalled'] = recalled + [pick['ja']]
+    return pick
+
+
+def chat_turn(state, session, build, mark=None, recall=True, now=None):
+    """One turn of a chat with a session id, under the sessions.json lock: counts the turn, picks the recall word when
+    the chat shows the recall cue (recall), and builds the brief with build(had, recall word) -> (text, what the chat
+    has after it, plan) (see compose). had is None, so the brief is whole, on the chat's first turn, after a compaction
+    since the last whole one (mark: the transcript's latest, see compaction; None: none seen, nothing new) and
+    FULL_EVERY turns after it, for a context lost in a way the transcript doesn't show. Returns (text, plan)."""
     path = fwlib.home() / 'sessions.json'
     with fwlib.locked('sessions.lock'):
-        sessions = fwlib.read_json(path, {}) or {}
-        entry = sessions.setdefault(session, {'n': 0, 'recalled': []})
+        sessions = fwlib.read_json(path, {})
+        sessions = sessions if isinstance(sessions, dict) else {}
+        entry = sessions.get(session)
+        if not isinstance(entry, dict) or not isinstance(entry.get('n'), int):
+            entry = sessions[session] = {'n': 0, 'recalled': []}
         entry['n'] += 1
-        entry['t'] = int(time.time())
-        pick = None
-        if (entry['n'] - 1) % RECALL_EVERY == 0:
-            pool = [w for w in fwlib.introduced(state) if w['status'] in ('shaky', 'active')]
-            pick = next((w for w in pool if w['ja'] not in entry['recalled']), None)
-            if pick:
-                entry['recalled'].append(pick['ja'])
-        if len(sessions) > 200:  # keep the newest chats only
-            sessions = dict(sorted(sessions.items(), key=lambda kv: kv[1].get('t', 0))[-200:])
+        entry['t'] = int(now or time.time())
+        pick = recall_word(state, entry) if recall else None
+        had = entry.get('brief') if isinstance(entry.get('brief'), dict) else {}
+        whole = (not isinstance(had.get('at'), int) or not isinstance(had.get('known'), str)
+                 or (mark is not None and mark != had.get('mark')) or entry['n'] - had['at'] >= FULL_EVERY)
+        text, after, plan = build(None if whole else dict(had, known=[ja for ja in had['known'].split('\n') if ja]),
+                                  pick)
+        entry['brief'] = dict(after, known='\n'.join(after['known']), at=entry['n'] if whole else had['at'],
+                              mark=mark if mark is not None else had.get('mark'))  # one line per chat in the file
+        when = lambda k: (sessions[k].get('t') if isinstance(sessions[k], dict)
+                          and isinstance(sessions[k].get('t'), int) else 0)
+        newest = sorted(sessions, key=when)
+        sessions = {k: sessions[k] for k in newest[-200:]}  # keep the newest chats only
+        for k in newest[:-MEMORY_KEPT]:
+            if isinstance(sessions.get(k), dict):
+                sessions[k].pop('brief', None)
         fwlib.write_json(path, sessions)
-    return pick
+    return text, plan
 
 
 def process_args(pid):
@@ -596,25 +734,57 @@ def main(argv):
         return 0
     markup = hook and abbr_glosses(state)
     seen, know = exposure(), knowledge.load()
-    text = brief(state, seen, next_recall(state, data.get('session_id')) if hook and not markup else None,
-                 markup=markup, know=know, level=level)
+    reply = mark = None
     if hook:
         try:
-            reply = last_reply(data['transcript_path'])
-            text += calibration(reply, state, level, know, seen) if reply else ''
+            lines = tail_lines(data['transcript_path'])
+            reply, mark = last_reply(None, lines), compaction(lines)
         except Exception:
             pass  # no transcript yet or unreadable: the brief alone still helps
-        out = {'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': text}}
+    try:
+        tail = calibration(reply, state, level, know, seen) if reply else ''
+    except Exception:
+        tail = ''
+    build = lambda had, recall: compose(state, seen, recall, markup=markup, know=know, level=level, had=had, tail=tail)
+    try:
+        if hook and session:
+            text, plan = chat_turn(state, session, build, mark, recall=not markup)
+        else:
+            text, _, plan = build(None, None)
+    except Exception:  # the chat's memory unreadable or unwritable: the whole brief, as on a first turn
         try:
-            notice = export_notice(state)
-        except Exception:
-            notice = None
-        if notice:
-            out['systemMessage'] = notice  # shown to the user, outside the brief
-        print(json.dumps(out, ensure_ascii=False))
-    else:
+            text, _, plan = build(None, None)
+        except Exception as error:  # never block a prompt because of Japanese
+            print(f'Japanese Weave: no brief ({error.__class__.__name__})', file=sys.stderr)
+            return 0
+    text += tail
+    if not hook:
         print(text)
+        return 0
+    out = {'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': text}}
+    try:
+        notice = export_notice(state)
+    except Exception:
+        notice = None
+    if notice:
+        out['systemMessage'] = notice  # shown to the user, outside the brief
+    print(json.dumps(out, ensure_ascii=False), flush=True)
+    if session:
+        keep_plan(plan, session, len(text), data.get('turn_id'))
     return 0
+
+
+def keep_plan(plan, session, chars, turn=None):
+    """Keeps what this reply was offered as a brief op (hub.keep): the plan (compose), the chat's session id, the
+    brief's length and, from Codex, the turn id. Never waits long and never fails the hook: a lost record only
+    leaves a gap in the log."""
+    try:
+        record = dict(plan, kind='brief', session=session, chars=chars)
+        if threads.valid_session(turn):
+            record['turn'] = turn
+        hub.keep(record)
+    except Exception as error:
+        print(f'Japanese Weave: brief not recorded ({error.__class__.__name__})', file=sys.stderr)
 
 
 if __name__ == '__main__':

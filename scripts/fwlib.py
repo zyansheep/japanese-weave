@@ -55,7 +55,40 @@ KANJI = '\u3005\u3006\u4e00-\u9fff\uf900-\ufaff'   # 々 〆 and CJK ideographs
 KANA = '\u3041-\u309f\u30a0-\u30ff\uff66-\uff9f'   # hiragana, katakana (with ー), half-width katakana
 JAPANESE = re.compile(f'[{KANJI}{KANA}]')
 CODE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+", re.S)
+FENCE = re.compile(r'[ \t]*(`{3,}|~{3,})(.*)')
+TICKS = re.compile(r'`+')
+URL = re.compile(r'https?://\S+')
 DEDUPE_DAYS = 45
+
+
+def strip_code(text):
+    """text with its code and links taken out, as markdown shows them: fenced blocks (a line opening with three or more
+    backticks or tildes, closed by a line of the same character at least as long, or else running to the end), code
+    spans (a run of backticks closed by the next run of the same length; an unclosed run is plain text) and links.
+    Each piece becomes a space. Quoted words are data, not woven words."""
+    lines, fence = [], None
+    for line in str(text).split('\n'):
+        if fence:
+            if line.strip() and line.strip() == fence[0] * len(line.strip()) and len(line.strip()) >= len(fence):
+                fence = None
+            lines.append('')
+            continue
+        opening = FENCE.fullmatch(line)
+        if opening and not (opening.group(1)[0] == '`' and '`' in opening.group(2)):  # ```js``` is a code span
+            fence = opening.group(1)
+            lines.append('')
+            continue
+        lines.append(line)
+    text = '\n'.join(lines)
+    runs, out, start, i = list(TICKS.finditer(text)), [], 0, 0
+    while i < len(runs):
+        close = next((j for j in range(i + 1, len(runs)) if len(runs[j].group()) == len(runs[i].group())), None)
+        if close is None:
+            i += 1
+            continue
+        out += [text[start:runs[i].start()], ' ']
+        start, i = runs[close].end(), close + 1
+    return URL.sub(' ', ''.join(out) + text[start:])
 
 
 def collector_url():
@@ -524,12 +557,15 @@ def introduced(state):
     return sorted(words, key=lambda w: (order[w['status']], w['added']))
 
 
-COLLAPSE_AT = 150      # from this many known words, the brief and exports name a rank band instead of listing them
+COLLAPSE_AT = 150      # from this many known words, the exports name a rank band instead of listing them (the chat
+                       # brief names every word: weave.py)
 EXCEPTIONS_MAX = 15    # most exceptions named on each side of the band
 
 
 def known_band(state, known=None, listed=None):
-    """Compact description of the known set by lexicon rank (the lexicon is in frequency/usefulness order).
+    """Compact description of the known set by rank in the word list (the exports' band). The list is the base list's
+    frequency/usefulness order only without Anki words: an Anki sync puts its words first, so the band then stops
+    meaning "the most common words" (the chat brief names every word instead).
 
     Returns (n, missing, extra): known = words ranked 1..n, except `missing` (ranked <= n but not yet introduced;
     learning words are listed separately anyway), plus `extra` (known words ranked > n). n minimizes the number
