@@ -94,8 +94,8 @@ The prior mean is a regression on the word's features (knowledge.features), fitt
   longer disagree about known words without history (the old replay started them at 27%, the planner at 7.6%); and a
   few observations can't swing a kind (with weak priors, one two-word episode moved the card regression by more than 1
   on the log-odds scale);
-- later word features (NEXT_STEPS step 13: frequency rank, kanji shared with known words, script, word type, length)
-  are each one more shared parameter in features() and SHARED.
+- for a word not marked known, plus its dictionary entry's word features: frequency rank, kanji known at a glance,
+  script, part of speech, length, rarity and source language (Starting values from the word itself, below).
 
 The prior's width tau is fitted per kind, Anki card or none, by EM: each word's squared distance from its prior mean
 plus its variance, averaged, held toward 1.0 (card) and 1.5 (none) by 5 words' worth of weight. On the 2026-10-20 log
@@ -137,16 +137,160 @@ free set after one form lookup each (PLAN.md row A); with it they stay (k 3.1 an
 
 Each word's sd is its k's entry of the inverse information at the fit (Laplace), the shared parameters' uncertainty
 included. A word without evidence has its prior: k = m_w, sd = tau. knowledge.json has every word of the word state:
-its k, sd, prior mean (mu), free flag (below), evidence weight (n) and, with evidence, its observations; and "prior",
-the regression's coefficients and widths by kind, which the native host uses for a word knowledge.json hasn't seen.
+its k, sd, prior mean (mu), free flag (below), evidence weight (n), the JMdict id of its dictionary entry and, with
+evidence, its observations; and "prior", the regression's coefficients and widths by kind, which the native host uses
+for a word knowledge.json hasn't seen, and from which any dictionary entry gets its starting value (below).
 
 How it is solved: Newton's method with the expected information, which is positive definite (the observed one isn't
 everywhere: log(1 - r q) is not concave in k when q is large), with step halving. The information has one row per word,
 joined to the others only through the shared parameters, so the Schur complement on the shared parameters solves each
 step in time linear in the words. A word's unopened observations with the same read weight (rounded to 0.02) pool, so
 the work grows with the words more than with the log. A refresh starts from the last one's fit. On the 2026-10-20 log
-(3,396 observations, 397 words, 1,870 pooled terms) a fit takes 0.07 s from scratch and 0.01 s from the last one; on a
-simulated log of 60 days (52,000 observations, 1,244 words, 16,563 terms), 0.43 s and 0.05 s.
+(3,396 observations, 397 words, 1,870 pooled terms) a fit takes 0.12 s from scratch and 0.03 s from the last one; on a
+simulated log of 60 days (52,000 observations, 1,244 words, 16,563 terms), 0.62 s and 0.16 s (with the word features
+of step 13, below).
+
+### Starting values from the word itself
+
+NEXT_STEPS step 13, PLAN.md row H. Once the vocabulary is the dictionary, its 27,000 entries with no history would all
+start from the intercept of a new word without an Anki card (14% on the 2026-10-20 log), so the planner could not tell
+them apart. So the prior mean of a word the reader hasn't vouched for (origin new or learning, card or not) adds its
+dictionary entry's word features (knowledge.word_features), each one more shared parameter of the fit:
+
+| Feature | Value | Why |
+|---|---|---|
+| rank | log10(rank / 1,000): +1 for each tenfold rarer | the most frequent words are met most |
+| kanji known | the share of its kanji found in words known at a glance | a compound of known kanji can be read |
+| all kanji known | 1 when it has kanji and all are known | |
+| kana, katakana, mixed | how it is written, against kanji alone (knowledge.script) | katakana gets its own baseline: an English loanword can be sounded out |
+| verb, adjective, adverb, other | the first sense's first JMdict tag, against a noun (knowledge.pos_group) | |
+| length | log2(characters / 2): +1 for each doubling | |
+| rare | JMdict marks no spelling common (common 0) | |
+| loan | JMdict names a source language other than English | |
+
+The reference word, with every feature 0, is a common two-character kanji noun of rank 1,000 none of whose kanji are
+known, so the origin intercepts keep their meaning. The loanword flag is the source language, not the loan field as
+such: JMdict's field marks every katakana word (3,890 have only "kata", no source), so a plain flag would repeat the
+katakana baseline; what it adds is a borrowing an English reader can't sound out (German アルバイト, Portuguese
+タバコ). A state word's entry is found once (dictionary.find, by spelling, reading and gloss; knowledge.word_entries)
+and kept by its JMdict id in knowledge.json, which later refreshes read back.
+
+A word marked known (setup's top words, an Anki sync) keeps its intercept and Anki interval alone: its lookup chance
+sits near its floor whatever the word is like (in the simulated reader, at the 2% checks of a recognised word), and as
+the larger part of the words with evidence (242 of 397 on the 2026-10-20 log) it would only pull the coefficients
+toward no effect.
+
+Kanji known at a glance come from the free flags of the last refresh (knowledge.json; in the harness, the day before),
+counting only free words with evidence of their own (an observation or a command), never the word itself. That closes
+three loops: a word's flag can't raise its own prior; a word free by its prior alone can't make its kanji known, so no
+chain of priors makes words free (日本 free, so 日曜日's prior rises until it is free, so 曜 is known, ...); and the fit
+never reads its own output, as the flags are from before it. What is left is that two words with evidence and a kanji
+in common raise each other's prior mean, which is what the feature is for, and each has evidence of its own to answer
+it. With no flags (a first refresh), no kanji are known and the feature is 0 until the next.
+
+Each coefficient is held toward 0, no effect, by a Gaussian prior with sd 0.5 (knowledge.WORD_SD). On these scales a
+word has about four features of size about 1, so before any data the features move its prior mean with an sd of
+about 1, the spread of words around their mean (the widths, 0.74 with a card and 1.0 without). Wider, a few words
+with much evidence swing every word without any: in a test refresh with one learning word never opened and 19 always
+opened, an sd of 1 moved the rank coefficient to +0.99 and labeled 79 unseen queue words known; 0.5 moved it to +0.29
+and labeled none. On the simulated reader 0.5 predicted first exposures best of 0.25, 0.5, 1 and 2 (below).
+
+knowledge.json "prior" carries what any entry's starting value needs: words (the coefficients), featured (the origins
+that take them), centre (the reference word's rank and length) and kanji (the kanji known at a glance the fit used).
+knowledge.prior_estimate(knowledge, origin, interval, entry) gives (k, sd) for any entry of data/dictionary.tsv (origin
+new for a word with no history); extension/src/prior.js priorOf(table, entry, {origin, interval}) gives the same in
+the extension, and tests/prior_cases.json holds cases both must agree on.
+
+The fit has 13 more shared parameters, 22 in all (the Schur complement grows with their square, but per word only with
+the features it has). On the 2026-10-20 log a fit takes 0.12 s from scratch (0.09 before) and 0.03 s from the last one
+(0.013); finding the state's 1,766 words in the dictionary takes 0.15 s once, and later refreshes read their ids back.
+A refresh that also chooses the day's reading model takes 1.9 s (1.4 before), a later one 0.3 s (as before). On the
+simulated log of 60 days, 0.62 s and 0.16 s a fit (0.50 and 0.12), a first refresh of the day 18.3 s (14.6) and a
+later one 1.9 s (1.8).
+
+On the simulated reader (`tools/sim/run.py priors`): every word has its entry in data/dictionary.tsv, 2,000 more
+entries spread over the dictionary's ranks join the queue (katakana among them), which chat's topical words follow in
+rank order, and each word not known starts at k0 = 0 + sum beta_j x_j + 0.8 z (z standard normal; beta: rank -1.2,
+kanji known +0.8, all kanji known +0.4, kana +0.3, katakana +0.8, verb -0.3, adverb -0.4, other +0.5, length -0.3, rare
+-0.5, loan -0.5, mixed and adjective 0). Its chance when read, sigmoid(-k0), held between the 2% checks of a word
+recognised and the 90% lookups of one not, sets its recall on the first day; a word at 90% was never met, any other
+was last met 10 to 100 days before. Known words are as before. Over 3 seeds of 28 days:
+
+- The word features against the flat start (the prior by origin and Anki interval alone), in log loss per observation
+  on each word's first 3 exposures while new or learning (4,183 observations), each day predicted from the days
+  before: -0.0141 (-0.0187 to -0.0100), better on 58 of 84 days: from 0.4858 to 0.4716, 14% of the way to the true
+  chances' 0.3867. With a coefficient sd of 0.25, -0.0122; 1, -0.0132; 2, -0.0108. On all observations, -0.0012.
+- The coefficients are recovered with the right sign where the data is rich and toward 0 where it is thin: rank -0.75,
+  -0.92 and -1.07 (90% intervals about +-0.3) against -1.18, -1.11 and -1.06 from least squares of the true k0 on the
+  features over the same words; kanji known +0.52, +0.22, +0.40 against +0.58 to +0.77. Most others' intervals hold the
+  truth and 0 both. They come out smaller than the truth because the fit maximizes over every word's k and the
+  coefficients together: with few observations per word its k stays near the prior mean, which then explains little
+  (the bias of penalized quasi-likelihood). With a rank slope of -1.2 and nothing else, 1,000 words with 1 observation
+  each give -0.80 to -0.86; with 10, -0.99 to -1.15; with 30, -1.11 to -1.22. The planner sees shrunken differences
+  between words, never invented ones.
+- How far the prior reaches: with the 2,000 extra entries never shown, so the coefficients come from the lexicon's
+  words (most within the first 5,000 ranks), their starting chances against the true ones: ranks 3,000 to 9,999, flat
+  26% against a true 69%, the features 48%; ranks 10,000 to 29,999, flat 26% against 76%, the features 60%. The
+  features halve the error, but rare words still start too well known: the intercepts and coefficients are learned
+  from words being shown, which reading and lookups teach, while the truth is the first day's.
+- Days of log the replay needs: of 11 simulated logs, replays of their first 5 days show the gain (the 90% interval
+  below 0) in 3, of 7 days in 7, of 21 days in 9. Over those 11 seeds of 21 days the gain is -0.0092 per observation
+  (-0.0112 to -0.0072), and after the first day (when the two start alike) -0.0109 a day with an sd of 0.0206 between
+  days: half of all logs would show it after about 10 days, 80% after about 22.
+
+On the 2026-10-20 log (`fw.py evaluate --models flat,fit`, 5 days), the coefficients barely leave 0: rank -0.31 (sd
+0.34 at the last fit), all others within 0.22 of 0; katakana, rare and loan have no featured word with evidence and
+stay at 0. On the first 3 exposures of new or learning words (338 observations, 34 opens) the features against the
+flat start are +0.0000 (-0.0031 to +0.0022), better on 2 of 5 days (the first day the two are the same by
+construction); on all first exposures -0.0000 (-0.0014 to +0.0008). The log can't show it yet: in the simulated reader 5
+days show it in 3 logs of 11, and the live gain is likely smaller than the simulated one while the coefficients sit
+this close to 0. Expect 2 to 4 weeks of log, and a gain only once words unlike the lexicon's (katakana, rare ones) are
+shown, since the coefficients for them have nothing to learn from yet.
+
+Starting chances on the web from that refresh's prior, for dictionary words with no history (origin new, no card; the
+flat start is 14% for every one):
+
+| Word | Rank | Script | Kanji known | k | Starting chance |
+|---|---|---|---|---|---|
+| 今日 | 138 | kanji | 2/2 | 2.35 | 9% |
+| 時間 | 117 | kanji | 2/2 | 2.37 | 9% |
+| 学校 | 344 | kanji | 2/2 | 2.22 | 10% |
+| 先生 | 360 | kanji | 2/2 | 2.22 | 10% |
+| 電話 | 579 | kanji | 1/2 | 1.94 | 13% |
+| 仕事 | 160 | kanji | 2/2 | 2.33 | 9% |
+| 毎日 | 534 | kanji | 2/2 | 2.17 | 10% |
+| 天気 | 3,101 | kanji | 1/2 | 1.72 | 15% |
+| 日本語 | 19,561 | kanji | 3/3 | 1.81 | 14% |
+| 大学生 | 4,962 | kanji | 3/3 | 1.99 | 12% |
+| 食べる | 165 | mixed | 0/1 | 2.11 | 11% |
+| 美しい | 628 | mixed | 0/1 | 2.36 | 9% |
+| 懐かしい | 2,103 | mixed | 0/1 | 2.29 | 9% |
+| ちょっと | 112 | kana | - | 2.35 | 9% |
+| やっぱり | 429 | kana | - | 2.17 | 10% |
+| いきなり | 1,822 | kana | - | 1.98 | 12% |
+| テレビ | 1,033 | katakana | - | 1.91 | 13% |
+| パソコン | 1,879 | katakana | - | 1.92 | 13% |
+| コンピュータ | 5,754 | katakana | - | 1.90 | 13% |
+| ストレス | 2,880 | katakana | - | 1.86 | 13% |
+| アルバイト | 4,841 | katakana | - | 1.86 | 13% |
+| インフレ | 13,866 | katakana | - | 1.65 | 16% |
+| リスク | 2,721 | katakana | - | 1.78 | 14% |
+| ワークショップ | 19,824 | katakana | - | 1.78 | 14% |
+| 概念 | 2,739 | kanji | 0/2 | 1.65 | 16% |
+| 措置 | 2,464 | kanji | 0/2 | 1.67 | 16% |
+| 憂鬱 | 6,777 | kanji | 0/2 | 1.53 | 18% |
+| 斡旋 | 9,629 | kanji | 0/2 | 1.48 | 18% |
+| 追徴 | 25,002 | kanji | 0/2 | 1.36 | 20% |
+| 範疇 | 9,790 | kanji | 0/2 | 1.48 | 19% |
+| 曖昧 | 2,987 | kanji | 0/2 | 1.85 | 14% |
+| 関数 | 10,796 | kanji | 0/2 | 1.47 | 19% |
+
+The order is right (frequent words of known kanji lowest, rare words of unknown kanji highest; 日本語 ranks 19,561
+because BCCWJ counts it as 日本 and 語), but the spread is far too narrow: 斡旋 or 追徴 would be looked up most times,
+not one in five. Until dictionary words are shown, the coefficients only know the lexicon's range, and the data says
+little even there; the simulated reader above shows the same, less so. The monthly probe (NEXT_STEPS step 7), known
+or not for words sampled across ranks, would be the evidence to pin the rank slope down before dictionary words are
+offered, once its marks feed the fit (they don't yet).
 
 ### Episodes and observations
 
@@ -643,15 +787,18 @@ score is the log loss of P(open) = read * q, with read from time on screen alone
 fixed for every model compared: the line rule depends on what was opened, so it weighs updates, never predictions.
 Chat rows count as well as web rows; episodes are fitted on but not scored. Per class (web and chat; known, learning
 and new by the word's status that day, from the word state's added and changed days; conjugated forms on their own;
-free and costly by each model's q) it gives the mean loss and seen over expected opens with an interval from
+free and costly by each model's q; first, each word's first 3 exposures, where its starting value decides most) it
+gives the mean loss and seen over expected opens with an interval from
 resampling days; for each model against the first, the paired loss difference day by day with its interval and the
 days it did better; and on a simulated log, the loss of the true chances, the floor no model can beat.
 
 A model is any object with fit(log, until), which learns from the log's events before `until`, and predict(obs),
 its P(lookup | read) for one observation; the module docstring lists what a log and an observation carry, including
 each observation's time on screen, words and depth, so a model may fit its own pace. "fit" is knowledge.Fit, refitted
-each day from the day before's (evaluate.CURRENT, the model knowledge.py runs); "today" is knowledge.Online, exactly
-the old replay's updates; "constant" is one chance per surface. The harness holds the reading model fixed, so the fit
+each day from the day before's, with the free flags carried from the day before as a refresh carries them
+(evaluate.CURRENT, the model knowledge.py runs); "flat" is the same fit without the word features, the prior by origin
+and Anki interval alone; "today" is knowledge.Online, exactly the old replay's updates; "constant" is one chance per
+surface. The harness holds the reading model fixed, so the fit
 runs at the log's pace and cap there.
 
 On the 2026-10-20 log (5 days scored), the fit against today's model, in log loss per observation with a 90% interval
@@ -664,7 +811,7 @@ log's overall difference (-0.0017 a day, sd 0.0043), a 90% interval needs about 
 
 ### The simulated reader
 
-tools/sim (`python3 tools/sim/run.py all`, about two minutes) is a reader whose memory, reading and lookup habits are
+tools/sim (`python3 tools/sim/run.py all`, about five minutes) is a reader whose memory, reading and lookup habits are
 known: each word's recall decays on an FSRS-4.5 curve and grows more after longer gaps, and a lookup lowers it; a
 word is read with the chance the replay's own formula gives (one depth per passage, so the line rule holds); a word
 read and not recognised is looked up with chance 0.9, one recognised with chance 0.02 (0.1 for a conjugated form),
@@ -674,7 +821,9 @@ volumes (web about 8,000 words and 5 lookups a day, chat about
 (truth.jsonl), so the real fit, calibrate and the harness read them unchanged. Its experiments: volumes,
 convergence of one word, recovery per class at 1, 2 and 4 weeks (and the reading model the fit picks), the chat
 offset against a true surface difference, the harness on a simulated log, the calibration window, the power of the
-delayed-start experiment, and recurrence intake. `run.py log DIR` writes a simulated state dir to look at.
+delayed-start experiment, recurrence intake, and starting values from the word itself (with `prior`, every word has
+its dictionary entry and words not known start from their features; Starting values from the word itself, above).
+`run.py log DIR` writes a simulated state dir to look at.
 
 tests/test_yardsticks.py holds the check every model change must pass: a word starting at 27% whose true chance is
 5%, shown 3 times a day, crosses 8% within 300 exposures. The fit passes it twice: as fitted (the prior learns from the
@@ -734,3 +883,13 @@ Step 8 (labels from the model) and step 6 (the delayed-start experiment):
   and kept at its defaults when the best pair is on the grid's edge.
 - The free line has hysteresis on each word's uncertainty, decided once per refresh and sent to every consumer.
 - The daily controller is gone: the challenge is normal's budget.
+
+Step 13, starting values from the word itself:
+
+- The prior's word features apply to words not marked known, so known words, most of the evidence, don't flatten them.
+- Kanji known at a glance come from the last refresh's free words with evidence, never the word itself, so neither a
+  word's own flag nor a chain of priors raises a prior.
+- The coefficients are held toward no effect by an sd of 0.5, so a few words with much evidence can't move every word
+  without any.
+- The prior of any dictionary entry is computed the same way in Python and JavaScript from knowledge.json, checked on
+  shared cases.

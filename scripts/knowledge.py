@@ -15,11 +15,14 @@ dictionary form (inflection.py: T3 glosses conjugated verbs whole).
 Fit: one penalized maximum-likelihood fit of the whole log on every refresh (NEXT_STEPS step 4), replacing the online
 updates and their pull toward the prior. Each word's k is held toward its prior mean by a Gaussian prior whose width is
 fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by origin
-and card, and the uncapped ln(1 + Anki interval)); evidence weighs half as much every EVIDENCE_DAYS; known and learn
-commands are one-sided pseudo-observations; a lookup of a conjugated form counts FORM_WEIGHT. Each word's uncertainty
-is the fit's curvature (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a
-grid, on both surfaces. The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the
-online updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
+and card, the uncapped ln(1 + Anki interval), and for a word not marked known its dictionary entry's frequency rank,
+kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
+13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as
+much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
+counts FORM_WEIGHT. Each word's uncertainty is the fit's curvature (Laplace). The reading model (pace and cap) is
+chosen once a day by profile likelihood over a grid, on both surfaces. The fit is the Fit class, which evaluate.py's
+"fit" model (evaluate.CURRENT) runs too; the online updates it replaced are the Online class, kept as evaluate.py's
+"today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
@@ -33,6 +36,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import statistics
 import sys
 import time
@@ -616,10 +620,19 @@ FIT_ITERATIONS = 60
 # regression on its features (features): with an Anki card, an intercept by origin (origin_at; the names say new,
 # learning and known) plus a slope on ln(1 + interval), centred on the old prior 0.5 + 0.8 ln(1 + interval); without
 # one, an intercept by origin, centred on the old neutral prior (1.0) and, for words marked known, the planner's
-# fwlib.KNOWN_PRIOR_K.
+# fwlib.KNOWN_PRIOR_K; for a word not marked known, plus its word features.
 SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
+# And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD: on their scales
+# (a tenfold rank, a doubling of length, a script or part of speech, all kanji known) a typical word has about four
+# features of size 1, so 0.5 lets them move its prior mean by about 1 before the data says so, the spread of words
+# around their mean (WIDTHS). Wider, a few words with much evidence swing every unseen word; in the simulated reader
+# 0.5 predicts first exposures best of 0.25, 0.5, 1 and 2 (tools/sim/run.py priors).
+WORD_FEATURES = ('rank', 'kanji known', 'all kanji known', 'kana', 'katakana', 'mixed', 'verb', 'adjective', 'adverb',
+                 'other', 'length', 'rare', 'loan')
+WORD_SD = 0.5
+SHARED.update({name: (0.0, WORD_SD) for name in WORD_FEATURES})
 SHARED_NAMES = tuple(SHARED)
 T3, FORM = SHARED_NAMES.index('t3'), SHARED_NAMES.index('form')
 ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
@@ -672,15 +685,118 @@ def origin_at(word, day):
     return origin
 
 
-def features(interval, origin):
+KANJI = re.compile('[㐀-䶿一-鿿豈-﫿]')  # the kanji of a written form, as dictionary.KANJI
+KANJI_LIKE = '々〆ヶヵ'                 # written among kanji (人々, 一ヶ月): a word of kanji and these is all kanji
+RANK_CENTRE = 1000         # the reference word of the word features: the 1,000th most frequent entry,
+LENGTH_CENTRE = 2          # two characters long, written in kanji alone, a noun, marked common, not borrowed from a
+                           # language other than English, none of its kanji known at a glance
+FEATURED = ('new', 'learning')  # the origins whose words take the word features (word_features)
+
+
+def script(ja):
+    """How a written form is written: 'kanji' (kanji alone, with 々 〆 ヶ ヵ), 'mixed' (kanji and kana), 'kana' (no
+    kanji, some hiragana) or 'katakana' (no kanji, no hiragana: katakana, letters or digits)."""
+    if KANJI.search(ja):
+        return 'kanji' if all(KANJI.match(c) or c in KANJI_LIKE for c in ja) else 'mixed'
+    return 'kana' if any('ぁ' <= c <= 'ゖ' or c in 'ゝゞ' for c in ja) else 'katakana'
+
+
+def pos_group(pos):
+    """A part-of-speech group from JMdict tags, the first sense's first: 'noun' (n..., num, ctr, pn), 'verb' (v...),
+    'adjective' (adj...), 'adverb' (adv...) or 'other' (expressions, interjections, particles, conjunctions,
+    auxiliaries, prefixes, suffixes)."""
+    tag = pos[0] if pos else ''
+    if tag.startswith('n') or tag in ('num', 'ctr', 'pn'):
+        return 'noun'
+    for prefix, group in (('v', 'verb'), ('adj', 'adjective'), ('adv', 'adverb')):
+        if tag.startswith(prefix):
+            return group
+    return 'other'
+
+
+def kanji_counts(words):
+    """{kanji: how many of these words (as written) have it}: what word_features counts as known at a glance."""
+    counts = {}
+    for ja in words:
+        for c in set(KANJI.findall(ja)):
+            counts[c] = counts.get(c, 0) + 1
+    return counts
+
+
+def word_features(entry, known=None, own=False, centre=(RANK_CENTRE, LENGTH_CENTRE)):
+    """A dictionary entry's word features, {name: value} (WORD_FEATURES; zeros left out), from its fields
+    (dictionary.py: ja, rank, common, loan, pos, kanji):
+      rank             log10(rank / RANK_CENTRE): +1 for each tenfold rarer (centre: the reference word's rank and
+                       length, RANK_CENTRE and LENGTH_CENTRE)
+      kanji known      the share of its kanji in words known at a glance (known: {kanji: words}, kanji_counts of the
+                       free words; own: whether the entry's word is one of them, so its own kanji don't count)
+      all kanji known  1 when it has kanji and all are known
+      kana, katakana, mixed  how it is written (script), against kanji alone
+      verb, adjective, adverb, other  its part of speech (pos_group), against a noun
+      length           log2(characters / LENGTH_CENTRE): +1 for each doubling
+      rare             1 when JMdict doesn't mark it common
+      loan             1 when JMdict names a source language other than English: every katakana word is a loan
+                       (kata: no source given), so the plain flag would repeat the katakana baseline
+    """
+    ja, rank = entry['ja'], entry.get('rank')
+    x = {'rank': math.log10(rank / centre[0]) if rank else 0.0, 'length': math.log2(max(1, len(ja)) / centre[1])}
+    kanji = entry.get('kanji') or []
+    if kanji and known:
+        mine = set(kanji) if own else ()
+        share = sum(1 for c in kanji if known.get(c, 0) - (c in mine) > 0) / len(kanji)
+        if share:
+            x['kanji known'] = share
+        if share == 1:
+            x['all kanji known'] = 1.0
+    for name in (script(ja), pos_group(entry.get('pos'))):
+        if name in WORD_FEATURES:
+            x[name] = 1.0
+    if not entry.get('common'):
+        x['rare'] = 1.0
+    if any(lang not in ('', 'eng', 'kata') for lang in (entry.get('loan') or '').split(',')):
+        x['loan'] = 1.0
+    return {name: value for name, value in x.items() if value}
+
+
+def features(interval, origin, entry=None, known=None, own=False):
     """A word's prior features, {shared parameter: value}, and the kind whose prior width it takes: with an Anki card,
     its origin's card intercept (origin_at) and ln(1 + interval in days), uncapped; without one, its origin's
-    intercept. The hook for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words,
-    script, word type, length): each is one more shared parameter, with its prior in SHARED."""
+    intercept. A word of an origin in FEATURED (one the reader hasn't vouched for) with a dictionary entry adds the
+    entry's word features (word_features, with known and own); a word marked known keeps its intercept: its lookup
+    chance is near its floor whatever the word is like, and its features would only blur theirs."""
     origin = origin if origin in fwlib.ORIGINS else 'new'
     if interval is not None:
-        return {f'card {origin}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
-    return {origin: 1.0}, 'none'
+        x, kind = {f'card {origin}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
+    else:
+        x, kind = {origin: 1.0}, 'none'
+    if entry is not None and origin in FEATURED:
+        x.update(word_features(entry, known, own))
+    return x, kind
+
+
+def word_entries(words, ids=None):
+    """{ja: its dictionary entry, or None} for the word state's entries (dictionary.find, by spelling, reading and
+    gloss), or by its JMdict id where ids ({ja: id}, knowledge.json's) has one: a word keeps the entry it was first
+    found as, and finding it again costs ten times as much. {} without data/dictionary.tsv."""
+    import dictionary  # here: only the prior needs it
+    if not dictionary.PATH.exists():
+        return {}
+    d, ids = dictionary.load(), ids or {}
+    return {w['ja']: d.get(ids[w['ja']]) if w['ja'] in ids else d.find(w['ja'], w.get('kana') or '', w.get('en') or '')
+            for w in words}
+
+
+def evidenced(log, until):
+    """The words with evidence in a log before `until`: an observation or a command."""
+    out = set()
+    for event in log.events:
+        if event.at >= until:
+            break
+        if hasattr(event, 'obs'):
+            out.update(o.word for o in event.obs)
+        else:
+            out.add(event.word)
+    return out
 
 
 def _solve(a, b):
@@ -715,13 +831,23 @@ class Fit:
     diagonal for the words, joined only through the shared parameters) the Schur complement solves in time linear in
     the words; the widths by EM toward WIDTHS. Each word's sd is its k's from the inverse of the information (Laplace),
     the shared parameters' uncertainty included. frozen: the shared parameters and widths stay at their priors, as for
-    one word among many others. start: what an earlier fit learned (state()), to start from."""
+    one word among many others. start: what an earlier fit learned (state()), to start from.
 
-    def __init__(self, log, until, pace=None, top=None, start=None, frozen=False):
-        self.until, self.day, self.frozen = until, day_of(until - 1), frozen
+    The word features (features, word_features) come from each word's dictionary entry (log.entries) and, for the
+    kanji known at a glance, from free: {ja: free flag} at the last refresh (or the day before). Its kanji are known
+    from the free words with evidence before `until` (observations or a command), the word itself left out: a word free
+    by its prior alone doesn't count, so no chain of priors can make words free, and the flags are from before the
+    fit, so it never reads its own output (docs/adaptive-difficulty.md). plain: no word features (the prior by origin
+    and Anki interval alone), for comparison."""
+
+    def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, free=None, plain=False):
+        self.until, self.day, self.frozen, self.plain = until, day_of(until - 1), frozen, plain
         self.pace, self.top = pace or log.pace, top or log.top
         self.intervals = log.intervals
         self.by_ja = {w['ja']: w for w in log.words}
+        self.entries = {} if plain else getattr(log, 'entries', None) or {}
+        self.own = {ja for ja in evidenced(log, until) if (free or {}).get(ja)} if self.entries else set()
+        self.known, self._features = kanji_counts(self.own), {}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
         self._terms(log)
         start = start or {}
@@ -746,7 +872,11 @@ class Fit:
         return i
 
     def features(self, ja):
-        return features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day))
+        found = self._features.get(ja)
+        if found is None:
+            found = self._features[ja] = features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day),
+                                                  self.entries.get(ja), self.known, ja in self.own)
+        return found
 
     def _terms(self, log):
         pooled, self.episodes, self.commands = {}, [], []
@@ -985,21 +1115,22 @@ def nested_loglik(log, fit, pace, top):
     return total
 
 
-def tune(log, until):
+def tune(log, until, free=None):
     """The reading model (pace, top) by profile likelihood over the grid PACES x READ_MAXES: at a point the whole log is
     fitted (Fit, starting from the point before) and scored by the likelihood of what was opened under the reading
     model the read chances come from (nested_loglik), on both surfaces. The search scores every other point first
     (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
     inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
     defaults by TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible
-    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word)."""
+    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word).
+    free: the free flags the fits take (Fit)."""
     opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until for o in e.obs)
     scores, start = {}, None
 
     def score(i, j):
         nonlocal start
         if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
-            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start)
+            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start, free=free)
             start = fit.state()
             scores[(i, j)] = nested_loglik(log, fit, PACES[i], READ_MAXES[j])
 
@@ -1066,16 +1197,17 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
                    done=()):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
-    fit before: start, a fit's state, for the first), the free flags carried from day to day (free_flags, from flags,
-    else the priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events).
-    done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    fit before: start, a fit's state, for the first; with the free flags of the day before), the free flags carried
+    from day to day (free_flags, from flags, else the priors'), and the sentence prices from the sentence ends before
+    (sentence_prices of sentence_events). done: days to skip (their sums are known). Returns (records, {day: the free
+    flags at its start})."""
     out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
     for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:
             continue
         if day_of(at) != day:
             day = day_of(at)
-            fit = Fit(log, day_start(day), pace, top, start=start)
+            fit = Fit(log, day_start(day), pace, top, start=start, free=flags)
             start = fit.state()
             flags.update(free_flags(fit, fit.words, flags))
             starts[day] = dict(flags)
@@ -1581,7 +1713,7 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
-MODEL = 'fit 1'  # the reading model is chosen again when this changes (knowledge.json "reading")
+MODEL = 'fit 2'  # the reading model is chosen again when this changes (knowledge.json "reading")
 
 
 def word_stats(log, now_ms):
@@ -1608,11 +1740,16 @@ def word_stats(log, now_ms):
 
 
 def prior_table(fit):
-    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by origin
-    (origin_at), plus interval times ln(1 + days); without one, by origin; and the sd of each kind (prior_estimate)."""
+    """What a word without evidence assumes, by kind (knowledge.json "prior"), for prior_estimate: k's mean with an Anki
+    card, by origin (origin_at), plus interval times ln(1 + days); without one, by origin; the sd of each kind; and
+    for a word of an origin in featured, plus the word features' coefficients (words, word_features) with what they
+    are measured from: the kanji known at a glance (kanji, every kanji of the free words with evidence the fit took)
+    and the reference word's rank and length (centre)."""
     shared = fit.shared()
     return {'card': {s: shared[f'card {s}'] for s in ORIGINS}, 'interval': shared['interval'],
-            'none': {s: shared[s] for s in ORIGINS}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
+            'none': {s: shared[s] for s in ORIGINS}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()},
+            'words': {name: shared[name] for name in WORD_FEATURES}, 'featured': list(FEATURED),
+            'centre': {'rank': RANK_CENTRE, 'length': LENGTH_CENTRE}, 'kanji': ''.join(sorted(fit.known))}
 
 
 def refresh(now=None):
@@ -1624,7 +1761,8 @@ def refresh(now=None):
 
     knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's), mu (its prior mean), free
     (known at a glance, with hysteresis against the last refresh's flag: free_flag), n (evidence weight), obs, opened,
-    recent (opens in the last RECENT_DAYS days), last and history; offset (the web's 0, chat's fitted); fit (the
+    recent (opens in the last RECENT_DAYS days), last and history, and id (the JMdict id of its dictionary entry,
+    word_entries, which the next refresh reuses); offset (the web's 0, chat's fitted); fit (the
     shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
     sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
     today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
@@ -1649,19 +1787,20 @@ def refresh(now=None):
         fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == MODEL
         pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
         log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
-        if not fresh:  # the reading model, once a day
-            reading = dict(tune(log, now_ms), day=today, model=MODEL)
-            pace, top = reading['pace'], reading['top']
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
+        before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+        log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
+                                                    and isinstance(e.get('id'), int)})
+        if not fresh:  # the reading model, once a day
+            reading = dict(tune(log, now_ms, before), day=today, model=MODEL)
+            pace, top = reading['pace'], reading['top']
         start = None
         if (previous.get('fit') or {}).get('model') == MODEL:  # start from the last refresh's fit
             start = {'shared': previous['fit'].get('shared'), 'widths': previous['fit'].get('widths'),
                      'k': {ja: e['k'] for ja, e in known.items() if isinstance(e, dict) and e.get('n')}}
-        fit = Fit(log, now_ms, pace, top, start=start)
+        fit = Fit(log, now_ms, pace, top, start=start, free=before)
         stats = word_stats(log, now_ms)
-        flags = free_flags(fit, [w['ja'] for w in state['words']],
-                           {ja: e['free'] for ja, e in known.items() if isinstance(e, dict)
-                            and isinstance(e.get('free'), bool)})
+        flags = free_flags(fit, [w['ja'] for w in state['words']], before)
         sentences = sentence_events(rows, contexts, now_ms, pace, top)
         prices = sentence_prices(sentences, now_ms)
         changes, challenge = feedback.intensity_changes(feedback.default_path()), challenge_of(state)
@@ -1673,7 +1812,7 @@ def refresh(now=None):
         # the free flags to carry: at the start of the last day summed, else the last refresh's
         carried = previous.get('dailyFree') if isinstance(previous.get('dailyFree'), dict) else {}
         flags_then = carried.get('free') if carried.get('day') in done and isinstance(carried.get('free'), dict) else \
-            {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+            before
         records, starts = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags_then,
                                          fit.state(), set(done))
         totals = dict(done, **day_totals(records, changes, challenge))
@@ -1687,6 +1826,8 @@ def refresh(now=None):
             k, sd = fit.estimate(ja)
             words[ja] = {'k': round(k, 3), 'sd': round(sd, 3), 'mu': round(fit.prior(ja)[0], 3), 'free': flags[ja],
                          'n': 0.0, 'obs': 0}
+            if log.entries.get(ja):
+                words[ja]['id'] = log.entries[ja]['id']
             s, i = stats.get(ja), fit.index.get(ja)
             if s:  # a word the log has something on
                 words[ja].update(n=round(fit.n[i], 2) if i is not None else 0.0, obs=s['obs'], opened=s['opened'],
@@ -1748,17 +1889,27 @@ def word_estimate(knowledge, ja, surface='browser'):
     return p, entry['k'], entry['sd']
 
 
-def prior_estimate(knowledge, origin, interval=None):
+def prior_estimate(knowledge, origin, interval=None, entry=None):
     """(k, sd) a word without an estimate in knowledge.json assumes, from its "prior" (prior_table): by its Anki
-    interval and origin (origin_at: new, learning or known), else its origin. None when knowledge.json has no prior."""
+    interval and origin (origin_at: new, learning or known), else its origin; and, given its dictionary entry (any
+    entry of data/dictionary.tsv: a word with no history is origin new) and an origin the table's featured has, by
+    the entry's word features (word_features, with the table's kanji known and centre). None when knowledge.json has
+    no prior. extension/src/prior.js computes the same (tests/prior_cases.json)."""
     table = knowledge.get('prior')
     if not isinstance(table, dict):
         return None
+    origin = origin if origin in ORIGINS else 'new'
     x, kind = features(interval, origin)
     try:
+        if entry is not None and origin in (table.get('featured') or ()):
+            centre = table.get('centre') or {}
+            x.update(word_features(entry, {c: 1 for c in table.get('kanji') or ''}, False,
+                                   (centre.get('rank', RANK_CENTRE), centre.get('length', LENGTH_CENTRE))))
+        words = table.get('words') or {}
         mean = sum(value * (table['interval'] if name == 'interval' else
-                            table['card'][name[5:]] if name.startswith('card ') else table['none'][name])
+                            table['card'][name[5:]] if name.startswith('card ') else
+                            table['none'][name] if name in ORIGINS else words.get(name, 0.0))
                    for name, value in x.items())
         return mean, table['sd'][kind]
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, AttributeError):
         return None

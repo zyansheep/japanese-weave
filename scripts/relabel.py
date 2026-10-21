@@ -53,12 +53,12 @@ def preview(home=None, now=None):
     fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == knowledge.MODEL
     pace, top = (reading['pace'], reading['top']) if fresh else (knowledge.PACE_MS, knowledge.READ_MAX)
     log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
-    if not fresh:
-        reading = dict(knowledge.tune(log, now_ms), day=today, model=knowledge.MODEL)
-        pace, top = reading['pace'], reading['top']
-    fit = knowledge.Fit(log, now_ms, pace, top)
     known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
     before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
+    if not fresh:
+        reading = dict(knowledge.tune(log, now_ms, before), day=today, model=knowledge.MODEL)
+        pace, top = reading['pace'], reading['top']
+    fit = knowledge.Fit(log, now_ms, pace, top, free=before)
     flags = knowledge.free_flags(fit, [w['ja'] for w in state['words']], before)
     stats = knowledge.word_stats(log, now_ms)
     commanded = {c['word'] for c in commands}

@@ -336,11 +336,23 @@ class Refresh(Home):
         self.assertEqual(len(words), len(world.state()['words']))  # every word, with its fitted prior if nothing else
         self.assertTrue(all(isinstance(e['free'], bool) and e['sd'] > 0 for e in words.values()))
         self.assertEqual(second['offset']['browser'], 0.0)
-        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd'})
+        self.assertEqual(set(second['prior']), {'card', 'interval', 'none', 'sd', 'words', 'featured', 'centre',
+                                                'kanji'})
         for origin in fwlib.ORIGINS:
             k, sd = knowledge.prior_estimate(second, origin)
             self.assertEqual((k, sd), (second['prior']['none'][origin], second['prior']['sd']['none']))
         self.assertIsNone(knowledge.prior_estimate({}, 'known'))
+        # every word the log has nothing on has the prior any dictionary entry gets from knowledge.json alone
+        entries = knowledge.word_entries(world.state()['words'])
+        intervals = {r['ja']: r['interval'] for r in world.anki_rows()}
+        today = evaluate.day_of(now * 1000)
+        unseen = [w for w in world.state()['words'] if not words[w['ja']]['obs'] and entries.get(w['ja'])]
+        self.assertGreater(len(unseen), 1000)
+        for w in unseen:
+            k, sd = knowledge.prior_estimate(second, knowledge.origin_at(w, today), intervals.get(w['ja']),
+                                             entries[w['ja']])
+            self.assertAlmostEqual(words[w['ja']]['mu'], k, delta=0.002)
+            self.assertAlmostEqual(words[w['ja']]['sd'], sd, delta=0.002)
         chat = second['calibration']['classes']['t3']['classes']['sentences']
         self.assertGreater(chat['expected'], 0)  # whole sentences are priced
         self.assertTrue(0 < second['sentencePrice']['t3'] < 1)
