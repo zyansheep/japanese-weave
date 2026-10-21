@@ -376,10 +376,11 @@ know is worth teaching it.
   flags at the start of the last day summed), reused while nothing they depend on changes: the model's version, the
   reading model, the challenge, and how much of the log, its interactions and the intensity changes came before the
   day's end. A refresh then fits twice (the whole log, and the log before today), and the first one of a day also
-  chooses the reading model (about a dozen fits). On the 2026-10-20 log a refresh takes 0.26 to 0.30 s, the first of a
-  day 0.9 s, and 1.4 s with nothing cached (version 1: 0.21 s). On a simulated log of 60 days (52,000 observations),
-  1.5 s, the day's first about 7 s and 13.7 s with nothing cached (version 1: 1.25 s, and 5.9 s for the day's first,
-  which tuned its reading model by 12 replays). Reading the log (evaluate.extract) takes about 1 s of that 1.5 s.
+  chooses the reading model (about a dozen fits). On the 2026-10-20 log a refresh takes 0.26 to 0.30 s, and 0.9 s with
+  nothing cached and the reading model to choose (version 1: 0.21 s). On a simulated log of 60 days (52,000
+  observations), 1.4 to 1.5 s, the day's first 6.7 s and 11 s with nothing cached (version 1: 1.25 s, and 5.9 s for the
+  day's first, which tuned its reading model by 12 replays). Reading the log (evaluate.extract) takes about 1 s of
+  that 1.5 s.
 - The native host's state reply carries, per word, k, its uncertainty and whether it is free, and the challenge and
   normal's budget. They are not part of the word-state version, so the extension's cache isn't cleared when they
   change.
