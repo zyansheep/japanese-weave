@@ -34,6 +34,7 @@ import { applySwaps, flatten, locate, toNode } from '../../extension/src/text.js
 import { costUsd } from '../../extension/src/usage.js';
 import { hashKey } from '../../extension/src/hash.js';
 import { MAX_BATCH, BATCH as BATCHES, FULL_BATCH, PARALLEL as PARALLELS } from '../../extension/src/models.js';
+import { judgedPassage, overlaps } from './oracle.mjs';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const [model = 'gemini-3.8-flash', passagesPath = here('corpus.json')] = process.argv.slice(2);
@@ -125,32 +126,12 @@ function placed(p, swaps) {
 }
 const wordsOf = (s) => s.words || [s.word || s.f];
 
-// The oracle's entries for a passage, each place as a span of the passage's text.
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// whole words, a possessive included ("grandfather" in "grandfather's"), not a contraction ("can" in "can't")
-const spans = (text, en) => [...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}'’])${escape(en)}(?![\\p{L}\\p{N}]|['’](?!s\\b))`, 'giu'))]
-  .map((m) => ({ start: m.index, end: m.index + m[0].length }));
+// The oracle's entries for a passage, each place as a span of the passage's text (oracle.mjs).
 const judged = new Map();
 function judgedFor(p) {
-  if (judged.has(p.id)) return judged.get(p.id);
-  const o = oracle[p.id];
-  if (!o) { judged.set(p.id, null); return null; }
-  if (o.text && o.text !== p.text) console.warn(`oracle: ${p.id} has another text`);
-  const parse = (entries = []) => entries.flatMap((e) => {
-    const at = e.indexOf('=');
-    const [en, which] = e.slice(0, at).split('#');
-    const ja = e.slice(at + 1).split('|');
-    const all = spans(p.text, en);
-    if (!all.length) console.warn(`oracle: ${p.id}: "${en}" is not in the passage`);
-    const pick = which ? which.split(',').map(Number) : all.map((_, i) => i);
-    return pick.filter((i) => all[i]).map((i) => ({ key: `${en}#${i}`, en, ja, ...all[i] }));
-  });
-  const j = { use: parse(o.use), ok: parse(o.ok), not: parse(o.not), sentences: (o.sentences || []).map((s) => s.trim()),
-    bad: new Set(o.bad || []) };
-  judged.set(p.id, j);
-  return j;
+  if (!judged.has(p.id)) judged.set(p.id, judgedPassage(p, oracle[p.id]));
+  return judged.get(p.id);
 }
-const overlaps = (a, b) => a.start < b.end && b.start < a.end;
 // What the oracle says of a passage's shown swaps: the "use" places covered, and each shown word as right, fine, wrong or
 // unjudged; a sentence the oracle lists as rendered whole when a sentence swap replaces it.
 function judge(p, shown) {
