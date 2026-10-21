@@ -56,13 +56,13 @@ export function safeOptions(flags, span) {
 
 // The file's text from rows { id, ja, kana, gloss, flag, rank }: in the dictionary's rank order (words that aren't
 // entries last), then by Japanese and gloss.
-export function formatSenses(rows, { version, model, thinking } = {}) {
+export function formatSenses(rows, { version, model, thinking, samples = 1 } = {}) {
   // Infinity - Infinity is NaN, which falls through to the next key like 0
   const sorted = [...rows].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
     a.ja.localeCompare(b.ja) || a.kana.localeCompare(b.kana) || a.gloss.localeCompare(b.gloss));
   const safe = rows.filter((r) => r.flag === 's').length;
   return [
-    `# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt ${version}, ${model}${thinking === false ? ', no thinking' : ''}), described in docs/matcher.md.`,
+    `# Japanese Weave sense flags, format 1: built by tools/sense-flags.mjs (prompt ${version}, ${model}${thinking === false ? ', no thinking' : ''}${samples > 1 ? `, safe in all of ${samples} samples` : ''}), described in docs/matcher.md.`,
     '# A pair of an entry (id: JMdict sequence number, empty for a word that is not one; ja and kana as the word state or the dictionary writes them) and one English gloss (as matcher.js glossAlternatives writes it):',
     `# s safe, d doubtful. A pair not listed, and any gloss of closed-class English, is doubtful. ${rows.length} pairs, ${safe} safe.`,
     SENSES_FIELDS.join('\t'),

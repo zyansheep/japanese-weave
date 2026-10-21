@@ -82,7 +82,8 @@ export function planPassage(text, spans, flags, { sentences = true, maxWords = D
 export const needsCall = (plan) => plan.spans.some((s) => s.doubtful.length > 0) || plan.sentences.length > 0;
 
 // The shortest stretch of the text around [start, end), widened a word at a time, that occurs once in the text and holds
-// its English once as a whole word, so text.js locate puts a swap there.
+// its English once as a whole word, so text.js locate puts a swap there. Where there is none (the first "I" of "I said I
+// would. Then I said no."), the English alone, which locate places only if it occurs once.
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const count = (hay, needle, whole) => (whole
   ? [...hay.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${escape(needle)}(?![\\p{L}\\p{N}])`, 'gu'))].length
@@ -101,7 +102,7 @@ export function contextFor(text, start, end) {
     if (left && (step % 2 === 1 || !right)) s -= left[0].length;
     else e += right[0].length;
   }
-  return t.slice(s, e);
+  return o;
 }
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';

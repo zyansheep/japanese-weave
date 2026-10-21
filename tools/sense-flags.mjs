@@ -28,10 +28,13 @@ import { costUsd } from '../extension/src/usage.js';
 import { functionGloss, toHiragana, formatSenses, parseSenses } from '../extension/src/senses.js';
 import { spendLog, meter } from './prompt-lab/spend.mjs';
 
-// Bumped whenever the prompt or the answer's shape changes: the cache and the flags file name it.
-export const FLAG_VERSION = 1;
+// Bumped whenever the prompt or the answer's shape changes: the cache and the flags file name it. PROMPT=1 reruns an
+// older one. Prompt 1 judged each pair from the entry's senses alone; its flags changed between two runs for common
+// words (時 "time", 行く "go", 仕事 "work" safe in one, doubtful in the other), and 17 of 140 judged safe hits in the
+// lab were wrong. Prompt 2 also shows, for each gloss, the other common words that share that English (docs/matcher.md).
+export const FLAG_VERSION = 2;
 
-export const FLAG_PROMPT = `You sort English-Japanese word pairs for a browser extension that replaces English words on web pages with Japanese words the reader is learning. For SAFE pairs, code makes the swap wherever the English occurs, without reading the sentence. For DOUBTFUL pairs, a model reads each sentence first.
+const FLAG_RULES = `You sort English-Japanese word pairs for a browser extension that replaces English words on web pages with Japanese words the reader is learning. For SAFE pairs, code makes the swap wherever the English occurs, without reading the sentence. For DOUBTFUL pairs, a model reads each sentence first.
 
 A pair is SAFE when, wherever that English word or phrase appears in ordinary English prose (news, social media, comments, blogs, shops), in any of its forms (plural, past, -ing, -er, -est), this Japanese word says the same thing at least 95 times in 100: a reader of the sentence with that one word swapped would understand what the English says.
 
@@ -45,9 +48,17 @@ It is DOUBTFUL when, counting how often each use turns up in real text (not whet
 
 Safe, for comparison: dog 犬, Tuesday 火曜日, library 図書館, delicious 美味しい, cheap 安い, slowly ゆっくり, to swim 泳ぐ, homework 宿題.
 
-When unsure, choose doubtful: a doubtful pair is still used once a model has read its sentence, while a wrong safe pair puts a wrong word on the page.
+When unsure, choose doubtful: a doubtful pair is still used once a model has read its sentence, while a wrong safe pair puts a wrong word on the page.`;
+export const FLAG_PROMPTS = {
+  1: `${FLAG_RULES}
 
-Each entry is a Japanese word with its reading, its parts of speech (JMdict codes) and its English senses (senses separated by |), followed by numbered English words or phrases to judge for it. Answer with the numbers of the safe pairs and of the doubtful pairs; every number in exactly one list.`;
+Each entry is a Japanese word with its reading, its parts of speech (JMdict codes) and its English senses (senses separated by |), followed by numbered English words or phrases to judge for it. Answer with the numbers of the safe pairs and of the doubtful pairs; every number in exactly one list.`,
+  2: `${FLAG_RULES}
+
+After an English word, "also" lists other common Japanese words that have the same English among their meanings, the most frequent first. Where some of them are the usual translation in other uses ("time" is 時間 for an amount of time, 回 for "three times", 時 for "when"), the pair is doubtful. It is safe only where this word is the usual translation in almost every use; a katakana loanword, a formal synonym or a rare word alongside it doesn't make it doubtful by itself.
+
+Each entry is a Japanese word with its reading, its parts of speech (JMdict codes) and its English senses (senses separated by |), followed by numbered English words or phrases to judge for it, each perhaps with its "also". Answer with the numbers of the safe pairs and of the doubtful pairs; every number in exactly one list.`,
+};
 
 export const FLAG_SCHEMA = {
   type: 'object',
@@ -98,19 +109,32 @@ export function pairsFor({ dictionary, words = [], all = false }) {
     }
   }
   if (all) for (const e of dictionary) if (e.swap) add(`${e.ja}\t${e.kana}`, fromEntry(e), e.glosses.flatMap((s) => glossAlternatives(s)));
+  // English -> the ranked entries with it among their glosses, most frequent first, for the "also" of prompt 2
+  const byGloss = new Map();
+  for (const e of dictionary) {
+    if (e.score === null) continue;
+    for (const g of new Set(e.glosses.flatMap((sense) => glossAlternatives(sense)))) {
+      if (!byGloss.has(g)) byGloss.set(g, []);
+      byGloss.get(g).push(e);
+    }
+  }
   const out = { judge: [], closed: [] };
   for (const g of [...groups.values()].sort((a, b) => a.rank - b.rank || a.ja.localeCompare(b.ja))) {
     const entry = { id: g.id, ja: g.ja, kana: g.kana, pos: g.pos, senses: g.senses };
     for (const gloss of g.glosses) {
-      const pair = { key: `${g.ja}\t${g.kana}\t${gloss}`, id: g.id, ja: g.ja, kana: g.kana, gloss, entry };
+      const others = (byGloss.get(gloss) || []).filter((e) => e.id !== g.id && e.ja !== g.ja);
+      const pair = { key: `${g.ja}\t${g.kana}\t${gloss}`, id: g.id, ja: g.ja, kana: g.kana, gloss, entry,
+        also: others.slice(0, ALSO).map((e) => `${e.ja} (${e.glosses[0].slice(0, 2).join('; ')})`), more: Math.max(0, others.length - ALSO) };
       out[functionGloss(gloss) ? 'closed' : 'judge'].push(pair);
     }
   }
   return out;
 }
+const ALSO = 4;
 
-// A call's user message: each entry once, then its pairs numbered from 1 across the call.
-export function flagContent(pairs) {
+// A call's user message: each entry once, then its pairs numbered from 1 across the call, from prompt 2 each with the
+// other words that share its English ("also").
+export function flagContent(pairs, version = FLAG_VERSION) {
   const lines = [];
   let last = null;
   pairs.forEach((p, i) => {
@@ -119,7 +143,8 @@ export function flagContent(pairs) {
       const senses = p.entry.senses.map((s) => s.join('; ')).join(' | ');
       lines.push(`${p.ja} (${p.kana}${p.entry.pos.length ? `; ${posLabel(p.entry.pos)}` : ''}): ${senses}`);
     }
-    lines.push(`  ${i + 1} ${p.gloss}`);
+    const also = version >= 2 && p.also.length ? ` (also: ${p.also.join(', ')}${p.more ? ` and ${p.more} more` : ''})` : '';
+    lines.push(`  ${i + 1} ${p.gloss}${also}`);
   });
   return `Pairs:\n${lines.join('\n')}`;
 }
@@ -146,96 +171,118 @@ export function batches(pairs, size) {
   return out;
 }
 
+// The order a sample asks the pairs in: the first in rank order, each other one with the entries shuffled by its
+// number, so the same pair is judged among other neighbours.
+function sampleOrder(pairs, sample) {
+  if (sample === 1) return pairs;
+  const groups = [];
+  for (const p of pairs) (groups.at(-1)?.[0].entry === p.entry ? groups.at(-1) : groups[groups.push([]) - 1]).push(p);
+  let seed = sample * 7919 + 13;
+  const rand = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  for (let i = groups.length - 1; i > 0; i--) { const k = Math.floor(rand() * (i + 1)); [groups[i], groups[k]] = [groups[k], groups[i]]; }
+  return groups.flat();
+}
+
 async function main() {
   const env = process.env;
   const model = env.MODEL || 'claude-haiku-5-5';
   const thinking = env.THINKING !== '0';
+  const version = Number(env.PROMPT || FLAG_VERSION);
+  const samples = (env.SAMPLES || '1').split(',').map(Number);
   const size = Number(env.BATCH || 80);
   const parallel = Number(env.PARALLEL || 4);
-  const cachePath = env.CACHE || `${homedir()}/.cache/japanese-weave-build/senses-${FLAG_VERSION}-${model}${thinking ? '' : '-nothink'}.jsonl`;
+  const base = env.CACHE || `${homedir()}/.cache/japanese-weave-build/senses-${version}-${model}${thinking ? '' : '-nothink'}`;
+  const cachePath = (sample) => `${base}${sample > 1 ? `-s${sample}` : ''}.jsonl`;
   const outPath = env.OUT || here('../data/senses.tsv');
+  const header = { version, model, thinking, samples: samples.length };
   const dictionary = parseDictionary(readFileSync(here('../data/dictionary.tsv'), 'utf8'));
   const state = env.WORDS ? JSON.parse(readFileSync(env.WORDS, 'utf8')) : { words: [] };
   const words = (state.words || []).filter((w) => !env.INTRODUCED || ['known', 'active', 'shaky'].includes(w.status));
   const { judge, closed } = pairsFor({ dictionary, words, all: !!env.ALL });
 
-  mkdirSync(dirname(cachePath), { recursive: true });
-  const cache = new Map(); // key -> flag
+  // each sample's answers so far: key -> flag
+  const caches = new Map(samples.map((n) => [n, new Map()]));
   const callsSoFar = [];
-  if (existsSync(cachePath)) {
-    for (const line of readFileSync(cachePath, 'utf8').split('\n').filter(Boolean)) {
+  for (const n of samples) {
+    mkdirSync(dirname(cachePath(n)), { recursive: true });
+    if (!existsSync(cachePath(n))) continue;
+    for (const line of readFileSync(cachePath(n), 'utf8').split('\n').filter(Boolean)) {
       const r = JSON.parse(line);
-      if (r.key) cache.set(r.key, r.flag);
+      if (r.key) caches.get(n).set(r.key, r.flag);
       if (r.call) callsSoFar.push(r.call);
     }
   }
-  // the flags file counts as a cache too, when the same prompt and model wrote it
+  // the flags file counts as a cache too, when the same prompt, model and samples wrote it
+  const final = new Map();
   if (existsSync(outPath)) {
     const text = readFileSync(outPath, 'utf8');
-    if (text.startsWith(formatSenses([], { version: FLAG_VERSION, model, thinking }).split('\n')[0])) {
+    if (text.startsWith(formatSenses([], header).split('\n')[0])) {
       for (const [key, rows] of parseSenses(text)) {
         const [ja, gloss] = key.split('\t');
-        for (const r of rows) if (!cache.has(`${ja}\t${r.kana}\t${gloss}`)) cache.set(`${ja}\t${r.kana}\t${gloss}`, r.flag);
+        for (const r of rows) final.set(`${ja}\t${r.kana}\t${gloss}`, r.flag);
       }
     }
   }
-  const todo = judge.filter((p) => !cache.has(p.key));
-  const perPair = callsSoFar.length ? callsSoFar.reduce((s, c) => s + c.usd, 0) / callsSoFar.reduce((s, c) => s + c.pairs, 0) : null;
-  console.log(`${words.length} words${env.ALL ? ' and every swappable entry' : ''}: ${judge.length + closed.length} pairs, ` +
-    `${closed.length} closed-class (doubtful, not asked), ${judge.length} to judge, ${judge.length - todo.length} cached, ${todo.length} to ask` +
-    (perPair ? `; about $${(perPair * todo.length).toFixed(3)} at $${(perPair * 1000).toFixed(4)} per 1,000 pairs so far` : ''));
+  const todo = new Map(samples.map((n) => [n, sampleOrder(judge, n).filter((p) => !final.has(p.key) && !caches.get(n).has(p.key))]));
+  const asks = [...todo.values()].reduce((a, l) => a + l.length, 0);
+  const perPair = callsSoFar.length ? callsSoFar.reduce((a, c) => a + c.usd, 0) / callsSoFar.reduce((a, c) => a + c.pairs, 0) : null;
+  console.log(`prompt ${version}, ${samples.length} sample${samples.length > 1 ? 's' : ''}; ${words.length} words${env.ALL ? ' and every swappable entry' : ''}: ` +
+    `${judge.length + closed.length} pairs, ${closed.length} closed-class (doubtful, not asked), ${judge.length} to judge, ${asks} to ask` +
+    (perPair ? `; about $${(perPair * asks).toFixed(3)} at $${(perPair * 1000).toFixed(4)} per 1,000 pairs so far` : ''));
 
-  if (todo.length && !env.DRY) {
+  if (asks && !env.DRY) {
     const key = readFileSync(env.ANTHROPIC_KEY_FILE || '', 'utf8').trim();
     if (!key) throw new Error('set ANTHROPIC_KEY_FILE to a file holding the key');
     const log = spendLog();
-    const queue = batches(todo, size);
+    const queue = samples.flatMap((n) => batches(todo.get(n), size).map((batch) => ({ n, batch })));
     let next = 0;
     let done = 0;
+    let stop = false;
     await Promise.all(Array.from({ length: parallel }, async () => {
-      while (next < queue.length) {
-        const batch = queue[next++];
+      while (next < queue.length && !stop) {
+        const { n, batch } = queue[next++];
         let usage = null;
         const t = Date.now();
-        const fetchImpl = meter(log, 'sense-flags', { label: () => `${batch.length} pairs`, onUsage: (u) => { usage = u; } });
+        const fetchImpl = meter(log, 'sense-flags', { label: () => `prompt ${version} sample ${n}, ${batch.length} pairs`, onUsage: (u) => { usage = u; } });
         try {
-          const { byId: flags } = await askClaude({ fetchImpl, apiKey: key, model, system: FLAG_PROMPT, user: flagContent(batch),
+          const { byId: flags } = await askClaude({ fetchImpl, apiKey: key, model, system: FLAG_PROMPTS[version], user: flagContent(batch, version),
             schema: FLAG_SCHEMA, timeoutMs: 120000, thinking, parse: (text) => parseFlags(text, batch.length) });
           const lines = batch.map((p, i) => JSON.stringify({ key: p.key, flag: flags[i] || 'd', ...(flags[i] ? {} : { unanswered: true }) }));
           const usd = costUsd(model, usage.input, usage.output, undefined, usage.cached, usage.written);
           lines.push(JSON.stringify({ call: { pairs: batch.length, usd, seconds: (Date.now() - t) / 1000, ...usage, unanswered: flags.filter((f) => !f).length } }));
-          appendFileSync(cachePath, `${lines.join('\n')}\n`);
-          batch.forEach((p, i) => cache.set(p.key, flags[i] || 'd'));
+          appendFileSync(cachePath(n), `${lines.join('\n')}\n`);
+          batch.forEach((p, i) => caches.get(n).set(p.key, flags[i] || 'd'));
           done += batch.length;
-          process.stderr.write(`\r${done} of ${todo.length} pairs, $${log.total().toFixed(4)} in the spend log`);
+          process.stderr.write(`\r${done} of ${asks} asked, $${log.total().toFixed(4)} in the spend log`);
         } catch (e) {
           console.error(`\na call of ${batch.length} pairs failed: ${e.message}`);
-          if (/spend cap/.test(e.message)) break;
+          if (/spend cap/.test(e.message)) stop = true;
         }
       }
     }));
     process.stderr.write('\n');
   }
 
-  const flagged = judge.filter((p) => cache.has(p.key));
-  const safe = flagged.filter((p) => cache.get(p.key) === 's').length;
+  // a pair is safe when every sample says so; it is written once every sample has judged it
+  for (const p of judge) {
+    if (final.has(p.key) || !samples.every((n) => caches.get(n).has(p.key))) continue;
+    final.set(p.key, samples.every((n) => caches.get(n).get(p.key) === 's') ? 's' : 'd');
+  }
+  const flagged = judge.filter((p) => final.has(p.key));
+  const safe = flagged.filter((p) => final.get(p.key) === 's').length;
   console.log(`judged ${flagged.length} of ${judge.length}: ${safe} safe (${((100 * safe) / Math.max(1, flagged.length)).toFixed(1)}%), ` +
     `${flagged.length - safe} doubtful`);
+  if (samples.length > 1) {
+    const both = judge.filter((p) => samples.every((n) => caches.get(n).has(p.key)));
+    const agree = both.filter((p) => new Set(samples.map((n) => caches.get(n).get(p.key))).size === 1).length;
+    const each = samples.map((n) => `${both.filter((p) => caches.get(n).get(p.key) === 's').length}`).join(', ');
+    console.log(`samples agree on ${agree} of ${both.length} pairs (${((100 * agree) / Math.max(1, both.length)).toFixed(1)}%); safe in each: ${each}`);
+  }
   if (!env.NOWRITE && !env.DRY) {
-    // every pair the cache has for this prompt version, merged with what the file already holds from other runs
-    const rows = new Map();
-    if (existsSync(outPath)) {
-      for (const line of readFileSync(outPath, 'utf8').split('\n')) {
-        if (!line || line.startsWith('#') || line.startsWith('id\t')) continue;
-        const [id, ja, kana, gloss, flag] = line.split('\t');
-        rows.set(`${ja}\t${kana}\t${gloss}`, { id: id ? Number(id) : null, ja, kana, gloss, flag, rank: Infinity });
-      }
-    }
     const rankOf = new Map(dictionary.map((e) => [e.id, e.rank]));
-    for (const p of flagged) rows.set(p.key, { id: p.id, ja: p.ja, kana: p.kana, gloss: p.gloss, flag: cache.get(p.key) });
-    for (const r of rows.values()) r.rank = rankOf.get(r.id) ?? Infinity;
-    writeFileSync(outPath, formatSenses([...rows.values()], { version: FLAG_VERSION, model, thinking }));
-    console.log(`wrote ${rows.size} pairs to ${outPath}`);
+    const rows = flagged.map((p) => ({ id: p.id, ja: p.ja, kana: p.kana, gloss: p.gloss, flag: final.get(p.key), rank: rankOf.get(p.id) ?? Infinity }));
+    writeFileSync(outPath, formatSenses(rows, header));
+    console.log(`wrote ${rows.length} pairs to ${outPath}`);
   }
 }
 
