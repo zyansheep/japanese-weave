@@ -372,34 +372,34 @@ How it does (`tools/sim/run.py recency`, 3 seeds of 28 days; `fw.py evaluate` on
 - The simulated reader. The floor comes out at 0.029, 0.019 and 0.014 in odds, the truth's 0.0204 (2% for a word
   recognised, as written) within a factor of 1.5. The decay, how much a word's chance rises in log odds from an hour
   after a read to a week after, fitted for each word with evidence against the truth's (FSRS at the word's stability at
-  the end), weighted by its observations: known words +0.95 against +0.81 (1.18 times), learning +2.81 against +1.96
+  the end), weighted by its observations: known words +0.96 against +0.81 (1.19 times), learning +2.80 against +1.96
   (1.43), new +3.82 against +2.68 (1.43), all +1.22 against +0.97 (1.25). Each day predicted from the days before, days
-  8 to 28: log loss 0.0998 against 0.1042 without the term (the truth's, 0.0933), better on 26 of 28 days in each seed;
-  on learning words by 0.0109, 0.0123 and 0.0095 a day (better on 25, 23 and 21 of 28), on known words by 0.0000 to
-  0.0006 (never worse). Expected lookups over the truth's: learning words 1.48 (2.11 without), known 0.99 (0.97), new
-  0.84 (0.89), all 0.94 (1.01). Learning words stay over-predicted: their memory grows with every read (with a reader
-  whose reading refreshes recall but never strengthens it, rho 0, they come to 0.80), and the floor and the context
-  offset are biased by the line rule in chat (below). The context offset comes out +0.17 to +0.48 (sd 0.18) on a reader
-  with no context effect: in a chat message the line rule takes every word above an open as read, where the simulated
-  reader reads paragraph by paragraph, so a repeat in the same chat session is less recent than the clock says; with the
-  clock ignoring the line rule in chat, the offset came to -0.02 and the floor to 0.0216 (seed 1, while choosing the
-  form). The days needed: on learning words the daily difference has a mean of -0.0106 and an sd of 0.0162, so a 90%
-  interval excludes no difference after about 6 days, 25 if the difference were half that.
-- An inert reader, whose memory nothing changes: the floor goes above every word (3.9 to 4.7 in odds), the fitted
-  decay is 0.00, and the fit predicts as without the term (log loss differences of at most 0.0005 a day). With rho 0 the
-  floor is 0.016 to 0.020 and the decay 1.10 to 1.33 times the truth's.
-- The live log of 2026-10-15 to 20 (5 days scored, 3,326 observations). The floor stays above every word (2.7 in
-  odds): the term is off, and the fit predicts as without it, but for the context offset (-0.10): all +0.0000 a day
-  (-0.0001 to +0.0001), web +0.0001, chat -0.0001, known -0.0000 (better on 3 of 5 days), new -0.0006, learning
-  +0.0006 (+0.0002 to +0.0009, better on none of 5; with the context offset held at 0 the two are the same model).
-  Five days can't show what the simulation needs about a week for, but they say more than that: the log's
-  likelihood is 15.8 units worse with the floor at the simulated reader's 2% than with no recency, and about flat for
-  floors from 0.2 up. What the term would take from it is new words in chat looked up again hours later about as
-  often as the first time (12 opens in 76 showings 6 to 24 hours after the last, against 20 in 137 first showings),
-  where the simulated reader, once it looks a word up, knows it for hours. Known words on the web point the other way
-  (1 open in 548 repeats within 15 minutes, 11 in 189 first showings), mostly repeats on the same page. With the
-  floor's prior at 2% the term cost 0.0033 a day on learning words and 0.019 on new words, mostly on the second and
-  third days, before the data had moved the floor off its prior; hence the prior above every word.
+  8 to 28: log loss 0.1000 against 0.1043 without the term (the truth's, 0.0933), better on 26, 25 and 25 of 28 days; on
+  learning words by 0.0112, 0.0129 and 0.0099 a day (better on 25, 26 and 22 of 28), on known words by 0.0000 to 0.0006
+  (never worse). Expected lookups over the truth's: learning words 1.51 (2.12 without), known 0.99 (0.97), new 0.85
+  (0.89), all 0.94 (1.01). Learning words stay over-predicted: their memory grows with every read (with a reader whose
+  reading refreshes recall but never strengthens it, rho 0, they come to 0.89), and the floor and the context offset are
+  biased by the line rule in chat (below). The context offset comes out +0.17 to +0.49 (sd 0.18) on a reader with no
+  context effect: in a chat message the line rule takes every word above an open as read, where the simulated reader
+  reads paragraph by paragraph, so a repeat in the same chat session is less recent than the clock says; with the clock
+  ignoring the line rule in chat, the offset came to -0.02 and the floor to 0.0216 (seed 1, while choosing the form).
+  The days needed: on learning words the daily difference has a mean of -0.0112 and an sd of 0.0159, so a 90% interval
+  excludes no difference after about 6 days, 22 if the difference were half that.
+- An inert reader, whose memory nothing changes: the floor goes above every word (4.1 to 5.1 in odds), the fitted decay
+  is 0.00, and the fit predicts as without the term (log loss differences of at most 0.0005 a day). With rho 0 the floor
+  is 0.016 to 0.020 and the decay 1.10 to 1.34 times the truth's.
+- The live log of 2026-10-15 to 20 (5 days scored, 3,326 observations). The floor stays above every word (2.7 in odds):
+  the term is off, and the fit predicts as without it, but for the context offset (-0.08): all +0.0001 a day (-0.0000 to
+  +0.0002), web +0.0001, chat +0.0001, known +0.0001 (better on 3 of 5 days), new -0.0003, learning +0.0005 (+0.0001 to
+  +0.0009, better on none of 5; with the context offset held at 0 the two are the same model). Five days can't show what
+  the simulation needs about a week for, but they say more than that: the log's likelihood is 15.8 units worse with the
+  floor at the simulated reader's 2% than with no recency, and about flat for floors from 0.2 up. What the term would
+  take from it is new words in chat looked up again hours later about as often as the first time (12 opens in 76
+  showings 6 to 24 hours after the last, against 20 in 137 first showings), where the simulated reader, once it looks a
+  word up, knows it for hours. Known words on the web point the other way (1 open in 548 repeats within 15 minutes, 11
+  in 189 first showings), mostly repeats on the same page. With the floor's prior at 2% the term cost 0.0033 a day on
+  learning words and 0.019 on new words, mostly on the second and third days, before the data had moved the floor off
+  its prior; hence the prior above every word.
 
 ### Episodes and observations
 
@@ -1060,21 +1060,21 @@ world with that floor and isn't this one. Today's model settles near 11%: the pu
 
 What the fit does on the simulated reader (3 seeds of 28 days; `run.py recovery`, `harness`, `recency`, `offset`):
 
-- Log loss, each day predicted from the days before (seed 1): fit 0.1050, without recency (version 2) 0.1093, today's
-  0.1286, a constant 0.1362, the true chances 0.0948. With recency it closes 30% of the gap between version 2 and the
-  truth: better by 0.0044 per observation (0.0032 to 0.0056), on 26 of 28 days; on learning words by 0.0109 (25 of
-  28), on new words by 0.049, on known words by 0.0000 (-0.0002 to +0.0003). Version 2 was better than today's by
-  0.0193 (27 of 28 days).
-- Expected lookups over the truth's, days 8 to 28 (the last week): known words 0.99 (0.98), new words 0.84 (0.90),
-  all 0.94 (0.97); version 2's 0.97, 0.89 and 1.01; today's 2.71, 0.52 and 1.51. Learning words are 1.48 (1.49),
-  version 2's 2.11, today's 3.57: the simulated reader learns them while they are shown (each reading it recognises
+- Log loss, each day predicted from the days before (seed 1): fit 0.1051, without recency 0.1097, today's 0.1286, a
+  constant 0.1362, the true chances 0.0948. With recency it closes 30% of the gap between the fit without it and the
+  truth: better by 0.0045 per observation (0.0033 to 0.0058), on 26 of 28 days; on learning words by 0.0112 (25 of
+  28), on new words by 0.051, on known words by 0.0000 (-0.0002 to +0.0003). The fit without recency is better than
+  today's by 0.0189 (27 of 28 days).
+- Expected lookups over the truth's, days 8 to 28 (the last week): known words 0.99 (0.98), new words 0.85 (0.90),
+  all 0.94 (0.97); without recency 0.97, 0.89 and 1.01; today's 2.71, 0.52 and 1.51. Learning words are 1.51 (1.50),
+  without recency 2.12, today's 3.57: the simulated reader learns them while they are shown (each reading it recognises
   strengthens memory), and the fit has one k per word; recency took the error by gap away (Recency, above), not the
-  lag. With a reader whose reading refreshes recall but never strengthens it (rho = 0), learning words come to 0.80
-  (version 2: 1.19 on these seeds).
+  lag. With a reader whose reading refreshes recall but never strengthens it (rho = 0), learning words come to 0.89
+  (without recency: 1.19 on these seeds).
 - Estimates at 08:59 after each week against the true chance then (the fit's current chance, as the planner would
-  price it), mean logit bias at 4 weeks: known -0.07, learning +0.34, new -0.05 (version 2's -0.10, +0.60, -0.20;
-  today's +1.09, +1.39, -0.78); rank correlation with the truth for known words 0.68 (version 2's 0.58), for new
-  words 0.39 (0.06).
+  price it), mean logit bias at 4 weeks: known -0.07, learning +0.34, new -0.04 (without recency -0.10, +0.58, -0.20;
+  today's +1.09, +1.39, -0.78); rank correlation with the truth for known words 0.68 (without recency 0.58), for new
+  words 0.40 (0.11).
 - The chat offset follows a true difference: with chat's chances doubled (about +0.69 on the log-odds scale) it moves
   from about -0.29 to +0.40, the whole difference; halved, it moves 0.46 (a factor can't move large chances the full
   0.69 down). Today's moves 0.32 and 0.18. With the surfaces alike it sits near -0.3: in a chat message the line rule
