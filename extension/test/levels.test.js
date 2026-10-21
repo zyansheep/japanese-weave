@@ -607,6 +607,55 @@ describe('word swaps where the word cannot go', () => {
     expect(misplaced({ o: 'I', f: '私', ctx: '' }, "I've seen it. I'm sure.")).toBe(true);
     expect(misplaced({ o: 'grandfather', f: 'おじいさん', ctx: '' }, "It was my grandfather's house.")).toBe(false);
   });
+  test('"\'s" after a word whose "\'s" is a verb is a contraction\'s tail; a pronoun with its contracted verb is not one word', () => {
+    expect(misplaced({ o: 'That', f: 'それ', ctx: '' }, "That's my favorite song.")).toBe(true);
+    expect(misplaced({ o: 'That', f: 'それ', ctx: '' }, 'That is my favorite song.')).toBe(false);
+    expect(misplaced({ o: 'What', f: 'どれ', ctx: '' }, "What's the plan?")).toBe(true);
+    expect(misplaced({ o: 'Here', f: 'ここ', ctx: '' }, "Here's what I said.")).toBe(true);
+    expect(misplaced({ o: "I'm", f: '私', ctx: '' }, "I'm busy today.")).toBe(true);
+    expect(misplaced({ o: "it's", f: 'それ' }, '')).toBe(true);
+    expect(misplaced({ o: "There's", f: 'ある', ctx: '' }, "There's a bench in the yard.")).toBe(false); // the existence verb's English
+  });
+  test('no word swap in front of what a joiner joins: while, though, when, until; a question\'s "when" or "where" stays', () => {
+    expect(misplaced({ o: 'while', f: '間', ctx: '' }, 'We talked while we waited for the bus.')).toBe(true);
+    expect(misplaced({ o: 'though', f: 'だけど', ctx: '' }, 'Even though it rained, we went out.')).toBe(true);
+    expect(misplaced({ o: 'When', f: '時', ctx: '' }, 'When I got home, the lights were off.')).toBe(true);
+    expect(misplaced({ o: 'When', f: 'いつ', ctx: '' }, 'When I got home, the lights were off.')).toBe(true);
+    expect(misplaced({ o: 'where', f: 'どこ', ctx: '' }, 'This is the town where I grew up.')).toBe(true);
+    expect(misplaced({ o: 'When', f: 'いつ', ctx: '' }, 'When did you get home?')).toBe(false);
+    expect(misplaced({ o: 'Where', f: 'どこ', ctx: '' }, 'Where is the station?')).toBe(false);
+    expect(misplaced({ o: 'though', f: 'だけど', ctx: '' }, 'No rush though.')).toBe(false); // at the end it joins nothing ahead
+    expect(misplaced({ o: 'If', f: 'もし', ctx: '' }, 'If it rains, we stay home.')).toBe(false); // moshi comes first in Japanese too
+    expect(misplaced({ o: 'between', f: '間', ctx: '' }, 'There is a gap between the two models.')).toBe(false);
+  });
+  test('suru and yaru only for "do"; aru and nai never for people or animals', () => {
+    expect(misplaced({ o: 'made', f: 'する', ctx: '' }, 'She made a cake for the party.')).toBe(true);
+    expect(misplaced({ o: 'Make', f: 'する', ctx: '' }, 'Make sure the tests pass.')).toBe(true);
+    expect(misplaced({ o: 'did', f: 'する', ctx: '' }, 'I did the dishes.')).toBe(false);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'My sister has a dog and two cats.')).toBe(true);
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, 'We have a lot of friends here.')).toBe(true);
+    expect(misplaced({ o: 'There are', f: 'ある', ctx: '' }, 'There are many people in the park.')).toBe(true);
+    expect(misplaced({ o: "There's", f: 'ある', ctx: '' }, "There's a puppy in the yard.")).toBe(true);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'My sister has a car and a dog.')).toBe(false); // the car
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, "I have my mom's old car.")).toBe(false);
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, 'I have a picture of my dog.')).toBe(false);
+    expect(misplaced({ o: 'have', f: 'いる', ctx: '' }, 'We have a dog.')).toBe(false);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'The release has a bug in the parser.')).toBe(false); // software
+  });
+  test('no "all" over a stretch of time; free-choice "anything" only where it is free', () => {
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I slept all day yesterday.')).toBe(true);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I have lived here all my life.')).toBe(true);
+    expect(misplaced({ o: 'whole', f: '全部', ctx: '' }, 'I was there the whole week.')).toBe(true);
+    expect(misplaced({ o: 'all', f: 'みんな', ctx: '' }, 'He knew it all along.')).toBe(true);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I ate all the cookies.')).toBe(false);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'She read all of the books this year.')).toBe(false); // the books
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, "I didn't say anything.")).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'I dont need anything else.')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'Do you need anything?')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'Before you buy anything, read the reviews.')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'I will eat anything.')).toBe(false);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'You can ask me anything you want.')).toBe(false);
+  });
 });
 
 describe('number words that are labels, ranks or pronouns', () => {
@@ -638,6 +687,13 @@ describe('number words that are labels, ranks or pronouns', () => {
     expect(kept('I waited two hours for the bus', 'two', '二')).toBe(true);
     expect(kept('I have two ideas for the name', 'two', '二つ')).toBe(true);
     expect(kept('Only one of the ideas worked out', 'one', '一つ')).toBe(true);
+    expect(kept('At least one of them works', 'one', '一つ')).toBe(true);
+    expect(kept('One of my friends called', 'One', '一つ')).toBe(false); // one member: a pronoun
+    expect(kept('It is one of the best songs', 'one', '一')).toBe(false);
+    expect(kept('I like the most recent one', 'one', '一つ')).toBe(false);
+    expect(kept('I want that red one', 'one', '一つ')).toBe(false);
+    expect(kept('That leaves one question', 'one', '一つ')).toBe(true);
+    expect(kept('This is one idea we had', 'one', '一つ')).toBe(true);
     expect(kept('I met two of the founders today', 'two', '二つ')).toBe(false);
     expect(kept('I met two founders today', 'two', '二つ')).toBe(false);
     expect(kept('I met two of the founders today', 'two', '二')).toBe(true);

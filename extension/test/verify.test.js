@@ -92,6 +92,16 @@ describe('the prompt and the answer', () => {
     expect(buildCheckSystem({ phrases: false })).not.toContain('PHRASES');
     expect(buildCheckSystem()).toContain('ている');
   });
+  test('the rules cover the held-out test\'s classes: joiners, ある and いる, 全部 over time, 何でも, "one", する for "make", contractions', () => {
+    const rules = buildCheckSystem();
+    for (const joiner of ['"while"', '"though"', '"until"', '"because"', '"that" or "which" opening a clause']) expect(rules).toContain(joiner);
+    expect(rules).toContain('ある for things, いる for people and animals');
+    expect(rules).toContain('never a stretch of time');
+    expect(rules).toContain('何でも only for "anything" as any at all');
+    expect(rules).toContain('"one" standing for a noun');
+    expect(rules).toContain('never for "make"');
+    expect(rules).toContain('followed by a contracted verb');
+  });
   test('picks: a letter or - per span number, in any spacing; junk ignored', () => {
     const a = parseCheckResponse(JSON.stringify({ passages: [{ id: 'p1', picks: '1a 2-  3: b,4=C x 5', swaps: [{ at: 's1', p: 'x' }, { p: 'no at' }] }, { picks: '1a' }] }));
     expect([...a.keys()]).toEqual(['p1']);

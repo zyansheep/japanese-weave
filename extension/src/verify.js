@@ -15,7 +15,7 @@ import { candidatesFor as modelsFor, providerOf, TIMEOUT_MS, DEFAULT_TIMEOUT_MS 
 import { COOLDOWN_MS } from './engine.js';
 
 // Bumped whenever the prompt or the answer changes shape, so cached answers from an older one aren't reused.
-export const CHECK_VERSION = 3;
+export const CHECK_VERSION = 4;
 
 const TOKEN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const bare = (w) => w.toLowerCase().replace(/’/g, "'").replace(/n't$/, '').replace(/'(s|re|ve|ll|d|m)$/, '');
@@ -115,13 +115,18 @@ function snippet(text, span, around = 3) {
 // The rules the picks most often need: today's MEANING RULES (prompt.js) that apply to choosing a word for a place.
 // Prompt 2 added the numeral rule prompt.js has (一 alone only as a plain numeral), 時 to the clause joiners, set phrases,
 // helper verbs, and そして only between sentences: prompt 1 picked 一 for "In One Week", 時 for "When I entered", 行く
-// in "go to bed" and そして for "huge and beautiful" in every seed (docs/swap-prompt.md).
+// in "go to bed" and そして for "huge and beautiful" in every seed (docs/swap-prompt.md). Prompt 4 widens the rules
+// for the classes of the held-out test's errors (docs/swap-prompt.md, "General fixes, checked on a second fresh set"):
+// every joiner, not only 前 後 時; ある and いる by what exists; 全部 never over time; 何でも only as a free choice; "one"
+// as a pronoun; する never for "make"; a contracted verb. levels.js misplaced and numberTrap drop most of these too.
 const RULES = `- Each listed word only in its listed meaning: another word with the same spelling or reading doesn't count.
 - A span that is part of a longer expression meaning something else ("go to bed", "all day", "every time", "one more", "right then", "had fun") takes -, unless an option says the whole expression.
-- Numbers: a number word that names a rank, an order or a label stays English ("number one", "day one", "the first", "the one", "no one", "one day" meaning someday, "one-on-one"). Counters (一つ 二つ 三つ) count things only, never people, days, years, minutes or money. 一 二 三 五 十 alone only as plain numerals, never before a unit or a counted noun ("one week", "two hours").
-- "have" and "had" as helper verbs ("have been", "had to") or for events ("had a meeting", "had fun") are not ある; "there is" and "has" where something exists or is owned are. する and やる only for "do" as a main verb with an object ("do the dishes"), never as a helper ("does not", "do you", "than I do").
+- Numbers: a number word that names a rank, an order or a label stays English ("number one", "day one", "the first", "the one", "no one", "one day" meaning someday, "one-on-one"), and so does "one" standing for a noun ("one of my friends", "the red one"). Counters (一つ 二つ 三つ) count things only, never people, days, years, minutes or money. 一 二 三 五 十 alone only as plain numerals, never before a unit or a counted noun ("one week", "two hours").
+- "have" and "had" as helper verbs ("have been", "had to") or for events ("had a meeting", "had fun") are not ある; "there is" and "has" where something exists or is owned are: ある for things, いる for people and animals ("we have two kids", "there's a dog": いる). する and やる only for "do" as a main verb with an object ("do the dishes"), never as a helper ("does not", "do you", "than I do") and never for "make" or another verb ("made dinner", "make sure", "make it work": -).
 - A verb that acts on something (止める 開ける 始める 変える 上げる) never stands where the subject itself stops, opens, starts or changes.
-- 前, 後 and 時 come after the clause they belong to, so they never stand for "before", "after" or "when" joining clauses: "before you go", "when I got there" stay English.
+- Joiners come after what they join in Japanese (〜前, 〜後, 〜時, 〜間, 〜けど), so no option stands for "before", "after", "when", "while", "until", "since", "though", "although" or "because" in front of its clause or noun, nor for "that" or "which" opening a clause: "before you go", "when I got there", "while we waited", "even though it rained", "the song that I like" stay English. "When" or "where" asking a question may be いつ or どこ.
+- 全部 for all of some things or an amount ("ate it all", "all the files"), never a stretch of time ("all day", "all my life", "the whole week") or people. 何でも only for "anything" as any at all, whatever you like ("I'll eat anything"), never after not, never, without, if or before, or in a question ("didn't say anything", "need anything?").
+- A span followed by a contracted verb ("that's", "you're", "I've") takes -.
 - だから only for "so" meaning therefore, never "so" meaning very; でも only for "but" joining two ideas; そして only for "and" starting a new sentence ("And then..."), never for "and" inside a sentence; もう for "already"; まだ for "still" or "not yet"; はい and いいえ only as answers; じゃ and では only as "well then".
 - この for "this" before a noun, これ for "this" alone; 彼 and 彼女 only for a specific person; 今 for "now" meaning at this moment, not "for a year now" or "now that"; 物 is a physical object only, never an event, fact or idea ("the best thing").
 - Never names, handles, hashtags, URLs, digits, code or quoted titles.`;

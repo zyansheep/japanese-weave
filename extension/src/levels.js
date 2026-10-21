@@ -1,6 +1,7 @@
 // Level schedule, word lists, and guards. Pure: no DOM, no chrome APIs.
 import { STARTER } from './starter.js';
 import { locate } from './text.js';
+import { ENGLISH } from './english.js';
 
 // L3/L4 prompts are not built yet; anything above this uses L2 rules.
 export const MAX_BUILT_LEVEL = 2;
@@ -297,6 +298,20 @@ export function validateSwaps(level, swaps, sharedWords, text = '') {
 // nothing follows to act on ("the program will tomeru with an error"). Every place the English occurs is checked. Also
 // two seen in full answers: ageru "give (away)" for "gave me" (that is kureru), and a swap that would leave a
 // contraction's tail on the page ("I've" as watashi've), where the swap's context puts it there.
+// Since the held-out test (docs/swap-prompt.md, "General fixes, checked on a second fresh set"), the classes of the
+// mistakes the check pipeline made there, each checked where the swap's context puts it (else at every place its
+// English occurs, all of which must be wrong):
+// - a joiner (english.json "joiners": while, though, when, until...) with a word after it: Japanese puts aida, kedo or
+//   toki after what they join ("aida we waited"); "when" and "where" before a helper verb ask a question;
+// - "'s" after a word whose "'s" is a verb (english.json "verb_s": "it's" as sore's), and a swap of a pronoun with its
+//   contracted verb ("I'm" as watashi), which drops the verb;
+// - the generic verbs suru and yaru for any English verb but "do" ("made a cake" as suru): other verbs name their own
+//   action;
+// - aru and nai, the existence verbs of things, where what exists or is had is a person or an animal ("we have a dog"
+//   is iru);
+// - a word for "all", "whole" or "entire" over a stretch of time ("all week", "my whole life" are ~juu, not zenbu);
+// - a free-choice word (nandemo "anything / whatever") for "anything" after a negation, "if" or "before", or in a
+//   question (english.json "polarity": "didn't say anything" is nanimo).
 const CLAUSE_JOINERS = new Set(['before', 'after']);
 const TRANSITIVE = new Set(['止める', '開ける', '始める', '変える', '上げる', '終える', '消す', '入れる', '出す', '続ける']);
 const NO_OBJECT = new Set(['with', 'at', 'in', 'on', 'for', 'to', 'from', 'by', 'and', 'but', 'or', 'so', 'when', 'if', 'because',
@@ -304,26 +319,119 @@ const NO_OBJECT = new Set(['with', 'at', 'in', 'on', 'for', 'to', 'from', 'by', 
   'early', 'late', 'already']);
 const TO_ME = new Set(['me', 'us']);
 const CONTRACTION = /^['’](ve|m|ll|d|re)\b/i;
+const CONTRACTION_S = /^['’](ve|m|ll|d|re|s)\b/i;
+const JOINERS = new Set(ENGLISH.joiners);
+const VERB_S = new Set(ENGLISH.verb_s);
+const POLARITY = new Set(ENGLISH.polarity);
+const ASKING = new Set(['when', 'where']);
+const HELPERS = new Set(['do', 'does', 'did', 'is', 'are', 'was', 'were', 'am', 'will', 'would', 'can', 'could', 'should',
+  'shall', 'may', 'might', 'must', 'have', 'has', 'had']);
+// a pronoun with its contracted verb, as one swap's English
+// ("there's" is not one: it is the existence verb's English, aru)
+const PRONOUN_CONTRACTED = /^(i|you|we|they|he|she|it|that|this|here|what|who|where|when|why|how)['’](m|re|ve|ll|d|s)$/i;
+const GENERIC_VERBS = new Set(['する', 'やる']);
+const DO = new Set(['do', 'does', 'did', 'doing', 'done']);
+const THING_EXIST = new Set(['ある', '有る', '在る', '無い', 'ない']);
+const FREE_CHOICE = /^(何|なん|誰|だれ|いつ|どこ|どれ|どちら|どっち)でも$/;
+const ALL_OF = new Set(['all', 'whole', 'entire']);
+// "dont" and the rest as typed without the apostrophe
+const NEGATED = /n't$|^(dont|didnt|doesnt|cant|wont|isnt|arent|wasnt|werent|couldnt|wouldnt|shouldnt|havent|hasnt|aint)$/;
+// People and animals (an open class: the common ones), with their plurals: what exists is iru, not aru. Not the words
+// the pages read here mostly use for software (a bug, a mouse, a client, a package manager, a fan).
+const LIVING_BASE = ['person', 'man', 'woman', 'guy', 'kid', 'child', 'baby', 'boy', 'girl', 'friend', 'family', 'parent',
+  'mother', 'mom', 'mum', 'mommy', 'father', 'dad', 'daddy', 'son', 'daughter', 'brother', 'sister', 'sibling', 'wife',
+  'husband', 'boyfriend', 'girlfriend', 'partner', 'cousin', 'aunt', 'uncle', 'grandma', 'grandpa', 'grandmother',
+  'grandfather', 'grandparent', 'grandchild', 'grandson', 'granddaughter', 'nephew', 'niece', 'roommate', 'neighbor',
+  'neighbour', 'coworker', 'colleague', 'boss', 'teacher', 'student', 'classmate', 'teammate', 'doctor', 'nurse',
+  'customer', 'user', 'follower', 'subscriber', 'employee', 'member', 'guest', 'visitor', 'stranger', 'adult', 'teen',
+  'teenager', 'toddler', 'twin', 'buddy', 'folk', 'animal', 'pet', 'cat', 'kitten', 'kitty', 'dog', 'puppy', 'pup', 'horse',
+  'pony', 'cow', 'pig', 'sheep', 'goat', 'rabbit', 'bunny', 'hamster', 'rat', 'bird', 'parrot', 'duck', 'goose', 'owl',
+  'crow', 'snake', 'lizard', 'turtle', 'tortoise', 'frog', 'bear', 'lion', 'tiger', 'wolf', 'fox', 'deer', 'monkey',
+  'elephant', 'insect', 'bee', 'ant', 'spider', 'butterfly', 'cockroach', 'roach', 'flea', 'shark', 'whale', 'dolphin',
+  'squirrel', 'raccoon', 'mosquito', 'cattle'];
+const pluralsOf = (w) => (Object.hasOwn(ENGLISH.plurals, w) ? ENGLISH.plurals[w]
+  : [/[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : /(s|sh|ch|x)$/.test(w) ? `${w}es` : `${w}s`]);
+const LIVING = new Set(LIVING_BASE.flatMap((w) => [w, ...pluralsOf(w)]));
+// "a lot of friends", "two of my cats": a quantity before "of", which goes on to what is counted
+const QUANTITY = new Set(['lot', 'lots', 'couple', 'bunch', 'few', 'some', 'any', 'many', 'none', 'number', 'pair', 'group',
+  'plenty', 'ton', 'tons', 'dozen', 'dozens', 'all', 'most', 'each', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+  'eight', 'nine', 'ten']);
+// where the noun phrase after "have" or "there is" ends
+const PHRASE_ENDS = new Set(['with', 'at', 'in', 'on', 'for', 'to', 'from', 'by', 'about', 'into', 'like', 'than', 'as', 'that',
+  'who', 'which', 'whose', 'where', 'when', 'while', 'because', 'but', 'so', 'if', 'is', 'are', 'was', 'were']);
+const NP_DETERMINERS = new Set(['the', 'a', 'an', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'our', 'their',
+  'its', 'some', 'any', 'no', 'every', 'each', 'two', 'three', 'many', 'few']);
+// a stretch of time after "all", "whole" or "entire"
+const TIME = new Set(['day', 'days', 'night', 'nights', 'week', 'weeks', 'weekend', 'weekends', 'month', 'months', 'year', 'years',
+  'hour', 'hours', 'minute', 'minutes', 'morning', 'mornings', 'afternoon', 'evening', 'summer', 'winter', 'spring',
+  'autumn', 'season', 'semester', 'term', 'life', 'lives', 'lifetime', 'career', 'childhood', 'time', 'decade', 'decades',
+  'century', 'era', 'along', 'long']);
+
+const lowerEn = (s) => String(s).toLowerCase().replace(/’/g, "'");
+const wordsIn = (s) => lowerEn(s).match(/[a-z0-9]+(?:'[a-z]+)*/g) || [];
+// The words after end up to the next punctuation: the rest of the clause.
+const clauseAfter = (text, end) => wordsIn(text.slice(end).split(/[.!?;:,()\n"“”—–]/)[0]);
+// The words of the sentence before at, and whether the sentence ends in a question mark.
+const sentenceBefore = (text, at) => wordsIn(text.slice(0, at).split(/[.!?\n]/).at(-1));
+const asks = (text, end) => /[.!?\n]/.exec(text.slice(end))?.[0] === '?';
+
+// Where a word swap lands: the place its context points at, else every place its English occurs as a whole word.
+function placesOf(swap, text) {
+  const whole = (s, o) => [...s.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'gu'))]
+    .map((m) => m.index);
+  const at = swap.ctx ? text.indexOf(swap.ctx) : -1;
+  const inCtx = at >= 0 ? whole(swap.ctx, swap.o) : [];
+  return inCtx.length === 1 ? [at + inCtx[0]] : whole(text, swap.o);
+}
 const nextWord = (text, end) => /^\s*([A-Za-z][A-Za-z']*)/.exec(text.slice(end))?.[1];
 export function misplaced(swap, text) {
   if (swap.parts) return false;
-  if (/^[前後]$/.test(swap.f)) return CLAUSE_JOINERS.has(swap.o.toLowerCase());
+  const o = lowerEn(swap.o);
+  if (/^[前後]$/.test(swap.f) && CLAUSE_JOINERS.has(o)) return true;
+  if (PRONOUN_CONTRACTED.test(o)) return true;
+  if (GENERIC_VERBS.has(swap.f) && !DO.has(o)) return true;
   if (!text) return false;
-  if (contracted(swap, text)) return true;
+  const places = placesOf(swap, text);
+  const everywhere = (wrong) => places.length > 0 && places.every((i) => wrong(i, i + swap.o.length));
+  if (everywhere((_, end) => (VERB_S.has(o) ? CONTRACTION_S : CONTRACTION).test(text.slice(end)))) return true;
+  if (JOINERS.has(o) && everywhere(joinsAhead(o, text))) return true;
+  if (THING_EXIST.has(swap.f) && everywhere((_, end) => livingAfter(text, end))) return true;
+  if (ALL_OF.has(o) && everywhere((_, end) => timeAfter(text, end))) return true;
+  if (FREE_CHOICE.test(swap.f) && everywhere((at, end) => sentenceBefore(text, at).some((w) => POLARITY.has(w) || NEGATED.test(w))
+    || asks(text, end))) return true;
   const check = TRANSITIVE.has(swap.f) ? (next) => !next || NO_OBJECT.has(next.toLowerCase())
     : swap.f === 'あげる' ? (next) => TO_ME.has(next?.toLowerCase()) : null;
   if (!check) return false;
   for (let i = text.indexOf(swap.o); i !== -1; i = text.indexOf(swap.o, i + 1)) if (check(nextWord(text, i + swap.o.length))) return true;
   return false;
 }
-// The place the swap's context points at (else every place its English occurs) is followed by 've, 'm, 'll, 'd or 're.
-function contracted(swap, text) {
-  const whole = (s, o) => [...s.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'gu'))]
-    .map((m) => m.index);
-  const at = swap.ctx ? text.indexOf(swap.ctx) : -1;
-  const inCtx = at >= 0 ? whole(swap.ctx, swap.o) : [];
-  const places = inCtx.length === 1 ? [at + inCtx[0]] : whole(text, swap.o);
-  return places.length > 0 && places.every((i) => CONTRACTION.test(text.slice(i + swap.o.length)));
+// A joiner with a word after it in its sentence stands in front of what it joins; not "when" or "where" before a helper
+// verb ("When did you...?").
+const joinsAhead = (o, text) => (_, end) => {
+  if (!/^\s+[\p{L}\p{N}]/u.test(text.slice(end))) return false;
+  return !(ASKING.has(o) && HELPERS.has(clauseAfter(text, end)[0]));
+};
+// A person or an animal in the noun phrase after end ("have a black dog", "there are two kids"), up to the end of the
+// clause, a preposition, a verb of being or "and" before a new determiner; a possessive ("my mom's car") is not its head.
+function livingAfter(text, end) {
+  const words = clauseAfter(text, end).slice(0, 7);
+  for (const [i, w] of words.entries()) {
+    if (PHRASE_ENDS.has(w) || (w === 'of' && !QUANTITY.has(words[i - 1]))) return false;
+    if ((w === 'and' || w === 'or') && NP_DETERMINERS.has(words[i + 1])) return false;
+    if (!/'s$/.test(w) && LIVING.has(w)) return true;
+  }
+  return false;
+}
+// A stretch of time after "all", "whole" or "entire": "all day", "all of my adult life", "the whole week". Determiners
+// and "of" come first; then at most two words before the time word.
+function timeAfter(text, end) {
+  let other = 0;
+  for (const w of clauseAfter(text, end)) {
+    if (TIME.has(w)) return true;
+    if (!other && (w === 'of' || NP_DETERMINERS.has(w) || /'s$/.test(w))) continue;
+    if (++other > 2 || NP_DETERMINERS.has(w)) return false;
+  }
+  return false;
 }
 
 // A phrase in Japanese order that ends in a verb ends its clause: "I 店に行きました with my mom" leaves English hanging
@@ -344,7 +452,9 @@ export function dangles(swap, text) {
 }
 
 // Number words that name a label, a rank or "someone" read wrong as a count: "Day one" as 日 一つ, "number one",
-// "one-on-one", "the first", "the one", "one day" (someday), 一つ for people or days. The prompt forbids these; this
+// "one-on-one", "the first", "the one", "one day" (someday), 一つ for people or days; since the held-out test also
+// "one of" naming a member ("one of my friends", not "only one of them") and "one" after a determiner and a modifier
+// ("the most recent one"). The prompt forbids these; this
 // drops the ones it lets through. It looks at the swap's English where it sits in the passage (every place it occurs).
 const NUMBER = new Set(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
   'twenty', 'thirty', 'forty', 'fifty', 'hundred', 'thousand']);
@@ -362,6 +472,13 @@ const ADJECTIVES = new Set(['last', 'next', 'only', 'right', 'wrong', 'same', 'n
   'bad', 'better', 'best', 'real', 'main', 'favorite', 'favourite', 'lucky', 'chosen', 'special', 'first', 'second']);
 // "one another", "one day", "one time", "one by one", "one on one"
 const AFTER_ONE = new Set(['another', 'day', 'time', 'night', 'morning', 'evening', 'afternoon', 'by', 'on', 'or', 'way', 'thing']);
+// "one of" names one member, a pronoun ("one of my friends"), but counts after these ("only one of the ideas")
+const COUNT_FOCUS = new Set(['only', 'just', 'exactly', 'least', 'than', 'but']);
+// "the most recent one", "a really good one", "that red one": a determiner, perhaps an intensifier, one word, one
+const INTENSIFIERS = new Set(['most', 'least', 'more', 'less', 'very', 'really', 'so', 'quite', 'pretty', 'too']);
+const FUNCTION_EN = new Set(ENGLISH.function);
+const modifier = (w, det) => !!w && !FUNCTION_EN.has(w) && !NUMBER.has(w) && !ORDINAL.test(w) &&
+  !(['this', 'that', 'which'].includes(det) && /(?:[^s]s|..ed)$/.test(w)); // "that makes one": a subject and its verb
 // a counter (一つ) counts things, never these
 const UNITS = new Set(['day', 'days', 'week', 'weeks', 'month', 'months', 'year', 'years', 'hour', 'hours', 'minute', 'minutes',
   'min', 'mins', 'second', 'seconds', 'night', 'nights', 'time', 'times', 'person', 'people', 'guy', 'guys', 'man', 'men',
@@ -402,8 +519,10 @@ export function numberTrap(swap, text) {
       const prev = tokens[i - 1]?.w || '';
       const next = tokens[i + 1]?.w || '';
       if (ORDINAL.test(t.w) || LABELS.has(prev)) return true;
-      const pronoun = DETERMINERS.has(prev) || (ADJECTIVES.has(prev) && DETERMINERS.has(tokens[i - 2]?.w || ''));
-      if (t.w === 'one' && (pronoun || AFTER_ONE.has(next))) return true;
+      const [p2, p3] = [tokens[i - 2]?.w || '', tokens[i - 3]?.w || ''];
+      const pronoun = DETERMINERS.has(prev) || (ADJECTIVES.has(prev) && DETERMINERS.has(p2)) ||
+        (modifier(prev, p2) && DETERMINERS.has(p2)) || (modifier(prev, p3) && INTENSIFIERS.has(p2) && DETERMINERS.has(p3));
+      if (t.w === 'one' && (pronoun || AFTER_ONE.has(next) || (next === 'of' && !COUNT_FOCUS.has(prev)))) return true;
       if (counter && (UNITS.has(next) || PEOPLE.has(next))) return true;
       if (counter && next === 'of' && PEOPLE.has(DETERMINERS.has(tokens[i + 2]?.w) ? tokens[i + 3]?.w : tokens[i + 2]?.w)) return true;
     }

@@ -643,3 +643,145 @@ SPEND_LOG=<log> ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=<words.
 ```
 
 Keep `fresh.json` out of the lab's default sets: once a rule is written from its errors, it is no longer held out.
+
+## General fixes, checked on a second fresh set (2026-10-21)
+
+The held-out test's wrong hits fell into classes next to rules the prompt and validation already had. Each fix below
+is written for a class, not for a phrase of `fresh.json`; then a second fresh set, collected and judged before any run,
+measured them.
+
+**The fixes**, in validation (`levels.js` `misplaced` and `numberTrap`, with three closed classes of English in
+`data/english.json`) and in check prompt 4 (`verify.js`, `CHECK_VERSION` 4):
+
+- **Joiners** (`english.json` "joiners": while, though, although, when, until, since, because, before, after, as,
+  once...): a word swap of one with a word after it in its sentence is dropped, since Japanese puts 間, けど, 時, 前 or
+  後 after what they join; "when" and "where" before a helper verb ask a question and stay ("When did you...?"), and
+  "if" is not a joiner (もし comes first in Japanese too). This widens the old rule for 前 and 後. The prompt also says
+  so, and adds "that" and "which" opening a clause, which code can't tell from the demonstrative.
+- **"'s" as a verb** (`english.json` "verb_s": that, it, there, what, who, here, he, she...): validation reads their
+  "'s" as "is", "has" or "does", never a possessive, and drops a swap that would leave it ("それ's"); also a swap of a
+  pronoun with its contracted verb ("I'm" as 私), which drops the verb ("there's" is the existence verb's English and
+  stays).
+- **する and やる only for "do"** (do, does, did, doing, done): these light verbs take their meaning from their object,
+  so any other English verb names an action that needs its own verb (作る, 料理する). The proposal to make する's "make"
+  doubtful by rule would change nothing: every gloss of する is already doubtful in `data/senses.tsv`, so the model was
+  always asked; the error was its pick. It costs やる for "play" where the dictionary's glosses are matched.
+- **ある and 無い never for people or animals**: after "have" or "there is", validation reads the noun phrase (to the
+  end of the clause, a preposition, a verb of being, or "and" before a new determiner; a possessive is not its head)
+  against a list of common people and animal nouns. That class is open, so the list is too; it leaves out the nouns
+  these pages mostly use for software (bug, mouse, client, manager, reader, viewer, worm, fan): with "bug" in it, the
+  first version dropped the one right ある of the lab set ("had the same bug"). The prompt: ある for things, いる for
+  people and animals.
+- **"all", "whole", "entire" over a stretch of time** ("all week", "my whole life", "all along"): any word swap of
+  them is dropped (全部 and みんな alike: Japanese says 〜中), reading determiners and "of", then at most two words, to a
+  time noun.
+- **Free-choice words** (何でも, 誰でも, いつでも, どこでも...) for "anything" after a negation, "if", "whether",
+  "before", "without" or "than" in its sentence, or in a question (`english.json` "polarity"): that "anything" is
+  何か or 何も.
+- **"one" as a pronoun**: `numberTrap` drops a numeral for "one of" unless a count word comes before it ("only one of
+  the ideas" stays a count: only, just, exactly, at least, more than, all but), and for "one" after a determiner and a
+  modifier ("the most recent one", "that red one").
+
+Each has tests (`levels.test.js`, `verify.test.js`) whose sentences are not from either fresh set.
+
+**Fresh2** (`tools/prompt-lab/fresh2.json`, each with its source URL), collected as `fresh.json` was, a day later and in
+another hash order, by rules written down before any candidate was read: 5 tweets (2026-10-20, English, no retweets), 5
+Hacker News and 5 Reddit comments (2026-10-20, any subreddit) and 5 YouTube comments (over 60 characters, video ids from
+`fR`, since the archive has no dates), each source in the order `cityHash64(id, 'fresh2')` from public archives, keeping
+the first items of English prose of 15 to 120 words with `fresh.json`'s skips and at most one per thread; 4 news ledes,
+BBC and NPR feeds of 2026-10-21 in feed order (3 from BBC, since only one NPR item was neither party politics, health,
+legal or money advice nor a story `fresh.json` used); and 3 blog and 3 technical first paragraphs from pages linked from
+Hacker News stories of 2026-10-20 with 50 or more points, in hash order (pages without such a paragraph skipped). One HN
+comment tripped `isZeroJapanese` ("investors") and the next that qualified took its place. To test sentences, 4 more: in
+each comment order past those picks, the first item with a sentence the list can say whole (found with a spelling finder
+that is not the pipeline's code, confirmed by reading). 34 passages, 1,331 words, median 32 a passage; none shares a
+five-word run with the lab's sets or `fresh.json`.
+
+**Judging** (`tools/prompt-lab/fresh2-oracle.json`): by hand against the 324 introduced words of the 2026-10-20
+snapshot, by `oracle.json`'s rules and `fresh-oracle.json`'s practice, committed before any run (1c7dea8): 184 "use",
+125 "ok", 239 "not", 5 sentences. A second pass of my own, also before any run (a0d9488), fixed three entries that
+judged more than their own place (`oracle.mjs` matches "it" inside "it’s" and "And" at every "and") and judged ten more
+places a model might take: 184, 121, 244. After the runs one kind of hit was unjudged, 本日 (formal "today") for
+"today", 9 in the check runs and 1 in Haiku's; unjudged hits count in no share. The judging was not blind: I wrote the
+fixes before judging, though each class they cover was already the oracles' practice.
+
+**Results**, three runs of each, intervals 90% resampling passages with their runs kept together. Before the fixes is
+check prompt 3 with the old validation (e9ba92d); after is prompt 4 with the new validation; Haiku today is `lab.mjs`
+with today's prompt and validation at normal (calls of 6) and full (calls of 3).
+
+| fresh2 (34 passages) | Coverage | Wrong: share (interval), wrong / judged | Function / content words wrong | Unjudged | Sentences whole, of 15 | $ per 1,000 passages | s a call (max) |
+|---|---|---|---|---|---|---|---|
+| Pipeline before the fixes, full | 83.9% (79-88) | 2.8% (1.0-4.8), 15 / 538 | 3.5% (11 / 313) / 2.1% (4 / 192) | 9 | 7 | 0.461 | 23.4 (39.3) |
+| Pipeline before the fixes, normal | 62.2% (57-69) | 3.4% (1.2-5.7) | 4.1% / 2.6% | 6 | 1.0 | | |
+| **Pipeline after the fixes, full** | **83.3% (78-88)** | **0.6% (0.0-1.2), 3 / 531** | 0.3% (1 / 298) / 1.0% (2 / 193) | 9 | 9 | 0.487 | 24.1 (36.2) |
+| Pipeline after the fixes, normal | 61.5% (56-68) | 0.7% (0.0-1.6) | 0.4% / 1.3% | 6 | 1.3 | | |
+| Haiku today, normal | 45.9% (42-52) | 3.4% (1.2-6.1), 10 / 294 | 2.0% / 4.9% (phrases and sentences 4.5%) | 6 | 4.4 | 0.508 | 24.5 (37.5) |
+| Haiku today, full | 73.0% (68-78) | 3.5% (1.5-6.2), 17 / 481 | 2.4% / 6.9% (phrases and sentences 0 / 73) | 1 | 9 | 0.668 | 16.1 (32.8) |
+| Haiku today with the new validation, full | 73.0% | 2.9% (0.9-5.7), 14 / 478 | 1.6% / 6.3% | 1 | 9 | | |
+
+Wilson's 90% interval of the fixed pipeline's 3 wrong of 531 is 0.2% to 1.4%. The 30 passages sampled by the rules
+alone: after 81.0% and 0.7% (3 / 418), before 81.4% and 3.5%, Haiku today 71.0% and 4.3% at full, 46.1% and 4.3% at
+normal. The 4 passages of the sentence stratum: no wrong hit for the check pipeline before or after, one for Haiku at
+full; sentences whole 9 of 12 after, 7 before, 9 for Haiku at full and 3.4 at normal. The fifth sentence ("We get it",
+in a passage of the main sample) says "get" by 分かる, which no gloss matches: code never marks it dense, and Haiku never
+wrote it.
+
+New minus Haiku today, paired by passage: at full, coverage +10.3 points (+6.0 to +14.5) and wrong -3.0 (-5.2 to
+-1.2); at normal, +15.5 (+11.3 to +19.8) and -2.6 (-4.8 to -0.9). After minus before: coverage -0.5 (-3.2 to +2.0) at
+full, wrong -2.2 (-4.0 to -0.6).
+
+The fixed pipeline on the sets the fixes were written from or tuned on (in-sample, so not evidence of their own):
+
+| Fixed pipeline, full | Coverage | Wrong, wrong / judged | Function / content words wrong | Sentences whole | $ per 1,000 passages | s a call (max) |
+|---|---|---|---|---|---|---|
+| `fresh.json` (prompt 3: 81.3% and 4.3%, 6.1% revised) | 79.6% (73-85) | 1.1% (0.0-3.0), 4 / 354 (pre-registered oracle: the same) | 0.5% / 1.9% | - | 0.403 | 21.4 (29.5) |
+| the lab's 79 passages (prompt 3: 85.1% and 0.8%) | 84.1% (81-87) | 1.1% (0.5-1.8), 12 / 1,107 | 1.1% / 1.2% (phrases 1 / 153) | 14 of 36 | 0.421 | 22.0 (34.6) |
+
+In the lab's first seed one call failed ("Incomplete model response"), leaving its six passages their safe options.
+
+**What each fix costs.** The validation rules, on the same answers: the old prompt's three runs on fresh2 lose 10
+wrong hits to them and nothing right or fine, so wrong falls from 2.8% to 0.9% with coverage unchanged: ある for
+"followers" and "there are people" 4, "that’s" as それ 3, "one of which" as 一つ or 一 3. The other four classes had no
+instance in fresh2: joiners, する, "all" over time and 何でも are untested on passages they weren't written from. On
+the held-out test's runs on `fresh.json` they drop the 21 wrong hits they were written for, again nothing right; on the
+lab's matcher options they drop 8 wrong and, after the software nouns came out, nothing right. With prompt 4 the model
+mostly stops making these picks itself, so on the new runs validation drops one hit in all (何でも, wrong, on
+`fresh.json`). The prompt costs a little coverage: -0.5 points on fresh2, -1.9 on `fresh.json` and -1.0 on the lab
+against prompt 3, mostly inside the seeds' spread, but one loss is the rule's: prompt 4 leaves もし for "So if you
+export..." in every seed, taking "if" for a joiner. A line saying もし may stand for "if" should fix it; it isn't in
+prompt 4, so the numbers above are for what was measured. Prompt 4 is about 5% dearer than prompt 3 ($0.421 against
+$0.399 per 1,000 passages on the lab's set).
+
+The fixed pipeline's remaining wrong hits on fresh2, with the run:
+
+- "the plans of most of their competitors" as つもり (1): つもり is an intention, not a plan someone has drawn up.
+- "Playing this in my speaker" as この (2): a pronoun "this" is これ; the prompt says so.
+- "makes it even easier to feel the style" as 風 (2): 風 is a manner or a style as a suffix (〜風), not a writer's style.
+
+Today's Haiku on fresh2, for comparison: 今回 for "at this time" (3), 風 for "style" (3), つもり for "plans" (2), ある
+for "there are people who" (2), なぜ for "that is probably why" (2), 私たち for "We're", もっと for "more of a
+testament", 一つ for "one more case", 店 for "trust stores" and いる for software that "still exists"; the new
+validation drops three of them ("We're" and the two ある).
+
+**Conclusion.** On fresh2 the fixed pipeline is no worse than today's Haiku in coverage or in wrong senses: at full it
+covers 10.3 points more of the places (the interval excludes zero) with 3.0 points fewer wrong (the interval excludes
+zero); at normal 15.5 points more with 2.6 fewer. It reaches the plan's 3% bar there: 0.6% wrong at full (90%
+interval 0.0% to 1.2% resampling passages; Wilson 0.2% to 1.4%), and 1.1% on `fresh.json` and the lab set, where it
+was tuned. Read it with three cautions. Fresh2 turned out easier than `fresh.json`: the pipeline before the fixes
+already had 2.8% wrong there (4.3% to 6.1% on `fresh.json`) and today's Haiku 3.5% (7.8%), so the out-of-sample
+evidence for the fixes is 10 wrong hits in three of the seven classes; the other four were not tested. The judge was
+not blind. And 34 passages and three runs are few: the remaining errors, 3 of 531 hits, are content-word senses (つもり,
+風) and one この, which no class rule covers.
+
+The test cost $0.353 in 147 calls: $0.233 for the check pipeline's 93 (before and after on fresh2, after on
+`fresh.json` and the lab), $0.120 for Haiku today's 54.
+
+```sh
+WORDS=<copy of state.json> ORACLE=tools/prompt-lab/fresh2-oracle.json SEEDS=1,2,3 SPEND_LOG=<log> \
+  ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key bun tools/prompt-lab/check-lab.mjs tools/prompt-lab/fresh2.json
+SPEND_LOG=<log> ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=<words.py output> ORACLE=tools/prompt-lab/fresh2-oracle.json \
+  LEVELS=0,3 bun tools/prompt-lab/lab.mjs claude-haiku-5-5 tools/prompt-lab/fresh2.json      # once per run
+```
+
+Keep `fresh2.json` out of the lab's default sets too, and don't write rules from its errors: it is the only set none
+of these rules has seen.
