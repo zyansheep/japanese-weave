@@ -443,16 +443,16 @@ Haiku's answer in the final variant's second seed: `{"id": "tweet-movie", "picks
 [{"at": "s1", "p": "私|は|本当に|この|映画|が|大好き|です|。"}, {"at": "5-6", "p": "この|映画"}]}`: また for "again", この
 for "this", nothing for the noun "ending" or for "every time", the sentence whole, and "this movie" as a phrase.
 
-The system prompt (`buildCheckSystem`, about 2,100 tokens, read from the cache after the first call) asks for a pick per lettered span, the letter of the one
-option that says exactly what the English says there or `-`, checked against the meaning rules of `prompt.js` that
-apply to choosing a word for a place; each s-numbered sentence written whole with only the words given in the
-passage's spans and the grammar list; and a short Japanese-order phrase wherever neighbouring spans make one. The
-answer (`CHECK_SCHEMA`) is compact, as above: per passage its id, the picks as one string, and its sentences and
-phrases, each naming its place by number (`s1`, or `5-6` from the start of span 5 to the end of span 6) with its
-pieces. The model never copies English: code fills in the English, its gloss (the English itself, since the Japanese
-says exactly that) and its context. Every candidate, the word swaps of safe options and picks included, goes
-through `levels.js validateSwaps`, which drops unlisted words, dangling phrases, labels read as numbers and the rest
-(`candidatesOf`). The result has `validateSwaps`' shape, so `planSwaps` picks from it as today.
+The system prompt (`buildCheckSystem`, about 2,100 tokens, read from the cache after the first call) asks for a pick
+per lettered span, the letter of the one option that says exactly what the English says there or `-`, checked against
+the meaning rules of `prompt.js` that apply to choosing a word for a place; each s-numbered sentence written whole with
+only the words given in the passage's spans and the grammar list; and a short Japanese-order phrase wherever
+neighbouring spans make one. The answer (`CHECK_SCHEMA`) is compact, as above: per passage its id, the picks as one
+string, and its sentences and phrases, each naming its place by number (`s1`, or `5-6` from the start of span 5 to the
+end of span 6) with its pieces. The model never copies English: code fills in the English, its gloss (the English
+itself, since the Japanese says exactly that) and its context. Every candidate, the word swaps of safe options and
+picks included, goes through `levels.js validateSwaps`, which drops unlisted words, dangling phrases, labels read as
+numbers and the rest (`candidatesOf`). The result has `validateSwaps`' shape, so `planSwaps` picks from it as today.
 
 **How it was scored.** As `lab.mjs` scores swaps: each listed word of a candidate where it lands is right, fine,
 wrong or unjudged; a phrase or sentence not judged bad covers every place inside it. "All" is every candidate (as
@@ -479,7 +479,7 @@ the 90% interval of the wrong share at full from resampling passages is about 0.
 of the final variant's pooled 10 wrong of 1,260 judged is 0.5% to 1.3%. No passage needed no call: every one has a
 closed-class span. Haiku today, for comparison, on the same passages: 51% at normal and 80% at full, 2.7% and 2.5%
 wrong, $0.45 per 1,000 passages at normal in calls of 6 (19.8 s a call, at most 29 s; $0.52 on `eval16.json`, about
-$0.55 in calls of one as most calls go live) and $0.52 to $0.89 at full; 10 of 24 sentences whole over two runs.
+$0.55 in calls of one as most calls go live) and $0.52 to $0.89 at full, where it rendered 10 of 24 sentences whole.
 
 What the variants showed:
 

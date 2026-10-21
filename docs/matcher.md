@@ -147,8 +147,8 @@ SPEND_LOG=~/.cache/japanese-weave-build/spend/senses.jsonl ANTHROPIC_KEY_FILE=~/
 were wrong on 17 of 140 judged hits (12.1%): 時 for "time" 7 times, 行く for "go", 日 for "day", 仕事 for "work". An
 earlier run of the same prompt on the 324 introduced words alone, in other batches, had marked those doubtful (2 wrong
 of 104). Prompt 2 adds, after each gloss, up to four other ranked entries that share that English, most frequent first
-("time" also 時間, 時, ほど, 頃 and 23 more), and says the pair is safe only where this word is the usual translation in
-almost every use. Two independent samples of it (the second with the entries in another order) agree on 87.8% of the
+(for 時 "time": `(also: ほど (extent; degree), 時間 (time), ころ (time; around), 際 (occasion; time) and 21 more)`), and
+says the pair is safe only where this word is the usual translation in almost every use. Two independent samples of it (the second with the entries in another order) agree on 87.8% of the
 pairs, but on only 864 of the pairs either finds safe (1,422 and 1,397). So a pair is safe only when every sample
 says so. A later sample need only ask the pairs the earlier ones found safe (`CONFIRM=1`); such a confirming pass, which
 sees only likely pairs, is somewhat more lenient than a full second sample (it kept 947 of the first sample's 1,422
@@ -178,7 +178,13 @@ the 581 doubtful spans are closed-class English. So nearly every passage still n
 it work and keep the most frequent safe words exact. Their other use is counting matches in what you read (NEXT_STEPS
 step 13), where a wrong safe flag counts a word you didn't read.
 
-**Every swappable entry.** Being flagged; see below once done.
+**Every swappable entry.** Flagging all 17,210 swappable entries with the words in the state was estimated at $1.36
+and cost $1.69: a first sample of the 50,126 pairs beyond your words ($1.03; about 12,800 safe, a quarter, since rarer
+entries' glosses are more specific), then two confirming passes ($0.39 and $0.27), in calls of about 80 pairs, 12 s
+each. `data/senses.tsv` holds every judged pair, 59,061 of 17,297 entries, 10,583 of them safe (17.9%): 1.2 MB, 566 KB
+compressed. An extension needs only the safe glosses of the words in use. Reading 60 random safe pairs outside your
+words, 2 look doubtful to me: 速記 "shorthand", nowadays mostly "X is shorthand for Y", and 小人 "little person". Most
+are specific or several words long ("cutting board", "economic growth") and rarely turn up.
 
 ## Speed
 
