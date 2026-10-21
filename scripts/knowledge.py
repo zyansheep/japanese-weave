@@ -1210,13 +1210,14 @@ def free_flags(fit, words, before):
 
 class Standing:
     """The model as it stood at a time, as shown_record reads it: a Fit, the free flags then ({ja: bool}; a word
-    without one gets its prior's, free_flag) and the sentence prices then (sentence_prices)."""
+    without one gets its prior's, free_flag), the sentence prices then (sentence_prices) and the clock of each word in
+    each passage or message ({(key, ja): (u, s)}, read_clocks), the one at key now (set key before shown_record)."""
 
-    def __init__(self, fit, flags, prices):
-        self.fit, self.flags, self.prices = fit, flags, prices
+    def __init__(self, fit, flags, prices, clocks=None):
+        self.fit, self.flags, self.prices, self.clocks, self.key = fit, flags, prices, clocks or {}, None
 
     def chance(self, ja, surface, _at=None):
-        return self.fit.q(ja, surface)
+        return self.fit.q(ja, surface, False, *self.clocks.get((self.key, ja), (1.0, 0.0)))
 
     def is_free(self, ja):
         if ja not in self.flags:
@@ -1232,11 +1233,12 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
                    done=()):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
-    fit before: start, a fit's state, for the first), the free flags carried from day to day (free_flags, from flags,
-    else the priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events).
+    fit before: start, a fit's state, for the first), each word at its clock in the passage or message (read_clocks:
+    its current chance), the free flags carried from day to day (free_flags, from flags, else the priors'), and the
+    sentence prices from the sentence ends before (sentence_prices of sentence_events).
     done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
     out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
-    for at, (surface, _view, _context), context, items in showings(rows, contexts, now_ms):
+    for at, key, context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:
             continue
         if day_of(at) != day:
@@ -1245,8 +1247,12 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
             start = fit.state()
             flags.update(free_flags(fit, fit.words, flags))
             starts[day] = dict(flags)
-            standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)))
-        out.append(shown_record(at, surface, context, items, standing, match, pace, top))
+            found = read_clocks(log, pace, top, fit._chance())
+            clocks = {(event.key, o.word): found[id(o)] for event in log.events
+                      if hasattr(event, 'obs') and day_of(event.at) == day for o in event.obs}
+            standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)), clocks)
+        standing.key = key
+        out.append(shown_record(at, key[0], context, items, standing, match, pace, top))
     return out, starts
 
 
