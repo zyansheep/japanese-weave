@@ -683,11 +683,14 @@ def compaction(lines):
 def uses(text, words):
     """({ja: uses} for the words a reply uses, the prose left once they are taken out). Code (fwlib.strip_code), links
     and glosses are skipped (and an old reply's recall cue). Longest first, each match removed before the next search:
-    一緒に is not also 一緒."""
+    一緒に is not also 一緒. A word none of whose forms is in the text is skipped before its pattern is compiled: with
+    300 words in use, compiling them all took about a second of every prompt."""
     prose = fwlib.norm(fwlib.strip_code(ABBR.sub(r'\1', text)))
     rest = '\n'.join(line for line in prose.split('\n') if not EXTRA.match(line))
     found = {}
     for word in sorted(words, key=lambda w: -len(w['ja'])):
+        if not any(form in rest for form in fwlib.forms(word['ja'], word.get('kana', ''))):
+            continue
         regex = fwlib.pattern(word['ja'], word.get('kana', ''))
         n = len(regex.findall(rest))
         if n:
