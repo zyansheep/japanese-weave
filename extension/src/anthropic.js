@@ -20,7 +20,7 @@ export function closed(schema) {
 // system: the prompt in parts (prompt.js buildSystemParts). Each part ends a cache breakpoint, so the rules and known
 // words are read from the cache even when the learning words' order has changed. thinking: false turns thinking off
 // (Haiku 5.5 accepts that at effort low to high), for a job simple enough not to need it (verify.js measures both).
-export function buildClaudeRequest({ model, system, user, schema, thinking = true, effort = 'low' }) {
+export function buildClaudeRequest({ model, system, user, schema, thinking = true, effort }) {
   const parts = [].concat(system).filter(Boolean);
   return {
     model,
@@ -30,7 +30,7 @@ export function buildClaudeRequest({ model, system, user, schema, thinking = tru
     // With thinking off, Haiku broke the rules: 15-21 dropped swaps in 16 test passages, unlisted words, almost no
     // phrases. A little thinking brought it close to Argon (docs/swap-prompt.md) at about 4x the cost.
     thinking: { type: thinking ? 'adaptive' : 'disabled' },
-    output_config: { effort, format: { type: 'json_schema', schema: closed(schema) } },
+    output_config: { effort: effort || 'low', format: { type: 'json_schema', schema: closed(schema) } },
   };
 }
 
