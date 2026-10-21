@@ -40,15 +40,16 @@ ENTRIES = [
     (114, '関数', 'かんすう', 'function', 'function', 'n', 0, 1),
     (115, '殆ど', 'ほとんど', 'mostly / almost', 'mostly;almost', 'adv', 3, 1),
     (116, '構築', 'こうちく', 'build / construction', 'construction;building', 'n,vs', 3, 1),
+    (117, '契約', 'けいやく', 'contract / agreement', 'contract;agreement', 'n,vs', 3, 1, 'law'),
 ]
 
 
 def tiny(entries=ENTRIES):
     """The text of a dictionary file with these entries."""
     rows = ['# test dictionary', '\t'.join(dictionary.FIELDS)]
-    for rank, (id_, ja, kana, en, glosses, pos, common, swap) in enumerate(entries, 1):
+    for rank, (id_, ja, kana, en, glosses, pos, common, swap, *field) in enumerate(entries, 1):
         rows.append('\t'.join([str(id_), ja, kana, kana, en, glosses, pos, str(rank * 10), '', '', str(common), '',
-                               str(swap), 'ほとんど' if ja == '殆ど' else '']))
+                               str(swap), ','.join(field), 'ほとんど' if ja == '殆ど' else '']))
     return '\n'.join(rows) + '\n'
 
 

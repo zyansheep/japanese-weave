@@ -10,7 +10,9 @@ speech, register, katakana, length) become a flag on each entry, swap, instead o
 
 Sources (SOURCES below has the exact URLs and sha256 sums): JMdict (EDRDG, CC BY-SA 4.0) via jmdict-simplified,
 English, all entries (an entry is common when one of its spellings is); JPDB v2.2 and BCCWJ frequency lists via
-Kuuuube/yomitan-dictionaries. Entries that are
+Kuuuube/yomitan-dictionaries. Each entry keeps its first sense's JMdict field tags (field: med, law, finc, comp...),
+the sense the display gloss and the matcher's English come from; a later sense's tags are mostly incidental (鏡
+"mirror" has a finance sense). Entries that are
 in data/lexicon.csv keep its reviewed gloss and romaji (the review fixed romaji at morpheme boundaries, 実は jitsu wa,
 which kana.romaji can't). Three things differ from build_candidates.py: a word written in kana is ranked by its kanji
 spellings too (こと is 15th, not 1,419th: BCCWJ files it under 事), a search-only or rare kanji spelling is never the
@@ -60,8 +62,8 @@ SOURCES = {
 }
 CACHE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'japanese-weave-build'
 FIELDS = ['id', 'ja', 'kana', 'romaji', 'en', 'glosses', 'pos', 'score', 'jpdb', 'bccwj', 'common', 'loan', 'swap',
-          'forms']
-FORMAT = 1
+          'field', 'forms']
+FORMAT = 2  # 2: the field column
 SENSES, GLOSSES, LIST = '|', ';', ','  # separators inside the glosses, pos and forms cells
 MAX_GLOSSES = 8         # glosses kept per entry: the first sense's first, then the other senses' in order
 MAX_FIRST = 5           # of which the first sense keeps at most this many
@@ -234,7 +236,8 @@ def build(words, jpdb, bccwj, lexicon, frequent=FREQUENT):
             'id': int(w['id']), 'ja': written, 'kana': reading,
             'romaji': listed['hint'] if listed else romaji(reading, verb_u=verb_u),
             'en': en, 'glosses': glosses(w['sense']), 'pos': pos, 'score': score, 'jpdb': jr, 'bccwj': br,
-            'common': common, 'loan': loan(w, written), 'swap': int(swappable(w, written, reading)), 'forms': forms,
+            'common': common, 'loan': loan(w, written), 'swap': int(swappable(w, written, reading)),
+            'field': list(dict.fromkeys(w['sense'][0]['field'])), 'forms': forms,
         })
     # ranked entries by score, then the rest. Homographs written in kana share a score (both そう are ranked by the
     # kana そう), so a swappable entry comes before one that isn't, then one whose written form is marked common;

@@ -73,6 +73,7 @@ WORDS = [
     word(1997770, [('無名語', False, [])], [('むめいご', False, [])], [(['n'], [], ['unranked word'], [])]),
     word(2266990, [('姉', False, [])], [('ねえ', False, [])], [(['n'], [], ['older sister'], [])]),
 ]
+WORDS[11]['sense'][0]['field'], WORDS[11]['sense'][1]['field'] = ['anat'], ['mahj']  # 手: the first sense's kept
 COMMON = 19  # the first 19 words above have a spelling marked common
 JPDB = [('なる', 'なる', 16, ''), ('成る', 'なる', 500, ''), ('いる', 'いる', 18, 18), ('要る', 'いる', 600, ''),
         ('確認', 'かくにん', 400, ''), ('かける', 'かける', '', 202), ('掛ける', 'かける', 900, ''),
@@ -127,12 +128,16 @@ class Fixture(unittest.TestCase):
 class Build(Fixture):
     def test_file_has_comments_header_and_every_entry(self):
         lines = self.path.read_text(encoding='utf-8').split('\n')
-        self.assertTrue(lines[0].startswith('# Japanese Weave dictionary, format 1'))
+        self.assertTrue(lines[0].startswith('# Japanese Weave dictionary, format 2'))
         self.assertIn('CC BY-SA 4.0', lines[1])
         self.assertIn('# jmdict: file fixture sha256 ' + '0' * 64, lines)
         self.assertIn('\t'.join(dictionary.FIELDS), lines)
         self.assertEqual(len(self.d), COMMON + 3)
         self.assertEqual(len({e['id'] for e in self.d}), len(self.d))
+
+    def test_the_first_senses_field_tags(self):
+        self.assertEqual(self.d.get(1327190)['field'], ['anat'])  # a later sense's tags are mostly incidental
+        self.assertEqual(self.d.get(1214970)['field'], [])
 
     def test_written_as_normally_written(self):
         ja = {e['id']: e['ja'] for e in self.d}
