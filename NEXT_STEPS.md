@@ -6,6 +6,35 @@ matters is in [PLAN.md](PLAN.md); the letters in brackets are its simplification
 The order follows one rule: build the yardsticks before changing what they measure. Every model change is checked on
 a simulated reader with known truth, then on the replayed log, so the measuring tools come first.
 
+## Where each step stands (2026-10-21)
+
+Built on the integration branch `plan`, merged step by step after review and a green test run; not deployed yet (see
+"After deployment" at the end). "Met" means the step's own "done when"; where it is only partly met, the reason is
+given. The numbers come from the simulated reader (sim), the 5-day snapshot of the live log (snapshot), or the prompt
+lab's judged passages (lab, fresh, fresh2).
+
+| Step | State | Done when met? |
+|---|---|---|
+| 1 T3 word counts | Done: T3 vendored.9 is running; live stays carry paragraph word counts since 2026-10-21 | Met |
+| 2 Known words named | Done: first turn names every known word (about 8,000 characters), later turns about 2,200 | Met |
+| 3 Yardsticks | Done: tools/sim, `fw.py evaluate`, `calibrate` per class with intervals, a record per chat brief | Met |
+| 4 One fitter | Done: a penalized fit of the whole log | Partly: the convergence check passes and known and new words are within 15% in the sim; learning words were 2.1 times over until step 10 (1.5 now); on the snapshot it ties the old model (5 days can't separate them) |
+| 5 Fewer controls | Done: no daily controller; sentences take up to 18% of the budget at their price on both surfaces; thinning keeps 20% to 100% of free words only | Met |
+| 6 Delayed-start experiment | Built; starts with the first refresh after deployment | Met in the sim (no hidden word shown in 2,482 hidden word-days; the planted effect read back at p = 0.001); power at 80 words a side is 33% to 91%, lower than planned |
+| 7 Probe | Done: `fw.py probe`, `/japanese-weave:probe` | Met: standard error 4 to 5 points at 60 words; interval coverage 89% to 94% in simulation |
+| 8 Status from the model | Built; the switch happens at the first refresh after deployment (`fw.py relabel --dry-run` lists the 73 words it changes; `--restore` undoes it for 30 days) | Met |
+| 9 Live check | Waiting: needs 2 to 4 weeks of data after deployment | Not yet |
+| 10 Shared recency | Done, self-disabling: it stays off until the reader's own log shows short-term forgetting | Partly: the sim recovers the decay within a factor of 2 and learning words improve from 2.1 to 1.5 times (not within 20%); on the snapshot the fitted floor sits above every word, so the term is off |
+| 11 Dictionary and matcher | Done: 26,969 entries; the matcher covers 93% of the lab's judged places | Met: 99.8% of the state's words and 39 of 42 unlisted lookups resolve |
+| 12 Sense flags and Haiku's new job | Done in the lab and on two fresh sets; the extension wiring (12b) is in progress | Met against a relative bar: on fresh2, 83% coverage and 0.6% wrong senses at full against today's Haiku at 73% and 3.5%; on fresh, 81% and 1.1% after the fixes. Every passage still needs a call (closed-class words are always doubtful); the safe swaps show first |
+| 13 Starting values and words from reading | Done (chat counts; web counts with 12b) | Partly: features beat a flat start on first exposures in the sim (better on 55 of 84 days); the snapshot can't show it in 5 days (about 2 to 4 weeks) |
+| 14 Topical words | Done: code finds them in the last turns, at most 5, never in health, legal or money chats | Met in part: 19% of offers are the wrong sense (from 41%); calibrate has a topical class, linked by time |
+| 15 Experiment readout | Waiting: about 8 weeks after deployment | Not yet |
+| 16 Per-word memory strength | Waiting: needs 60 days of log and a positive step 15; its place in the code is marked | Not yet |
+| 17 One planner, two executors | Deferred: a large refactor that changes exploration (draws per word per refresh instead of per passage); worth doing only after the live check shows the two planners disagree in a way that costs | Not started |
+| 18 Prompt iteration | Web: done in the labs (three prompt versions, two fresh sets). Chat: a replay lab would spend the user's Claude limits; deferred | Partly |
+| 19 Reading speed as evidence | In progress, behind a switch that stays off until the replay shows a gain | Not yet |
+
 ## Now: fix what is broken, build the yardsticks, start the slow experiment (days to two weeks)
 
 1. **Run the T3 build that sends word counts** [I]. Today no T3 stay carries a paragraph word count and no T3 message
