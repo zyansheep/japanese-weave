@@ -1,0 +1,150 @@
+{
+ "about": "Zero-Japanese topics: page is the extension's page guard (extension/src/levels.js isZeroJapanese, checked by extension/test/zero.test.js), chat the hook's guard for topical words (scripts/weave.py zero_japanese, checked by tests/test_weave.py). The page guard keeps one short list for a short passage; on chat its word families fire on the talk of code, so the chat guard counts those only in pairs.",
+ "cases": [
+  {
+   "text": "if you take ibuprofen talk to your doctor first",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "my lawyer says the lawsuit is fine",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "call 911 in an emergency",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "is it safe to refinance my mortgage now?",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "what dose of melatonin is too much? my doctor is away",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "shipped the new onboarding flow today",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "the taxi was late again",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "refactor the parser and add tests",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "the stack frame holds the return address",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "what is the base case of this recursion?",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "investigate why the build fails",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "let me look at the diagnostics output",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "that needs surgery on the reducer",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "what's driving the slowdown here?",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "the crypto module hashes the token",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "an emergency fallback path",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "the symptom is a crash in the allocator",
+   "page": true,
+   "chat": false
+  },
+  {
+   "text": "I have had a headache since this morning",
+   "page": false,
+   "chat": true
+  },
+  {
+   "text": "is a fever of 38 bad?",
+   "page": false,
+   "chat": true
+  },
+  {
+   "text": "my landlord wants to raise the rent",
+   "page": false,
+   "chat": true
+  },
+  {
+   "text": "should I pay off my credit card debt first?",
+   "page": false,
+   "chat": true
+  },
+  {
+   "text": "the side effects of my medication",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "the symptoms, the pain and the diagnosis point to an infection",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "the emergency room after the shooting",
+   "page": true,
+   "chat": true
+  },
+  {
+   "text": "that side effect of the refactor",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "cache eviction of cold entries",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "we took on technical debt",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "police the invariant in the walker",
+   "page": false,
+   "chat": false
+  },
+  {
+   "text": "lower the IRs to bytecode",
+   "page": false,
+   "chat": false
+  }
+ ]
+}

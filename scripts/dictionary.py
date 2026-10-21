@@ -12,7 +12,8 @@ romaji, en (a short gloss), glosses ([[gloss, ...] per sense], the first sense f
 tags, the first sense's first), score (geometric mean of the JPDB and BCCWJ ranks, None without either), jpdb,
 bccwj, common (0: JMdict marks no spelling common and the entry is kept for its rank; else bit 1: the written form
 is marked common, bit 2: the reading is), loan (JMdict's source languages, 'kata' for a katakana word without one,
-'' if not a loanword), swap (build_candidates.py's filters: can stand in for an English word), forms (other
+'' if not a loanword), swap (build_candidates.py's filters: can stand in for an English word), field (the first
+sense's JMdict field tags: med, law, finc, comp...), forms (other
 spellings), rank (1 is the most frequent; entries without a score come last) and kanji (the kanji of the written
 form). The file is in rank order.
 
@@ -28,7 +29,7 @@ import inflection
 
 PATH = Path(__file__).resolve().parent.parent / 'data' / 'dictionary.tsv'
 FIELDS = ('id', 'ja', 'kana', 'romaji', 'en', 'glosses', 'pos', 'score', 'jpdb', 'bccwj', 'common', 'loan', 'swap',
-          'forms')
+          'field', 'forms')
 SENSES, GLOSSES, LIST = '|', ';', ','  # separators inside the glosses, pos and forms cells
 NUMBERS = ('id', 'score', 'jpdb', 'bccwj', 'common')
 KANJI = re.compile('[㐀-䶿一-鿿豈-﫿]')
@@ -118,6 +119,7 @@ class Dictionary:
             e['common'] = e['common'] or 0
             e['glosses'] = [sense.split(GLOSSES) for sense in e['glosses'].split(SENSES)] if e['glosses'] else []
             e['pos'] = e['pos'].split(LIST) if e['pos'] else []
+            e['field'] = e['field'].split(LIST) if e['field'] else []
             e['forms'] = e['forms'].split(LIST) if e['forms'] else []
             e['swap'] = e['swap'] == '1'
             e['rank'] = index + 1

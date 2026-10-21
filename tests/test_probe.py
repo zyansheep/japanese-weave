@@ -415,5 +415,117 @@ class Command(Home):
                       probe.status_line(state, '2026-10-01'))
 
 
+class Evidence(Home):
+    """The probe's answers are observations in the fit (knowledge.probe_answers), of their own kind with their own
+    offset; its estimate stays from its answers alone."""
+    KANJI = ['時間', '問題', '世界', '仕事', '会社', '情報', '気持ち', '最初', '意味', '部分']
+
+    def log(self):
+        """A web log of ten state words, each read 3 times a day for 5 days, looked up 30% of the time when read."""
+        import evaluate
+        rng, events = random.Random(1), []
+        t0 = evaluate.day_start('2026-09-01')
+        for e in range(15):
+            at = t0 + (e // 3) * 86_400_000 + (9 + 5 * (e % 3)) * 3_600_000
+            group = evaluate.Group(at, 'browser', ('browser', f'v{e}', 'p'), False, [])
+            for ja in self.KANJI:
+                looked = rng.random() < 0.6 and rng.random() < 0.3
+                group.obs.append(evaluate.Observation(
+                    at=at, day=evaluate.day_of(at), surface='browser', key=group.key, episode=False, word=ja,
+                    written=ja, form=False, y=1.0 if looked else 0.0, weight=1.0 if looked else 0.6, near=0.0, ms=1,
+                    words=1, share=1.0, read=0.6, status='new', seen=e))
+            events.append(group)
+        words = [{'ja': ja, 'kana': '', 'status': 'queue', 'added': '', 'changed': ''} for ja in self.KANJI]
+        log = evaluate.Log(events, {}, words)
+        d = dictionary.load()
+        log.entries = {ja: d.find(ja) for ja in self.KANJI}
+        return log, events[-1].at + 3_600_000
+
+    def record(self, at, answers, fakes=(0,) * 6):
+        d = dictionary.load()
+        return {'at': at, 'day': '2026-09-05', 'uid': f'p{at}',
+                'words': [[ja, d.find(ja)['id'], 0, 1.0, a] for ja, a in answers],
+                'fakes': [[f'作{i}', a] for i, a in enumerate(fakes)]}
+
+    def fit(self, log, at, records=(), **options):
+        import knowledge
+        log.probes = list(records)
+        log.entries = log.entries  # finds the answers' words again
+        return knowledge.Fit(log, at, **options)
+
+    def test_answers_are_found_by_entry_then_spelling_and_skips_and_made_up_words_left_out(self):
+        import knowledge
+        d = dictionary.load()
+        mondai, denwa = d.find('問題'), d.find('電話')
+        entries = {'問題': mondai, '方': None}
+        probes = [{'at': 5, 'words': [['問題', mondai['id'], 0, 1.0, 1], ['方', 999_999_999, 1, 1.0, 0],
+                                      ['電話', denwa['id'], 2, 1.0, 0], ['時間', d.find('時間')['id'], 2, 1.0, None]],
+                   'fakes': [['作一', 1], ['作二', 0], ['作三', None]]},
+                  {'words': [['問題', mondai['id'], 0, 1.0, 1]]},  # no time: not a record
+                  {'at': 9, 'words': [['問題', 'x', 0, 1.0, 1], ['他', 1, 0, 1.0, 1]], 'fakes': 'none'}]
+        answers, fakes, extra = knowledge.probe_answers(probes, entries, d)
+        self.assertEqual(answers, [(5, '問題', 0), (5, '方', 1), (5, '電話', 1)])  # y 1: answered not known
+        self.assertEqual(extra, {'電話': denwa})  # outside the word state: its entry, for the word features
+        self.assertEqual(fakes, [(5, 1, 2), (9, 0, 0)])
+        self.assertEqual(knowledge.overclaiming(fakes, 10), 0.5)
+        self.assertEqual(knowledge.overclaiming(fakes, 5), 0.0)  # only probes before the fit count
+        self.assertEqual(knowledge.overclaiming([], 10), 0.0)
+
+    def test_an_answer_moves_its_word_and_the_shared_parameters_little_else(self):
+        import knowledge
+        log, at = self.log()
+        base = self.fit(log, at)
+        known = self.fit(log, at, [self.record(at - 3_600_000, [('時間', 1), ('電話', 1)])])
+        unknown = self.fit(log, at, [self.record(at - 3_600_000, [('時間', 0), ('電話', 0)])])
+        k = lambda fit, ja: fit.estimate(ja)[0]
+        self.assertGreater(k(known, '時間'), k(base, '時間') + 0.05)
+        self.assertLess(k(unknown, '時間'), k(base, '時間') - 0.2)
+        self.assertGreater(k(known, '電話'), k(unknown, '電話') + 0.5)  # a word outside the state, with its features
+        self.assertIn('rank', known.features('電話')[0])
+        for ja in self.KANJI[1:]:  # the others move only through the shared parameters
+            self.assertLess(abs(k(known, ja) - k(base, ja)), 0.1)
+            self.assertLess(abs(k(unknown, ja) - k(base, ja)), 0.1)
+        self.assertNotEqual(unknown.theta[knowledge.PROBE], base.theta[knowledge.PROBE])
+        self.assertLess(unknown.theta_sd[knowledge.PROBE], 1.0)  # its prior's sd: the answers inform it
+        self.assertGreater(known.n[known.index['時間']], base.n[base.index['時間']])
+        without = self.fit(log, at, [self.record(at - 3_600_000, [('時間', 0)])], probes=False)
+        self.assertEqual(without.k, base.k)
+        self.assertEqual(self.fit(log, at, [self.record(at + 1, [('時間', 0)])]).k, base.k)  # after until: not yet
+
+    def test_over_claiming_weakens_a_yes(self):
+        log, at = self.log()
+        fit = self.fit(log, at, [self.record(at - 1, [('電話', 1)], (0,) * 6)])
+        base = fit.prior('電話')[0]
+        honest = fit.estimate('電話')[0]
+        claims = self.fit(log, at, [self.record(at - 1, [('電話', 1)], (1, 1, 0, 0, 0, 0))])
+        self.assertAlmostEqual(claims.probe_read, 2 / 3)
+        self.assertGreater(honest - base, claims.estimate('電話')[0] - claims.prior('電話')[0])
+        self.assertGreater(claims.estimate('電話')[0], claims.prior('電話')[0])
+        self.assertLess(claims.known_chance('電話'), 1.0)
+
+    def test_the_estimate_is_from_the_answers_alone_and_refresh_keeps_probed_words(self):
+        import knowledge
+        import reading
+        fwlib.save_state(fwlib.new_state('2026-10-01', known_top=40))
+        d = dictionary.load()
+        p = probe.sample(rng=random.Random(3), frame=FRAME)
+        answers = answered(p, lambda ja: ja in {it['ja'] for it in FRAME.bands[0]})
+        op = hub.stamp(probe.record(p, answers, 'chat', 95))
+        self.assertEqual(op['estimate'], probe.record(p, answers, 'chat', 95)['estimate'])  # no model in it
+        hub.run(op)
+        know = knowledge.refresh(time.time())
+        state = fwlib.load_state()
+        have = {w['ja'] for w in state['words']}
+        outside = [w for w in op['words'] if w[0] not in have and w[4] is not None]
+        self.assertTrue(outside)
+        for ja, id_, _band, _weight, answer in outside:
+            entry = d.get(id_)
+            word = know['words'][entry['ja']]
+            self.assertEqual((word['id'], word['probed']), (id_, True))
+            self.assertEqual(reading.starting_k(know, entry), word['k'])  # topical words and intake read it
+            self.assertEqual(word['k'] > word['mu'], bool(answer))
+        self.assertIn('probe', know['fit']['shared'])
+
+
 if __name__ == '__main__':
     unittest.main()

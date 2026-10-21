@@ -40,15 +40,16 @@ ENTRIES = [
     (114, '関数', 'かんすう', 'function', 'function', 'n', 0, 1),
     (115, '殆ど', 'ほとんど', 'mostly / almost', 'mostly;almost', 'adv', 3, 1),
     (116, '構築', 'こうちく', 'build / construction', 'construction;building', 'n,vs', 3, 1),
+    (117, '契約', 'けいやく', 'contract / agreement', 'contract;agreement', 'n,vs', 3, 1, 'law'),
 ]
 
 
 def tiny(entries=ENTRIES):
     """The text of a dictionary file with these entries."""
     rows = ['# test dictionary', '\t'.join(dictionary.FIELDS)]
-    for rank, (id_, ja, kana, en, glosses, pos, common, swap) in enumerate(entries, 1):
+    for rank, (id_, ja, kana, en, glosses, pos, common, swap, *field) in enumerate(entries, 1):
         rows.append('\t'.join([str(id_), ja, kana, kana, en, glosses, pos, str(rank * 10), '', '', str(common), '',
-                               str(swap), 'ほとんど' if ja == '殆ど' else '']))
+                               str(swap), ','.join(field), 'ほとんど' if ja == '殆ど' else '']))
     return '\n'.join(rows) + '\n'
 
 
@@ -344,6 +345,62 @@ class Topical(Home):
         self.assertNotIn('ほとんど', [w['ja'] for w in weave.topical_words(state, know, {}, text)])
         with mock.patch.object(reading, 'INDEX', 'missing.sqlite'):
             self.assertEqual(weave.topical_words(state, know, {}, text), [])  # no index yet: none
+
+    def test_none_in_a_conversation_the_brief_keeps_free_of_japanese_nor_a_legal_medical_or_money_entry(self):
+        reading.ensure()
+        state = {'words': [word('削除')]}
+        know = {'offset': {'t3': 0.2}, 'words': {}}
+        text = 'Please update the build, then delete the old build and sign the contract.'
+        self.assertEqual([w['ja'] for w in weave.topical_words(state, know, {}, text)], ['構築', '更新', '削除'])
+        self.assertEqual(reading.Reader.open().entries([16])[16]['field'], ['law'])  # 契約: legal, never offered
+        for health in ('I have had a headache all day. ', 'Which dose is right? ',
+                       'The symptom, the pain and the diagnosis. '):
+            self.assertEqual(weave.topical_words(state, know, {}, health + text), [], health)
+        self.assertEqual(len(weave.topical_words(state, know, {}, 'Investigate why the build fails. ' + text)), 3)
+        self.assertEqual(len(weave.topical_words(state, know, {}, text + '\n```\nmy headache.py\n```')), 3)  # code
+
+    def test_a_technical_chat_gets_safe_senses_and_its_own_words_only(self):
+        """A chat about recursion: "frame", "value", "case", "back" and "answer" in their main meaning (額, 価値, 場合,
+        奥, 答え) are the wrong sense there, and the sense flags call them doubtful; a safe match (例 "example") and a
+        word whose own first sense is computing (変数 "variable") are what a technical chat is offered."""
+        extra = [(201, '額', 'がく', 'frame / framed picture', 'frame;framed picture', 'n', ''),
+                 (202, '価値', 'かち', 'value / worth', 'value;worth', 'n', ''),
+                 (203, '場合', 'ばあい', 'case / situation', 'case;situation', 'n', ''),
+                 (204, '答え', 'こたえ', 'answer', 'answer;reply', 'n', ''),
+                 (205, '例', 'れい', 'example', 'example;instance', 'n', ''),
+                 (206, '解決', 'かいけつ', 'solve / resolve', 'solution;resolution', 'n,vs', ''),
+                 (207, '変数', 'へんすう', 'variable', 'variable', 'n', 'math,comp')]
+        rows = tiny().rstrip('\n').split('\n')
+        for rank, (id_, ja, kana, en, glosses, pos, field) in enumerate(extra, len(rows)):
+            rows.append('\t'.join([str(id_), ja, kana, kana, en, glosses, pos, str(rank * 10), '', '', '3', '', '1',
+                                   field, '']))
+        bigger = self.root / 'bigger.tsv'  # a path of its own: the dictionary is read once per path
+        bigger.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+        flags = self.root / 'senses.tsv'
+        flags.write_text('# test flags\nid\tja\tkana\tsafe\tdoubtful\n' + '\n'.join(
+            f'{id_}\t{ja}\t{kana}\t{"example" if ja == "例" else ""}\t'
+            f'{";".join(g for g in en.split(" / ") if ja != "例")}'
+            for id_, ja, kana, en, _glosses, _pos, _field in extra) + '\n', encoding='utf-8')
+        prose = ('Recursion works like this: each call pushes a new stack frame, and the value of each variable lives '
+                 'in that frame. When it reaches the base case, the answer comes back up, so the first call can '
+                 'solve the problem. Here is an example: a factorial.')
+        state = {'words': [word('確認', 'known')]}
+        wrong = {'額', '価値', '場合', '奥', '答え'}
+        with mock.patch.object(reading, 'SENSES', flags), mock.patch.object(reading, 'DICTIONARY', bigger):
+            reading.ensure()
+            code = prose + '\n```python\ndef f(n):\n    return 1 if n == 0 else n * f(n - 1)\n```'
+            for text in (code, prose):  # technical by its code, or by a computing word (変数)
+                got = [w['ja'] for w in weave.topical_words(state, {}, {}, text)]
+                self.assertEqual(got, ['例', '変数'], text)  # safe first, then its own word; 解決 is doubtful too
+            plain = prose.replace('each variable', 'each name')  # no code, no computing word: not technical
+            got = [w['ja'] for w in weave.topical_words(state, {}, {}, plain, most=9)]
+            self.assertEqual(got[0], '例')  # safe first, then the doubtful ones as before
+            self.assertTrue(wrong & set(got[1:]), got)
+        self.assertTrue(weave.is_technical('see `a` and `b`'))
+        self.assertFalse(weave.is_technical('see `a` only'))
+        self.assertTrue(weave.is_technical('x\n```\ny\n```'))
+        self.assertTrue(weave.is_technical('plain', [{'field': ['comp']}]))
+        self.assertFalse(weave.is_technical('plain', [{'field': ['math']}, {}]))
 
     def test_the_brief_offers_them_with_odds_and_prices_them_with_the_learning_words(self):
         state = {'stage': 2, 'stage_pinned': True, 'paused': False,

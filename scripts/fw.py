@@ -780,7 +780,8 @@ def knowledge_cmd(args):
     fit, reading = know.get('fit') or {}, know.get('reading') or {}
     print(f'  log: {know.get("rows", 0)} interactions; chat offset {(know.get("offset") or {}).get("t3", 0)}'
           + (f', form offset {fit["shared"]["form"]}' if 'shared' in fit else '')
-          + (f'; reading {reading.get("pace")} ms a word, at most {reading.get("top")}' if reading else ''))
+          + (f'; reading {knowledge.reading_text(reading["pace"], reading["top"])}'
+             if reading.get('pace') is not None and reading.get('top') is not None else ''))
     status = {w['ja']: w['status'] for w in state['words']}
     held = {w['ja'] for w in state['words'] if fwlib.hidden(w)}
     ranked = sorted(((ja, e) for ja, e in words.items() if ja not in held), key=lambda kv: -kv[1].get('n', 0))

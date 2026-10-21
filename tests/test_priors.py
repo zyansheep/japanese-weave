@@ -167,6 +167,25 @@ class SimulatedReader(unittest.TestCase):
         self.assertEqual(ranks, sorted(ranks))  # chat's topical words come up by frequency
         self.assertTrue(all(w.k0 is None for w in World(seed=2).words))  # off by default: the world as before
 
+    def test_the_reader_answers_a_monthly_probe_from_its_true_recall(self):
+        honest = World(seed=2, prior=PRIOR, extra=300)
+        at = honest.time() - HOUR
+        op = honest.answer_probe(at)
+        self.assertEqual((len(op['words']), len(op['fakes'])), (60, 6))
+        self.assertEqual(honest.state()['probes'][0]['uid'], op['uid'])
+        self.assertEqual(sum(a for _ja, a in op['fakes']), 0)  # no over-claiming: no made-up word claimed
+        d = dictionary.load()
+        for ja, id_, _band, _weight, answer in op['words']:
+            if answer:  # a yes only for a word the reader recognises at all
+                self.assertGreater(honest.word_of(id_, d).recall(at, honest.cfg), 0, ja)
+        self.assertTrue(0.2 < honest.goal(at) < 0.95)
+        claims = World(seed=2, prior=PRIOR, extra=300, overclaim=1.0)
+        op = claims.answer_probe(claims.time() - HOUR)
+        self.assertEqual([a for _ja, a in op['fakes']], [1] * 6)
+        self.assertTrue(all(w[4] == 1 for w in op['words']))
+        again = World(seed=2, prior=PRIOR, extra=300)
+        self.assertEqual(again.answer_probe(again.time() - HOUR)['words'], honest.probes[0]['words'])  # seeded
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -25,10 +25,12 @@ and card, the uncapped ln(1 + Anki interval), and for a word not marked known it
 kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
 13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as
 much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
-counts FORM_WEIGHT. Each word's uncertainty is the fit's curvature (Laplace). The reading model (pace and cap) is
-chosen once a day by profile likelihood over a grid, on both surfaces. The fit is the Fit class, which evaluate.py's
-"fit" model (evaluate.CURRENT) runs too; the online updates it replaced are the Online class, kept as evaluate.py's
-"today" for comparison.
+counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset,
+corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
+computed from its answers alone, so it remains the check on the model. Each word's uncertainty is the fit's curvature
+(Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
+The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online updates it replaced
+are the Online class, kept as evaluate.py's "today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
@@ -78,10 +80,22 @@ PACE_MS = 300              # ms per word a reader takes on a passage with Japane
 READ_MAX = 0.7             # the most a passage's time on screen alone says about a word in it being read
 SLACK_PX = 10              # how far above a T3 paragraph's band a word's top may sit and still be in it (stay_chance)
 READ_STEPS = 20            # words_read averages the read chance over this many depths of a passage or paragraph
-PACES = (150, 200, 300, 450, 650)    # the reading model's grid, chosen by profile likelihood (tune)
-READ_MAXES = (0.5, 0.6, 0.7, 0.8, 0.9)
-TUNE_MIN_OPENS = 60        # opens, on both surfaces, before the tuned reading model replaces the defaults
+SURFACES = ('browser', 't3')
+# The reading model's grid, chosen by profile likelihood per surface (tune), the defaults at even positions, which the
+# search scores first. On the live log of 2026-10-20 the web's best is 1,000 ms a word with a cap of 0.2 (10.7 log
+# likelihood units over the defaults), outside the grid of 150 to 650 ms and 0.5 to 0.9 it had before: time on screen
+# overstates reading on the web, where several passages are on screen at once and many pages are skimmed.
+PACES = (150, 200, 300, 450, 650, 1000, 1500, 2200, 3300, 5000)
+READ_MAXES = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+# Opens on a surface before its tuned reading model is ready (the web had 32 on 2026-10-20, 15 of them on one page),
+TUNE_MIN_OPENS = 60
 TUNE_MARGIN = 3.0          # and how much more log likelihood than the defaults it needs (about a 95% test of two)
+# A ready reading model is only reported (tune's ready), not used, until this is set: k is on the web's scale, so a
+# new web reading model rescales every word and moves the free line, the chat offset and the one unit's denominator
+# at once (on the 2026-10-20 snapshot, ready at 30 opens with web 1,000 ms and cap 0.2: the web's chance of every word
+# rises about 2.7 times, 366 free words become 68, and the web's words read fall from 16,596 to 3,354). Which scale
+# the free line is judged on is a decision to make first.
+SURFACE_TUNING = False
 READ_FLOOR = 0.05          # the least read chance an open's prediction uses: an open far down still happens
 CALIBRATION_DAYS = 30
 CALIBRATED = (0.83, 1.2)   # seen over expected lookups inside this, at 90%, is calibrated (PLAN.md section 10)
@@ -202,6 +216,20 @@ def showings(rows, contexts, now_ms):
     return sorted(out, key=lambda e: e[0])
 
 
+def by_surface(value, surface):
+    """A reading-model parameter (pace or top) on a surface: the value, or its surface's when it is one per surface,
+    {surface: value} (tune)."""
+    return value[surface] if isinstance(value, dict) else value
+
+
+def reading_text(pace, top):
+    """A reading model in words: '300 ms a word, cap 0.7', or per surface 'web 1500 ms a word, cap 0.3; chat ...'."""
+    if not isinstance(pace, dict) and not isinstance(top, dict):
+        return f'{pace:g} ms a word, cap {top:g}'
+    names = {'browser': 'web', 't3': 'chat'}
+    return '; '.join(f'{names[s]} {by_surface(pace, s):g} ms a word, cap {by_surface(top, s):g}' for s in SURFACES)
+
+
 def _chance(ms, words, share, pace, top):
     """The chance of having read down to `share` of the way through `words` words in `ms` of possible reading, at
     `pace` ms a word, at most `top`."""
@@ -262,6 +290,7 @@ def reader(surface, context, pace=PACE_MS, top=READ_MAX):
     """The read chance of a word of this passage or message from its height and the line height (read_chance or
     stay_chance)."""
     chance = stay_chance if surface == 't3' else read_chance
+    pace, top = by_surface(pace, surface), by_surface(top, surface)
     return lambda y, line: chance(context, y, line, pace, top)
 
 
@@ -275,7 +304,9 @@ def words_read(surface, context, pace=PACE_MS, top=READ_MAX):
     (read_chance, stay_chance) at evenly spaced depths: the denominator of the one unit (per_100). A T3 message's
     paragraphs are the distinct bands of its stays, the longest stayed first where bands overlap (a paragraph whose
     layout changed), each with the words and ms stay_chance gives it; its words outside them (paragraphs without
-    Japanese, which T3 doesn't watch) count at the mean read chance of the words it watched."""
+    Japanese, which T3 doesn't watch) count at the mean read chance of the words it watched. pace and top: numbers,
+    or per surface (by_surface)."""
+    pace, top = by_surface(pace, surface), by_surface(top, surface)
     if surface != 't3':
         words = context.get('words') or 0
         return words * _read_share(context.get('active') or 0, words, pace, top)
@@ -547,7 +578,8 @@ def replay(rows, contexts, listed, intervals, commands, now_ms, pace=PACE_MS, to
             if losses is not None and surface == 'browser':
                 line = _line_height([n[2] for n in context['annotations']])
                 for ja, y, _w in obs:
-                    alone = max(0.05, read_chance(context, _y_of(context, ja, match), line, pace, top))
+                    alone = max(0.05, read_chance(context, _y_of(context, ja, match), line,
+                                                  by_surface(pace, surface), by_surface(top, surface)))
                     losses.append((y > 0, min(1 - 1e-6, max(1e-6, alone * model.chance(ja, surface, at)))))
             model.showing(at, surface, obs)
         else:
@@ -564,9 +596,56 @@ def _y_of(context, ja, match):
 
 
 CLASSES = ('costly', 'free', 'topical', 'sentences', 'offlist')  # calibrate's classes of lookups
+# A word in a T3 message is topical when a chat brief offered it as topical (weave.topical_words) in this long before
+# the message was shown. Nothing links a T3 message to the chat its brief was for: T3 logs a window (view) and a
+# message id (context), the brief op the Claude Code session id and the time, so the link is the word and the time.
+# The hook writes a brief as each prompt is sent, and on the user's 2,995 prompts with a reply (2026-10-21) the
+# reply's last text came within 30 minutes of the prompt for 90% and within an hour for 95%; a topical word comes from
+# the conversation's own turns, so one offered in another chat within the hour and used off the lists here is rare.
+TOPICAL_WINDOW_MS = 3_600_000
 
 
-def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX):
+class Offers:
+    """The topical words chat briefs offered (feedback.chat_briefs' topical, [[ja, p]]), for calibrate's topical class
+    (shown_record): price(keys, at) is (ja, p) of the latest brief in the TOPICAL_WINDOW_MS before `at` that offered
+    one of keys (spellings of the word as written), else None; p is the brief's own price, the chat's lookup chance it
+    offered the word at. entry(written): the dictionary entry's spelling of a word as written (dictionary.find, the
+    dictionary loaded on first use), so a conjugated form or another spelling of an offered entry counts."""
+
+    def __init__(self, briefs, window=TOPICAL_WINDOW_MS):
+        number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        self.window, self.by_word, self.times, self._d = window, {}, [], None
+        for b in briefs or ():
+            for row in b.get('topical') or ():
+                if isinstance(row, list) and len(row) == 2 and isinstance(row[0], str) and number(row[1]) \
+                        and number(b.get('at')):
+                    self.by_word.setdefault(row[0], []).append((b['at'], row[1]))
+                    self.times.append(b['at'])
+        self.times.sort()
+
+    def active(self, at):
+        """Whether any brief offered a topical word in the window before `at`."""
+        import bisect
+        i = bisect.bisect_right(self.times, at)
+        return i > 0 and self.times[i - 1] >= at - self.window
+
+    def entry(self, written):
+        if self._d is None:
+            import dictionary  # here: only a T3 message shown after a topical offer needs it
+            self._d = dictionary.load() if dictionary.PATH.exists() else False
+        e = self._d.find(written) if self._d else None
+        return e['ja'] if e else None
+
+    def price(self, keys, at):
+        best = None
+        for ja in keys:
+            for t, p in self.by_word.get(ja, ()):
+                if at - self.window <= t <= at and (best is None or t > best[0]):
+                    best = (t, ja, p)
+        return best[1:] if best else None
+
+
+def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX, offers=None):
     """One passage or message for calibrate, as the model stood before it: {at, shown (when it was shown: its shown
     record, else at), surface, words (shown), japanese (its annotations: none in a blank passage), read (words_read),
     lookups (its opens; T3 peeks under T3_NOISE_MS left out), budget (a browser plan's, per 100 words; else None),
@@ -574,19 +653,28 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     its best annotation, and seen its opens (a glance counts GLANCE_Y): listed words are free when the model says so
     (model.is_free, the free flag; without one, P(peek) under fwlib.FREE_P), else costly; a sentence translation
     (is_sentence) costs the model's price of a whole sentence (model.sentence_price, a chance per sentence read; without
-    one it isn't priced); a word off the list costs its prior's P(peek). Topical words (chat words found by code,
-    planned) have none yet. model: chance(word, surface, at), and maybe is_free(word) and sentence_price(surface)."""
+    one it isn't priced); a word off the list costs its prior's P(peek). In a T3 message, a word a chat brief offered
+    as topical in the TOPICAL_WINDOW_MS before it was shown (offers: an Offers, by the word as written, its listed
+    word or its dictionary entry) is topical whether listed or not, at the price the brief offered it at. model:
+    chance(word, surface, at), and maybe is_free(word) and sentence_price(surface)."""
     notes = context['annotations']
     line = _line_height([n[2] for n in notes])
     read = reader(surface, context, pace, top)
     opened = _opened(surface, notes, items)
-    units = {}  # (kind, word or sentence index) -> [best read chance, seen]
+    shown = context.get('shown_at') or at
+    topical = offers if surface == 't3' and offers is not None and offers.active(shown) else None
+    units, prices = {}, {}  # (kind, word or sentence index) -> [best read chance, seen]; topical word -> price
     for index, (written, _x, y) in enumerate(notes):
         if is_sentence(written):
             unit = ('sentences', index)
         else:
             ja = match(written)
-            unit = ('listed', ja) if ja is not None else ('offlist', written)
+            found = topical.price({written, ja, topical.entry(written)} - {None}, shown) if topical else None
+            if found:
+                unit = ('topical', found[0])
+                prices[found[0]] = found[1]
+            else:
+                unit = ('listed', ja) if ja is not None else ('offlist', written)
         best = units.setdefault(unit, [0.0, 0.0])
         best[0] = max(best[0], read(y, line))
         best[1] = max(best[1], opened.get(index, 0.0))
@@ -594,7 +682,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     price = getattr(model, 'sentence_price', lambda _surface: 0.0)(surface) or 0.0
     classes = {name: [0.0, 0.0] for name in CLASSES}
     for (kind, word), (chance, seen) in units.items():
-        p = price if kind == 'sentences' else model.chance(word, surface, at)
+        p = price if kind == 'sentences' else prices[word] if kind == 'topical' else model.chance(word, surface, at)
         if kind == 'listed':
             kind = 'free' if (is_free(word) if is_free else p < fwlib.FREE_P) else 'costly'
         classes[kind][0] += chance * p
@@ -603,7 +691,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     plan = context.get('plan') or {}
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
-    return {'at': at, 'shown': context.get('shown_at') or at, 'surface': surface, 'words': words,
+    return {'at': at, 'shown': shown, 'surface': surface, 'words': words,
             'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
@@ -625,11 +713,14 @@ FIT_ITERATIONS = 60
 # (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. The recency term's
 # (recency_log_odds): the floor, the log odds of a lookup right after a read, centred above every word (no recency: the
 # term enters only as the reader's own log shows it), and the context offset for a repeat in the same page or window.
+# The monthly probe's (probe): its answers are observations of their own kind (probe_answers), recognition out of
+# context, answered on purpose, so they get their own offset on the web's scale, centred on none and free to move by
+# about the lookup habit (PLAN.md row R: a word not recognised in reading is looked up only some of the time).
 # Then a word's prior mean, a regression on its features (features): with an Anki card, an intercept by origin
 # (origin_at; the names say new, learning and known) plus a slope on ln(1 + interval), centred on the old prior
 # 0.5 + 0.8 ln(1 + interval); without one, an intercept by origin, centred on the old neutral prior (1.0) and, for words
 # marked known, the planner's fwlib.KNOWN_PRIOR_K; for a word not marked known, plus its word features.
-SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5),
+SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5), 'probe': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 # And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD: on their scales
@@ -642,8 +733,8 @@ WORD_FEATURES = ('rank', 'kanji known', 'all kanji known', 'kana', 'katakana', '
 WORD_SD = 0.5
 SHARED.update({name: (0.0, WORD_SD) for name in WORD_FEATURES})
 SHARED_NAMES = tuple(SHARED)
-T3, FORM, FLOOR, CONTEXT = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context'))
-JOINED = (T3, FORM, FLOOR, CONTEXT)  # the shared parameters an observation's chance depends on
+T3, FORM, FLOOR, CONTEXT, PROBE = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context', 'probe'))
+JOINED = (T3, FORM, FLOOR, CONTEXT, PROBE)  # the shared parameters an observation's chance depends on
 ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
@@ -716,7 +807,8 @@ def read_weight(o, episode, pace, top, same=True):
         return 1.0
     if episode:
         return o.near
-    return o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, pace, top))
+    return o.weight if same else max(o.near, _chance(o.ms, o.words, o.share, by_surface(pace, o.surface),
+                                                      by_surface(top, o.surface)))
 
 
 def showings_of(log, pace, top):
@@ -725,7 +817,8 @@ def showings_of(log, pace, top):
     log."""
     origin = log.origin
     cache = origin.__dict__.setdefault('_showings', {})
-    if (pace, top) not in cache:
+    key = tuple(tuple(sorted(v.items())) if isinstance(v, dict) else v for v in (pace, top))
+    if key not in cache:
         same = (pace, top) == (origin.pace, origin.top)
         out = {}
         for event in origin.events:
@@ -737,8 +830,8 @@ def showings_of(log, pace, top):
                                                    o))
         for items in out.values():
             items.sort(key=lambda h: h[0])
-        cache[(pace, top)] = out
-    return cache[(pace, top)]
+        cache[key] = out
+    return cache[key]
 
 
 def read_clocks(log, pace, top, chance):
@@ -926,7 +1019,7 @@ def word_entries(words, ids=None):
 
 
 def evidenced(log, until):
-    """The words with evidence in a log before `until`: an observation or a command."""
+    """The words with evidence in a log before `until`: an observation, a command or a probe answer."""
     out = set()
     for event in log.events:
         if event.at >= until:
@@ -935,7 +1028,73 @@ def evidenced(log, until):
             out.update(o.word for o in event.obs)
         else:
             out.add(event.word)
+    out.update(ja for at, ja, _y in probe_log(log)[0] if at < until)
     return out
+
+
+OVERCLAIM_DAYS = 365       # the over-claiming rate pools the made-up words of the probes this long before a fit
+                           # (probe.FAKE_DAYS)
+
+
+def probe_answers(probes, entries, d=None):
+    """The monthly probes' answers (state["probes"], probe.py's records) as the fit reads them: (answers, fakes,
+    extra). answers: [(at, ja, y)], one per real word answered, y 1 when answered not known (the event the fit counts,
+    as it counts a lookup) and 0 known; skipped words are left out, and so are the made-up words, which only say how
+    often the reader claims a word not known. ja is the word state's word with the answered entry (entries: {ja: its
+    dictionary entry}, knowledge.word_entries of the word state; by JMdict id, else by spelling), else the entry's
+    own spelling, and extra has that entry ({ja: entry}, from the dictionary d) for the word features. fakes:
+    [(at, claimed, answered)] per probe, for the over-claiming rate (overclaiming). A record that isn't one is left
+    out whole."""
+    by_id, by_key = {}, {}
+    for ja, e in (entries or {}).items():
+        if e is not None:
+            by_id.setdefault(e['id'], ja)
+        by_key.setdefault(fwlib.key(ja), ja)
+    answers, fakes, extra = [], [], {}
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    for p in probes or ():
+        if not isinstance(p, dict) or not number(p.get('at')):
+            continue
+        rows = [r for r in p.get('words') or () if isinstance(r, list) and len(r) == 5 and isinstance(r[0], str)
+                and isinstance(r[1], int) and r[4] in (0, 1)]
+        made_up = [r[1] for r in p.get('fakes') or () if isinstance(r, list) and len(r) == 2 and r[1] in (0, 1)]
+        fakes.append((p['at'], sum(made_up), len(made_up)))
+        for spelling, id_, _band, _weight, answer in rows:
+            ja = by_id.get(id_) or by_key.get(fwlib.key(spelling))
+            if ja is None:
+                if d is None:
+                    import dictionary  # here: only a probe of a word outside the state needs it
+                    d = dictionary.load() if dictionary.PATH.exists() else False
+                entry = d.get(id_) if d else None
+                if entry is None:  # without the dictionary, the words outside the state are left out
+                    continue
+                ja = entry['ja']
+                extra[ja] = entry
+            answers.append((p['at'], ja, 1 - answer))
+    return answers, fakes, extra
+
+
+def probe_log(log):
+    """probe_answers of a log's probes (log.probes: the state's records; none for a log without them), found once per
+    log and its word state's entries."""
+    origin = getattr(log, 'origin', log)
+    found = origin.__dict__.get('_probed')
+    if found is None:
+        probes = getattr(log, 'probes', None) or ()
+        found = probe_answers(probes, getattr(log, 'entries', None) or {}) if probes else ((), (), {})
+        origin.__dict__['_probed'] = found
+    return found
+
+
+def overclaiming(fakes, until, days=OVERCLAIM_DAYS):
+    """The share of made-up words the reader claimed known in the probes of the `days` days before `until` (fakes:
+    probe_answers'), the over-claiming rate the probe's own correction for guessing uses (probe.corrected); 0 without
+    any."""
+    claimed = answered = 0
+    for at, c, n in fakes:
+        if until - days * DAY_MS <= at < until:
+            claimed, answered = claimed + c, answered + n
+    return claimed / answered if answered else 0.0
 
 
 def _solve(a, b):
@@ -967,6 +1126,10 @@ class Fit:
     conditioned on at least one open. A word's unopened observations with the same read weight and clock, rounded to
     POOL_STEP (u on its square root, finer near 0), pool, so the work grows with the words more than with the log.
 
+    The monthly probes' answers before `until` (probe_log, without them when probes is False) are observations too,
+    each at the word's long-term chance with an offset of its own (_probe_terms); a probed word outside the word state
+    takes its features from its dictionary entry.
+
     Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
     regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
     times (COMMAND_K - k)^2 / 2 while k is below a known command's or above a learn command's; and each shared
@@ -987,13 +1150,15 @@ class Fit:
     and Anki interval alone), for comparison."""
 
     def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, free=None, plain=False,
-                 recency=True):
+                 recency=True, probes=True):
         self.until, self.day, self.frozen, self.plain = until, day_of(until - 1), frozen, plain
-        self.recency = recency
+        self.recency, self.probes = recency, probes
         self.pace, self.top = pace or log.pace, top or log.top
         self.intervals = log.intervals
         self.by_ja = {w['ja']: w for w in log.words}
         self.entries = {} if plain else getattr(log, 'entries', None) or {}
+        if probes and not plain and probe_log(log)[2]:  # the entries of probed words outside the word state
+            self.entries = dict(self.entries, **probe_log(log)[2])
         self.own = {ja for ja in evidenced(log, until) if (free or {}).get(ja)} if self.entries else set()
         self.known, self._features = kanji_counts(self.own), {}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
@@ -1089,6 +1254,28 @@ class Fit:
                 self.episodes.append((chosen, decay))
         keys = list(pooled)
         self.terms = tuple(tuple(key[j] for key in keys) for j in range(7)) + (tuple(pooled[key] for key in keys),)
+        self._probe_terms(log)
+
+    def _probe_terms(self, log):
+        """The monthly probes' answers before until (probe_log), pooled by word and answer: probe_terms (word, y:
+        weight), each weighted like evidence. A word answered not known (y 1) has a chance r q, one answered known
+        1 - r q, with q = sigmoid(probe - k) the chance the reader doesn't recognise it at a glance out of context and
+        r = 1 - f the chance such a word is answered not known, f the over-claiming rate of the made-up words
+        (overclaiming, as the probe's own correction for guessing has it): a probe answer is a read showing with its
+        own offset, at the word's long-term chance (a probe is no reading, and its clock doesn't move)."""
+        pooled, self.probe_read = {}, 1.0
+        answers, fakes, _extra = probe_log(log) if self.probes else ((), (), {})
+        if answers:
+            self.probe_read = 1.0 - min(0.9, overclaiming(fakes, self.until))
+        for at, ja, y in answers:
+            if at >= self.until:
+                continue
+            i = self._word(ja)
+            v = 0.5 ** ((self.until - at) / DAY_MS / EVIDENCE_DAYS)
+            pooled[(i, y)] = pooled.get((i, y), 0.0) + v
+            self.n[i] += v * (1.0 if y else self.probe_read)
+        keys = list(pooled)
+        self.probe_terms = (tuple(i for i, _y in keys), tuple(y for _i, y in keys), tuple(pooled[k] for k in keys))
 
     def _mean(self, i, theta):
         return sum(theta[f] * value for f, value in self.x[i].items())
@@ -1171,6 +1358,26 @@ class Fit:
                 gc -= vd * x
                 jcontext[w] += vik * x
                 hcc += vi * x * x
+        r, jprobe, gp, hpp = self.probe_read, joins[PROBE], 0.0, 0.0
+        for w, y, v in zip(*self.probe_terms):  # eta = probe - k: d eta / d k = -1, d eta / d probe = 1
+            kw = k[w]
+            kw = -30.0 if kw < -30.0 else 30.0 if kw > 30.0 else kw
+            q = 1 / (1 + exp(-(theta[PROBE] - kw)))
+            q = 1e-12 if q < 1e-12 else 1 - 1e-12 if q > 1 - 1e-12 else q
+            if y:  # answered not known: r q
+                d, i = 1 - q, q * (1 - q)
+                total -= v * log(r * q)
+            else:  # answered known: 1 - r q
+                a = 1 - r * q
+                d, i = -r * q * (1 - q) / a, r * q * (1 - q) * (1 - q) / a
+                total -= v * log(a)
+            grad[w] += v * d
+            info[w] += v * i
+            jprobe[w] -= v * i
+            gp -= v * d
+            hpp += v * i
+        g[PROBE] += gp
+        h[PROBE][PROBE] += hpp
         for (a, b), value in (((T3, T3), htt), ((T3, FORM), htf), ((T3, FLOOR), htl), ((T3, CONTEXT), htc),
                               ((FORM, FORM), hff), ((FORM, FLOOR), hfl), ((FORM, CONTEXT), hfc),
                               ((FLOOR, FLOOR), hll), ((FLOOR, CONTEXT), hlc), ((CONTEXT, CONTEXT), hcc)):
@@ -1322,6 +1529,11 @@ class Fit:
         offset = (self.theta[T3] if surface == 't3' else 0.0) + (self.theta[FORM] if form else 0.0)
         return sigmoid(offset + self.theta[CONTEXT] * s + recency_log_odds(k, u, self.theta[FLOOR]))
 
+    def known_chance(self, ja):
+        """The chance a probe answers this word known: 1 - r sigmoid(probe - k) (_probe_terms), at the over-claiming
+        rate of this fit's probes."""
+        return 1 - self.probe_read * sigmoid(self.theta[PROBE] - self.estimate(ja)[0])
+
     def shared(self):
         return {name: round(v, 4) for name, v in zip(SHARED_NAMES, self.theta)}
 
@@ -1343,7 +1555,8 @@ def nested_loglik(log, fit, pace, top):
             break
         if not hasattr(event, 'obs') or event.episode or not event.obs:
             continue
-        rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, pace, top)), o.y,
+        rows = sorted(((max(READ_FLOOR, _chance(o.ms, o.words, o.share, by_surface(pace, o.surface),
+                                                by_surface(top, o.surface))), o.y,
                         min(1 - 1e-9, max(1e-9, fit.q(o.word, o.surface, o.form, *clocks.get(id(o), (1.0, 0.0))))))
                        for o in event.obs), key=lambda t: -t[0])
         lowest = max((i for i, (_r, y, _q) in enumerate(rows) if y > 0), default=-1)
@@ -1358,41 +1571,56 @@ def nested_loglik(log, fit, pace, top):
 
 
 def tune(log, until, free=None):
-    """The reading model (pace, top) by profile likelihood over the grid PACES x READ_MAXES: at a point the whole log is
-    fitted (Fit, starting from the point before, without recency: pace and cap are about time on screen, and a dozen
-    fits with it would take most of a refresh on a long log) and scored by the likelihood of what was opened under the
-    reading model the read chances come from (nested_loglik), on both surfaces. The search scores every other point first
-    (the defaults among them), then the neighbours of the best until it stays. Returns {pace, top, tuned, best,
-    inside, opens, grid}; pace and top stay the defaults until there are TUNE_MIN_OPENS opens, the best pair beats the
-    defaults by TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible
-    range, a sign the reading model doesn't fit (on the live log of 2026-10-20 it keeps rising past 5,000 ms a word).
-    free: the free flags the fits take (Fit)."""
-    opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until for o in e.obs)
-    scores, start = {}, None
+    """The reading model by profile likelihood, one per surface ({surface: pace}, {surface: top}): over the grid
+    PACES x READ_MAXES of one surface, the other's held at what it has, the whole log is fitted at each point (Fit,
+    starting from the point before, without recency: pace and cap are about time on screen, and dozens of fits with it
+    would take most of a refresh on a long log) and scored by the likelihood of what was opened under the reading model
+    the read chances come from (nested_loglik, both surfaces). The web first, then chat. Each search scores every other
+    point first (the defaults among them), then the neighbours of the best until it stays. A surface keeps the defaults
+    until it has TUNE_MIN_OPENS opens, its best pair beats the defaults by TUNE_MARGIN, and it lies inside the grid: on
+    its edge the likelihood has no maximum in the plausible range, a sign the reading model doesn't fit (on the live log
+    of 2026-10-20 chat's keeps rising past 5,000 ms a word), and uses it only with SURFACE_TUNING (else it is ready,
+    reported, and the defaults stay). The surfaces differ: a web page stays on screen while it is skimmed or not read
+    at all. Returns {pace, top (per surface), tuned (whether any surface uses its own), ready, best, inside, opens (per
+    surface), grid (every point scored: surface, pace, top, loglik)}. free: the free flags the fits take (Fit)."""
+    pace, top = {s: PACE_MS for s in SURFACES}, {s: READ_MAX for s in SURFACES}
+    grid, start = [], None
+    out = {'tuned': False, 'best': {}, 'inside': {}, 'opens': {}, 'ready': {}}
+    for surface in SURFACES:
+        opens = sum(o.y for e in log.events if hasattr(e, 'obs') and not e.episode and e.at < until
+                    and e.surface == surface for o in e.obs)
+        scores = {}
 
-    def score(i, j):
-        nonlocal start
-        if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
-            fit = Fit(log, until, PACES[i], READ_MAXES[j], start=start, free=free, recency=False)
-            start = fit.state()
-            scores[(i, j)] = nested_loglik(log, fit, PACES[i], READ_MAXES[j])
+        def score(i, j):
+            nonlocal start
+            if (i, j) not in scores and 0 <= i < len(PACES) and 0 <= j < len(READ_MAXES):
+                p, t = dict(pace, **{surface: PACES[i]}), dict(top, **{surface: READ_MAXES[j]})
+                fit = Fit(log, until, p, t, start=start, free=free, recency=False)
+                start = fit.state()
+                scores[(i, j)] = nested_loglik(log, fit, p, t)
+                grid.append({'surface': surface, 'pace': PACES[i], 'top': READ_MAXES[j],
+                             'loglik': round(scores[(i, j)], 3)})
 
-    for j in range(0, len(READ_MAXES), 2):
-        for i in range(0, len(PACES), 2):
-            score(i, j)
-    best = None
-    while best != max(scores, key=scores.get):
-        best = max(scores, key=scores.get)
-        for i in (best[0] - 1, best[0], best[0] + 1):
-            for j in (best[1] - 1, best[1], best[1] + 1):
+        for j in range(0, len(READ_MAXES), 2):
+            for i in range(0, len(PACES), 2):
                 score(i, j)
-    grid = [{'pace': PACES[i], 'top': READ_MAXES[j], 'loglik': round(v, 3)} for (i, j), v in sorted(scores.items())]
-    top_ = max(grid, key=lambda g: g['loglik'])
-    default = next(g for g in grid if (g['pace'], g['top']) == (PACE_MS, READ_MAX))
-    inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
-    ready = opens >= TUNE_MIN_OPENS and top_['loglik'] - default['loglik'] >= TUNE_MARGIN and inside
-    return {'pace': top_['pace'] if ready else PACE_MS, 'top': top_['top'] if ready else READ_MAX, 'tuned': ready,
-            'best': top_, 'inside': inside, 'opens': round(opens, 1), 'grid': grid}
+        best = None
+        while best != max(scores, key=scores.get):
+            best = max(scores, key=scores.get)
+            for i in (best[0] - 1, best[0], best[0] + 1):
+                for j in (best[1] - 1, best[1], best[1] + 1):
+                    score(i, j)
+        default = scores[(PACES.index(PACE_MS), READ_MAXES.index(READ_MAX))]
+        inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
+        ready = opens >= TUNE_MIN_OPENS and scores[best] - default >= TUNE_MARGIN and inside
+        if ready and SURFACE_TUNING:
+            pace[surface], top[surface] = PACES[best[0]], READ_MAXES[best[1]]
+        out['tuned'] = out['tuned'] or ready and SURFACE_TUNING
+        out['ready'][surface] = ready
+        out['best'][surface] = {'pace': PACES[best[0]], 'top': READ_MAXES[best[1]], 'loglik': round(scores[best], 3),
+                                'default': round(default, 3)}
+        out['inside'][surface], out['opens'][surface] = inside, round(opens, 1)
+    return dict(out, pace=pace, top=top, grid=grid)
 
 
 def free_flag(k, sd, before, mean):
@@ -1438,14 +1666,15 @@ class Standing:
 
 
 def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags=None, start=None,
-                   done=()):
+                   done=(), offers=None):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
     at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
     fit before: start, a fit's state, for the first; refresh passes its fit's, which is from nothing once a day, so the
     floor's basin is the whole log's; with the free flags of the day before), each word at its clock in the passage or
     message (read_clocks: its current chance), the free flags carried from day to day (free_flags, from flags, else the
     priors'), and the sentence prices from the sentence ends before (sentence_prices of sentence_events). done: days to
-    skip (their sums are known). Returns (records, {day: the free flags at its start})."""
+    skip (their sums are known); offers: the chat briefs' topical words (Offers), for the topical class. Returns
+    (records, {day: the free flags at its start})."""
     out, starts, flags, day, standing = [], {}, dict(flags or {}), None, None
     for at, key, context, items in showings(rows, contexts, now_ms):
         if at < since or day_of(at) in done:
@@ -1461,14 +1690,14 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
                       if hasattr(event, 'obs') and day_of(event.at) == day for o in event.obs}
             standing = Standing(fit, dict(flags), sentence_prices(sentences, day_start(day)), clocks)
         standing.key = key
-        out.append(shown_record(at, key[0], context, items, standing, match, pace, top))
+        out.append(shown_record(at, key[0], context, items, standing, match, pace, top, offers))
     return out, starts
 
 
-def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
+def day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers=None):
     """{day: key} for the days from `since` to yesterday: what their records depend on (the model, the reading model,
-    the challenge, and how much of the log, its interactions and intensity changes came before the day's end), so a
-    day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
+    the challenge, and how much of the log, its interactions, intensity changes and topical offers (offers: Offers)
+    came before the day's end), so a day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
     import bisect
     ats, row_ats = [e.at for e in log.events], sorted(r['at'] for r in rows)
     counts, total = [], 0
@@ -1481,7 +1710,8 @@ def day_keys(log, rows, changes, since, now_ms, pace, top, challenge):
         end = day_start(day_of(end))
         n = bisect.bisect_left(ats, end)
         out[day] = (f'{MODEL} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
-                    f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}')
+                    f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}'
+                    + (f' {bisect.bisect_left(offers.times, end)}' if offers is not None and offers.times else ''))
         day = day_of(end)
     return out
 
@@ -1800,7 +2030,8 @@ def classes_text(classes, days):
             k = c['classes'][key]
             label = f'    {CLASS_NAMES[key] + ":":<17}'
             if key == 'topical' and not k['expected'] and not k['seen']:
-                lines.append(f'{label}none yet (chat has no topical words before the dictionary)')
+                lines.append(f'{label}none yet (no word a brief offered as topical was shown in the hour after)'
+                             if surface == 't3' else f'{label}none (chat only)')
                 continue
             if k['ratio'] is None:
                 verdict = ': not priced yet' if key == 'sentences' else ''
@@ -1965,8 +2196,9 @@ def is_stale(knowledge=None, now=None):
     return (now if now is not None else time.time()) - updated > STALE_S
 
 
-MODEL = 'fit 3'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
-                 # term, with the prior by origin and word features)
+MODEL = 'fit 5'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
+                 # term, with the prior by origin and word features; fit 4: the monthly probes' answers; fit 5: a
+                 # reading model per surface)
 
 
 def word_stats(log, now_ms):
@@ -2017,9 +2249,10 @@ def refresh(now=None):
     flag: free_flag), n (evidence weight), obs, opened, recent (opens in the last RECENT_DAYS days), last and history,
     read (when it was last read: [shown, chance] per showing of the last LONG_DAYS, word_reads; a consumer gets its
     current chance from it, current_chance), and id (the JMdict id of its dictionary entry, word_entries, which the next
-    refresh reuses); offset (the web's 0, chat's fitted); recency (the floor, the context offset, LONG_DAYS, SOFT_MIN
-    and SPACING_P); fit (the shared parameters with their sd, the prior widths, and whether it started from nothing, as
-    the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices; sentences has their counts);
+    refresh reuses); also each word a monthly probe answered that the word state doesn't have (probed, with its entry's
+    id: reading.starting_k takes its k for that entry); offset (the web's 0, chat's fitted); recency (the floor, the
+    context offset, LONG_DAYS, SOFT_MIN and SPACING_P); fit (the shared parameters with their sd, the prior widths,
+    and whether it started from nothing, as the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices; sentences has their counts);
     reading (tune, once a day); calibration, with daily, its sums for each day before today (day_totals), reused while
     the day's key holds (day_keys), and dailyFree, the free flags at the start of the last of those days, which today's
     records carry on from; unlisted; spend (spending: the budget's use that sets intake); moves (the label changes
@@ -2042,7 +2275,8 @@ def refresh(now=None):
         reading = previous.get('reading')
         fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == MODEL
         pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
-        log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top)
+        log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top,
+                               state.get('probes'))
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
         before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
         log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
@@ -2061,8 +2295,10 @@ def refresh(now=None):
         sentences = sentence_events(rows, contexts, now_ms, pace, top)
         prices = sentence_prices(sentences, now_ms)
         changes, challenge = feedback.intensity_changes(feedback.default_path()), challenge_of(state)
+        briefs = feedback.chat_briefs(feedback.default_path())
+        offers = Offers(briefs)
         since = now_ms - CALIBRATION_DAYS * DAY_MS
-        keys = day_keys(log, rows, changes, since, now_ms, pace, top, challenge)
+        keys = day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers)
         cached = previous.get('daily') if isinstance(previous.get('daily'), dict) else {}
         done = {day: cached[day]['totals'] for day, key in keys.items()
                 if isinstance(cached.get(day), dict) and cached[day].get('key') == key}
@@ -2071,7 +2307,7 @@ def refresh(now=None):
         flags_then = carried.get('free') if carried.get('day') in done and isinstance(carried.get('free'), dict) else \
             before
         records, starts = fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags_then,
-                                         fit.state(), set(done))
+                                         fit.state(), set(done), offers)
         totals = dict(done, **day_totals(records, changes, challenge))
         daily = {day: {'key': key, 'totals': totals[day]} for day, key in keys.items() if day in totals}
         last = max((day for day in starts if day in daily), default=None)
@@ -2093,8 +2329,16 @@ def refresh(now=None):
                     if chance >= 0.001]
             if read:  # when it was last read, for its current chance (current_chance)
                 words[ja]['read'] = read
+        for ja, entry in probe_log(log)[2].items():  # a probed word outside the word state, by its entry's id
+            i = fit.index.get(ja)
+            if ja not in words and i is not None:
+                k, sd = fit.estimate(ja)
+                mean = fit.prior(ja)[0]
+                words[ja] = {'k': round(k, 3), 'sd': round(sd, 3), 'mu': round(mean, 3),
+                             'free': free_flag(k, sd, before.get(ja), mean), 'n': round(fit.n[i], 2), 'obs': 0,
+                             'id': entry['id'], 'probed': True}
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
-        spend = spending(contexts, feedback.chat_briefs(feedback.default_path()), now_ms)
+        spend = spending(contexts, briefs, now_ms)
         looked = {ja: len(st['recent']) for ja, st in stats.items() if len(st['recent']) >= fwlib.LOOKED_UP}
         try:  # words from your reading (reading.py); without its counts, the list's order
             import reading as counts  # refresh's `reading` is the reading model

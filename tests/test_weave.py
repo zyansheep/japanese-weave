@@ -1724,10 +1724,22 @@ class Knowledge(Home):
         fit = knowledge.Fit(log, self.NOW)
         self.assertGreater(fit.estimate('今')[0], fit.prior('今')[0])  # read and not opened, 20 times to 1
         tuned = knowledge.tune(log, self.NOW)  # one open: too few to leave the defaults
+        both = lambda x: {surface: x for surface in knowledge.SURFACES}
         self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned'], tuned['opens']),
-                         (knowledge.PACE_MS, knowledge.READ_MAX, False, 1.0))
-        self.assertIn({'pace': knowledge.PACE_MS, 'top': knowledge.READ_MAX},
-                      [{k: g[k] for k in ('pace', 'top')} for g in tuned['grid']])
+                         (both(knowledge.PACE_MS), both(knowledge.READ_MAX), False, {'browser': 1.0, 't3': 0}))
+        for surface in knowledge.SURFACES:  # each surface's grid, the defaults scored
+            self.assertIn({'surface': surface, 'pace': knowledge.PACE_MS, 'top': knowledge.READ_MAX},
+                          [{k: g[k] for k in ('surface', 'pace', 'top')} for g in tuned['grid']])
+        # a reading model per surface: the web's alone changes the web's read chances, and the same numbers per
+        # surface are the shared model
+        slow = ({'browser': 1500, 't3': knowledge.PACE_MS}, {'browser': 0.3, 't3': knowledge.READ_MAX})
+        alike = evaluate.extract(rows, contexts, words, {}, [], self.NOW, *(both(x) for x in (300, 0.7)))
+        self.assertEqual([round(o.read, 9) for o in alike.scored()], [round(o.read, 9) for o in log.scored()])
+        self.assertAlmostEqual(knowledge.Fit(alike, self.NOW).estimate('今')[0], fit.estimate('今')[0], places=6)
+        apart = evaluate.extract(rows, contexts, words, {}, [], self.NOW, *slow)
+        self.assertTrue(all(o.read <= 0.3 for o in apart.scored()))
+        self.assertLess(sum(o.read for o in apart.scored()), sum(o.read for o in log.scored()))
+        self.assertIn('web 1500 ms a word, cap 0.3; chat 300 ms a word, cap 0.7', knowledge.reading_text(*slow))
 
     def test_calibrate_compares_thinned_passages_and_counts_presses(self):
         import random
@@ -2266,6 +2278,23 @@ class Examples(unittest.TestCase):
 
     def test_without_known_examples_the_brief_still_has_two(self):
         self.assertEqual(weave.examples({}), 'like "問題は設定です。" or "これは簡単です。"')
+
+
+class ZeroJapanese(unittest.TestCase):
+    def test_the_shared_cases(self):
+        # extension/test/zero.test.js checks the page guard on the same cases
+        cases = json.loads((Path(__file__).resolve().parent / 'zero_japanese_cases.json').read_text(encoding='utf-8'))
+        self.assertGreater(len(cases['cases']), 10)
+        for case in cases['cases']:
+            self.assertEqual((case['text'], weave.zero_japanese(case['text'])), (case['text'], case['chat']))
+
+    def test_one_strong_term_or_three_families_of_weak_ones(self):
+        self.assertTrue(weave.zero_japanese('my doctor said so'))
+        self.assertFalse(weave.zero_japanese('let me diagnose it: it was diagnosed as a race'))  # one family
+        self.assertFalse(weave.zero_japanese('the symptom and the diagnosis'))  # two: the talk of a bug, often
+        self.assertTrue(weave.zero_japanese('the symptom, the pain and the diagnosis'))
+        self.assertTrue(weave.zero_japanese('the IRS sent a letter'))
+        self.assertFalse(weave.zero_japanese('lower the IRs to bytecode'))  # a compiler's, not the tax office
 
 
 if __name__ == '__main__':

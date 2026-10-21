@@ -44,7 +44,7 @@ Words in `data/lexicon.csv` keep its reviewed gloss and romaji, which fixed morp
 ## The file
 
 Tab-separated, UTF-8. A few `#` comment lines (format, license, sources), a header row, then one entry per line in
-rank order. 3.57 MB, 1.61 MB gzipped.
+rank order. 3.60 MB, 1.62 MB gzipped.
 
 | Field | Meaning |
 |---|---|
@@ -60,6 +60,7 @@ rank order. 3.57 MB, 1.61 MB gzipped.
 | `common` | 0 for an entry JMdict doesn't mark common, kept for its rank. Otherwise 1 if the written form is marked common, plus 2 if the reading is (all but 3 common entries have 3). jmdict-simplified reduces JMdict's priority tags (news1, ichi1, nf01...) to this. |
 | `loan` | JMdict's source languages (`por`, `ger`, `eng`...; 649 entries), `kata` for a katakana word without one (3,890), or empty. |
 | `swap` | 1 if build_candidates.py's filters keep it: a noun, adverb, conjunction, adjective or expression that can stand in for an English word (17,210 entries). |
+| `field` | The first sense's JMdict field tags, comma-separated (`med`, `law`, `finc`, `comp`...; 1,022 entries): the sense the display gloss and the matcher's English come from. A later sense's tags are mostly incidental (鏡 "mirror" has a finance sense), so they aren't kept. Chat's topical words leave out medical, legal and financial entries by it (weave.SENSITIVE_FIELDS). Since format 2. |
 | `forms` | Other spellings, comma-separated: kanji spellings (殆ど for ほとんど), then other kana. |
 
 The loaders add `rank` (the line's position, 1 the most frequent) and `kanji` (the kanji of the written form).
@@ -86,7 +87,7 @@ from the reading index, an SQLite file built from the dictionary in the backgrou
 
 JavaScript, `extension/src/dictionary.js`: `parse(text)` gives the same entries (115 ms and about 24 MB of heap in
 Bun for the whole file); `load(url)` fetches it. The extension doesn't ship the file yet: setup copies only
-`extension/`, so shipping it means copying `data/dictionary.tsv` into the package, which adds 3.57 MB unpacked and
+`extension/`, so shipping it means copying `data/dictionary.tsv` into the package, which adds 3.60 MB unpacked and
 1.61 MB to the .xpi. The fields the matcher needs (`id ja kana romaji en glosses swap score`) are 2.83 MB, 1.27 MB
 compressed; the swappable entries alone are 2.25 MB, 1.01 MB compressed.
 
