@@ -1,8 +1,9 @@
 // Content script: watch readable text (tweets on X, prose elsewhere), ask the background for swaps, paint them,
 // handle the delayed gloss, click/Enter flip and seen/peek/flip events, and log clicks and selections in passages with
 // glossed words, and when passages are shown and their on-screen time, also for planned passages left without Japanese
-// (blank). Once the page settles it tells the background whether it found anything to weave, for the toolbar icon. Every
-// async reply belongs to one config generation.
+// (blank); a passage read (a stay long enough to log) goes to the background once, for the reading counts. Once the
+// page settles it tells the background whether it found anything to weave, for the toolbar icon. Every async reply
+// belongs to one config generation.
 //
 // Two paintings at most (docs/swap-prompt.md, "The web pipeline"). The swaps code is sure of come at once; a passage
 // whose model check is still on its way is awaiting, and the page asks again for what the answer adds. When it comes,
@@ -15,7 +16,7 @@ import { flatten, applySwaps, revert, toggle, isSwap, swapWord, swapOf, showsEng
 import { hashKey } from './hash.js';
 import { offReason } from './settings.js';
 import { selector, readable, skipped, revealing } from './page.js';
-import { wordCount, intensityLabel, isSentenceMark, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
+import { wordCount, intensityLabel, isSentenceMark, isZeroJapanese, INTENSITY_LEVELS, INTENSITY_OFF } from './levels.js';
 import { MAX_BATCH } from './models.js';
 import { readingState, account, newStay, paused } from './attention.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
@@ -31,8 +32,10 @@ const memo = new Map();
 const plans = new Map(); // text key -> how its amount was chosen (levels.js planSwaps), for its shown record
 const keys = new WeakMap(); // element -> revision:text hash, kept off the DOM so pages can't read it
 const sizes = new WeakMap(); // element -> its word count, for shown records
+const texts = new WeakMap(); // element -> its text, for the reading counts
 const awaiting = new Set(); // text keys painted with the sure swaps while the model's answer is on its way
 let sighted = new WeakSet(); // passages that have been on screen, even partly, since their painting
+const counted = new Set(); // passages (text hashes) sent as read in this page load
 const shownContexts = new Set(); // passages already logged as shown in this view
 const pending = new Map();
 const inflight = new Set();
@@ -258,6 +261,7 @@ function endStay(passage) {
   if (!stays.size) { clearInterval(stayTimer); stayTimer = null; }
   const key = keys.get(passage);
   if (stay.ms < STAY_MIN_MS || !key || !on()) return;
+  countRead(passage, key);
   if (stay.early || staysLogged >= STAYS_MAX) return;
   const { spans, annotations, box } = passage.isConnected ? describe(passage) : stay.desc;
   if (!spans.length && !stay.blank) return;
@@ -265,6 +269,15 @@ function endStay(passage) {
   void send({ type: 'interaction', kind: 'visible', at: stay.at, view: VIEW, uid: `${VIEW}-${++logged}`,
     context: key.slice(key.indexOf(':') + 1), box, annotations, y: 0, height: box[3], ms: stay.ms, wall: stay.wall,
     away: stay.away, media: stay.media, idle: stay.idle }).catch(() => {});
+}
+// A passage read: its text to the background once per page load, which counts the dictionary entries it shows (counts
+// only leave the browser, never text). Japanese or not; never a topic kept in English.
+function countRead(passage, key) {
+  const context = key.slice(key.indexOf(':') + 1);
+  const text = texts.get(passage);
+  if (!text || counted.has(context) || isZeroJapanese(text)) return;
+  counted.add(context);
+  void send({ type: 'read', text }).catch(() => counted.delete(context)); // sent again after a lost message, not after a no
 }
 // After a passage's painting changes: a stay under way ends there, and a new one starts if it is still on screen.
 function restay(passage) {
@@ -332,7 +345,8 @@ function consider(el) {
   const key = `${config.revision}:${hashKey(text)}`;
   keys.set(el, key);
   sizes.set(el, wordCount(text));
-  onscreen?.observe(el); // on screen before its last painting: those stays aren't logged (startStay)
+  texts.set(el, text);
+  onscreen?.observe(el); // its stays decide whether it was read, Japanese or not
   if (memo.has(key)) { paint(el, key); return; }
   let p = pending.get(key);
   if (!p) { p = { text, els: new Set() }; pending.set(key, p); }

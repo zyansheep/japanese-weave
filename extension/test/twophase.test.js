@@ -5,7 +5,7 @@ import { hashKey } from '../src/hash.js';
 // The page's two paintings (content.js): the swaps code is sure of at once, the model's additions when its answer
 // comes. A passage the reader hasn't had on screen is painted afresh from the full plan; one they have keeps the very
 // spans it shows and only gains; one with nothing sure is painted when the answer comes. Until its last painting a
-// passage logs no shown record and no stays.
+// passage logs no shown record and no stays; a passage read goes to the background once, for the reading counts.
 test('two paintings: sure swaps at once, the answer without moving what the reader saw; the log waits for the last', async () => {
   const win = new Window({ url: 'https://example.com/blog' });
   const keys = ['chrome', 'document', 'window', 'location', 'MutationObserver', 'IntersectionObserver', 'setInterval'];
@@ -109,16 +109,21 @@ test('two paintings: sure swaps at once, the answer without moving what the read
     // bare: painted now
     expect(ja('bare')).toEqual(['傘']);
     expect(p('seen').textContent).toBe('Our new 犬 runs to the park, でも he never stays there long.');
-    // its shown record now, with the plan of what is on the page; the stay before the answer is not logged
+    // its shown record now, with the plan of what is on the page; the stay before the answer is not logged, but read
     expect(of(logged('shown'))).toEqual(['seen']);
     expect(logged('shown')[0]).toMatchObject({ plan: full.seen.appended.plan, annotations: [['犬', 0, 0], ['でも', 0, 0]] });
     expect(logged('visible')).toHaveLength(0);
+    const reads = sent.filter((m) => m.type === 'read');
+    expect(reads).toEqual([{ type: 'read', text: texts.seen }]);
     // the stay since the answer is the last painting's
     await wait(1100);
     sight('seen', false);
     await wait(20);
     expect(of(logged('visible'))).toEqual(['seen']);
     expect(logged('visible')[0].annotations).toEqual([['犬', 0, 0], ['でも', 0, 0]]);
+    // read again in this page load: not sent again; English topics kept out are never sent
+    sight('seen', true); await wait(1100); sight('seen', false); await wait(20);
+    expect(sent.filter((m) => m.type === 'read')).toHaveLength(1);
     expect(JSON.stringify(sent.filter((m) => m.type === 'interaction'))).not.toContain('umbrella');
   } finally {
     await win.happyDOM.close();

@@ -1,18 +1,18 @@
 // Background (service worker in Chrome, event page in Firefox): word state and the model keys from the Claude Code plugin
 // (native host), site access, the web pipeline for every tab's passages (code's candidates at once, one model check per
-// batch of passages for the rest: pipeline.js, verify.js), results back to pages, seen/flip/peek events and the log back
-// to the plugin.
+// batch of passages for the rest: pipeline.js, verify.js), results back to pages, seen/flip/peek events, the log and the
+// reading counts back to the plugin.
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestChecks, needsCall, candidatesOf, CHECK_VERSION } from './verify.js';
-import { pipelineFor, planText, answerKey, storeAnswer, loadAnswer } from './pipeline.js';
+import { pipelineFor, planText, answerKey, storeAnswer, loadAnswer, readingIndexOf, readingCounts } from './pipeline.js';
 import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, intensityBudget, isSentenceMark, wordsForLevel,
   INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay,
-  cleanIntensity } from './hostsource.js';
+  cleanIntensity, refreshReadingIndex, queueReading, readToday, flushReading, INDEX_KEY } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 import { createToolbar } from './toolbar.js';
@@ -290,6 +290,44 @@ async function chooser(ctx) {
   };
 }
 
+// The reading index (hostsource.js refreshReadingIndex) as a matcher index, built once per version a worker sees.
+let reader = null;
+async function readingIndex() {
+  const { wordState } = await store.get(['wordState']);
+  if (reader && reader.version === wordState?.reading) return reader.index;
+  const stored = (await store.get([INDEX_KEY]))[INDEX_KEY];
+  if (!stored?.entries?.length) return null;
+  reader = { version: stored.version, index: readingIndexOf(stored.entries) };
+  return reader.index;
+}
+
+// A passage the page says was read (content.js: a stay on screen long enough to log), counted once a day: the
+// dictionary entries its safe matches show and the doubtful ones the model confirmed (pipeline.js readingCounts), from
+// the cached answer or the call under way; none asked for just to count. Counts only: queued for the host, never text.
+async function read(msg, sender) {
+  const ctx = await context();
+  const text = msg.text;
+  if (!activeOn(ctx, sender.url) || typeof text !== 'string' || text.length > 2000 || wordCount(text) < 6 || isZeroJapanese(text)) {
+    return { ok: false };
+  }
+  const day = localDay();
+  const d = `web:${hashKey(text)}`;
+  if (await readToday(chromeStorage, d, day)) return { ok: true, counted: false };
+  const { pipe, words } = await pipelineOf(ctx);
+  const plan = planText(pipe, text);
+  let answer = null;
+  if (ctx.hasKey && needsCall(plan)) {
+    const id = answerKey(plan);
+    const stored = (await cache.getMany([id]))[id] ?? (pending.has(id) ? await pending.get(id).promise.catch(() => null) : null);
+    answer = loadAnswer(plan, stored);
+  }
+  const entries = readingCounts({ text, reading: await readingIndex(), plan, answer, words, level: ctx.level });
+  if (!Object.keys(entries).length) return { ok: true, counted: false };
+  const counted = await locked(() => queueReading(chromeStorage, { d, day, entries }));
+  if (counted) scheduleFlush();
+  return { ok: true, counted };
+}
+
 // Every billed attempt counts toward usage, including an answer that was unusable before the fallback.
 async function recordSpent(spent) {
   for (const { model, ...tokens } of spent || []) await recordUsage(chromeStorage, model, tokens);
@@ -298,6 +336,7 @@ async function recordSpent(spent) {
 const flush = () => locked(async () => {
   const result = await flushEvents({ storage: chromeStorage, send });
   await flushLog({ storage: chromeStorage, send });
+  await flushReading({ storage: chromeStorage, send });
   return result;
 });
 let flushTimer = null;
@@ -331,11 +370,12 @@ async function logInteraction(msg, sender) {
 }
 
 // A new word state repaints pages (its version is in the revision); the answers cache stays, since each answer is keyed
-// by what its passage asked.
+// by what its passage asked. Then the reading index, when the host has a new one.
 async function syncWords() {
   await flush();
   const res = await refresh({ storage: chromeStorage, send });
   await broadcast();
+  if (res.state?.reading) await refreshReadingIndex({ storage: chromeStorage, send, version: res.state.reading });
   return { ok: !res.error, error: res.error, count: res.state?.words?.length || 0, stage: res.state?.stage || 0 };
 }
 
@@ -434,8 +474,8 @@ async function status() {
     usage: await readUsage(chromeStorage), intensity: config.intensity };
 }
 
-// Pages may only ask for config and swaps, and send events, interactions and what they have to weave; everything else
-// is popup-only.
+// Pages may only ask for config and swaps, and send events, interactions, passages read and what they have to weave;
+// everything else is popup-only.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || sender.id !== chrome.runtime.id) return false;
   const popup = sender.url === chrome.runtime.getURL('src/popup.html');
@@ -446,12 +486,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     event: () => record(msg, sender),
     interaction: () => logInteraction(msg, sender),
     nothing: () => nothing(msg, sender),
+    read: () => read(msg, sender),
     status, stats, syncWords, clearCache,
     save: () => save(msg),
     setChallenge: () => setChallenge(msg),
     intensity: () => stepIntensity(msg.step, 'popup'),
   };
-  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction', 'nothing'].includes(msg.type)))) return false;
+  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction', 'nothing', 'read'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));
   return true;
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { parseState, readCached, refresh, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, flushLog, describeStats,
-  STATE_KEY, PENDING_KEY, LOG_KEY } from '../src/hostsource.js';
+  refreshReadingIndex, queueReading, readToday, flushReading, STATE_KEY, PENDING_KEY, LOG_KEY, READING_KEY, INDEX_KEY } from '../src/hostsource.js';
 import { memoryStorage } from '../src/cache.js';
 import { validateSwaps } from '../src/levels.js';
 import { pipelineFor, planText } from '../src/pipeline.js';
@@ -227,5 +227,40 @@ describe('interaction log', () => {
     expect((await flushLog({ storage, send: async (m) => { sent.push(m); return { ok: true, stored: 1 }; } })).sent).toBe(1);
     expect(sent.map((m) => [m.type, m.items.length])).toEqual([['log', 1]]);
     expect((await storage.get([LOG_KEY]))[LOG_KEY]).toEqual([]);
+  });
+});
+
+describe('the reading index and the reading counts', () => {
+  const INDEX = { ok: true, version: 'v1', entries: [[1361110, 'adj-i', 'new'], [1464900, 'n', 'sunday'], ['x', 'n', 'bad'], [5, 'n', '']] };
+  it('asks for the index once per version and keeps what is well formed; without a host, nothing changes', async () => {
+    const storage = memoryStorage();
+    const asked = [];
+    const send = async (msg) => { asked.push(msg.type); return INDEX; };
+    expect(await refreshReadingIndex({ storage, send, version: 'v1' })).toEqual({ changed: true, count: 2 });
+    expect((await storage.get([INDEX_KEY]))[INDEX_KEY]).toEqual({ version: 'v1', entries: INDEX.entries.slice(0, 2) });
+    expect(await refreshReadingIndex({ storage, send, version: 'v1' })).toEqual({ changed: false });
+    expect(await refreshReadingIndex({ storage, send, version: '' })).toEqual({ changed: false });
+    expect(asked).toEqual(['readingIndex']);
+    const old = await refreshReadingIndex({ storage, send: async () => ({ ok: false, error: 'unknown message type' }), version: 'v2' });
+    expect(old.error).toContain('unknown message type');
+    expect((await storage.get([INDEX_KEY]))[INDEX_KEY].version).toBe('v1');
+  });
+  it('queues each passage once a day, counts only; flushes to the host and keeps them when it fails', async () => {
+    const storage = memoryStorage();
+    const item = { d: 'web:00ff00ff00ff00ff', day: '2026-10-21', entries: { 1361110: 2 } };
+    expect(await queueReading(storage, item)).toBe(true);
+    expect(await queueReading(storage, item)).toBe(false); // read again today
+    expect(await readToday(storage, item.d, '2026-10-21')).toBe(true);
+    expect(await readToday(storage, item.d, '2026-10-22')).toBe(false);
+    expect(await queueReading(storage, { ...item, day: '2026-10-22' })).toBe(true); // another day: the host counts it once
+    for (const bad of [{ ...item, d: 'the text itself' }, { ...item, entries: {} }, { ...item, entries: { x: 1 } }, { ...item, entries: { 1: 0 } },
+      { ...item, day: 'today' }, null]) expect(await queueReading(storage, bad)).toBe(false);
+    const failing = await flushReading({ storage, send: async () => ({ ok: false, error: 'unknown message type' }) });
+    expect(failing).toEqual({ sent: 0, error: 'unknown message type' });
+    expect((await storage.get([READING_KEY]))[READING_KEY]).toHaveLength(2);
+    const sent = [];
+    expect(await flushReading({ storage, send: async (msg) => { sent.push(msg); return { ok: true, counted: 2 }; } })).toEqual({ sent: 2, counted: 2 });
+    expect(sent).toEqual([{ type: 'reading', passages: [item, { ...item, day: '2026-10-22' }] }]);
+    expect((await storage.get([READING_KEY]))[READING_KEY]).toEqual([]);
   });
 });
