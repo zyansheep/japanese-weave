@@ -385,6 +385,25 @@ describe('the lookup budget', () => {
       expect(pick(list, { budgetPer100: 0, jitter: 0.2, seed, keep: [all[0]] }).swaps.map((s) => s.word)).toEqual(['k0']);
     }
   });
+  test('keep with a probe: the shown probe stays outside the budget, and no second showing or overlap is added', () => {
+    const list = [{ ...word('new', undefined, 'active'), arm: 'held:probe' }, word('k0', 4, 'known')];
+    const text = passage(2);
+    const at = (n) => ({ o: `w${n}`, f: 'new', g: 'x', h: '', ctx: `The w${n} x`, word: 'new', status: 'active' });
+    const phrase = { kind: 'phrase', o: 'w0 x', f: 'newk0', g: 'x', ctx: 'The w0 x x', words: ['new', 'k0'], word: 'new',
+      parts: [{ t: 'new', word: 'new' }, { t: 'k0', word: 'k0' }] };
+    const first = planSwaps(2, [at(0)], text, list, { seed: 7, budgetPer100: 1e-6 });
+    expect(first.swaps.map((s) => s.ctx)).toEqual(['The w0 x']);
+    expect(first.plan.spent).toBe(0);
+    for (const offered of [[at(0), at(1)], [phrase, at(0)]]) {
+      const again = planSwaps(2, offered, text, list, { seed: 7, budgetPer100: 1e-6, keep: first.swaps });
+      expect(again.swaps).toEqual([at(0)]); // not new at w1 again, not the phrase over the shown word
+      expect(again.plan).toMatchObject({ spent: 0, arms: { new: 'held:probe' } });
+    }
+    // seen today already (its 'seen' event in before the answer): still the probe it was, outside the budget
+    const seen = planSwaps(2, [at(0), at(1)], text, list, { seed: 7, budgetPer100: 1e-6, keep: first.swaps, shownToday: ['new'] });
+    expect(seen.swaps).toEqual([at(0)]);
+    expect(seen.plan.spent).toBe(0);
+  });
   test('a word whose delayed-start probe is due goes first, outside the budget, once a day; plans record the arms', () => {
     const learning = [...Array.from({ length: 10 }, (_, i) => word(`l${i}`, 0.5)), word('new', undefined, 'active')];
     expect(pick(learning, { budgetPer100: 1e-6 }).swaps).toEqual([]); // a new word alone no longer jumps the budget

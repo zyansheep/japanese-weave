@@ -780,17 +780,22 @@ export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed 
   // The budget's two parts: what is left of each, and stop, the place in the ranking of the first that didn't fit it
   const parts = [{ left: budget * (1 - SENTENCE_SHARE) }, { left: budget * SENTENCE_SHARE }];
   const partOf = (c) => parts[whole(c) ? 1 : 0];
-  // Swaps already on the page first, as they were planned: costly ones from the budget (even past it, as estimates move),
-  // free ones as they are.
-  const shownKeys = new Set((Array.isArray(keep) ? keep : []).map(swapKey));
-  for (const c of items.filter((x) => shownKeys.has(swapKey(x.s)))) {
-    if (!c.cost || full) { take(c); continue; }
-    spend(c);
-    partOf(c).left -= c.cost;
-  }
-  const probe = full ? null : [...ranked, ...items.filter((c) => !c.cost || c.waits)].find((c) => !kept.includes(c) && due(c));
-  if (probe) spend(probe, true);
   const fits = (c) => !kept.includes(c) && unused(c) && room(c) && clear(c);
+  // Swaps already on the page first, as they were planned: one with a word whose probe is due was the passage's probe,
+  // outside the budget (whether or not today's showing has been counted yet); costly ones from the budget (even past it,
+  // as estimates move); free ones as they are.
+  const shownKeys = new Set((Array.isArray(keep) ? keep : []).map(swapKey));
+  const shownItems = items.filter((x) => shownKeys.has(swapKey(x.s)));
+  const keptProbe = full ? null : shownItems.find((c) => c.listed.some((x) => isProbe(x.w)));
+  for (const c of shownItems) {
+    if (c === keptProbe) spend(c, true);
+    else if (!c.cost || full) take(c);
+    else { spend(c); partOf(c).left -= c.cost; }
+  }
+  // The probe, unless the page already shows it: placed as any other candidate (a word not used yet, room in its
+  // sentence, no overlap).
+  const probe = full || keptProbe ? null : [...ranked, ...items.filter((c) => !c.cost || c.waits)].find((c) => fits(c) && due(c));
+  if (probe) spend(probe, true);
   const go = (from, only) => {
     for (let i = from; i < ranked.length; i++) {
       const c = ranked[i];
