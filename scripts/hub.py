@@ -21,6 +21,9 @@ Ops (each also carries uid, day, at and machine; see stamp):
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
   brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {}, "known", "whole", "chars",
              "budget"?, "ask"?, "expected"?, "turn"?}   what one chat reply was offered (weave.compose); a record only
+  probe     {"via", "seconds", "weights", "top", "words": [[ja, id, band, weight, answer]], "fakes": [[ja, answer]],
+             "bands": [[share, words]], "estimate"}   a probe of the goal (probe.py), kept in state["probes"]; where
+             the gloss log is, the lookup habit of its words answered not known is added
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
 log of everything that changed the word state sit side by side. Records (RECORDS) change nothing: they are kept in
 the ops table and nowhere else (hub.keep; feedback.chat_briefs reads them back).
@@ -60,7 +63,7 @@ REPLIES_PER_OP = 500
 MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
 PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed',  # applied to the cache while queued
-               'thread')
+               'thread', 'probe')
 RECORDS = ('brief',)       # ops only kept in the ops table: they change nothing in the word state
 RECORD_TIMEOUT = 2         # seconds a record waits for the database here before it is dropped
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
@@ -149,6 +152,8 @@ def validate(op):
             return 'thread: {"session", "off": true|false, "source"}'
     elif kind == 'brief':
         return brief_error(op)
+    elif kind == 'probe':
+        return probe_error(op)
     elif kind not in ('chat_day', 'noticed'):
         return f'unknown op {kind!r}'
     return None
@@ -179,6 +184,40 @@ def brief_error(op):
             and ('turn' not in op or threads.valid_session(op['turn'])))
     return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
                               '"known", "whole", "chars", "budget"?, "ask"?, "expected"?, "turn"?}')
+
+
+PROBE_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands',
+                'estimate'}
+PROBE_SHARES = ('known', 'se', 'low', 'high', 'corrected', 'corrected_low', 'corrected_high', 'listed')
+PROBE_COUNTS = ('deff', 'n', 'claimed', 'fakes')
+
+
+def probe_error(op):
+    """What is wrong with a probe op (probe.record), or None: its words [[word, entry id, band, weight, answer]],
+    made-up words [[word, answer]] and bands [[share of the weight, words]], an answer 1, 0 or null (skipped), and
+    its estimate's shares between 0 and 1."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
+    answer = lambda x: x is None or count(x, 1)
+    words, fakes, bands, found = op.get('words'), op.get('fakes'), op.get('bands'), op.get('estimate')
+    good = (set(op) <= PROBE_FIELDS and op.get('via') in ('terminal', 'chat') and count(op.get('seconds'), 10 ** 7)
+            and op.get('weights') in ('frequency', 'reading') and count(op.get('top'), 10 ** 6)
+            and isinstance(bands, list) and 0 < len(bands) <= 20
+            and all(isinstance(b, list) and len(b) == 2 and number(b[0]) and 0 <= b[0] <= 1 and count(b[1], 10 ** 6)
+                    and b[1] > 0 for b in bands)
+            and isinstance(words, list) and len(words) <= 200
+            and all(isinstance(w, list) and len(w) == 5 and word(w[0]) and count(w[1], 10 ** 9)
+                    and count(w[2], len(bands) - 1) and number(w[3]) and w[3] > 0 and answer(w[4]) for w in words)
+            and isinstance(fakes, list) and len(fakes) <= 50
+            and all(isinstance(f, list) and len(f) == 2 and word(f[0]) and answer(f[1]) for f in fakes)
+            and isinstance(found, dict) and set(found) <= set(PROBE_SHARES + PROBE_COUNTS)
+            and all(found[k] is None or number(found[k]) and 0 <= found[k] <= 1 for k in PROBE_SHARES if k in found)
+            and all(found[k] is None or number(found[k]) and 0 <= found[k] <= 10 ** 6 for k in PROBE_COUNTS
+                    if k in found))
+    return None if good else ('probe: {"via": "terminal"|"chat", "seconds", "weights", "top", "words": [[word, id, '
+                              'band, weight, answer]], "fakes": [[word, answer]], "bands": [[share, words]], '
+                              '"estimate": {...}}')
 
 
 def apply(state, op):
@@ -230,6 +269,9 @@ def apply(state, op):
         return {}
     if kind == 'thread':  # merged per chat: a later change from another machine is kept
         return {'off': threads.merge(state, op['session'], {'off': op['off'], 'at': op['at'], 'source': op['source']})}
+    if kind == 'probe':
+        import probe  # here: the hook needn't load the dictionary
+        return probe.keep(state, op)
     return {}  # exposure: run folds it into exposure.json
 
 
@@ -285,8 +327,14 @@ def _apply_here(op):
         fwlib.fold(index, replies, [w['ja'] for w in fwlib.load_state()['words']])
         fwlib.write_json(path, index)
         counted = len({r['d'] for r in replies} - before)
+    habit = None
+    if kind == 'probe':  # the gloss log lives where the state does
+        import probe
+        habit = probe.habit_here(op)
     with fwlib.editing() as state:  # merges anki.csv into the list, applies, promotes, saves
         result = apply(state, op)
+        if habit is not None and result.get('kept'):
+            result['habit'] = probe.attach(state, op['uid'], habit)
     if kind == 'mark' and result['canonical']:  # timestamped, so the knowledge replay applies them at the right moment
         knowledge.log_command(result['canonical'], 'known' if op['as'] == 'known' else 'learn', now=op['at'] / 1000)
     if counted is not None:

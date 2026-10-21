@@ -52,6 +52,11 @@
                                                      score models of lookup chances on the gloss log, each day
                                                      predicted from the days before (scripts/evaluate.py; a
                                                      simulated reader's state dir from tools/sim works too)
+  fw.py probe [--list | --answers "1 4 7-9" | --history]
+                                                     a 3-minute check of how much of your reading you would read
+                                                     without a lookup: about 60 words sampled by frequency and 6
+                                                     made-up ones, one at a time in a terminal, y or n (--list and
+                                                     --answers: the same in a chat); monthly (scripts/probe.py)
   fw.py refresh                                      rescan chat transcripts and apply the promotion rules
                                                      (with a collector: send them and anything queued, and
                                                      refresh the cached state)
@@ -84,6 +89,7 @@ import hub  # noqa: E402
 import intensity  # noqa: E402
 import evaluate  # noqa: E402
 import knowledge  # noqa: E402
+import probe  # noqa: E402
 import threads  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
@@ -546,6 +552,7 @@ def status(_args):
     nxt = next((n for n, s in sorted(fwlib.STAGES) if fwlib.stage_for(state) < s), None)
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
+    print(probe.status_line(state))
 
 
 def stale_note(error):
@@ -895,6 +902,9 @@ def main(argv=None):
     p.add_argument('--session', help='the chat for "here": its Claude Code session id')
     p.set_defaults(run=intensity_cmd)
     sub.add_parser('calibrate').set_defaults(run=calibrate_cmd)
+    p = sub.add_parser('probe')
+    probe.add_arguments(p)
+    p.set_defaults(run=probe.run)
     p = sub.add_parser('evaluate')
     evaluate.add_arguments(p)
     p.set_defaults(run=evaluate.run)
