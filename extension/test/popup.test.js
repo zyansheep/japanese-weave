@@ -12,8 +12,9 @@ test('popup: off until a time with a way back, full, and the Less and More butto
   win.document.body.innerHTML = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script'));
   const until = new Date(2026, 9, 19, 21, 40).getTime();
   let intensity = { level: -3, until };
+  let hasKey = true;
   const asked = [];
-  const status = () => ({ config: { settings: { ...cleanSettings(), newSitesEnabled: true }, stage: 1, hasKey: true, paused: false,
+  const status = () => ({ config: { settings: { ...cleanSettings(), newSitesEnabled: true }, stage: 1, hasKey, paused: false,
     origins: ['<all_urls>'], challenge: 0, intensity }, words: 0, usage: {}, modelStatus: null });
   Object.assign(globalThis, {
     window: win, document: win.document,
@@ -53,6 +54,14 @@ test('popup: off until a time with a way back, full, and the Less and More butto
     expect($('levelInfo').textContent).toBe('L1 · all the Japanese it can for now');
     expect($('heavier').disabled).toBe(true);
     expect($('lighter').disabled).toBe(false);
+    // Without a key the page still gets the swaps code is sure of; no density cap and no daily rate any more.
+    hasKey = false;
+    $('lighter').click();
+    await settle();
+    expect($('operationText').textContent).toBe('On · only the swaps code is sure of; add a Gemini key for the rest');
+    expect($('density')).toBeNull();
+    expect($('rateInfo')).toBeNull();
+    expect(cleanSettings({ density: 10 })).not.toHaveProperty('density');
   } finally {
     await win.happyDOM.close();
     Object.assign(globalThis, saved);

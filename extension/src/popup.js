@@ -1,6 +1,6 @@
 import { resolveLevel, intensityLabel, intensityBudget, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { MODELS, MODEL_NAMES, providerOf } from './models.js';
-import { siteEnabled, siteOn, hasSiteAccess, DENSITIES, CHALLENGES } from './settings.js';
+import { siteEnabled, siteOn, hasSiteAccess, CHALLENGES } from './settings.js';
 import { describeStats } from './hostsource.js';
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`.
 const chrome = globalThis.browser ?? globalThis.chrome;
@@ -48,10 +48,8 @@ async function refresh() {
   const level = c.intensity?.level || 0;
   // What the level means on pages (levels.js intensityBudget): known words free, a lookup budget for the rest.
   const amount = level === INTENSITY_OFF ? 'no Japanese for now' : level === INTENSITY_FULL ? 'all the Japanese it can for now'
-    : `known words wherever they fit, plus ~${+intensityBudget(level, status.budget).toFixed(2)} lookups per 100 words`
-      + (s.density ? `, at most ${s.density}% of words` : '');
+    : `known words wherever they fit, plus ~${+intensityBudget(level, status.budget).toFixed(2)} lookups per 100 words`;
   $('levelInfo').textContent = `L${chosen}${stage && chosen !== stage ? ` (stage ${stage})` : ''} · ${amount}`;
-  $('density').value = String(s.density || 0);
   const ends = level ? new Date(c.intensity.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
   $('intensityInfo').textContent = level ? `${intensityLabel(level)} until ${ends}` : 'normal';
   $('intensityInfo').title = 'Alt+Shift+. for more, Alt+Shift+, for less; from Off (no Japanese) to Full (all it can); back to normal 3 hours after the last change';
@@ -60,9 +58,6 @@ async function refresh() {
   $('intensityBack').hidden = level !== INTENSITY_OFF;
   $('challenge').value = String(c.challenge || 0);
   $('challenge').disabled = !status.words; // the dial lives in the native host's word state
-  const rate = status.rate;
-  $('rateInfo').textContent = rate ? `${rate.per100} per 100 words (${rate.peeks} in ${rate.shownWords}, ${rate.days} days)`
-    : status.words ? 'nothing logged yet' : 'needs the native host';
   $('usageToday').textContent = usageLine(status.usage?.today);
   $('usageTotal').textContent = status.usage?.total?.calls ? `${usageLine(status.usage.total)} since ${status.usage.since}` : 'none yet';
   $('levelOverride').value = String(s.levelOverride || 0);
@@ -77,10 +72,10 @@ async function refresh() {
     : 'built-in list';
   $('operationText').textContent = !s.enabled ? 'Off'
     : level === INTENSITY_OFF ? `Off until ${ends}`
-    : !c.hasKey ? `Add ${providerOf(s.model) === 'anthropic' ? 'an Anthropic' : 'a Gemini'} key to start`
     : c.paused ? 'Paused from Claude Code'
     : host && !siteEnabled(s, tab.url) ? 'Off on this site'
     : host && !hasSiteAccess(tab.url, c.origins) ? 'This site needs your OK'
+    : !c.hasKey ? `On · only the swaps code is sure of; add ${providerOf(s.model) === 'anthropic' ? 'an Anthropic' : 'a Gemini'} key for the rest`
     : status.modelStatus?.error || (status.modelStatus?.model && status.modelStatus.model !== s.model
       ? `On · last answer from ${MODEL_NAMES[status.modelStatus.model] || status.modelStatus.model}` : 'On');
   const list = $('siteList');
@@ -134,13 +129,6 @@ async function inject() {
   } catch { $('notice').textContent = 'Reload this page to start. Browsers block extensions on some pages.'; }
 }
 
-for (const value of DENSITIES) {
-  const opt = document.createElement('option');
-  opt.value = String(value);
-  opt.textContent = value ? `at most ${value}% of words` : 'No cap';
-  $('density').appendChild(opt);
-}
-
 for (const value of CHALLENGES) {
   const opt = document.createElement('option');
   opt.value = String(value);
@@ -162,7 +150,6 @@ $('model').addEventListener('change', (e) => run(() => save({ settings: { model:
 $('lighter').addEventListener('click', () => run(() => stepIntensity(-1)));
 $('heavier').addEventListener('click', () => run(() => stepIntensity(1)));
 $('intensityBack').addEventListener('click', () => run(() => stepIntensity(0)));
-$('density').addEventListener('change', (e) => run(() => save({ settings: { density: Number(e.target.value) || 0 } })));
 $('challenge').addEventListener('change', (e) => run(async () => {
   const res = await send({ type: 'setChallenge', challenge: Number(e.target.value) });
   await refresh();

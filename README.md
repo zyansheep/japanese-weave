@@ -67,20 +67,25 @@ level from [blocks/](blocks/level-01.md).
   results a snippet, the knowledge panel's description and AI answers (the overview, and People also ask once opened),
   never titles, links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or
   opened, never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。 for its
-  translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by default,
-  Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys only), or Claude
-  Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s for a page's first
-  passages. Passages from every tab share calls, up to 16 a call ([docs/swap-prompt.md](docs/swap-prompt.md)).
+  translation; click to flip back to English. Code finds every place one of your words could go and takes the ones it
+  is sure of, which show within a second of the page loading; a model on your own key settles the rest and writes the
+  sentences and phrases, one call per batch of passages from every tab, and its additions follow in 20 to 30 s
+  without moving what you already see: Claude Haiku 5.5 with an Anthropic key (on passages nobody tuned against, 80%
+  to 88% of the places your words fit at full, about 1% of them in the wrong sense, about $0.44 per 1,000 passages),
+  or Gemini 3.8 Flash or 4 Argon (popup, Model; not yet measured on this job). Without a key you get the sure swaps alone and no text leaves the browser. Each
+  answer is kept, so revisiting a page, changing the level or learning a new word costs no new call except where the
+  new word adds a doubtful place ([docs/swap-prompt.md](docs/swap-prompt.md), "The web pipeline"). Passages you read
+  are counted per dictionary entry, counts only, for the words your reading brings in.
 - **From off to full on pages** (extension): Alt+Shift+Comma and Alt+Shift+Period (or the popup's Less and More) step
   the Japanese on pages from **Off** to **Full** for 3 hours after the last press: off (−3), much lighter, lighter,
   normal, heavier, much heavier, full (+3). Off puts every woven page back in English at once, sends nothing to the
-  model and logs nothing, until a heavier press or the popup's **Turn back on**. Full asks the model for every listed
-  word, learning or known, that a passage says in that sense, and every sentence your words and simple grammar can say
-  whole, and shows all of it, still checked word by word; heavier and much heavier show part of that same answer. The
+  model and logs nothing, until a heavier press or the popup's **Turn back on**. Full shows every candidate: each of
+  your words, learning or known, wherever the passage says it in that sense, and every sentence your words and simple
+  grammar can say whole, still checked word by word; every level picks from that same set, with no new call. The
   toolbar badge shows the level (`−2`, `+1`, `off`, `full`) and `···` while the model works on that tab's page; the
   icon turns grey where a page gets no Japanese, and
-  its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, no
-  key, or a page extensions can't run on. Once a page has settled, the icon is faded where it has nothing to weave,
+  its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, or a
+  page extensions can't run on. Once a page has settled, the icon is faded where it has nothing to weave,
   and its tooltip says whether no English paragraphs were found or no Japanese fit the text; it comes back when
   Japanese turns up (more comments, the next results, another video).
 
@@ -336,7 +341,8 @@ Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE
 local Claude Code and Codex transcripts to count exposure and words from your reading, and sends only counts (to your
 collector, if you set one), never the text. The extension sends
 readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
-(free-tier Gemini keys allow Google to train on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
+(free-tier Gemini keys allow Google to train on prompts); without a key no text leaves the browser. Of what you read on
+those sites it sends the plugin counts per dictionary entry and a hash of each passage, never the text. Private sites start off even when every site is on: webmail and messaging, AI chat, password
 managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;
 the popup can turn any of them on). It talks to the plugin through a native messaging host that only this extension
 may call.

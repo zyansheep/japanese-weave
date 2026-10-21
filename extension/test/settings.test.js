@@ -50,17 +50,16 @@ describe('siteOn edge hosts', () => {
   });
 });
 
-it('density is a percent from the offered list, 0 (the level rule) otherwise', () => {
-  expect(cleanSettings().density).toBe(0);
-  expect(cleanSettings({ density: 15 }).density).toBe(15);
-  for (const bad of [7, -5, 100, '15', 15.5]) expect(cleanSettings({ density: bad }).density).toBe(0);
+it('there is no density setting: the lookup budget sets the amount (an old one is dropped)', () => {
+  expect(cleanSettings()).not.toHaveProperty('density');
+  expect(cleanSettings({ density: 15 })).not.toHaveProperty('density');
 });
 
 describe('offReason', () => {
   const ctx = (patch = {}, settings = {}) => ({ hasKey: true, paused: false, origins: ['<all_urls>'], intensity: { level: 0, until: 0 },
     ...patch, settings: { ...cleanSettings(settings), newSitesEnabled: true, ...settings } });
-  // the worker's test before offReason
-  const before = (c, url) => c.hasKey && !c.paused && siteEnabled(c.settings, url) && hasSiteAccess(url, c.origins);
+  // the worker's test before offReason; a key no longer matters, as pages without one get the swaps code is sure of
+  const before = (c, url) => !c.paused && siteEnabled(c.settings, url) && hasSiteAccess(url, c.origins);
   test('one reason per page, global ones first, in the order a reader would fix them', () => {
     const page = 'https://example.com/a';
     expect(offReason(ctx(), page)).toBe('');
@@ -68,9 +67,9 @@ describe('offReason', () => {
     expect(offReason(ctx({ paused: true, intensity: { level: -3, until: 1 } }), page)).toBe('paused');
     expect(offReason(ctx({ intensity: { level: -3, until: 1 }, hasKey: false }), page)).toBe('intensity-off');
     expect(offReason(ctx({ intensity: { level: -2, until: 1 } }), page)).toBe('');
-    expect(offReason(ctx({ hasKey: false }), page)).toBe('no-gemini-key');
-    expect(offReason(ctx({ hasKey: false }, { model: 'claude-haiku-5-5' }), page)).toBe('no-anthropic-key');
-    expect(globalOffReason(ctx({ hasKey: false }))).toBe('no-gemini-key');
+    expect(offReason(ctx({ hasKey: false }), page)).toBe(''); // no key: the swaps code is sure of, and no text leaves
+    expect(offReason(ctx({ hasKey: false }, { model: 'claude-haiku-5-5' }), page)).toBe('');
+    expect(globalOffReason(ctx({ hasKey: false }))).toBe('');
     expect(globalOffReason(ctx())).toBe('');
     for (const url of ['about:addons', 'chrome://extensions/', 'moz-extension://abc/src/popup.html', 'file:///home/a.html', 'not a url']) {
       expect(offReason(ctx(), url)).toBe('unsupported');

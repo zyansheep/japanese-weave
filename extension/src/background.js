@@ -1,16 +1,18 @@
 // Background (service worker in Chrome, event page in Firefox): word state and the model keys from the Claude Code plugin
-// (native host), site access, shared model calls for every tab's passages together, results back to pages,
-// seen/flip/peek events back to the plugin.
+// (native host), site access, the web pipeline for every tab's passages (code's candidates at once, one model check per
+// batch of passages for the rest: pipeline.js, verify.js), results back to pages, seen/flip/peek events, the log and the
+// reading counts back to the plugin.
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
-import { requestSwaps } from './engine.js';
-import { PROMPT_VERSION } from './prompt.js';
-import { candidatesFor, MAX_BATCH, BATCH, FULL_BATCH, PARALLEL } from './models.js';
+import { requestChecks, needsCall, candidatesOf, CHECK_VERSION } from './verify.js';
+import { pipelineFor, planText, answerKey, storeAnswer, loadAnswer, readingIndexOf, readingCounts } from './pipeline.js';
+import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
-import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, answerLevel, intensityBudget, isSentenceMark,
+import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, intensityBudget, isSentenceMark, wordsForLevel,
   INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
-import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay, cleanIntensity } from './hostsource.js';
+import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay,
+  cleanIntensity, refreshReadingIndex, queueReading, readToday, flushReading, INDEX_KEY } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 import { createToolbar } from './toolbar.js';
@@ -36,13 +38,20 @@ const serial = () => {
   return (fn) => { const p = chain.then(fn); chain = p.catch(() => {}); return p; };
 };
 const locked = serial(); // storage read-modify-writes one at a time, or concurrent ones drop data
+// The cache's format: 2 since the check pipeline, a model's answer per passage keyed by what was asked (pipeline.js
+// answerKey); before, every level's validated swaps per revision, which nothing reads now.
+const CACHE_FORMAT = 2;
 
 const ready = (async () => {
   // Content scripts run on every enabled site, so stored keys are kept out of their reach.
   if (store.setAccessLevel) await store.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
-  const { settings } = await store.get('settings');
+  const { settings, cacheFormat } = await store.get(['settings', 'cacheFormat']);
   if (settings?.apiKey) await store.set({ apiKey: settings.apiKey }); // 0.1 kept a pasted key in settings
   await store.set({ settings: cleanSettings(settings) });
+  if (cacheFormat !== CACHE_FORMAT) {
+    await cache.clear();
+    await store.set({ cacheFormat: CACHE_FORMAT });
+  }
 })();
 
 // Intensity (heavier or lighter for a while, ../scripts/intensity.py): the newer of what this browser set and what the
@@ -52,12 +61,12 @@ function intensityOf(data, now = Date.now()) {
   return latest?.level && latest.until > now ? latest : { level: 0, until: 0, at: latest?.at || 0 };
 }
 
-// What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped. The
-// cache is keyed by cacheRevision, which leaves out the adaptive-difficulty dial and the intensity, all but which answer
-// it picks from: the cache holds every validated candidate and those only change which of them planSwaps picks, so they
-// never cost a model call. The heavier levels and full pick from the full answer (answerLevel), which has its own cache,
-// the lighter ones from normal's. Off (-3) changes the revision too, so pages go back to English at once (settings.js
-// offReason).
+// What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped and pages
+// repaint. The answers cache is keyed by what each passage asked (pipeline.js answerKey), not by the revision: a new
+// word list, level, intensity or budget only changes which candidates planSwaps picks, and asks the model again only
+// for passages whose doubtful spans changed. Off (-3) changes the revision too, so pages go back to English at once
+// (settings.js offReason). hasKey: the chosen model or its fallback has a key; without one, pages get the swaps code
+// is sure of alone.
 async function context() {
   await ready;
   const data = await store.get(['settings', 'wordState', 'epoch', 'intensity', ...KEY_NAMES]);
@@ -69,11 +78,10 @@ async function context() {
   const paused = !!state?.paused;
   const { origins = [] } = await chrome.permissions.getAll();
   const intensity = intensityOf(data);
-  const answer = answerLevel(intensity.level);
-  const cacheRevision = hashKey(JSON.stringify(['candidates', PROMPT_VERSION, data.epoch || '', settings, level, state?.version || '', paused, hasKey, origins, ...(answer ? [answer] : [])]));
   const challenge = state?.challenge || 0;
-  const revision = hashKey(JSON.stringify([cacheRevision, challenge, intensity.level]));
-  return { settings, level, revision, cacheRevision, challenge, hasKey, paused, origins, stage: state?.stage || 0,
+  const revision = hashKey(JSON.stringify(['checks', CHECK_VERSION, data.epoch || '', settings, level, state?.version || '', paused,
+    hasKey, origins, challenge, intensity.level]));
+  return { settings, level, revision, epoch: data.epoch || '', challenge, hasKey, paused, origins, stage: state?.stage || 0,
     intensity: { level: intensity.level, until: intensity.until } };
 }
 
@@ -121,47 +129,79 @@ async function nothing(msg, sender) {
   return { ok: true };
 }
 
+// The matcher's index and flags for the words in use (the host's, else the bundled list for the level), built again
+// when a sync brings a new word state. words: what validation checks candidates against (levels.js validateSwaps;
+// undefined for the bundled lists, which it knows by level).
+let piped = null;
+// A passage's answer in the cache: its key (pipeline.js answerKey) after the epoch, which Clear cache changes, so an
+// answer still on its way when the cache is cleared is never read.
+const answerId = (ctx, plan) => `${ctx.epoch}|${answerKey(plan)}`;
+async function pipelineOf(ctx) {
+  const { wordState } = await store.get(['wordState']);
+  const own = wordState?.words?.length ? wordState.words : null;
+  const key = own ? `state:${wordState.version}:${wordState.fetchedAt || 0}` : `level:${ctx.level}`;
+  if (piped?.key !== key) piped = { key, pipe: pipelineFor(own || wordsForLevel(ctx.level)), words: own || undefined };
+  return piped;
+}
+
+// A page's passages: each one's plan (pipeline.js), its candidates (verify.js candidatesOf) and the level's pick of them
+// (planSwaps). Code's candidates need no model: the safe options, and with the model's cached answer its picks,
+// sentences and phrases too. A passage that needs the model (needsCall) and has no cached answer gets its safe swaps
+// at once, listed in `waiting`, and its call starts now; the page asks again with wait: true for what the answer adds,
+// and that reply waits for the call. An item's keep (the swaps the page already shows) also gets `appended`: the plan
+// redone around them, for a passage the reader has had on screen (content.js). Without a key no call is made: the safe
+// swaps are all. A failed call leaves the safe swaps, with the error.
 async function swaps(msg, sender) {
   const ctx = await context();
   if (msg.revision !== ctx.revision || !activeOn(ctx, sender.url)) return { results: {}, stale: true };
   if (!Array.isArray(msg.items) || msg.items.length > MAX_BATCH) throw new Error('Invalid text batch');
   const items = msg.items.filter((i) => i && typeof i.text === 'string' && i.text.length <= 2000 &&
     wordCount(i.text) >= 6 && !isZeroJapanese(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
-  const cacheKey = (i) => `${ctx.cacheRevision}:${hashKey(i.text)}`;
-  const cached = await cache.getMany(items.map(cacheKey));
+  const { pipe, words } = await pipelineOf(ctx);
+  const planned = items.map((i) => {
+    const plan = planText(pipe, i.text);
+    const keep = Array.isArray(i.keep) ? i.keep.filter((x) => x && typeof x === 'object').slice(0, 100) : [];
+    return { key: i.key, text: i.text, plan, keep, id: ctx.hasKey && needsCall(plan) ? answerId(ctx, plan) : null };
+  });
+  const asked = planned.filter((p) => p.id);
+  const stored = await cache.getMany(asked.map((p) => p.id));
   const choose = await chooser(ctx);
-  // { results: { key: swaps }, plans: { key: plan } } for the items with candidates
-  const picked = (candidates) => {
-    const out = { results: {}, plans: {} };
-    for (const i of items.filter((x) => cacheKey(x) in candidates)) {
-      const { swaps: chosen, plan } = choose(i.text, candidates[cacheKey(i)]);
-      out.results[i.key] = chosen;
-      out.plans[i.key] = plan;
-    }
-    return out;
+  const out = { results: {}, plans: {} };
+  const pick = (p, answer) => {
+    const candidates = candidatesOf(p.plan, answer, words, ctx.level);
+    ({ swaps: out.results[p.key], plan: out.plans[p.key] } = choose(p.text, candidates));
+    if (p.keep.length) (out.appended ||= {})[p.key] = choose(p.text, candidates, p.keep);
   };
-  const misses = items.filter((i) => !(cacheKey(i) in cached));
-  if (!misses.length) return picked(cached);
+  const misses = asked.filter((p) => !(p.id in stored));
+  for (const p of planned) if (!misses.includes(p)) pick(p, p.id ? loadAnswer(p.plan, stored[p.id]) : null);
+  if (!misses.length) return out;
+  const batch = misses.map((p) => ({ id: p.id, plan: p.plan }));
+  if (!msg.wait) {
+    for (const p of misses) pick(p, null);
+    out.waiting = misses.map((p) => p.key);
+    void gather(ctx, batch).catch(() => {}); // the wait request hears how it went
+    return out;
+  }
   const done = toolbar.wait(sender.tab?.id); // the tab's button says a model is at work until this answer is in
   try {
-    const fresh = await gather(ctx, misses.map((i) => ({ id: cacheKey(i), text: i.text })));
+    const fresh = await gather(ctx, batch);
     const now = await context();
     if (!fresh || now.revision !== ctx.revision) return { results: {}, stale: true };
-    return picked({ ...cached, ...fresh });
+    for (const p of misses) pick(p, loadAnswer(p.plan, fresh[p.id]));
+    return out;
   } catch (e) {
-    return { ...picked(cached), error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
+    return { ...out, error: e?.message || 'Model request failed', retryAfterMs: e?.retryAfterMs };
   } finally {
     done();
   }
 }
 
-// Cache misses from every tab wait here and go to the model together, up to the model's batch size a call (models.js:
-// BATCH, FULL_BATCH for the full answer, else MAX_BATCH) and one call at a time (PARALLEL for Haiku), so the passages
-// that turn up while a call runs (scrolling, other tabs) share the next call and its prompt. A passage already waiting
-// or in a call isn't asked for twice. Resolves with { cacheKey: swaps } for the batch, or null when the word state or
-// settings changed meanwhile. Passage ids are cache keys, which start with the cacheRevision, so one id never mixes two
-// revisions.
-const pending = new Map(); // passage id -> { ctx, p: { id, text }, promise, resolve, reject }
+// Passages to check from every tab wait here and go to the model together, up to the model's batch size a call
+// (models.js: BATCH, else MAX_BATCH) and one call at a time (PARALLEL for Haiku), so the passages that turn up while a
+// call runs (scrolling, other tabs) share the next call and its prompt. A passage already waiting or in a call isn't
+// asked for twice: its id is its answer's cache key. Resolves with { id: stored answer } for the batch, or null when the
+// reader turned the Japanese off meanwhile.
+const pending = new Map(); // passage id -> { ctx, p: { id, plan }, promise, resolve, reject }
 const queue = []; // ids of pending passages not in a call yet
 let active = 0;
 function gather(ctx, batch) {
@@ -169,6 +209,7 @@ function gather(ctx, batch) {
     if (pending.has(p.id)) continue;
     const entry = { ctx, p };
     entry.promise = new Promise((resolve, reject) => Object.assign(entry, { resolve, reject }));
+    entry.promise.catch(() => {}); // heard by whoever awaits it
     pending.set(p.id, entry);
     queue.push(p.id);
   }
@@ -181,11 +222,11 @@ function drain() {
     const { ctx } = pending.get(queue[0]);
     const model = ctx.settings.model;
     if (active >= (PARALLEL[model] || 1)) return;
-    const size = (answerLevel(ctx.intensity.level) === INTENSITY_FULL && FULL_BATCH[model]) || BATCH[model] || MAX_BATCH;
+    const size = BATCH[model] || MAX_BATCH;
     const group = [];
     for (let i = 0; i < queue.length && group.length < size;) {
       const entry = pending.get(queue[i]);
-      if (entry.ctx.cacheRevision !== ctx.cacheRevision) { i++; continue; }
+      if (entry.ctx.settings.model !== model) { i++; continue; }
       queue.splice(i, 1);
       group.push(entry);
     }
@@ -193,7 +234,7 @@ function drain() {
     void answer(ctx, group).finally(() => { active--; drain(); });
   }
 }
-// Each passage's promise gets its swaps, or null if the call's answer is stale.
+// Each passage's promise gets its stored answer, or null if the call was dropped.
 async function answer(ctx, group) {
   try {
     // A passage may have come back in an earlier call (another tab, the same text twice).
@@ -208,19 +249,18 @@ async function answer(ctx, group) {
   }
 }
 
-// One model call for a batch; the swaps go into the cache and the tokens into usage. None once the reader turned the
-// Japanese off, which a lighter level's cacheRevision doesn't show.
+// One model call for a batch; the answers go into the cache, keyed by what was asked, and the tokens into usage. None
+// once the reader turned the Japanese off, paused it, or the key went.
 async function callModel(ctx, batch) {
   const current = await context();
-  if (current.cacheRevision !== ctx.cacheRevision || current.intensity.level === INTENSITY_OFF) return null;
+  if (globalOffReason(current) || !current.hasKey) return null;
   let fresh;
   try {
     if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
-    const data = await store.get(['wordState', ...KEY_NAMES]);
+    const data = await store.get(KEY_NAMES);
     const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
-    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, words: data.wordState?.words,
-      fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
-      full: answerLevel(ctx.intensity.level) === INTENSITY_FULL });
+    const { words } = await pipelineOf(current);
+    fresh = await requestChecks({ keys: keysOf(data), model: ctx.settings.model, batch, words, level: current.level, fetchImpl, cooldown });
   } catch (e) {
     await locked(async () => {
       await recordSpent(e?.usage);
@@ -230,28 +270,66 @@ async function callModel(ctx, batch) {
   }
   return locked(async () => {
     await recordSpent(fresh.usage);
-    if ((await context()).cacheRevision !== ctx.cacheRevision) return null;
-    await cache.setMany(fresh.results); // still good candidates if only the dial moved meanwhile
+    const stored = Object.fromEntries(batch.map((p) => [p.id, storeAnswer(p.plan, fresh.answers[p.id])]));
+    await cache.setMany(stored);
     await store.set({ modelStatus: { at: Date.now(), error: '', model: fresh.model } });
-    return fresh.results;
+    return stored;
   });
 }
 
-// Picks each passage's swaps from its cached candidates (planSwaps): the level's lookup budget (normal's from the host:
-// the challenge when set, else intensity.py's), the host's per-word estimates and price of a whole sentence
-// (else levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage
-// and the day so a passage repaints the same way. Returns { swaps, plan }.
+// Picks each passage's swaps from its candidates (planSwaps): the level's lookup budget (normal's from the host: the
+// challenge when set, else intensity.py's), the host's per-word estimates and price of a whole sentence (else
+// levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage and
+// the day so a passage repaints the same way; keep: swaps the page already shows. Returns { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
   const shown = await shownToday(chromeStorage, day);
   const budgetPer100 = intensityBudget(ctx.intensity.level, wordState?.budget);
-  return (text, swaps) => {
+  return (text, swaps, keep = []) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
-    return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
-      sentencePrice: wordState?.sentencePrice, shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed),
-      now: Date.now(), recency: wordState?.recency });
+    return planSwaps(ctx.level, swaps, text, wordState?.words, { budgetPer100, sentencePrice: wordState?.sentencePrice,
+      shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed), now: Date.now(), recency: wordState?.recency, keep });
   };
+}
+
+// The reading index (hostsource.js refreshReadingIndex) as a matcher index, built once per version a worker sees.
+let reader = null;
+async function readingIndex() {
+  const { wordState } = await store.get(['wordState']);
+  if (reader && reader.version === wordState?.reading) return reader.index;
+  const stored = (await store.get([INDEX_KEY]))[INDEX_KEY];
+  if (!stored?.entries?.length) return null;
+  reader = { version: stored.version, index: readingIndexOf(stored.entries) };
+  return reader.index;
+}
+
+// A passage the page says was read (content.js: a stay on screen long enough to log), counted and queued for the host
+// once a day (where the counts are kept, each passage counts once in 30 days, as a chat reply does: fwlib.fold): the
+// dictionary entries its safe matches show and the doubtful ones the model confirmed (pipeline.js readingCounts), from
+// the cached answer or the call under way; none asked for just to count. Counts only, never text.
+async function read(msg, sender) {
+  const ctx = await context();
+  const text = msg.text;
+  if (!activeOn(ctx, sender.url) || typeof text !== 'string' || text.length > 2000 || wordCount(text) < 6 || isZeroJapanese(text)) {
+    return { ok: false };
+  }
+  const day = localDay();
+  const d = `web:${hashKey(text)}`;
+  if (await readToday(chromeStorage, d, day)) return { ok: true, counted: false };
+  const { pipe, words } = await pipelineOf(ctx);
+  const plan = planText(pipe, text);
+  let answer = null;
+  if (ctx.hasKey && needsCall(plan)) {
+    const id = answerId(ctx, plan);
+    const stored = (await cache.getMany([id]))[id] ?? (pending.has(id) ? await pending.get(id).promise.catch(() => null) : null);
+    answer = loadAnswer(plan, stored);
+  }
+  const entries = readingCounts({ text, reading: await readingIndex(), plan, answer, words, level: ctx.level });
+  if (!Object.keys(entries).length) return { ok: true, counted: false };
+  const counted = await locked(() => queueReading(chromeStorage, { d, day, entries }));
+  if (counted) scheduleFlush();
+  return { ok: true, counted };
 }
 
 // Every billed attempt counts toward usage, including an answer that was unusable before the fallback.
@@ -262,6 +340,7 @@ async function recordSpent(spent) {
 const flush = () => locked(async () => {
   const result = await flushEvents({ storage: chromeStorage, send });
   await flushLog({ storage: chromeStorage, send });
+  await flushReading({ storage: chromeStorage, send });
   return result;
 });
 let flushTimer = null;
@@ -294,12 +373,13 @@ async function logInteraction(msg, sender) {
   return { ok: true };
 }
 
-// A new word-state version clears the decision cache, because cached swaps were chosen against the old list.
+// A new word state repaints pages (its version is in the revision); the answers cache stays, since each answer is keyed
+// by what its passage asked. Then the reading index, when the host has a new one.
 async function syncWords() {
   await flush();
   const res = await refresh({ storage: chromeStorage, send });
-  if (res.changed) await locked(() => cache.clear());
   await broadcast();
+  if (res.state?.reading) await refreshReadingIndex({ storage: chromeStorage, send, version: res.state.reading });
   return { ok: !res.error, error: res.error, count: res.state?.words?.length || 0, stage: res.state?.stage || 0 };
 }
 
@@ -357,9 +437,8 @@ async function stats() {
 
 // One press of the heavier/lighter shortcut (or the popup): step 1 heavier, -1 lighter, 0 back to normal, for
 // INTENSITY_MS from now; at off (-3) or full (3) a press further that way keeps the level and restarts the clock.
-// Takes effect here at once (lighter: from the cached candidates; heavier and full: a model call per passage; off:
-// pages back to English, no model calls), and goes to the host so the change is logged with the word state
-// (calibration).
+// Takes effect here at once (every level picks from the same candidates and cached answers; off: pages back to English,
+// no model calls), and goes to the host so the change is logged with the word state (calibration).
 async function stepIntensity(step, source) {
   if (![-1, 0, 1].includes(step)) throw new Error('step is 1, -1 or 0');
   const now = Date.now();
@@ -393,14 +472,14 @@ async function status() {
   const config = await context();
   const data = await store.get(['wordState', 'modelStatus', ...KEY_NAMES]);
   return { config, words: data.wordState?.words?.length || 0, fetchedAt: data.wordState?.fetchedAt || 0,
-    budget: data.wordState?.budget || 0, rate: data.wordState?.rate || null,
+    budget: data.wordState?.budget || 0,
     pastedKey: !!data.apiKey, hostKey: !!data.hostKey, pastedAnthropicKey: !!data.anthropicKey,
     hostAnthropicKey: !!data.hostAnthropicKey, modelStatus: data.modelStatus || null,
     usage: await readUsage(chromeStorage), intensity: config.intensity };
 }
 
-// Pages may only ask for config and swaps, and send events, interactions and what they have to weave; everything else
-// is popup-only.
+// Pages may only ask for config and swaps, and send events, interactions, passages read and what they have to weave;
+// everything else is popup-only.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || sender.id !== chrome.runtime.id) return false;
   const popup = sender.url === chrome.runtime.getURL('src/popup.html');
@@ -411,12 +490,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     event: () => record(msg, sender),
     interaction: () => logInteraction(msg, sender),
     nothing: () => nothing(msg, sender),
+    read: () => read(msg, sender),
     status, stats, syncWords, clearCache,
     save: () => save(msg),
     setChallenge: () => setChallenge(msg),
     intensity: () => stepIntensity(msg.step, 'popup'),
   };
-  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction', 'nothing'].includes(msg.type)))) return false;
+  if (!handlers[msg.type] || (!popup && !(page && ['config', 'swaps', 'event', 'interaction', 'nothing', 'read'].includes(msg.type)))) return false;
   ready.then(handlers[msg.type]).then(reply, (e) => reply({ error: String(e?.message || e) }));
   return true;
 });

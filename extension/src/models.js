@@ -7,27 +7,29 @@ export const MODELS = {
 // Every model a call can come from, fallbacks included, for the popup's "last answer from".
 export const MODEL_NAMES = { ...MODELS, 'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite' };
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
-// Passages per model call. The prompt (~3,300 tokens) is paid once per call, so fuller calls cost less per passage.
+// Passages per model call (verify.js requestChecks). The check prompt (~2,100 tokens) is paid once per call, so fuller
+// calls cost less per passage; a page asks for at most this many at once.
 export const MAX_BATCH = 16;
-// Haiku thinks before it answers (anthropic.js), about 45 s for a call of 16 passages, so it gets smaller calls, several
-// at once: a page's first passages come back in about 20 s. Its prompt is read from Anthropic's cache at a tenth of the
-// price, so the extra calls cost little. Every other model: one call of up to MAX_BATCH at a time.
+// Haiku thinks before it answers (anthropic.js), so it gets smaller calls, several at once: calls of 6 took 24 s on the
+// lab's fresh passages (at most 39 s; docs/swap-prompt.md), and calls of 12 cost 11% less but took 31 s. Its prompt is
+// read from Anthropic's cache at a tenth of the price, so the extra calls cost little. Every other model: one call of up
+// to MAX_BATCH at a time.
 export const BATCH = { 'claude-haiku-5-5': 6 };
 export const PARALLEL = { 'claude-haiku-5-5': 3 };
-// The full answer (levels.js answerLevel), which the heavier levels pick from, is about twice as long: Haiku took 24-34 s
-// a call of 6, up to 45 s, against 15-19 s and at most 27 s a call of 3, at about the same cost and coverage
-// (docs/swap-prompt.md).
-export const FULL_BATCH = { 'claude-haiku-5-5': 3 };
 // Tried once when the chosen model fails, if its provider has a key.
 export const FALLBACK_MODEL = {
   'gemini-4-argon': 'gemini-3.8-flash',
   'gemini-3.8-flash': 'gemini-3.5-flash-lite',
   'claude-haiku-5-5': 'gemini-3.8-flash',
 };
-// How long a call of 8 passages may take; a bigger batch gets proportionally longer (engine.js). Argon writes whole
-// sentences more slowly (12-15 s in testing); Haiku took 14-23 s for 4 passages with its thinking.
+// How long a call of 8 passages may take; a bigger batch gets proportionally longer (verify.js requestChecks). Argon
+// writes whole sentences more slowly (12-15 s in testing); Haiku's check of 6 took at most 39 s in the lab.
 export const TIMEOUT_MS = { 'gemini-4-argon': 35000, 'claude-haiku-5-5': 60000 };
 export const DEFAULT_TIMEOUT_MS = 20000;
+
+// cooldown: Map<model, until ms>. Rate-limited or overloaded models are skipped until then, so the free tier's
+// per-minute limit does not cost every batch a failed request before the fallback.
+export const COOLDOWN_MS = { 429: 60000, 503: 30000, 529: 30000, timeout: 30000 };
 
 export const providerOf = (model) => (String(model).startsWith('claude-') ? 'anthropic' : 'gemini');
 

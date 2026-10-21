@@ -1,7 +1,13 @@
 # How the extension picks its Japanese
 
-The extension sends readable passages to the chosen model (Gemini, or Claude Haiku since 0.5.0) with one prompt
-(`extension/src/prompt.js`) and paints what comes back. Since 0.4.0 the answer can hold three kinds of swap:
+Since 2026-10-21 code finds every place one of your words could go in a passage (`extension/src/matcher.js`, over the
+words the native host sends), takes the options it is sure of (flagged safe in `data/senses.tsv`) by itself, and asks
+the chosen model (Claude Haiku or Gemini) only to settle the rest and write the sentences and phrases, in one call per
+batch of passages (`extension/src/verify.js`). The sure swaps show at once; the model's additions follow when its
+answer comes, without moving what the reader saw. One answer serves every level. How it runs, what it costs and what
+it caches: "The web pipeline" at the end. Until then the extension sent passages to the model with one prompt
+(`prompt.js`, deleted) that proposed the swaps itself; most of this document measures that prompt, and its meaning
+rules live on in the check's. Since 0.4.0 the candidates can be three kinds of swap:
 
 | Kind | What it replaces | Example |
 |---|---|---|
@@ -41,11 +47,11 @@ to English. A flip of a group is logged but not counted against the word clicked
 as T3 logs it: it is in the passage's glossed words, and opening it is a peek of the 。 (the price of a sentence is
 fitted from these); before, nothing recorded a sentence's translation being opened on the web.
 
-How many sentences go fully into Japanese is up to the extension's lookup budget, not the stage: since prompt 6 the
-model is asked for every sentence the list can say, with the word and phrase swaps inside it, and `planSwaps` prices
-each sentence and shows those the budget pays for (below, and docs/adaptive-difficulty.md). Before, the prompt asked
-for about one sentence in five at Stage 3 and 4, one in ten at Stage 2 (or Level 2 without the plugin), and none at
-Stage 1.
+How many sentences go fully into Japanese is up to the extension's lookup budget, not the stage: the model is asked
+to write every sentence code marks dense (every word one of yours or grammar can say), the word swaps inside it stay
+candidates too, and `planSwaps` prices each sentence and shows those the budget pays for (below, and
+docs/adaptive-difficulty.md). Before prompt 6 the old prompt asked for about one sentence in five at Stage 3 and 4, one
+in ten at Stage 2 (or Level 2 without the plugin), and none at Stage 1.
 
 ## Which text is a passage
 
@@ -87,6 +93,10 @@ mistakes, each now a rule in the prompt:
 
 ## Models
 
+The table measures the old prompt. The check (since 2026-10-21) has been measured with Haiku only: its Gemini request
+is built and tested against recorded answers, not run, so measure Flash with `check-lab.mjs` before relying on it as
+Haiku's fallback.
+
 Same prompt, same 16 passages (`tools/prompt-lab/eval16.json`: most of `corpus.json` and `heldout.json` plus two
 number traps), low thinking, the real Stage 3 word list, measured 2026-10-17 through the extension's own engine:
 
@@ -111,6 +121,9 @@ are shown), so consecutive calls share a prefix. Gemini caches it implicitly: Go
 minimum, but repeated calls of this ~3,950-token prompt had about 2,100 tokens served from the cache.
 
 ## Batching
+
+The queue below is the check's too: calls of 6 passages for Haiku, three at once, and up to 16 for other models (the
+check's prompt is about 2,100 tokens). The numbers are the old prompt's.
 
 The prompt is about 3,300 tokens before any passage, and calls used to carry about 2 passages each, so most of the bill
 was the same prompt sent again. Since 0.5.0 the background puts the cache misses of every tab in one queue and sends
@@ -216,6 +229,9 @@ known-word hints may invite more literal swaps from Flash, which has more sense 
 both through the lab once before relying on them.
 
 ## Full intensity (+3)
+
+Since the web pipeline, full shows every candidate of the one answer (everything code found and the model kept, that
+can be placed), and needs no call of its own. Before, with the old prompt:
 
 At the top of the reader's intensity scale the page gets all the Japanese the list allows. The amount paragraph is
 replaced: passages carry no target, and the model goes through each passage sentence by sentence, writing every sentence
@@ -379,26 +395,19 @@ sentences rendered whole, and the call's seconds and cost. `planSwaps` in the la
 
 ## Tuning it again
 
-`tools/prompt-lab/lab.mjs` runs passages through the extension's own pipeline and prints them woven, ⟦word or phrase⟧
-and ⟪sentence⟫:
+`tools/prompt-lab/check-lab.mjs` measures the pipeline's variants (prompt, effort, batch size, glosses) on judged
+passages, several seeds at a time; `tools/prompt-lab/worker-lab.mjs` runs the extension's own worker on them as pages
+ask it, and `tools/prompt-lab/first-swaps.mjs` times a page's first swaps (both in "The web pipeline", below). The old
+prompt's lab, `lab.mjs`, went with the prompt (in git history before 2026-10-21, with `prompt.js` and `engine.js`).
 
 ```sh
 python tools/prompt-lab/words.py > /tmp/words.json      # your word state, as the extension gets it
-GEMINI_KEY_FILE=~/path/to/key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs gemini-4-argon tools/prompt-lab/heldout.json
-ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=/tmp/words.json bun tools/prompt-lab/lab.mjs claude-haiku-5-5
+WORDS=/tmp/words.json ORACLE=tools/prompt-lab/fresh2-oracle.json SEEDS=1,2 SPEND_LOG=<log> \
+  ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key bun tools/prompt-lab/check-lab.mjs tools/prompt-lab/fresh2.json
 ```
 
-`BATCH=8` sends 8 passages a call instead of 16 (`BATCH=1` is how most calls go out live). It asks for normal's
-answer and full's, measures every level from -2 to full from them as `planSwaps` picks (`LEVELS=0,3` for fewer),
-without the random thinning and with it, and prints per call the time, tokens and cost, and per level the swaps shown
-a passage, the Japanese share of the words, swaps with a learning word, phrases and sentences, and the ratios to
-normal. With the oracle (`oracle.json`; `ORACLE=` another) it prints coverage, whole sentences, the places full missed
-and why, every wrong-sense swap and every shown word the oracle doesn't judge yet, to be added. `SAVE=run.json` keeps
-the answers and `REPLAY=run.json` measures them again for free (`REVALIDATE=1` checks them again by today's
-validation, `HEAVY_ANSWERS=1` picks +1 and +2 from answers of their own as before prompt 5); `SUMMARY=` writes the
-tables as JSON. The header of `lab.mjs` lists the rest.
-
-Bump `PROMPT_VERSION` in `prompt.js` whenever the prompt changes, so cached answers from the old one aren't reused.
+Bump `CHECK_VERSION` in `verify.js` whenever the check's prompt or answer changes: it is in every cached answer's key
+and in the pages' revision, so answers from the old one are neither reused nor shown.
 
 ## Places found by code (2026-10-20)
 
@@ -421,6 +430,8 @@ closed-class English, goes to the model with all its options. Code also marks th
 a listed word (articles, the prepositions particles stand for, be, do and have, will, not, and, or, because, than, the
 personal pronouns and want, `GRAMMAR_ENGLISH`). A passage with nothing doubtful and no dense sentence needs no call
 (`needsCall`), and a passage on a zero-Japanese topic gets nothing, as the extension never sends one.
+
+(Since wired into the extension: "The web pipeline", below.)
 
 **What the model does.** One call per batch of passages that need one (`requestChecks`, Haiku or Gemini, with the
 fallback model as `engine.js`). The user message lists each passage, then its spans in place with a few words around
@@ -785,3 +796,139 @@ SPEND_LOG=<log> ANTHROPIC_KEY_FILE=~/.japanese-weave/anthropic_key WORDS=<words.
 
 Keep `fresh2.json` out of the lab's default sets too, and don't write rules from its errors: it is the only set none
 of these rules has seen.
+
+## The web pipeline (2026-10-21)
+
+The check above, wired into the extension: code's candidates and one model check per batch of passages are what every
+page gets, at every level, through `extension/src/background.js` with `pipeline.js` and `verify.js`.
+
+**What the host sends.** The native host's state reply gives each word in use its glosses as the matcher indexes them
+(the gloss alternatives of its gloss: the lexicon's, or the dictionary's display gloss for a word intake brought in),
+the ones among them flagged safe in `data/senses.tsv`, and its dictionary entry id (`scripts/webdata.py`). For the 324
+introduced words of the 2026-10-20 snapshot the reply is 56 KB, well under the 1 MB a native message may carry; 65 of
+their glosses are safe. So the extension carries no dictionary or flags file. The worker builds the matcher's index
+from the list (a few milliseconds) and again after each sync.
+
+**A page's passages.** A page sends its passages to the worker, up to 16 a message. For each, the worker plans the
+passage (`planPassage`: its spans, each safe or doubtful, and its dense sentences) and makes its candidates
+(`candidatesOf`, every one checked by `validateSwaps`):
+
+- nothing doubtful and nothing dense, or no model key: the safe options are all, at once and final;
+- the model's answer in the cache: all of it at once;
+- else the safe options at once, the passage listed as waiting, and its check queued now; the page asks again with
+  `wait: true`, and that reply comes when the call does (the toolbar shows `···` meanwhile). Nearly every passage
+  needs a call, as closed-class English is always doubtful: 33 of fresh2's 34.
+
+Calls go out as before (Batching, above): the queue of every tab's passages, calls of 6 for Haiku, three at once, the
+fallback to Flash with a Gemini key, the cooldowns and the daily cap. A failed call leaves the page its safe swaps; it
+asks again after 5, 10 and 15 s, then keeps them. `planSwaps` picks each level's share from the one candidate set: the
+budget, the experiment's hidden words (never sent, so never matched; an answer cached before a word was held back
+loses its sentences with it at validation), due probes, the sentence share, current-chance costs and the spacing wait
+work as before; full shows every candidate that can be placed. Stepping between levels never calls the model.
+
+**Two paintings at most, and nothing the reader saw moves.** The safe swaps cover few places (9 of fresh2's 184, 4.9%;
+at normal 10 of its 34 passages show one), and the model's answer takes 20 to 30 s, so most of a page's Japanese comes
+late. Planning a passage again over the full candidates can drop or move a safe swap already shown: the budget, the one
+use per word and the day's thinning draw again over more candidates. So when the answer comes (`content.js`):
+
+- a passage that has not been on screen since its first painting is painted afresh from the full plan, as if the
+  answer had come first;
+- a passage on screen, even partly, or seen only in part, keeps every swap it shows, the very spans (an open gloss
+  stays open, a flipped word stays flipped), and only gains: the worker plans the passage again with those swaps taken
+  first, in the budget as they were planned (a probe among them stays the probe, outside it: `planSwaps` keep), and
+  the page paints the rest around them, which `text.js` only ever places in English text;
+- a passage whose Japanese the reader saw and then scrolled away from keeps that painting for this page view;
+- a passage with nothing sure to show gets its first painting when the answer comes, on screen or not, as every
+  passage did before.
+
+English may turn into Japanese once; Japanese never moves or turns back. Painting the additions only to passages not
+yet on screen was the other choice: it would leave the first screen of every page, and a fast-scrolled timeline,
+with only the safe swaps (a sixth or less of the Japanese) while it is read. The log keeps one plan and one set of
+words per passage and view, so a passage's shown record and stays are those of its last painting: while it awaits the
+answer they are held (its peeks and flips are logged as they happen, and its reading still counts for the reading
+counts). If its sure painting turns out to be the last (the reader left it, the call failed for good, or the view
+ended: a new level, say), they go out, the record with the time it was first seen; if the answer paints it again,
+they are dropped and the new painting's are logged from then. The cost: the fit gets no stays from a passage's time on
+screen before an answer that changed it.
+
+**The cache.** One answer per passage, keyed by `CHECK_VERSION`, the passage's text, each doubtful span with its options
+as the model sees them (place, Japanese and gloss) and the dense sentences' places (`pipeline.js answerKey`), after the
+epoch Clear cache changes, so an answer still on its way when the cache is cleared is never read. Safe spans
+are left out, since the model only reads them. The answer is kept by place (each pick as the span's start, end and the
+Japanese picked or none; sentences and phrases by their places: `storeAnswer`), so it still fits when a new word
+renumbers the spans. A new word list asks again only for passages whose doubtful spans or dense sentences changed; a
+new safe word asks for nothing; a word no longer in use drops out at validation. A sync no longer clears the cache
+(before, every new word-state version did, and every open passage was asked again). The old caches (normal's and
+full's, per revision) are cleared once.
+
+**Fresh2 through the extension's own worker** (`tools/prompt-lab/worker-lab.mjs`: the worker as pages ask it, its own
+batching, calls, cache and picking, with the host's reply for the snapshot's 324 introduced words from `words.py`, and
+Haiku 5.5 at low effort), scored as `check-lab.mjs` scores (the placing and judging are shared, in `judge.mjs`):
+
+| fresh2 (34 passages, 184 places) | Coverage at full | Wrong at full, wrong / judged | Normal: the worker's day / without thinning | $ per 1,000 passages | s a call (max) | All answers in |
+|---|---|---|---|---|---|---|
+| worker, run 1 | 82.6% (152) | 0.6%, 1 / 174 | 51.6% / | 0.435 | 20.8 (27.4) | 47.0 s |
+| worker, run 2 | 88.0% (162) | 0.5%, 1 / 184 | 58.2% / 64.2% | 0.443 | 21.8 (29.7) | 55.1 s |
+| check-lab, after the fixes, 3 seeds (above) | 83.3% (78-88) | 0.6%, 3 / 531 | / 61.5% | 0.487 | 24.1 (36.2) | |
+
+Within the seeds' spread on every count. Run 2's cached answers replayed through `check-lab.mjs` give the same 88.0%
+and 1 wrong of 184 at full, so the worker's path and the lab's agree on the same answers. The wrong hit, both runs:
+風 for "style", one of the lab's three; unjudged, as in the lab: 本日 for "today". Sentences whole: 3 of 5. The
+worker's normal is a day's pick with the snapshot's estimates and that day's thinning, as a reader would see it; the
+lab's averages 50 days without thinning and with priors by status. All 34 passages had their safe swaps from the
+worker in 73 to 77 ms; the answers came in two rounds of three calls. The two runs cost $0.030.
+
+**Time to first swaps.** `tools/prompt-lab/first-swaps.mjs` (happy-dom, the content script and the worker together,
+fresh2's 34 passages on one page, the model never answering): the first swap is painted 322 ms after the content script
+starts with a worker that has just started, 276 to 278 ms with one already warm; 250 ms of that is the content
+script's wait for passages to arrive together. In `tests/extension_e2e.mjs` (Chromium 152, headless, the real native
+host, setup's 300 known words and no key): 839 ms from the start of navigation to the first swap on the fake X
+timeline. Before, a page showed nothing until the model answered, about 20 s with Haiku.
+
+**Cost.** About $0.44 per 1,000 passages read live on fresh2 (the lab's $0.46 to $0.49 there), against $0.51 at normal
+and $0.67 at full for the old prompt with Haiku. The saving is the cheaper call and full's answer no longer being asked
+for; since nearly every passage still needs a call, it is not the passages spared one.
+
+**Without a key** the safe swaps are all, and no text leaves the browser: a missing key no longer turns a page off, and
+the popup says so ("only the swaps code is sure of; add an Anthropic key for the rest").
+
+**Reading counts.** NEXT_STEPS step 13's web side (docs/adaptive-difficulty.md, "Words from your reading"). Once a
+passage's stay on screen is long enough to log (a second of reading, as the visible stays are logged), the page sends
+its text to the worker, once per page load; the worker counts it once a day: every span of the reading index (the safe
+glosses of every swappable dictionary entry, the most frequent entry; never closed-class English), then each span of
+the words in use whose option is safe or the model's pick and that validation keeps as a word swap, where no counted
+span overlaps it. The picks come from the cached answer or the call under way; none is asked for just to count. Only
+the counts leave the worker (`{d: "web:" and the text's hash, day, entries: {entry id: times}}`), with the log, to the
+native host, which sends them as an `exposure` op where the state lives: its own exposure.json, or the collector's,
+which checks them as it checks chat's (`hub.validate`). There they join chat's counts by day, each passage once by its
+digest, as a chat reply counts once.
+
+The reading index comes from the host (`readingIndex`), once per version of the dictionary and flags files
+(`webdata.reading_version`): 6,982 entries with 9,914 safe glosses, 292 KB of JSON (99 KB compressed), one native
+message, kept in the extension's storage. From the host rather than a file setup copies into the extension: the counts
+only matter where a host takes them, the entry ids must be the dictionary's where intake runs (a remote host over ssh
+has its own), and the reply fits one message. Safe glosses only, not the whole index: on the lab's 151 passages they
+find all 167 matches chat's rule (`reading.py`, the longest match over every entry) finds among swappable entries, and
+23 more, mostly where chat's longest match takes a doubtful dictionary phrase and counts nothing ("the same" as 同 "the
+said", "machines" as メカ, "a year" as 年間); adding every doubtful phrase as a blocker (525 KB) brings the two within 3%
+but undoes those. Swappable entries only, as intake admits only those: verbs (読む, 食べる) are not swappable and never
+count from the web. In the end-to-end check, reading one fake article put 13 entries in the scratch state's
+exposure.json, with digests and counts and no text.
+
+**What went.** `prompt.js` (the old prompt), `engine.js` (`requestSwaps`) and `hints.js`, with their tests and the
+lab that measured them (`lab.mjs`); the per-passage target; the full answer, its cache and `FULL_BATCH`; `answerLevel`,
+`swapLimit`, `swapTarget`, `capSwaps` and the density cap with its popup option; the popup's daily-rate line, since
+the host stopped sending a rate with the daily controller.
+
+**Risks.**
+- Gemini is unmeasured on the check (above).
+- An answer arriving while a passage is on screen with nothing sure in it paints English into Japanese under the
+  reader, as every answer did before; a passage with something sure only gains, but that also reflows its lines.
+- A word's safe flag is a model's judgment (docs/matcher.md, "Sense flags"); technical senses (React, epoch) can slip
+  through, and are now shown without a check and counted toward intake.
+- The fit gets no stays from a passage's time on screen before an answer that changed its painting.
+- A host older than this extension sends no glosses or flags: every span goes to the model, nothing shows before its
+  answer or without a key, and the reading counts wait in the extension's queue (up to 500 passages) until the host
+  is updated. An older extension with this host ignores what it adds. The collector needs no update: the counts come
+  as exposure ops it already takes.
+

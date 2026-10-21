@@ -1,6 +1,5 @@
-// Check lab: runs the new web pipeline on the judged passages with your words and scores it against oracle.json, as
-// matcher-lab.mjs scores the matcher and lab.mjs a model's swaps (docs/swap-prompt.md, "Code finds the places, a model
-// checks them"). Code finds the spans (matcher.js), takes the options flagged safe (senses.js), and a model checks the
+// Check lab: runs the web pipeline on the judged passages with your words and scores it against oracle.json, as
+// matcher-lab.mjs scores the matcher (docs/swap-prompt.md, "Code finds the places, a model checks them"). Code finds the spans (matcher.js), takes the options flagged safe (senses.js), and a model checks the
 // doubtful ones and writes the dense sentences and some phrases (verify.js), in calls of BATCH passages; only passages
 // with something doubtful or dense get a call.
 //
@@ -19,7 +18,7 @@
 // VERBOSE=1: the wrong, unjudged and missed, and every sentence and phrase. SUMMARY: a file for the numbers as JSON.
 // Every call's tokens and cost go to SPEND_LOG (spend.mjs), which holds the cap.
 //
-// Scored as lab.mjs scores swaps: each listed word of a swap where it lands is right (it covers a "use" place), fine
+// Scored as the old swap prompt's lab (lab.mjs) scored swaps: each listed word of a swap where it lands is right (it covers a "use" place), fine
 // ("ok"), wrong ("not"; or the whole swap is in "bad") or unjudged; a phrase or sentence not judged bad covers every
 // "use" place inside it; coverage is the share of "use" places covered; the wrong share is wrong / (right + fine +
 // wrong). Three ways: every candidate (as matcher-lab counts every option), what planSwaps shows at full (no budget:
@@ -28,15 +27,14 @@
 // phrases and sentences are counted apart. Intervals: 5th to 95th percentile over 2,000 resamples of the passages.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Window } from 'happy-dom';
 import { buildIndex, matchText, glossAlternatives } from '../../extension/src/matcher.js';
 import { parseSenses, safeOptions } from '../../extension/src/senses.js';
 import { parse as parseDictionary } from '../../extension/src/dictionary.js';
 import { planPassage, needsCall, requestChecks, candidatesOf, CHECK_VERSION, DENSE_MAX_WORDS } from '../../extension/src/verify.js';
 import { planSwaps, wordCount, INTENSITY_FULL } from '../../extension/src/levels.js';
-import { flatten, locate, toNode } from '../../extension/src/text.js';
 import { hashKey } from '../../extension/src/hash.js';
 import { judgedPassage, overlaps } from './oracle.mjs';
+import { placeSwaps, judgeSwaps } from './judge.mjs';
 import { spendLog, meter } from './spend.mjs';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
@@ -129,55 +127,9 @@ async function run(seed) {
 // A passage's candidates from a run's answer (none for a passage that needed no call: its safe options alone).
 const candidates = (id, answer) => candidatesOf(plans.get(id), answer && { picks: new Map(answer.picks), swaps: answer.swaps }, words);
 
-// Where swaps land, as lab.mjs places them: text.js on the passage as a page element, the first that fits wins.
-const doc = new Window().document;
-const flats = new Map();
-function placed(p, swaps, all = false) {
-  if (!flats.has(p.id)) {
-    const el = doc.createElement('p');
-    el.textContent = p.text;
-    flats.set(p.id, flatten(el));
-  }
-  const flat = flats.get(p.id);
-  const used = [];
-  const out = [];
-  for (const swap of swaps) {
-    const m = locate(flat, swap.o, swap.ctx);
-    if (!m || !toNode(flat, m, swap.o)) continue;
-    if (!all && used.some((u) => m.start < u.end && u.start < m.end)) continue;
-    used.push(m);
-    out.push({ swap, m });
-  }
-  return out;
-}
-
-// lab.mjs's judge, with each word swap's kind (function or content, from the span it sits on) and the words of phrases
-// and sentences apart ("group").
-const wordsOf = (s) => s.words || [s.word || s.f];
-function judge(p, j, shown) {
-  const spans = plans.get(p.id).spans.map((m) => m.span);
-  const out = { covered: new Set(), right: 0, ok: 0, wrong: [], unjudged: [], sentences: new Set(),
-    by: { fn: { right: 0, ok: 0, wrong: 0, unjudged: 0 }, content: { right: 0, ok: 0, wrong: 0, unjudged: 0 }, group: { right: 0, ok: 0, wrong: 0, unjudged: 0 } } };
-  for (const { swap, m } of shown) {
-    const kind = swap.parts ? 'group' : spans.find((s) => s.start === m.start && s.end === m.end)?.function ? 'fn' : 'content';
-    const bad = j.bad.has(swap.o);
-    if (bad) { out.wrong.push(`${swap.o} -> ${swap.f} (as a whole)`); out.by.group.wrong++; }
-    if (swap.kind === 'sentence' && !bad && j.sentences.includes(swap.o.trim())) out.sentences.add(swap.o.trim());
-    if (swap.parts && !bad) for (const e of j.use) if (overlaps(e, m)) out.covered.add(e.key);
-    for (const w of wordsOf(swap)) {
-      const hits = (list) => list.filter((e) => e.ja.includes(w) && overlaps(e, m));
-      const use = hits(j.use);
-      for (const e of use) out.covered.add(e.key);
-      const verdict = use.length ? 'right' : hits(j.ok).length ? 'ok' : hits(j.not).length ? 'wrong' : 'unjudged';
-      out.by[kind][verdict]++;
-      if (verdict === 'right') out.right++;
-      else if (verdict === 'ok') out.ok++;
-      else if (verdict === 'wrong') out.wrong.push(`${hits(j.not)[0].en} -> ${w}${swap.parts ? ` in ${swap.f}` : ''}`);
-      else out.unjudged.push(`${w} for "${swap.o}"${swap.parts ? ` in ${swap.f}` : ''}`);
-    }
-  }
-  return out;
-}
+// Where swaps land and how they are judged (judge.mjs), each word swap's kind from the span it sits on.
+const placed = (p, swaps, all = false) => placeSwaps(p, swaps, all);
+const judge = (p, j, shown) => judgeSwaps(j, shown, plans.get(p.id).spans.map((m) => m.span));
 
 // Per passage, for one run: what each way shows and how it is judged.
 const NORMAL_DAYS = Number(env.NORMAL_DAYS || 50);

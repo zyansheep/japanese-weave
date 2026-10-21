@@ -1,5 +1,5 @@
 // Matcher lab: runs the code matcher (extension/src/matcher.js) over the judged passages with your words and scores it
-// as lab.mjs scores a model's swaps, against oracle.json (docs/matcher.md). No model, no network, no cost.
+// as check-lab.mjs scores the pipeline's swaps, against oracle.json (docs/matcher.md). No model, no network, no cost.
 //
 //   cp ~/.japanese-weave/state.json /tmp/state.json && WORDS=/tmp/state.json bun tools/prompt-lab/matcher-lab.mjs
 //
@@ -8,13 +8,13 @@
 // as arguments, or every set here (eval16, heldout, live, web, corpus), each passage once; only judged passages count.
 // ORACLE: another oracle. MATCHER=naive: the naive baseline instead of the matcher (each gloss alternative as written,
 // plus -s, -es, -ed, -d, -ing and y to -ies, whole words, longest first, no overlaps). WITHOUT=helpers,nouns: rules to
-// switch off (matcher.js RULES); ABLATE=1: a line for each rule switched off on its own. EXTRA=1: the English hints.js
-// adds to a few glosses (about for について, there is for ある...) as glosses too. CHECKS=1: drop the options the
+// switch off (matcher.js RULES); ABLATE=1: a line for each rule switched off on its own. EXTRA=1: the English the old
+// prompt's hints (hints.js) added to a few glosses (about for について, there is for ある...) as glosses too. CHECKS=1: drop the options the
 // extension's validation would drop as word swaps (numberTrap, misplaced in levels.js). VERBOSE=1: list the places
 // missed, the wrong hits and the unjudged ones. TIMING=1: index build and match times, also for every word in the state
 // and for 22,000 synthetic entries. SUMMARY: a file for the numbers as JSON.
 //
-// Scored as lab.mjs scores a swap: every option of every span is a hit; it covers the "use" places it overlaps whose
+// Scored as check-lab.mjs scores a swap: every option of every span is a hit; it covers the "use" places it overlaps whose
 // Japanese includes it, and is right (it covers one), fine ("ok"), wrong ("not") or unjudged. Coverage is the share of
 // "use" places covered. Wrong share: wrong / (right + fine + wrong), also split by function words (every word of the
 // span closed-class, data/english.json) and content words. Intervals: 5th to 95th percentile over 2,000 resamples of
@@ -38,7 +38,7 @@ const state = env.WORDS ? JSON.parse(readFileSync(env.WORDS, 'utf8')) : null;
 let entries = env.ENTRIES ? JSON.parse(readFileSync(env.ENTRIES, 'utf8'))
   : (state?.words || []).filter((w) => INTRODUCED.has(w.status)).map((w) => ({ ja: w.ja, en: w.en, ...(w.pos ? { pos: w.pos } : {}) }));
 if (!entries.length) throw new Error('set WORDS to a word state (a copy of state.json) or ENTRIES to a list of entries');
-// hints.js's English the gloss leaves out (EXTRA there), as more glosses
+// the old prompt's hints' English the gloss leaves out, as more glosses
 const HINT_EXTRA = { について: ['about'], ある: ['there is', 'there are', 'there was', 'there were', "there's"],
   違う: ['different', 'differently'], 自分: ['myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves'],
   時間: ['hour'] };

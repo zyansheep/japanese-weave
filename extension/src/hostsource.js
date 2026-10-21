@@ -8,7 +8,12 @@ export const STATE_KEY = 'wordState';
 export const PENDING_KEY = 'pendingEvents';
 export const SENT_KEY = 'seenSent';
 export const LOG_KEY = 'pendingLog';
+export const READING_KEY = 'pendingReading'; // passages read, counted, waiting for the host
+export const READ_SENT_KEY = 'readingSent'; // passages counted today
+export const INDEX_KEY = 'readingIndex'; // the host's reading index: { version, entries }
 const LOG_MAX = 500;
+const READING_MAX = 500;
+const READ_SENT_MAX = 3000;
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
@@ -19,8 +24,12 @@ const ANNOTATIONS_MAX = 200;
 // sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and levels.js
 // SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
 // 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
-// the experiment hides.
+// the experiment hides. For the web pipeline (pipeline.js) each word comes with its glosses as the matcher indexes them,
+// those of them code may swap alone (safe: data/senses.tsv), and its dictionary entry id (the reading counts' key), and
+// the reply says which version of the reading index (readingIndex) goes with it.
 const READS_MAX = 50;
+const GLOSSES_MAX = 60;
+const gloss = (x) => typeof x === 'string' && x.length > 0 && x.length <= 200;
 const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
@@ -34,10 +43,13 @@ export function parseState(data) {
     const en = w.en.trim();
     if (!ja || !en || seen.has(ja)) continue;
     seen.add(ja);
+    const glosses = Array.isArray(w.glosses) ? w.glosses.filter(gloss).slice(0, GLOSSES_MAX) : [];
+    const safe = Array.isArray(w.safe) ? w.safe.filter((g) => glosses.includes(g)) : [];
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
       status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
       ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(reads(w.read).length ? { read: reads(w.read) } : {}),
-      ...(armOk(w.arm) ? { arm: w.arm } : {}) });
+      ...(armOk(w.arm) ? { arm: w.arm } : {}), ...(glosses.length ? { glosses, safe } : {}),
+      ...(Number.isInteger(w.id) && w.id > 0 ? { id: w.id } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -52,8 +64,7 @@ export function parseState(data) {
     sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
     recency: num(data?.recency?.floor) && num(data?.recency?.days) && data.recency.days > 0
       ? { floor: data.recency.floor, days: data.recency.days } : null,
-    rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
-      shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
+    reading: typeof data?.reading?.version === 'string' && /^[\w.-]{1,64}$/.test(data.reading.version) ? data.reading.version : '',
     words,
   };
 }
@@ -87,6 +98,64 @@ export async function refresh({ storage, send, now = () => Date.now() }) {
     return { state: stored, changed, error: null };
   } catch (e) {
     return { state: cached, changed: false, error: String(e?.message || e) };
+  }
+}
+
+// The reading index (fw_host readingIndex: the safe glosses of every swappable dictionary entry, [[entry id, pos codes,
+// "gloss;gloss"]]), asked for once per version the state names and kept here; pipeline.js readingIndexOf indexes it.
+// Never throws: without a host, or with an older one, no index, and only the words in use are counted.
+export async function refreshReadingIndex({ storage, send, version }) {
+  if (!version) return { changed: false };
+  const stored = (await storage.get([INDEX_KEY]))[INDEX_KEY];
+  if (stored?.version === version) return { changed: false };
+  try {
+    const reply = await send({ type: 'readingIndex' });
+    if (!reply?.ok || !Array.isArray(reply.entries)) throw new Error(reply?.error || 'no reading index from the host');
+    const entries = reply.entries.filter((e) => Array.isArray(e) && e.length === 3 && Number.isInteger(e[0]) && e[0] > 0
+      && typeof e[1] === 'string' && typeof e[2] === 'string' && e[2].length > 0 && e[2].length <= 2000);
+    await storage.set({ [INDEX_KEY]: { version: typeof reply.version === 'string' ? reply.version : version, entries } });
+    return { changed: true, count: entries.length };
+  } catch (e) {
+    return { changed: false, error: String(e?.message || e) };
+  }
+}
+
+// A passage read on the web, counted (pipeline.js readingCounts): { d: 'web:' and its text's hash, day, entries: {entry
+// id: times} }, queued for the host once per passage and day. Counts only, never text. Returns whether it was queued.
+export async function queueReading(storage, item) {
+  const ok = item && typeof item.d === 'string' && /^web:[0-9a-f]{8,48}$/.test(item.d) && /^\d{4}-\d{2}-\d{2}$/.test(item.day)
+    && item.entries && typeof item.entries === 'object' && Object.keys(item.entries).length > 0
+    && Object.entries(item.entries).every(([k, n]) => /^\d{1,12}$/.test(k) && Number.isInteger(n) && n >= 1 && n <= 1000);
+  if (!ok) return false;
+  const obj = await storage.get([READING_KEY, READ_SENT_KEY]);
+  const sent = obj[READ_SENT_KEY]?.day === item.day ? obj[READ_SENT_KEY] : { day: item.day, ds: [] };
+  if (sent.ds.includes(item.d)) return false;
+  sent.ds = [...sent.ds, item.d].slice(-READ_SENT_MAX);
+  const pending = Array.isArray(obj[READING_KEY]) ? obj[READING_KEY] : [];
+  pending.push({ d: item.d, day: item.day, entries: item.entries });
+  await storage.set({ [READING_KEY]: pending.slice(-READING_MAX), [READ_SENT_KEY]: sent });
+  return true;
+}
+// Was this passage counted today already (queueReading)?
+export async function readToday(storage, d, day) {
+  const sent = (await storage.get([READ_SENT_KEY]))[READ_SENT_KEY];
+  return sent?.day === day && sent.ds.includes(d);
+}
+
+// Sends the queued reading counts to the host, which adds them to the daily store intake reads (its own, or the
+// collector's); keeps them queued if the host is missing, older than the counts or fails.
+export async function flushReading({ storage, send }) {
+  const obj = await storage.get([READING_KEY]);
+  const pending = Array.isArray(obj[READING_KEY]) ? obj[READING_KEY] : [];
+  if (!pending.length) return { sent: 0 };
+  try {
+    const reply = await send({ type: 'reading', passages: pending });
+    if (!reply?.ok) throw new Error(reply?.error || 'host refused the reading counts');
+    const now = await storage.get([READING_KEY]);
+    await storage.set({ [READING_KEY]: (now[READING_KEY] || []).slice(pending.length) });
+    return { sent: pending.length, taken: reply.taken };
+  } catch (e) {
+    return { sent: 0, error: String(e?.message || e) };
   }
 }
 

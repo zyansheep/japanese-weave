@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test';
 import { Window } from 'happy-dom';
 import { hashKey } from '../src/hash.js';
 import { DAILY_MODEL_CALLS } from '../src/quota.js';
+import { checkAnswer, modelReply, userOf } from './checkmodel.js';
 
 // The real worker and content modules together on a plain article page, with a fake native host and Gemini.
 test('runtime: key privacy, native host sync and events, site controls, setup default, stale replies, retries', async () => {
@@ -82,11 +83,8 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
       modelCalls++;
       if (modelThrows > 0) { modelThrows--; throw new TypeError('Failed to fetch'); }
       if (delayed) { release = () => { delayed = null; }; await new Promise((done) => { const free = release; release = () => { free(); done(); }; }); }
-      const body = JSON.parse(init.body);
-      const items = JSON.parse(body.contents[0].parts[0].text.replace(/^Passages:\n/, ''));
-      const passages = items.map(({ id, text }) => ({ id, swaps: text.includes(' and ') ? [{ o: 'and', f: 'et', ctx: '' }] : [] }));
-      return reply({ candidates: [{ content: { parts: [{ text: JSON.stringify({ passages }) }] } }],
-        usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 300 } });
+      // the model's check: "and" is closed-class English, so code asks; the model takes et
+      return modelReply(url, checkAnswer(userOf(url, init)), { input: 2000, output: 300 });
     },
   });
   const call = (msg) => dispatch(msg, popup);
@@ -253,7 +251,8 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     await call({ type: 'save', settings: { enabled: false } });
     release(); await wait();
     expect(el.querySelector('.fw-word')).toBeNull();
-    expect(Object.keys(local).filter((k) => k.startsWith('c:'))).toHaveLength(0);
+    // the answer is kept all the same: it is keyed by what was asked, and good for the next time
+    expect(Object.keys(local).filter((k) => k.startsWith('c:'))).toHaveLength(1);
 
     // A new word-state version changes the revision; an old revision's request is stale.
     const oldRevision = (await dispatch({ type: 'config' }, page())).revision;

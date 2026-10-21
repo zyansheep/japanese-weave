@@ -3,7 +3,7 @@
 PLAN.md section 6 and docs/matcher.md say why. An index from English (each gloss, its inflections by rule and by the
 irregular tables, and phrases that stand for it, such as "there is" for "exist") to entries, and a matcher that marks
 every span of a passage an entry could take, with all its options: "you" gets both あなた and 君, and a model settles
-the doubtful ones later. Whole words only, as tools/prompt-lab/lab.mjs places the oracle's words: a possessive counts
+the doubtful ones later. Whole words only, as tools/prompt-lab/oracle.mjs places the oracle's words: a possessive counts
 ("grandfather" in "grandfather's"), a contraction doesn't ("can" in "can't"). Case-insensitive. The longest match wins
 and spans never overlap.
 

@@ -4,10 +4,20 @@
 Messages (JSON, 4-byte native-endian length prefix, one per line of conversation):
   {"type": "ping"}                      -> {"ok": true, "host": 1}
   {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status,
-                                            arm?}] (none the delayed-start experiment hides: fwlib.public_state),
+                                            arm?, glosses, safe, id?}] (none the delayed-start experiment hides:
+                                            fwlib.public_state; glosses, safe and id: webdata.add_word_data),
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
+                                            "reading": {"version"} (of readingIndex's answer),
                                             "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
                                             (gemini_key by setup, anthropic_key by hand)}
+  {"type": "readingIndex"}              -> {"ok": true, "version", "entries": [[id, pos, "gloss;gloss"]]}: the safe
+                                            glosses of every swappable dictionary entry (webdata.reading_index), for
+                                            counting what the browser reads; asked for when "reading" changes
+  {"type": "reading", "passages": [{"d", "day", "entries": {entry id: times}}]} -> {"ok": true, "taken": n,
+                                            "queued"?: true}: the dictionary entries passages read on the web showed
+                                            (counts only, never text), into the same daily store as chat's: an
+                                            exposure op (hub.py), on the collector when one is set (hub.validate there);
+                                            the store keeps each passage once in 30 days, as a chat reply (fwlib.fold)
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
   {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
                                         -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
@@ -30,6 +40,7 @@ them and refreshes the cache. The browser never waits on the network.
 """
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 
@@ -39,8 +50,13 @@ import feedback  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
+import webdata  # noqa: E402
 
 MAX_EVENTS = 500
+MAX_READ = 500             # passages a reading message may carry
+MAX_READ_ENTRIES = 2000    # entries one passage may count (a passage is at most 2,000 characters)
+WEB_DIGEST = re.compile(r'^web:[0-9a-f]{8,48}$')
+ENTRY_ID = re.compile(r'^[1-9][0-9]{0,11}$')
 STATE_MAX_AGE = 60
 
 
@@ -67,12 +83,26 @@ def handle(message):
         return {'ok': True, 'host': 1}
     if kind == 'state':
         state, _ = hub.current(STATE_MAX_AGE, wait=False)  # here: applies today's promotion; else the cache
-        reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {})
+        reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {},
+                     reading={'version': webdata.reading_version()})
+        webdata.add_word_data(reply['words'], state)
         for name, field in (('gemini_key', 'geminiKey'), ('anthropic_key', 'anthropicKey')):
             key = fwlib.home() / name
             if key.exists():
                 reply[field] = key.read_text().strip()
         return dict(reply, **adaptive(state, reply['words']))
+    if kind == 'readingIndex':
+        index = webdata.reading_index()
+        return dict(index, ok=True) if index else {'ok': False, 'error': 'no dictionary or sense flags here'}
+    if kind == 'reading':
+        passages = message.get('passages')
+        if not isinstance(passages, list):
+            return {'ok': False, 'error': 'passages must be a list'}
+        replies = [r for r in (web_reply(p) for p in passages[:MAX_READ]) if r]
+        if not replies:
+            return {'ok': True, 'taken': 0}
+        result = hub.submit({'kind': 'exposure', 'replies': replies}, wait=False)  # a collector's: sent by a sync
+        return {'ok': True, 'taken': len(replies), **({'queued': True} if result.get('queued') else {})}
     if kind == 'events':
         events = message.get('events')
         if not isinstance(events, list):
@@ -131,6 +161,23 @@ def handle(message):
         hub.submit({'kind': 'set', 'prefs': {'challenge': challenge}}, wait=False)
         return {'ok': True, 'challenge': challenge}
     return {'ok': False, 'error': 'unknown message type'}
+
+
+def web_reply(passage):
+    """A passage read on the web (the extension's reading counts) as a reply of the exposure op, or None when it is
+    malformed: {d: "web:" and the passage's hash, day (not after today), words: [], entries: {entry id: times}}. Its
+    digest counts it once, as a chat reply's does (fwlib.fold)."""
+    if not isinstance(passage, dict):
+        return None
+    d, day, entries = passage.get('d'), passage.get('day'), passage.get('entries')
+    if not isinstance(d, str) or not WEB_DIGEST.match(d) or not hub.is_day(day):
+        return None
+    if not isinstance(entries, dict) or not 0 < len(entries) <= MAX_READ_ENTRIES:
+        return None
+    if not all(isinstance(k, str) and ENTRY_ID.match(k) and isinstance(n, int) and not isinstance(n, bool)
+               and 1 <= n <= 1000 for k, n in entries.items()):
+        return None
+    return {'d': d, 'day': min(day, fwlib.today()), 'words': [], 'entries': entries}
 
 
 def adaptive(state, words):

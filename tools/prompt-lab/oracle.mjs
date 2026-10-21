@@ -1,6 +1,13 @@
-// The prompt lab's oracle (oracle.json; its format is in lab.mjs's header): each judged entry's places as spans of the
-// passage's text. Shared by lab.mjs, which judges a model's swaps, and matcher-lab.mjs, which judges the code matcher's
-// spans.
+// The prompt lab's oracle (oracle.json, fresh-oracle.json, fresh2-oracle.json): each judged entry's places as spans of
+// the passage's text. Shared by matcher-lab.mjs, which judges the code matcher's spans, and judge.mjs, which judges the
+// web pipeline's swaps for check-lab.mjs and worker-lab.mjs (lab.mjs judged the old swap prompt's the same way).
+//
+// The oracle, per passage id: "use", the places a listed word fits in its listed sense, "en=ja" or "en=ja|ja" (any of
+// them will do), "en#1=ja" for only the second place the English occurs; "ok", swaps that are fine but not owed; "not",
+// listed words whose English is there in another sense (a swap there is wrong); "sentences", the sentences listed words
+// and the grammar list can say completely; "bad", the English of phrase or sentence swaps judged wrong as a whole.
+// Coverage is the share of "use" places a shown swap with one of its words covers. A shown word no entry speaks for is
+// unjudged, to be added.
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Where en occurs in text: whole words, a possessive included ("grandfather" in "grandfather's"), not a contraction
