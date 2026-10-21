@@ -626,7 +626,7 @@ chat exposure) is counted per dictionary entry (data/dictionary.tsv, by its JMdi
 
 On the user's chats of the 30 days to 2026-10-21 (Claude Code only; a median of about 10,000 words of replies on the
 24 days with over 2,000), without sense flags: the English of 4,218 reply blocks was counted in 7 seconds; a median
-of 440 entries came up a day (35 to 932); 2,686 entries came up at all, and 1,246 on 3 days or more, 725 of them
+of 420 entries came up a day (35 to 932); 2,686 entries came up at all, and 1,246 on 3 days or more, 725 of them
 swappable. Requiring the main meaning halves what the most frequent option alone would count (a median of 1,061
 entries on those 24 days against 542), mostly wrong senses of technical English ("script" as 本 "book / script",
 "data" as 資料 "materials / data", "state" as 国); some remain, "back" as 奥 and "stays" (a term of this codebase) as
