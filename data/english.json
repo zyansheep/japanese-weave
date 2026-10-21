@@ -1,6 +1,7 @@
 {
   "about": [
-    "English morphology for the matcher (extension/src/matcher.js, scripts/matcher.py; docs/matcher.md).",
+    "English morphology for the matcher (extension/src/matcher.js, scripts/matcher.py; docs/matcher.md), and closed-class",
+    "English the extension's validation reads (extension/src/levels.js: joiners, verb_s, polarity).",
     "verbs: irregular verbs, base -> its irregular forms (past, participle, and -s where irregular); -s and -ing are",
     "otherwise made by rule, and a listed verb gets no regular -ed. plurals: irregular plurals, base -> plural forms",
     "(an empty list: the same as the singular). comparatives: irregular comparatives and superlatives; other adjectives",
@@ -11,6 +12,12 @@
     "come between. determiners: words after which a bare verb is a noun (the rest, a look). function: English closed-class",
     "words (pronouns, determiners, prepositions, conjunctions, auxiliaries, numbers and the commonest function adverbs),",
     "which are never inflected by rule and mark a span as a function word for reporting and sense flags.",
+    "joiners: English that joins a clause, or a noun, to the rest (subordinating conjunctions and the prepositions that",
+    "double as them), whose Japanese comes after what it joins (~toki, ~aida, ~mae, ~ato, ~made, ~kara, ~kedo), so no",
+    "word swap may stand in front of what it joins (\"if\" is not one: moshi comes first in Japanese too; \"when\" and",
+    "\"where\" asking a question are question words). verb_s: words whose \"'s\" is always \"is\", \"has\" or \"does\", never a",
+    "possessive (\"that's\", \"it's\"). polarity: words after which, in the same sentence, \"anything\" or \"anyone\" means any",
+    "at all in a negation, condition or comparison (nanika, nanimo), not a free choice (nandemo).",
     "Generated into extension/src/english.js by python3 scripts/matcher.py --js; both tests check they agree."
   ],
   "verbs": {
@@ -316,5 +323,8 @@
     "was", "we", "well", "were", "what", "whatever", "when", "whenever", "where", "whereas", "wherever", "whether",
     "which", "whichever", "while", "who", "whoever", "whom", "whose", "why", "will", "with", "within", "without",
     "would", "yes", "yet", "you", "your", "yours", "yourself", "yourselves"
-  ]
+  ],
+  "joiners": ["after", "although", "as", "because", "before", "once", "since", "though", "till", "until", "unless", "when", "whenever", "where", "whereas", "wherever", "while", "whilst"],
+  "verb_s": ["he", "here", "how", "it", "she", "that", "there", "this", "what", "when", "where", "who", "why"],
+  "polarity": ["before", "barely", "hardly", "if", "neither", "never", "no", "nor", "not", "scarcely", "than", "unless", "whether", "without"]
 }
