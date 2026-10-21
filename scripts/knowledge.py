@@ -63,7 +63,8 @@ READ_MAXES = (0.5, 0.7, 0.9)
 TUNE_MIN_OPENS = 60        # browser opens before the tuned reading model replaces the defaults
 CALIBRATION_DAYS = 30
 CALIBRATED = (0.83, 1.2)   # seen over expected lookups inside this, at 90%, is calibrated (PLAN.md section 10)
-MIN_DAYS = 3               # days before calibrate gives an interval
+MIN_DAYS = 5               # days before calibrate gives an interval: with 3, one from a model off by 20% passes
+                           # 10-13% of the time (tools/sim/run.py calibration-days); with 5, 3-6%
 BOOT_DRAWS = 1000          # resamples of days for an interval
 BURST_MS = 60_000          # intensity presses this close together are one decision (calibrate)
 SHARE_BINS = (0.0, 0.03, 0.06, 0.1, 0.2, 1.01)  # share of a passage's words in Japanese, after a bin for none
@@ -544,10 +545,11 @@ CLASSES = ('costly', 'free', 'topical', 'sentences', 'offlist')  # calibrate's c
 def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX):
     """One passage or message for calibrate, as the model stood before it: {at, surface, words (shown), japanese (its
     annotations: none in a blank passage), read (words_read), lookups (its opens; T3 peeks under T3_NOISE_MS left
-    out), budget (a browser plan's, per 100 words; else None), classes: {class: [expected, seen]}}. Expected is the read chance from time on screen times P(peek),
-    each word at its best annotation, and seen its opens (a glance counts GLANCE_Y): listed words are costly, or free
-    when P(peek) is under fwlib.FREE_P; sentence translations (is_sentence) aren't priced yet; a word off the list costs
-    its prior's P(peek). Topical words (chat words found by code, planned) have none yet."""
+    out), budget (a browser plan's, per 100 words; else None), classes: {class: [expected, seen]}}. Expected is the
+    read chance from time on screen times P(peek), each word at its best annotation, and seen its opens (a glance
+    counts GLANCE_Y): listed words are costly, or free when P(peek) is under fwlib.FREE_P; sentence translations
+    (is_sentence) aren't priced yet; a word off the list costs its prior's P(peek). Topical words (chat words found by
+    code, planned) have none yet."""
     notes = context['annotations']
     line = _line_height([n[2] for n in notes])
     read = reader(surface, context, pace, top)

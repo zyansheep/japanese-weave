@@ -198,7 +198,7 @@ class Calibration(unittest.TestCase):
         self.assertIn(f'\n  Chat: 2 messages (1 with no lookup) over 1 days, 240 words shown, {round(read)} read, 1 '
                       'lookups; budget 0.50:\n', text)
         self.assertIn(f'\n    costly words:    {costly["expected"]:.3f} expected, {costly["seen"]:.3f} seen: '
-                      f'{costly["ratio"]:.2f} (no interval before 3 days)\n', text)
+                      f'{costly["ratio"]:.2f} (no interval before 5 days)\n', text)
         self.assertIn('\n  Web: no passages with Japanese yet.\n', text)
         self.assertIn('    topical words:   none yet', text)
         old = {k: v for k, v in report.items() if k != 'classes'}  # knowledge.json from before
@@ -242,7 +242,7 @@ class Calibration(unittest.TestCase):
         self.assertEqual(knowledge.per_100(3, 600), 0.5)
 
     def test_intervals_resample_days(self):
-        self.assertIsNone(knowledge.day_interval([(1.0, 1.0)] * 2, knowledge.ratio))  # too few days
+        self.assertIsNone(knowledge.day_interval([(1.0, 1.0)] * 4, knowledge.ratio))  # too few days
         self.assertEqual(knowledge.day_interval([(2.0, 1.0)] * 5, knowledge.ratio), (0.5, 0.5))
         days = [(10.0, s) for s in (5, 8, 10, 12, 15, 9, 11)]
         low, high = knowledge.day_interval(days, knowledge.ratio)
