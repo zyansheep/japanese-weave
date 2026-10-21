@@ -56,8 +56,8 @@ level from [blocks/](blocks/level-01.md).
   short reminder, the learning words and only what changed, since the hook's text stays in the conversation. Most
   sentences stay English sentences, with listed words dropped in as written (no particles or conjugation below Stage
   3, suru-nouns standing in for English verbs: "let me 確認 the logs"), and a few are short Japanese sentences of
-  words you know, as many as your lookup budget pays for. New words get a footer gloss with romaji, and every third
-  reply opens with a recall cue. Never in code, files, commits or anything meant to be shared, and never in scripted
+  words you know, as many as your lookup budget pays for. New words get a footer gloss with romaji. Never in code,
+  files, commits or anything meant to be shared, and never in scripted
   runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks
   for a `t3 serve` parent and weaves there.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
@@ -91,7 +91,7 @@ way round.
 
 | Command | What it does |
 |---|---|
-| `/japanese-weave:status` | Stage, word counts, the words you're learning |
+| `/japanese-weave:status` | Stage, word counts by label, the words you're learning, new words today |
 | `/japanese-weave:known <word>` | Mark a word known: kanji, kana or romaji (`多分`, `たぶん`, `tabun`) |
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
@@ -130,17 +130,41 @@ whose name contains NAME.
 
 ## How words advance
 
-- **Exposure day**: a day you saw the word in a chat reply, or on a web page.
-- **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day. Words you
-  looked up before they were introduced (opened in 2 different messages or passages within 14 days) come in first,
-  most opened first; then the list order. A learning or shaky word the gloss log says you know at a glance (under an
-  8% chance of a lookup) keeps its status but gives its slot to a new word.
-- **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
-- **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
-  often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or
-  peek. With a challenge set, evidence from the gloss log can also move words (see
-  [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md)).
+Every word has a label, and the fitted model sets it on each refresh (see [Adaptive difficulty](#adaptive-difficulty)):
+
+- **Known**: you know it at a glance, a lookup chance under 8%, judged with a margin for doubt so that one lookup
+  doesn't change it. Known words are free: they appear wherever they fit.
+- **Learning** (status `active`): in use, and not known at a glance yet.
+- **New** (status `queue`): not introduced yet.
+
+A word moves between known and learning as the evidence does: one you keep reading without a lookup becomes known,
+one you look up often enough is learning again. There are no exposure days, learning slots or shaky words. `known` and
+`learn` set a word's label at once, and the fit takes them as strong evidence, so the next refresh keeps the label
+unless your lookups say otherwise.
+
+- **New words**: up to 5 a day come in, and only while the lookup budget goes unspent: when, over the last 48 hours,
+  the web's passages or the chat's briefs (at least 5 of either) planned to spend under 80% of their budget, so there
+  aren't enough learning words to spend it on. Words you looked up before they were introduced (opened in 2 different
+  messages or passages within 14 days) come first, most opened first; then the list order. A word the model already
+  says you know at a glance is labeled known instead.
+- **The delayed-start experiment** (PLAN.md section 7) tests whether being shown a word teaches it. Each new word is
+  drawn into one of two arms: held back, appearing nowhere for 3 weeks, or shown like any learning word for 2 weeks
+  and then paused for 1. At week 3 both are probed: the first web passage that can show the word shows it outside the
+  budget, once a day until one is read, and the chat brief asks for it once; the first of its showings you read is
+  the outcome, looked up or not. Then it is an ordinary learning word. The draw comes from a seed and the word alone,
+  and every web plan and chat brief record says the arms of the words it offers. `fw.py status` counts the held-back
+  words without naming them; `fw.py experiment` shows the arms, the probes, the outcome so far, and when each arm will
+  have 80 words probed (`--power`: the simulated reader's power at your rate of showings). The 25 words the fixed rules
+  name (でも, だから and the like) come in outside it.
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
+
+**The switch from day counts.** Until then labels came from rules inherited from French Weave: 20 learning slots, 3
+exposure days to graduate, shaky words after two peek days, and evidence moves with a challenge set. `fw.py relabel
+--dry-run` lists the words whose labels the model would change, grouped by kind and explained, and changes nothing.
+The first refresh with the model's labels switches: each word keeps its old status, days and peeks under `legacy` for
+30 days. To undo it in that time, run `fw.py relabel --restore` (where the state lives, or queued for the collector):
+it puts the old statuses and fields back (a word taken in since stays learning) and stops refreshes from labeling
+words; then check out the code from before the switch.
 
 In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
 glance goes in wherever the English has its meaning, and learning words and short です/ます sentences of known words go
@@ -212,15 +236,16 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 ## Adaptive difficulty
 
 From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss): one fit of the
-whole log, redone on every refresh, which starts each word from its Anki interval and status and moves it by what you
-opened and didn't. Each intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal):
+whole log, redone on every refresh, which starts each word from its Anki interval and how it came into use (taken in
+to learn, marked known at setup or by Anki, or neither; never its label, which the fit itself sets) and moves it by
+what you opened and didn't. Each intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal):
 words you know at a glance (under an 8% chance, judged with a margin for doubt so one lookup doesn't change it) are free
 and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most one per sentence, on web
 pages and in chat. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted from
 your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the budget
 and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the command
-above, or the popup) is normal's budget. While one is set, strong evidence also moves words between learning and known,
-a few a day. Why it works this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
+above, or the popup) is normal's budget. The same fit labels every word ([How words advance](#how-words-advance)). Why
+it works this way and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.

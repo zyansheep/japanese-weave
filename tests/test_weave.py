@@ -1,4 +1,5 @@
 """Offline tests for the hook, word state, native host and setup. Run: python3 -m unittest discover -s tests"""
+import copy
 import io
 import json
 import math
@@ -40,7 +41,7 @@ def line(text, day='2026-10-09', sidechain=False):
 
 def word(ja, status='known'):
     return {'ja': ja, 'en': 'meaning', 'hint': 'hint', 'status': status, 'added': '2026-10-01', 'changed': '',
-            'days': [], 'last_bad': ''}
+            'days': [], 'last_bad': ''}  # with the day-count fields, as before the switch
 
 
 class Home(unittest.TestCase):
@@ -122,83 +123,86 @@ class Rules(Home):
 
     def test_new_state_starts_small(self):
         state = fwlib.new_state('2026-10-01')
-        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
-        self.assertEqual(active, [w['ja'] for w in fwlib.load_lexicon()[:5]])  # 5 new a day
+        active = [w for w in state['words'] if w['status'] == 'active']
+        self.assertEqual([w['ja'] for w in active], [w['ja'] for w in fwlib.load_lexicon()[:5]])  # 5 new a day
+        self.assertTrue(all(w['origin'] == 'learning' and 'arm' not in w for w in active))  # every first word on show
+        self.assertEqual(fwlib.taken_today(state, '2026-10-01'), fwlib.NEW_PER_DAY)
+        self.assertEqual(state['labels'], {'from': 'model', 'since': '2026-10-01'})
         self.assertEqual(fwlib.stage_for(state), 1)
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'):
-            fwlib.promote(state, day, {})
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW)  # full at 20
+        self.assertEqual(fwlib.blank({'ja': 'x'}), {'ja': 'x', 'status': 'queue', 'added': '', 'changed': ''})
 
-    def test_graduation_needs_three_clean_days(self):
+    def test_labels_come_from_the_model(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'でも': {'n': 5, 'days': ['2026-10-01', '2026-10-02']}}
-        fwlib.promote(state, '2026-10-02', chat)
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')  # 2 days
-        fwlib.apply_event(state, 'でも', 'seen', '2026-10-03')  # extension day + chat days
-        fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'known')
+        learning, queued = state['words'][0], state['words'][40]
+        self.assertEqual([fwlib.label(learning, f) for f in (True, False)], ['known', 'active'])
+        self.assertEqual([fwlib.label(queued, f) for f in (True, False)], ['known', 'queue'])  # free: known, not new
+        fwlib.apply_event(state, learning['ja'], 'known', '2026-10-02')  # a command since the refresh decided
+        done = fwlib.relabel(state, [[learning['ja'], 'active', 'known'], [queued['ja'], 'queue', 'known'],
+                                     [state['words'][1]['ja'], 'queue', 'known']], '2026-10-03')
+        self.assertEqual(done, [[queued['ja'], 'queue', 'known']])  # only where the label is still the one decided on
+        self.assertEqual((queued['status'], queued['added'], queued['origin']), ('known', '2026-10-03', 'new'))
+        self.assertEqual(fwlib.label(queued, False), 'active')  # in use since: learning once it isn't free
 
-    def test_peek_blocks_graduation_and_assumed_alone_never_graduates(self):
+    def test_commands_set_the_label_at_once_and_events_change_nothing(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'もう': {'n': 3, 'days': ['2026-10-01', '2026-10-02', '2026-10-03']}}
-        fwlib.apply_event(state, 'もう', 'peek', '2026-10-02')
-        fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'もう')['status'], 'active')  # peek inside the last 3 days
-        chat['もう']['days'] += ['2026-10-04', '2026-10-05']
-        fwlib.promote(state, '2026-10-05', chat)
-        self.assertEqual(fwlib.find(state, 'もう')['status'], 'known')  # last 3 days (03-05) are peek-free
-        for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.apply_event(state, '今', 'assumed', day)
-        fwlib.promote(state, '2026-10-04', {})
-        self.assertEqual(fwlib.find(state, '今')['status'], 'active')  # 4 assumed days, never seen
-        fwlib.apply_event(state, '今', 'seen', '2026-10-05')
-        fwlib.promote(state, '2026-10-05', {})
-        self.assertEqual(fwlib.find(state, '今')['status'], 'known')
-
-    def test_flip_counts_like_a_peek_day_and_shaky_recovers_after_7_clean_days(self):
-        state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, '前', 'known', '2026-10-01')
-        fwlib.apply_event(state, '前', 'flip', '2026-10-02')  # one flip is often a test click
+        before = json.dumps(state, sort_keys=True)
+        for kind in ('seen', 'peek', 'flip', 'assumed'):
+            self.assertTrue(fwlib.apply_event(state, '前', kind, '2026-10-02'))
+        self.assertEqual(json.dumps(state, sort_keys=True), before)  # no day counts: the ops log keeps them
+        fwlib.apply_event(state, '前', 'known', '2026-10-02')
         self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'flip', '2026-10-05')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
-        learning = fwlib.find(state, state['words'][0]['ja'])
-        fwlib.apply_event(state, learning['ja'], 'flip', '2026-10-05')
-        self.assertEqual((learning['status'], learning['last_bad']), ('active', '2026-10-05'))  # restarts graduation
-        fwlib.apply_event(state, '中', 'asked', '2026-10-04')
-        fwlib.promote(state, '2026-10-10', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
-        fwlib.apply_event(state, '中', 'peek', '2026-10-09')  # restarts the clock
-        fwlib.promote(state, '2026-10-15', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
-        fwlib.promote(state, '2026-10-16', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'known')
+        fwlib.apply_event(state, '前', 'asked', '2026-10-03')
+        self.assertEqual(fwlib.find(state, '前')['status'], 'active')
+        self.assertFalse(fwlib.apply_event(state, 'nope', 'known'))
+        self.assertFalse(fwlib.apply_event(state, '前', 'jump'))
 
-    def test_known_word_peeked_twice_in_a_week_becomes_shaky(self):
+    def test_intake_order_and_the_days_count(self):
         state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, '前', 'known', '2026-10-01')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-02')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-02')  # same day: once
-        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-08')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
+        queue = [w['ja'] for w in state['words'] if w['status'] == 'queue']
+        order = [w['ja'] for w in fwlib.newcomers(state, {queue[30]: 2, queue[9]: 5}, free={queue[0]})]
+        self.assertEqual(order[:4], [queue[9], queue[30], queue[1], queue[2]])  # looked up first; never a free word
+        self.assertEqual(fwlib.take_in(state, [[queue[9], 'held', 0.25], [queue[1], None, None], [queue[0], None, None],
+                                               [state['words'][0]['ja'], None, None]], '2026-10-02'),
+                         [queue[9], queue[1], queue[0]])  # a word in use already isn't taken again
+        self.assertEqual(fwlib.taken_today(state, '2026-10-02'), 3)
+        self.assertEqual(fwlib.taken_today(state, '2026-10-03'), 0)
+        held = fwlib.find(state, queue[9])
+        self.assertEqual((held['status'], held['origin'], held['arm']),
+                         ('active', 'learning', {'arm': 'held', 'draw': 0.25, 'day': '2026-10-02', 'probe': '2026-10-23'}))
+        self.assertNotIn('arm', fwlib.find(state, queue[1]))
 
-    def test_refill_cap_and_shaky_words_take_learning_slots(self):
-        state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.promote(state, day, {})
-        top = [w['ja'] for w in fwlib.load_lexicon()]
-        for ja in top[:6]:
-            fwlib.apply_event(state, ja, 'known', '2026-10-05')
-        fwlib.promote(state, '2026-10-05', {})
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW - 1)  # 20-6+5
-        for ja in top[6:11]:
-            fwlib.apply_event(state, ja, 'asked', '2026-10-06')
-        before = sum(w['status'] != 'queue' for w in state['words'])
-        fwlib.promote(state, '2026-10-06', {})
-        # 14 active + 5 shaky fill 19 of 20 slots: one new word, where 5 shaky words used to stop all new words
-        self.assertEqual(sum(w['status'] != 'queue' for w in state['words']), before + 1)
+    def test_the_switch_keeps_the_old_fields_a_month_and_can_be_undone(self):
+        words = [dict(word('今'), changed='2026-10-01', days=['2026-10-01'], peeks=['2026-10-02']),
+                 dict(word('前', 'shaky'), last_bad='2026-10-03'), dict(word('中', 'active')), dict(word('何', 'queue'), added=''),
+                 dict(word('多分', 'queue'), added='')]
+        state = {'stage': 1, 'stage_pinned': False, 'paused': False, 'words': words, 'refilled': ['2026-10-04', 2]}
+        result = fwlib.apply_labels(state, {'labels': [['前', 'shaky', 'active'], ['今', 'known', 'known']],
+                                            'intake': [['何', 'shown', 0.75]], 'experiment': {'seed': 7}}, '2026-10-05')
+        self.assertTrue(result['switched'])
+        self.assertEqual((result['labels'], result['intake']), ([['前', 'shaky', 'active']], ['何']))
+        by = {w['ja']: w for w in state['words']}
+        self.assertEqual([by[ja]['origin'] for ja in ('今', '前', '中', '何', '多分')],
+                         ['known', 'known', 'learning', 'learning', 'new'])  # the prior's feature, never the label
+        self.assertEqual(by['前']['legacy'], {'status': 'shaky', 'added': '2026-10-01', 'changed': '', 'days': [],
+                                             'last_bad': '2026-10-03'})
+        self.assertNotIn('peeks', by['今'])
+        self.assertEqual((state['legacy'], state['experiment']),
+                         ({'refilled': ['2026-10-04', 2]}, {'name': 'delayed-start', 'seed': 7, 'since': '2026-10-05'}))
+        self.assertFalse(fwlib.apply_labels(state, {}, '2026-10-06')['switched'])  # once
+        undone = copy.deepcopy(state)
+        self.assertEqual(fwlib.restore(undone, '2026-10-07'), 5)
+        back = {w['ja']: w for w in undone['words']}
+        self.assertEqual((back['前']['status'], back['前']['last_bad'], back['今']['peeks']), ('shaky', '2026-10-03',
+                                                                                            ['2026-10-02']))
+        self.assertEqual((back['何']['status'], back['何']['days']), ('active', []))  # taken in since: still learning
+        self.assertEqual((undone['labels']['from'], undone['refilled']), ('rules', ['2026-10-04', 2]))
+        self.assertEqual(fwlib.apply_labels(undone, {'labels': [['前', 'shaky', 'known']]}, '2026-10-08')['labels'], [])
+        self.assertIsNone(fwlib.restore(undone, '2026-10-08'))  # nothing left to restore
+        fwlib.expire_legacy(state, '2026-11-03')
+        self.assertIn('legacy', by['今'])  # 29 days on
+        fwlib.expire_legacy(state, '2026-11-04')
+        self.assertFalse(any('legacy' in w for w in state['words']) or 'legacy' in state)
+        self.assertIsNone(fwlib.restore(state, '2026-11-04'))  # too late to undo
 
     def test_stage_auto_and_pinned(self):
         state = fwlib.new_state('2026-10-01')
@@ -283,14 +287,14 @@ class Brief(Home):
         for stage in (1, 4):
             self.assertIn('about 1 whole sentence per 100 words', weave.brief(self.state(stage), self.seen))
 
-    def test_recall_every_third_turn_shaky_first(self):
+    def test_no_recall_cue_and_turns_still_count(self):
         state = self.state()
-        build = lambda had, pick: (pick and pick['ja'], {'known': [], 'rules': ''}, {})
-        picks = [weave.chat_turn(state, 's1', build)[0] for _ in range(7)]
-        self.assertEqual(picks, ['結局', None, None, '一緒に', None, None, None])
-        self.assertEqual([weave.chat_turn(state, 's2', build, recall=False)[0] for _ in range(4)], [None] * 4)  # <abbr>
-        self.assertEqual(fwlib.read_json(fwlib.home() / 'sessions.json')['s2']['n'], 4)  # turns count all the same
-        self.assertIn('Recall: 結局?', weave.brief(state, {}, {'ja': '結局', 'en': 'after all', 'hint': 'kekkyoku'}))
+        fwlib.write_json(fwlib.home() / 'sessions.json', {'s1': {'n': 3, 'recalled': ['結局']}})  # from before it went
+        build = lambda had: ('brief', {'known': [], 'rules': ''}, {})
+        self.assertEqual([weave.chat_turn(state, s, build)[0] for s in ('s1', 's2', 's2')], ['brief'] * 3)
+        sessions = fwlib.read_json(fwlib.home() / 'sessions.json')
+        self.assertEqual((sessions['s1']['n'], sessions['s2']['n'], 'recalled' in sessions['s1']), (4, 2, False))
+        self.assertNotIn('Recall', weave.brief(state, {}))
 
     def test_calibration(self):
         words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active'), word('もっと')]
@@ -364,7 +368,7 @@ class Brief(Home):
         context = out['hookSpecificOutput']['additionalContext']
         self.assertEqual(out['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
         self.assertIn('Japanese Weave (Stage 1)', context)
-        self.assertIn('Recall: でも?', context)
+        self.assertNotIn('Recall', context)
         self.assertLess(len(context), 3200)
         fw.main(['pause'])
         self.assertEqual(self.run_hook({'session_id': 'x'}), '')
@@ -417,14 +421,11 @@ class Brief(Home):
         state['prefs'] = {'chat_glosses': 'abbr'}
         self.assertTrue(weave.abbr_glosses(state, host_check=lambda: True))
         self.assertFalse(weave.abbr_glosses(state, host_check=lambda: False))  # a terminal would show raw tags
-        recall = {'ja': 'でも', 'kana': 'でも', 'en': 'but / however', 'hint': 'demo'}
-        footer, popover = weave.brief(state, {}, recall), weave.brief(state, {}, recall, markup=True)
+        footer, popover = weave.brief(state, {}), weave.brief(state, {}, markup=True)
         self.assertIn('footer line', footer)
         self.assertNotIn('<abbr', footer)
         self.assertIn('<abbr title="hiragana reading · meaning">', popover)
         self.assertNotIn('footer line', popover)
-        self.assertIn('Recall: でも?', footer)
-        self.assertNotIn('Recall', popover)  # popover glosses already test recall on every word
         with mock.patch('sys.stdout', new=io.StringIO()):
             fw.main(['glosses', 'abbr'])
         self.assertEqual(fwlib.load_state()['prefs']['chat_glosses'], 'abbr')
@@ -449,8 +450,9 @@ def grown(known, seed=1):
     chosen.update(range(known, min(len(words), known + known // 20)))
     for i in chosen:
         fwlib.apply_event(state, words[i]['ja'], 'known', '2026-01-01')
-    for day in range(2, 7):
-        fwlib.promote(state, f'2026-01-0{day}', {})
+    for day in range(2, 7):  # up to 20 learning words, 5 a day
+        room = min(fwlib.NEW_PER_DAY, 20 - sum(w['status'] == 'active' for w in words))
+        fwlib.take_in(state, [[w['ja'], None, None] for w in fwlib.newcomers(state, {})[:room]], f'2026-01-0{day}')
     return state
 
 
@@ -466,15 +468,14 @@ class Scale(Home):
         later = {}
         for known in (50, 400, 1000):
             state = grown(known)
-            recall = {'ja': 'でも', 'en': 'but', 'hint': 'demo'}
-            first, had, _ = weave.compose(state, {}, recall, tail='x' * 300)
+            first, had, _ = weave.compose(state, {}, tail='x' * 300)
             about, respond = export.chatgpt(state)
             self.assertLessEqual(len(about), export.CHATGPT_LIMIT)
             self.assertLessEqual(len(respond), export.CHATGPT_LIMIT)
             self.assertLess(len(export.claude_ai(state)), 6000)
             self.assertLessEqual(len(first) + 300, weave.BRIEF_MAX)  # Claude Code files away hook context over 10,000
             self.assertNotIn('most common', first)
-            later[known] = weave.compose(state, {}, recall, had=had)[0]
+            later[known] = weave.compose(state, {}, had=had)[0]
             if known >= 400:  # the most useful named on the first turn, the rest never: a later turn has no list
                 self.assertIn('more the user knows, not named here: keep the English for any word not named', first)
                 self.assertNotIn('also known', later[known])
@@ -501,10 +502,9 @@ class Scale(Home):
         rare = known[-10]  # a word far down the base list that keeps coming up in the user's chats
         seen = {rare['ja']: {'n': 5, 'days': ['2026-10-18', '2026-10-19', '2026-10-20']}}
         tail = '\nYour last reply in this chat had ' + 'x' * 420  # about the longest feedback line
-        recall = {'ja': '申し訳ない', 'en': 'sorry / inexcusable', 'hint': 'mōshiwakenai'}
         for markup in (False, True):
             for level in (0, -2, 2, intensity.FULL):
-                first, _, plan = weave.compose(state, seen, recall, markup=markup, level=level, tail=tail)
+                first, _, plan = weave.compose(state, seen, markup=markup, level=level, tail=tail)
                 self.assertLess(len(first) + len(tail), 9500, (markup, level))
                 self.assertEqual(plan['known'], 1500)
                 lines = first.split('\n')
@@ -612,12 +612,14 @@ class Scale(Home):
         self.assertIn('/japanese-weave:export', weave.export_notice(state, now=time.time() + 8 * 86400))
         self.assertIsNone(weave.export_notice(fwlib.load_state(), now=time.time() + 9 * 86400))  # only once
 
-    def test_log_chat_day_counts_but_never_graduates_alone(self):
+    def test_day_count_ops_from_before_change_nothing(self):
         state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
-            self.assertGreater(export.log_chat_day(state, day), 0)
-            fwlib.promote(state, day, {})
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')
+        before = json.dumps(state, sort_keys=True)
+        self.assertEqual(hub.apply(state, hub.stamp({'kind': 'chat_day'})), {'logged': 0})
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+        self.assertEqual(hub.apply(state, hub.stamp({'kind': 'exported', 'target': 'chatgpt', 'log_day': True})),
+                         {'logged': 0})
+        self.assertEqual(state['exported']['target'], 'chatgpt')
 
 
 class Blocks(unittest.TestCase):
@@ -1044,10 +1046,9 @@ class Hub(Home):
         self.assertEqual(fwlib.load_state(), self.served())  # the cache was refreshed after each change
         peeked = self.learning(cache)[1]
         self.assertEqual(fw_host.handle({'type': 'events', 'events': [{'word': peeked, 'kind': 'peek'}]})['applied'], 1)
-        self.assertEqual(fwlib.find(fwlib.load_state(), peeked)['peeks'], [fwlib.today()])  # shown here at once
-        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [])  # the browser never waits: sent by a sync
+        self.assertEqual([op['kind'] for op in hub.pending()], ['events'])  # the browser never waits: sent by a sync
         self.assertEqual(hub.sync(), (True, None))
-        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [fwlib.today()])
+        self.assertEqual(hub.pending(), [])
         self.assertEqual(fw_host.handle({'type': 'state'})['version'], fwlib.version(self.served()))
         self.assertEqual([k for k, _ in self.ops()], ['seed', 'mark', 'set', 'events'])  # seed: its own setup
         self.assertEqual({m for _, m in self.ops()}, {socket.gethostname()[:64]})
@@ -1244,7 +1245,7 @@ class Hub(Home):
         rev = fwlib.read_json(fwlib.home() / hub.SYNCED)['rev']
         with fwlib.using_home(self.server_home):
             with fwlib.editing():
-                pass  # promotion with nothing to promote: nothing rewritten
+                pass  # nothing to change: nothing rewritten
             self.assertEqual(hub.snapshot(rev), (200, {'ok': True, 'rev': rev, 'unchanged': True}))
             hub.submit({'kind': 'set', 'stage': 2})
             self.assertNotIn('unchanged', hub.snapshot(rev)[1])
@@ -1406,15 +1407,14 @@ class Setup(Home):
     def test_rerun_never_resets_or_downgrades(self):
         self.run_setup()  # top 5 become learning words
         with fwlib.editing() as state:
-            fwlib.apply_event(state, 'でも', 'asked')  # shaky
-            fwlib.apply_event(state, 'もう', 'seen')
+            fwlib.apply_event(state, 'でも', 'known')
+            fwlib.apply_event(state, 'でも', 'asked')  # back to learning
         state = self.run_setup('--known-top', '150', '--sites', 'ask')
         by = {w['ja']: w for w in state['words']}
-        self.assertEqual(by['でも']['status'], 'shaky')
+        self.assertEqual(by['でも']['status'], 'active')
         self.assertEqual(by['もう']['status'], 'active')
-        self.assertEqual(by['もう']['days'], [fwlib.today()])
         self.assertEqual(sum(w['status'] == 'known' for w in state['words'][:150]), 145)
-        self.assertEqual(fwlib.stage_for(state), 2)  # 145 known: stage 3 comes once the learning words graduate
+        self.assertEqual(fwlib.stage_for(state), 2)  # 145 known: stage 3 once the model labels learning words known
         self.assertEqual(state['prefs'], {'extension_sites': 'ask'})
         before = json.dumps(state)
         state = self.run_setup('--known-top', '40')  # a lower answer later changes nothing
@@ -1648,58 +1648,37 @@ class Knowledge(Home):
         episode(rows, contexts, 'browser', 'v1', notes, [0], self.NOW - 60_000)  # still being read
         self.assertEqual([len(e[2]) for e in knowledge.episodes(rows, contexts, self.NOW)], [1, 1])
 
-    def word_entry(self, k, n, command_at=None):
-        w = knowledge.Word(1.0)
-        w.k, w.n, w.recent, w.command_at = k, n, [self.NOW], command_at
-        return w
-
-    def test_plan_moves(self):
-        state = {'words': [word('a', 'shaky'), word('b', 'shaky'), word('c', 'known'), word('d', 'active'),
-                           word('e', 'shaky'), word('f', 'known'), word('g', 'shaky')]}
-        words = {'a': self.word_entry(4, 20), 'b': self.word_entry(4, 1),  # b: too little evidence
-                 'c': self.word_entry(-2, 20), 'd': self.word_entry(-2, 20),
-                 'e': self.word_entry(4, 20, command_at=self.NOW - knowledge.DAY_MS),  # right after `learn`
-                 'f': self.word_entry(0.5, 20), 'g': self.word_entry(4, 20)}
-        moves, veto = knowledge.plan_moves(state, words, {}, self.NOW)
-        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky'), ('g', 'shaky', 'known')])
-        self.assertEqual(veto, ['d'])
-        moves, _ = knowledge.plan_moves(state, words, {'known': 2}, self.NOW)
-        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky')])  # 3 a day per direction
-
-    def test_vetoed_words_wait_to_graduate(self):
-        state = {'words': [dict(word('今', 'active'), days=['2026-10-01', '2026-10-02', '2026-10-03'],
-                                changed='2026-10-01')]}
-        fwlib.promote(state, '2026-10-10', chat={}, veto={'今'})
-        self.assertEqual(state['words'][0]['status'], 'active')
-        fwlib.promote(state, '2026-10-10', chat={}, veto=set())
-        self.assertEqual(state['words'][0]['status'], 'known')
-
-    def test_refresh_moves_words_and_ignores_a_shrunk_log(self):
+    def test_refresh_labels_words_from_the_model_and_ignores_a_shrunk_log(self):
         with fwlib.editing() as state:
             listed = [w for w in state['words'] if w['status'] != 'queue']
             target = listed[0]['ja']
-            fwlib.set_status(listed[0], 'shaky', fwlib.today())
             others = [w['ja'] for w in listed[1:]]
         now = time.time()
         items = []
-        for e in range(40):  # target never opened, another word opened each time
+        for e in range(40):  # target never opened, every other word opened each time
             notes = [[target, 0, 0]] + [[w, 40 * (i + 1), 0] for i, w in enumerate(others)]
-            items.append({'kind': 'peek', 'word': others[e % len(others)], 'at': int((now - 3600 - e * 60) * 1000),
-                          'dwellMs': 1500, 'view': f'v{e}', 'context': 'c', 'position': 1 + e % len(others),
-                          'box': [0, 0, 500, 40], 'annotations': notes, 'uid': f'u{e}'})
+            items += [{'kind': 'peek', 'word': w, 'at': int((now - 3600 - e * 60 + i) * 1000), 'dwellMs': 1500,
+                       'view': f'v{e}', 'context': 'c', 'position': 1 + i, 'box': [0, 0, 500, 40],
+                       'annotations': notes, 'uid': f'u{e}-{i}'} for i, w in enumerate(others)]
         feedback.record(items, 'browser')
-        know = knowledge.refresh(now)  # no challenge set: only the day rules move words
-        self.assertEqual((know['rows'], know['moves'], know['challenge']), (40, [], 0))
-        fw_host.handle({'type': 'prefs', 'challenge': 1.5})
         fwlib.write_json(knowledge.path(), {'rows': 10_000})  # the log used to be longer: don't trust it
         know = knowledge.refresh(now)
-        self.assertEqual((know['rows'], know['moves']), (40, []))
-        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'shaky')
-        know = knowledge.refresh(now)
-        self.assertEqual([(m['word'], m['to']) for m in know['moves']], [(target, 'known')])
-        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'known')
-        self.assertLess(know['words'][target]['k'] - know['words'][target]['mu'], 3)
+        self.assertEqual((know['rows'], know['moves']), (40 * len(others), []))
+        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'active')
+        know = knowledge.refresh(now)  # whatever the challenge: labels always come from the model
+        self.assertEqual(know['challenge'], 0)
+        self.assertEqual([(m['word'], m['from'], m['to']) for m in know['moves']], [(target, 'active', 'known')])
+        state = fwlib.load_state()
+        self.assertEqual(fwlib.find(state, target)['status'], 'known')
+        self.assertTrue(know['words'][target]['free'])
+        self.assertEqual([fwlib.find(state, ja)['status'] for ja in others], ['active'] * len(others))
+        self.assertEqual(fwlib.find(state, target)['origin'], 'learning')  # the label never moves the prior
         self.assertGreater(know['words'][target]['k'], know['words'][others[0]]['k'])
+        con = feedback.connect()
+        ops = [json.loads(body) for (body,) in con.execute("SELECT body FROM ops WHERE kind = 'labels'")]
+        con.close()
+        self.assertEqual([op['labels'] for op in ops], [[[target, 'active', 'known']]])  # the ops log keeps it
+        self.assertEqual(knowledge.refresh(now)['moves'], know['moves'])  # nothing new to change
 
     def showing(self, contexts, rows, view, notes, at, active, words=60, opened=(), jitter=None, level=0):
         contexts[('browser', view, 'c')] = {'surface': 'browser', 'view': view, 'context': 'c', 'annotations': notes,
@@ -2020,29 +1999,28 @@ class Budget(Home):
                  'words': [word('でも'), word('中'), word('多分', 'active')]}
         free, learning, _p = weave.lists(state, {}, know)
         self.assertEqual(([w['ja'] for w in free], [w['ja'] for w in learning]), (['でも'], ['多分', '中']))
-        fwlib.write_json(fwlib.home() / 'knowledge.json', know)
-        self.assertEqual(fwlib.settled_words(), {'でも'})
-        know['words']['でも']['obs'] = 0  # free by its prior alone: the log has nothing on it
-        self.assertEqual(fwlib.settled_words(know), set())
 
-    def test_words_known_at_a_glance_leave_their_learning_slot(self):
+    def test_new_words_come_in_while_the_budget_goes_unspent(self):
+        now, hour = 1_800_000_000_000, 3_600_000
+        web = lambda i, plan, ago=hour: (('browser', f'v{i}', 'c'), {'surface': 'browser', 'shown_at': now - ago,
+                                                                       'plan': plan})
+        contexts = dict(web(i, {'budget': 0.2, 'spent': 0.05, 'expected': 0.3}) for i in range(5))
+        contexts.update([web(9, {'budget': 0.2, 'spent': 0}, 49 * hour), web(10, {'level': 3}),
+                         (('t3', 'm', 'c'), {'surface': 't3', 'shown_at': now, 'plan': None})])
+        briefs = [{'at': now - hour, 'budget': 0.5, 'expected': 0.45}] * 5 + [{'at': now, 'budget': None}]
+        spend = knowledge.spending(contexts, briefs, now)
+        self.assertEqual(spend, {'browser': {'plans': 5, 'budget': 1.0, 'spent': 0.25, 'share': 0.25},
+                                 't3': {'plans': 5, 'budget': 2.5, 'spent': 2.25, 'share': 0.9}})
+        self.assertTrue(knowledge.unspent(spend))  # the web's plans left three quarters of its budget
         state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.refill(state, day, settled=set())
-        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
-        self.assertEqual(len(active), fwlib.WINDOW)
-        self.assertEqual(fwlib.refill(state, '2026-10-05'), 0)  # no knowledge.json: every word takes its slot
-        # the gloss log says 3 of them are known at a glance on the web (browser offset), whatever T3 says
-        fwlib.write_json(fwlib.home() / 'knowledge.json', self.know({active[0]: 4.0, active[1]: 3.5, active[2]: 2.5,
-                                                                     active[3]: 1.0}, t3=5.0, browser=1.0))
-        self.assertEqual(fwlib.settled_words(), {active[0], active[1]})  # sigmoid(1 - 2.5) is 0.18: not yet
-        self.assertEqual(fwlib.refill(state, '2026-10-05'), 2)
-        self.assertEqual([fwlib.find(state, ja)['status'] for ja in active[:2]], ['active', 'active'])  # unchanged
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW + 2)
-        self.assertEqual(fwlib.refill(state, '2026-10-06'), 0)  # the learning set is full again
-        self.assertEqual(fwlib.settled_words({'offset': {'browser': True}, 'words': {'x': {'k': 'high'}, 'y': None}}), set())
-        self.assertEqual(fwlib.settled_words([]), set())
-
+        self.assertEqual(knowledge.intake_room(state, spend, '2026-10-01'), 0)  # today's 5 are in
+        self.assertEqual(knowledge.intake_room(state, spend, '2026-10-02'), fwlib.NEW_PER_DAY)
+        spent = {'browser': dict(spend['browser'], share=0.85), 't3': spend['t3']}
+        self.assertEqual(knowledge.intake_room(state, spent, '2026-10-02'), 0)  # both spend 80% or more
+        few = {'browser': dict(spend['browser'], plans=4), 't3': {'plans': 0, 'budget': 0, 'spent': 0, 'share': None}}
+        self.assertEqual(knowledge.intake_room(state, few, '2026-10-02'), 0)  # too little reading to tell
+        old = dict(web(i, {'budget': 0.2, 'expected': 0.04}) for i in range(5))  # plans before spent was logged
+        self.assertEqual(knowledge.spending(old, [], now)['browser']['share'], 0.2)
 
 class DamagedState(Home):
     """A state.json cut short or edited by hand is kept aside and the copy from before the last save comes back."""

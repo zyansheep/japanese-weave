@@ -224,17 +224,24 @@ def _clean(item, now):
 
 
 def _plan_ok(plan, num):
-    """As the extension's cleanPlan (hostsource.js) checks it; budget, expected and sentencePrice are optional, as plans
-    from before levels meant a lookup budget have none of them (and full's has no budget), and plans from before whole
-    sentences were priced have no sentencePrice (their thinning also scaled the budget)."""
+    """As the extension's cleanPlan (hostsource.js) checks it; budget, spent, expected, sentencePrice and arms are
+    optional, as plans from before levels meant a lookup budget have none of them (and full's has no budget), plans
+    from before whole sentences were priced have no sentencePrice (their thinning also scaled the budget), and plans
+    from before extension 0.10 no spent (what the swaps within the budget cost) or arms (the delayed-start arm of each
+    word shown that has one: {word: 'shown' | 'held:probe' | 'shown:probe'})."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key, top=1000: key not in plan or (num(plan[key]) and 0 <= plan[key] <= top)
+    arms = plan.get('arms', {}) if isinstance(plan, dict) else None
     return (isinstance(plan, dict)
-            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected', 'sentencePrice'}
+            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'spent', 'expected',
+                              'sentencePrice', 'arms'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
-            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected')
-            and amount('sentencePrice', 1))
+            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('spent') and amount('expected')
+            and amount('sentencePrice', 1)
+            and isinstance(arms, dict) and len(arms) <= 200
+            and all(isinstance(w, str) and 0 < len(w) <= 40 and isinstance(a, str) and 0 < len(a) <= 20
+                    for w, a in arms.items()))
 
 
 MAX_TRACE_POINTS = 200

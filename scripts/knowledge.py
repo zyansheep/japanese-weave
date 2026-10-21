@@ -14,7 +14,7 @@ dictionary form (inflection.py: T3 glosses conjugated verbs whole).
 
 Fit: one penalized maximum-likelihood fit of the whole log on every refresh (NEXT_STEPS step 4), replacing the online
 updates and their pull toward the prior. Each word's k is held toward its prior mean by a Gaussian prior whose width is
-fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by status
+fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by origin
 and card, and the uncapped ln(1 + Anki interval)); evidence weighs half as much every EVIDENCE_DAYS; known and learn
 commands are one-sided pseudo-observations; a lookup of a conjugated form counts FORM_WEIGHT. Each word's uncertainty
 is the fit's curvature (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a
@@ -22,9 +22,11 @@ grid, on both surfaces. The fit is the Fit class, which evaluate.py's "fit" mode
 online updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
-with hysteresis), fits the price of a whole sentence per surface, makes a few guarded status moves, and reports whether
-the default amount of Japanese looks right and how the model's expected lookups per class compare with those seen, in
-lookups per 100 words read (calibration), and which opened words the lexicon doesn't have (unlisted).
+with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
+looks right and how the model's expected lookups per class compare with those seen, in lookups per 100 words read
+(calibration), and which opened words the lexicon doesn't have (unlisted). Then it labels every word from the model
+(known when free, learning once in use, else new), takes in the day's new words while the lookup budget goes unspent,
+each with its delayed-start arm, and records the probes' outcomes (decide).
 """
 import json
 import math
@@ -32,6 +34,7 @@ import os
 from pathlib import Path
 import random
 import statistics
+import sys
 import time
 
 import feedback
@@ -58,9 +61,6 @@ ETA_MAX, ETA_MIN, ETA_SLOPE = 1.2, 0.2, 0.3
 T3_RATE, T3_LIMIT = 0.02, 1.5
 KNOWN_COMMAND_K, LEARN_COMMAND_K = 2.5, 0.0
 TARGET_P = 0.25            # the predicted peek chance learning words are aimed at
-Z80 = 0.8416               # one-sided 80% bound
-MOVE_CAP = 3               # evidence moves per direction per day
-IMMUNE_DAYS = 14           # no evidence moves this soon after a known or learn command
 RECENT_DAYS = 14
 CHALLENGES = (0, 0.5, 1, 1.5, 2, 3)  # normal's lookup budget per 100 words (0: intensity.BUDGETS[0])
 PUNCTUATION = set('。？！?!.')
@@ -613,15 +613,16 @@ WIDTH_TOLERANCE = 1e-3     # nor a prior width
 FIT_ITERATIONS = 60
 # The shared parameters, each with the prior that holds it while the data is thin: (mean, sd). The offsets: chat's
 # (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. Then a word's prior mean, a
-# regression on its features (features): with an Anki card, an intercept by status plus a slope on ln(1 + interval),
-# centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on the old neutral
-# prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
+# regression on its features (features): with an Anki card, an intercept by origin (origin_at; the names say new,
+# learning and known) plus a slope on ln(1 + interval), centred on the old prior 0.5 + 0.8 ln(1 + interval); without
+# one, an intercept by origin, centred on the old neutral prior (1.0) and, for words marked known, the planner's
+# fwlib.KNOWN_PRIOR_K.
 SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 SHARED_NAMES = tuple(SHARED)
 T3, FORM = SHARED_NAMES.index('t3'), SHARED_NAMES.index('form')
-STATUSES = ('new', 'learning', 'known')
+ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
 
@@ -651,15 +652,35 @@ def status_at(word, day):
     return 'known' if status == 'shaky' else 'learning'
 
 
-def features(interval, status):
+def origin_at(word, day):
+    """How a word had come into use by `day` ('YYYY-MM-DD'), the prior's stand-in for its status, which now comes from
+    the model (fwlib.relabel) and would feed the fit its own output: 'learning' (taken in to be taught), 'known' (marked
+    known: setup's top words, an Anki sync, or known before labels came from the model) or 'new' (neither, or not yet
+    on that day). The word's origin field (fwlib.ORIGINS), which only intake, setup, Anki syncs and the switch to the
+    model's labels set; a word state from before the switch (and the simulated reader's) has none, and its statuses
+    say it (fwlib.legacy_origin), with a known word learning before its last change, as status_at has it. None for a
+    word the state doesn't have."""
+    if word is None:
+        return None
+    if not word.get('added') or day < word['added']:
+        return 'new'
+    explicit = word.get('origin') if word.get('origin') in fwlib.ORIGINS else None
+    old = word.get('legacy') if isinstance(word.get('legacy'), dict) else None if explicit else word
+    origin = explicit or fwlib.legacy_origin(old)
+    if old and origin == 'known' and old.get('status') == 'known' and day < (old.get('changed') or ''):
+        return 'learning'  # it graduated by the day rules after that day
+    return origin
+
+
+def features(interval, origin):
     """A word's prior features, {shared parameter: value}, and the kind whose prior width it takes: with an Anki card,
-    its status's card intercept and ln(1 + interval in days), uncapped; without one, its status's intercept. The hook
-    for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words, script, word type,
-    length): each is one more shared parameter, with its prior in SHARED."""
-    status = status if status in STATUSES else 'new'
+    its origin's card intercept (origin_at) and ln(1 + interval in days), uncapped; without one, its origin's
+    intercept. The hook for the word features NEXT_STEPS step 13 adds (frequency rank, kanji shared with known words,
+    script, word type, length): each is one more shared parameter, with its prior in SHARED."""
+    origin = origin if origin in fwlib.ORIGINS else 'new'
     if interval is not None:
-        return {f'card {status}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
-    return {status: 1.0}, 'none'
+        return {f'card {origin}': 1.0, 'interval': math.log1p(max(0.0, interval))}, 'card'
+    return {origin: 1.0}, 'none'
 
 
 def _solve(a, b):
@@ -725,7 +746,7 @@ class Fit:
         return i
 
     def features(self, ja):
-        return features(self.intervals.get(ja), status_at(self.by_ja.get(ja), self.day))
+        return features(self.intervals.get(ja), origin_at(self.by_ja.get(ja), self.day))
 
     def _terms(self, log):
         pooled, self.episodes, self.commands = {}, [], []
@@ -1446,36 +1467,103 @@ def valid_challenge(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value in CHALLENGES
 
 
-# ---- status moves ----
+# ---- labels, intake and probes: the refresh's state edit ----
 
-def bounds(word, offset=0.0):
-    """80% bounds on the browser peek chance: (lower, upper)."""
-    return sigmoid(offset - word.k - Z80 * word.sd), sigmoid(offset - word.k + Z80 * word.sd)
+SPENT_SHARE = 0.8          # a surface whose plans asked to spend under this share of their budget left it unspent
+SPEND_HOURS = 48           # over its plans of this many hours
+SPEND_MIN = 5              # and only with at least this many plans with a budget (web passages or chat briefs)
+PROBE_READ = 0.1           # a probe's showing counts once its read chance from time on screen is this (or it was opened)
 
 
-def plan_moves(state, words, moves_today, now_ms):
-    """Evidence moves on top of the day rules: shaky -> known when the upper bound of p < 0.15, known -> shaky when
-    the lower bound > 0.35 and it was opened recently. At most MOVE_CAP per direction per day, none right after a
-    command. Also the graduation veto: active words whose lower bound > 0.3. Words not introduced yet (queue) never
-    move: fwlib.refill brings them in."""
-    moves, veto = [], []
-    done = {'known': moves_today.get('known', 0), 'shaky': moves_today.get('shaky', 0)}
+def spending(contexts, briefs, now_ms):
+    """Per surface, what its plans of the last SPEND_HOURS asked to spend against their budget, in lookups if read:
+    {surface: {plans, budget, spent, share}}. The web: each passage's plan (its shown record), its budget and spent
+    (what its budgeted swaps cost; plans from before extension 0.10 have none, so their expected, which counts every
+    listed word shown, stands in: an upper bound); chat: each brief (feedback.chat_briefs), its budget and expected,
+    per 100 words. Full has no budget and doesn't count."""
+    since = now_ms - SPEND_HOURS * 3_600_000
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    out = {surface: {'plans': 0, 'budget': 0.0, 'spent': 0.0} for surface in feedback.SURFACES}
+    for c in contexts.values():
+        plan = c.get('plan')
+        if c['surface'] != 'browser' or not isinstance(plan, dict) or (c.get('shown_at') or 0) < since:
+            continue
+        spent = plan.get('spent', plan.get('expected'))
+        if number(plan.get('budget')) and number(spent):
+            web = out['browser']
+            web['plans'], web['budget'], web['spent'] = web['plans'] + 1, web['budget'] + plan['budget'], \
+                web['spent'] + spent
+    for b in briefs:
+        if b['at'] >= since and number(b.get('budget')) and number(b.get('expected')):
+            chat = out['t3']
+            chat['plans'], chat['budget'], chat['spent'] = chat['plans'] + 1, chat['budget'] + b['budget'], \
+                chat['spent'] + b['expected']
+    for v in out.values():
+        v['share'] = v['spent'] / v['budget'] if v['budget'] > 0 else None
+        v['budget'], v['spent'] = round(v['budget'], 3), round(v['spent'], 3)
+    return out
+
+
+def unspent(spend):
+    """Whether the lookup budget goes unspent: on some surface with SPEND_MIN plans, they asked to spend under
+    SPENT_SHARE of their budget, so more learning words would be shown. Without plans nothing is spent, but nothing is
+    read either: no intake."""
+    return any(v['plans'] >= SPEND_MIN and v['share'] is not None and v['share'] < SPENT_SHARE
+               for v in spend.values())
+
+
+def intake_room(state, spend, today):
+    """How many new words come in today: what is left of NEW_PER_DAY while the budget goes unspent, else none."""
+    return max(0, fwlib.NEW_PER_DAY - fwlib.taken_today(state, today)) if unspent(spend) else 0
+
+
+def probe_outcomes(state, log, today):
+    """[[ja, outcome]] for each word whose probe is due (fwlib.phase): its first showing on or after its probe day that
+    was read (opened, or a read chance from time on screen of at least PROBE_READ), {at, surface, y, read}; 'missed'
+    when there is none fwlib.PROBE_WAIT days on. Episodes don't count: they exist only because something was opened."""
+    due = {w['ja']: day_start(w['arm']['probe']) for w in state['words'] if fwlib.phase(w, today) == 'probe'}
+    found = {}
+    for event in log.events:
+        if not hasattr(event, 'obs') or event.episode:
+            continue
+        for o in event.obs:
+            if o.word in due and o.word not in found and event.at >= due[o.word] and (o.y > 0 or o.read >= PROBE_READ):
+                found[o.word] = {'at': int(event.at), 'surface': o.surface, 'y': round(o.y, 3),
+                                 'read': round(max(o.read, READ_FLOOR) if o.y > 0 else o.read, 4)}
+    out = [[ja, outcome] for ja, outcome in found.items()]
+    out += [[w['ja'], 'missed'] for w in state['words'] if w['ja'] in due and w['ja'] not in found
+            and fwlib.days_between(w['arm']['probe'], today) >= fwlib.PROBE_WAIT]
+    return out
+
+
+def decide(state, flags, looked, spend, log, today, seed=None):
+    """The refresh's state edit, as a labels op (hub.py, fwlib.apply_labels): every word's label from its free flag
+    (fwlib.label) where it changes, up to intake_room new words (fwlib.newcomers: looked up first, then the list's
+    order; never one known at a glance) each with its delayed-start arm (fwlib.assign, from the experiment's seed, or
+    a new seed when it starts; none for a word the fixed texts name, fwlib.IN_THE_RULES), and the due probes' outcomes
+    (probe_outcomes). flags: {ja: free}; looked: {ja: messages
+    opened in} (fwlib.looked_up's). Nothing when labels come from the rules (fwlib.restore)."""
+    op = {'kind': 'labels', 'labels': [], 'intake': [], 'probes': []}
+    if (state.get('labels') or {}).get('from') == 'rules':
+        return op
     for w in state['words']:
-        word = words.get(w['ja'])
-        if word is None or word.n < 2:
-            continue
-        if word.command_at and now_ms - word.command_at < IMMUNE_DAYS * DAY_MS:
-            continue
-        lower, upper = bounds(word)
-        if w['status'] == 'active' and lower > 0.3:
-            veto.append(w['ja'])
-        elif w['status'] == 'shaky' and upper < 0.15 and done['known'] < MOVE_CAP:
-            moves.append((w['ja'], 'shaky', 'known'))
-            done['known'] += 1
-        elif w['status'] == 'known' and lower > 0.35 and word.recent and done['shaky'] < MOVE_CAP:
-            moves.append((w['ja'], 'known', 'shaky'))
-            done['shaky'] += 1
-    return moves, veto
+        to = fwlib.label(w, flags.get(w['ja'], False))
+        if to != w['status']:
+            op['labels'].append([w['ja'], w['status'], to])
+    room = intake_room(state, spend, today)
+    if room:
+        experiment = state.get('experiment') if isinstance(state.get('experiment'), dict) else None
+        if experiment is None:
+            seed = seed if seed is not None else random.SystemRandom().randrange(2 ** 32)
+            op['experiment'] = {'seed': seed}
+        else:
+            seed = experiment['seed']
+        free = {ja for ja, f in flags.items() if f}
+        for w in fwlib.newcomers(state, looked, free)[:room]:  # a word the fixed texts name can't be held back
+            outside = w['ja'] in fwlib.IN_THE_RULES
+            op['intake'].append([w['ja'], *((None, None) if outside else fwlib.assign(seed, w['ja']))])
+    op['probes'] = probe_outcomes(state, log, today)
+    return op
 
 
 # ---- refresh ----
@@ -1494,15 +1582,6 @@ def is_stale(knowledge=None, now=None):
 
 
 MODEL = 'fit 1'  # the reading model is chosen again when this changes (knowledge.json "reading")
-
-
-class Estimate:
-    """A word as the status moves read it (plan_moves, bounds): k, sd, evidence weight n, its opens in the last
-    RECENT_DAYS days (times), its last command's time."""
-    __slots__ = ('k', 'sd', 'n', 'recent', 'command_at')
-
-    def __init__(self, k, sd, n=0.0, recent=(), command_at=None):
-        self.k, self.sd, self.n, self.recent, self.command_at = k, sd, n, list(recent), command_at
 
 
 def word_stats(log, now_ms):
@@ -1529,17 +1608,19 @@ def word_stats(log, now_ms):
 
 
 def prior_table(fit):
-    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by status,
-    plus interval times ln(1 + days); without one, by status; and the sd of each kind (prior_estimate)."""
+    """What a word without evidence assumes, by kind (knowledge.json "prior"): k's mean with an Anki card, by origin
+    (origin_at), plus interval times ln(1 + days); without one, by origin; and the sd of each kind (prior_estimate)."""
     shared = fit.shared()
-    return {'card': {s: shared[f'card {s}'] for s in STATUSES}, 'interval': shared['interval'],
-            'none': {s: shared[s] for s in STATUSES}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
+    return {'card': {s: shared[f'card {s}'] for s in ORIGINS}, 'interval': shared['interval'],
+            'none': {s: shared[s] for s in ORIGINS}, 'sd': {kind: round(w, 3) for kind, w in fit.widths.items()}}
 
 
 def refresh(now=None):
-    """Fit the gloss log (Fit), apply guarded status moves, write knowledge.json. One at a time; returns the new
-    knowledge, or None when another refresh is running. With a collector set, the collector does this and the cache
-    here is refreshed instead (hub.py).
+    """Fit the gloss log (Fit), write knowledge.json, and make the state edit that follows (decide): every word's label
+    from the model, the day's new words while the budget goes unspent, with their delayed-start arms, and the probes'
+    outcomes, as one labels op (hub.run, so the ops log keeps it). One at a time; returns the new knowledge, or None
+    when another refresh is running. With a collector set, the collector does this and the cache here is refreshed
+    instead (hub.py).
 
     knowledge.json: per word of the word state, k and its sd (the fit's, else its prior's), mu (its prior mean), free
     (known at a glance, with hysteresis against the last refresh's flag: free_flag), n (evidence weight), obs, opened,
@@ -1547,7 +1628,8 @@ def refresh(now=None):
     shared parameters with their sd, the prior widths); prior (prior_table); sentencePrice per surface (sentence_prices;
     sentences has their counts); reading (tune, once a day); calibration, with daily, its sums for each day before
     today (day_totals), reused while the day's key holds (day_keys), and dailyFree, the free flags at the start of the
-    last of those days, which today's records carry on from; unlisted; the evidence moves and veto."""
+    last of those days, which today's records carry on from; unlisted; spend (spending: the budget's use that sets
+    intake); moves (the label changes made, the last 200)."""
     if fwlib.collector_url():
         import hub
         ok, error = hub.sync(scan=False)
@@ -1609,24 +1691,18 @@ def refresh(now=None):
             if s:  # a word the log has something on
                 words[ja].update(n=round(fit.n[i], 2) if i is not None else 0.0, obs=s['obs'], opened=s['opened'],
                                  recent=len(s['recent']), last=s['last'], history=s['history'])
-        history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
-        today_counts = {}
-        for m in history:
-            if m.get('day') == today:
-                today_counts[m['to']] = today_counts.get(m['to'], 0) + 1
         shrank = len(rows) < previous.get('rows', 0)  # a truncated mirror must not move words
-        # with no challenge set, the day rules alone move words, as before adaptive difficulty
-        estimates = {ja: Estimate(e['k'], e['sd'], e['n'], (stats.get(ja) or {}).get('recent', ()),
-                                  (stats.get(ja) or {}).get('command_at')) for ja, e in words.items()}
-        moves, veto = ([], []) if shrank or not challenge else plan_moves(state, estimates, today_counts, now_ms)
+        spend = spending(contexts, feedback.chat_briefs(feedback.default_path()), now_ms)
+        looked = {ja: len(st['recent']) for ja, st in stats.items() if len(st['recent']) >= fwlib.LOOKED_UP}
+        op = decide(state, flags, looked, spend, log, today) if not shrank else {}
         applied = []
-        if moves:
-            with fwlib.editing() as live:
-                for ja, before, after in moves:
-                    w = fwlib.find(live, ja)
-                    if w is not None and w['status'] == before:
-                        fwlib.set_status(w, after, today)
-                        applied.append({'day': today, 'word': ja, 'from': before, 'to': after})
+        if op.get('labels') or op.get('intake') or op.get('probes') or (op and not state.get('labels')):
+            import hub  # here: hub imports this module
+            result = hub.run(hub.stamp(dict(op, day=today, at=now_ms)))
+            if not result.get('ok'):
+                print(f'Japanese Weave: labels not changed: {result.get("error")}', file=sys.stderr)
+            applied = [{'day': today, 'word': ja, 'from': a, 'to': b} for ja, a, b in result.get('labels') or []]
+        history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
         knowledge = {
             'updated': now, 'rows': len(rows),
             'offset': {'browser': 0.0, 't3': round(fit.theta[T3], 3)},
@@ -1637,7 +1713,7 @@ def refresh(now=None):
                     'seconds': round(fit.seconds, 3)},
             'prior': prior_table(fit),
             'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
-            'challenge': challenge, 'veto': veto, 'moves': (history + applied)[-200:], 'reading': reading,
+            'challenge': challenge, 'spend': spend, 'moves': (history + applied)[-200:], 'reading': reading,
             'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
             'daily': daily, 'dailyFree': daily_free,
             'unlisted': unlisted(rows, match, now_ms),
@@ -1652,7 +1728,6 @@ def start_refresh():
     if os.environ.get('JAPANESE_WEAVE_NO_REFRESH'):
         return
     import subprocess
-    import sys
     subprocess.Popen([sys.executable, str(Path(__file__).resolve().with_name('fw.py')), 'refresh'],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True, env=dict(os.environ))
@@ -1673,14 +1748,13 @@ def word_estimate(knowledge, ja, surface='browser'):
     return p, entry['k'], entry['sd']
 
 
-def prior_estimate(knowledge, status, interval=None):
+def prior_estimate(knowledge, origin, interval=None):
     """(k, sd) a word without an estimate in knowledge.json assumes, from its "prior" (prior_table): by its Anki
-    interval and status, else its status. None when knowledge.json has no prior."""
+    interval and origin (origin_at: new, learning or known), else its origin. None when knowledge.json has no prior."""
     table = knowledge.get('prior')
     if not isinstance(table, dict):
         return None
-    x, kind = features(interval, 'learning' if status in ('active', 'shaky') else
-                       'known' if status == 'known' else 'new')
+    x, kind = features(interval, origin)
     try:
         mean = sum(value * (table['interval'] if name == 'interval' else
                             table['card'][name[5:]] if name.startswith('card ') else table['none'][name])

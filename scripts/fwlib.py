@@ -1,11 +1,11 @@
-"""Japanese Weave shared state: word statuses, stage, chat exposure, extension events.
+"""Japanese Weave shared state: word labels, stage, chat exposure, extension events.
 
 Python 3.9+ standard library only. One state directory per user (JAPANESE_WEAVE_HOME, default ~/.japanese-weave)
 holds everything; the Claude Code hook, the slash commands and the browser native messaging host all read it through
 this module and change it through hub.py. With a collector set, the state lives on the collector's machine and the
 files here are a cache of it (see hub.py).
 
-Statuses: queue -> active -> known, with shaky as the penalty box (see README "How words advance").
+Statuses are labels from the fitted model: queue (new), active (learning), known (see README "How words advance").
 """
 import contextlib
 import csv
@@ -34,23 +34,29 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 LEXICON = PLUGIN_ROOT / 'data' / 'lexicon.csv'
 ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Anki review words, ahead of the base list
 
-# ---- promotion rules (documented in README "How words advance") ----
-WINDOW = 20             # learning slots: active plus shaky words
-NEW_PER_DAY = 5         # new words per day, including the first day
+# ---- word labels (documented in README "How words advance") ----
+# A word's status is a label from the fitted model (knowledge.py), set on each refresh (relabel): known when it is
+# known at a glance (free), learning ('active') once it has come into use and isn't free, new ('queue') before that.
+# The day-count rules from French Weave (learning slots, exposure days, shaky words) are gone; their fields stay under
+# each word's "legacy" for LEGACY_DAYS after the switch, so it can be undone (restore).
+NEW_PER_DAY = 5         # new words a day at most, taken in while the lookup budget goes unspent (knowledge.intake_room)
 LOOKED_UP = 2           # a word not introduced yet, opened in this many messages or passages in 14 days, comes first
-GRADUATE_DAYS = 3       # active -> known: exposure days needed, and length of the clean streak
-SHAKY_DAYS = 7          # shaky -> known: days with no new flip, asked or peek
-PEEK_WINDOW = 7         # a known word peeked on 2 different days within this many days becomes shaky
-ASSUMED_WEIGHT = 1      # a day with only opt-in "assumed" exposure (fw.py log-chat-day) counts this much
+STATUSES = ('queue', 'active', 'known')  # the labels: new, learning, known ('shaky' is from before the switch)
+LEGACY_FIELDS = ('days', 'assumed', 'peeks', 'last_bad')  # the day-count rules' fields, kept under "legacy"
+LEGACY_DAYS = 30
 STAGES = [(400, 4), (150, 3), (40, 2)]  # (known words, stage): first match wins; otherwise Stage 1
 # Known at a glance: a word knowledge.json marks free (its lookup chance under FREE_P, with hysteresis: is_free)
-# costs nothing against the intensity's lookup budget (intensity.BUDGETS) and is used wherever it fits; it no longer
-# takes a learning slot either. knowledge.json has an estimate for every word, from the fitted prior for a word the log
-# has nothing on; without knowledge.json a known word starts at KNOWN_PRIOR_K (log-odds of not looking it up), any
-# other at the neutral prior (knowledge.prior). KNOWN_PRIOR_K is also the fit's prior mean for a known word without an
-# Anki card (knowledge.SHARED).
+# costs nothing against the intensity's lookup budget (intensity.BUDGETS) and is used wherever it fits, and its label
+# is known. knowledge.json has an estimate for every word, from the fitted prior for a word the log has nothing on;
+# without knowledge.json a known word starts at KNOWN_PRIOR_K (log-odds of not looking it up), any other at the neutral
+# prior (knowledge.prior). KNOWN_PRIOR_K is also the fit's prior mean for a word marked known without an Anki card
+# (knowledge.SHARED).
 FREE_P = 0.08
 KNOWN_PRIOR_K = 2.5
+# How a word came into use, its "origin": the fit's prior has an intercept for each (knowledge.origin_at). Unlike its
+# status, nothing the model says sets it: intake ('learning'), setup's top words and Anki syncs ('known'), and once,
+# the statuses from before labels came from the model (legacy_origin). 'new': none of these.
+ORIGINS = ('new', 'learning', 'known')
 
 
 KANJI = '\u3005\u3006\u4e00-\u9fff\uf900-\ufaff'   # 々 〆 and CJK ideographs
@@ -240,33 +246,48 @@ def locked(name='state.lock', blocking=True):
 # ---- state ----
 
 def new_state(day=None, lexicon=None, known_top=0, known=()):
-    """A fresh state; known_top (the top lexicon words) and known (words by name, like mature Anki cards) are
-    marked known before the first learning words are picked."""
+    """A fresh state, its labels from the model from the start: known_top (the top lexicon words) and known (words by
+    name, like mature Anki cards) are marked known, then the first NEW_PER_DAY words are taken in (outside the
+    delayed-start experiment: a new reader starts with every first word on show)."""
     day = day or today()
-    words = [blank(w) for w in (lexicon or load_lexicon())]
-    state = {'schema': 1, 'created': day, 'stage': 1, 'stage_pinned': False, 'paused': False, 'words': words}
+    words = [dict(blank(w), origin='new') for w in (lexicon or load_lexicon())]
+    state = {'schema': 1, 'created': day, 'stage': 1, 'stage_pinned': False, 'paused': False, 'words': words,
+             'labels': {'from': 'model', 'since': day}}
     seed_known(state, known_top, day)
-    for name in known:
-        w = find(state, name)
-        if w and w['status'] == 'queue':
-            set_status(w, 'known', day)
-    refill(state, day)
+    mark_known(state, known, day)
+    take_in(state, [[w['ja'], None, None] for w in newcomers(state, {})[:NEW_PER_DAY]], day)
+    state['stage'] = stage_for(state)
     return state
 
 
 def seed_known(state, n, day=None):
-    """Marks the top n lexicon words known if they aren't introduced yet (queue). Words already learning, shaky or
-    known keep their status, so seeding never resets progress. Returns how many words changed."""
+    """Marks the top n lexicon words known if they aren't introduced yet (queue), as words you know: their origin is
+    known. Words already learning or known keep their label, so seeding never resets progress. Returns how many words
+    changed."""
     day = day or today()
     seeded = [w for w in state['words'][:max(n, 0)] if w['status'] == 'queue']
     for w in seeded:
         set_status(w, 'known', day)
+        w['origin'] = 'known'
     return len(seeded)
 
 
+def mark_known(state, names, day=None):
+    """Marks words known by name (mature Anki cards) when they aren't introduced yet, their origin known. Returns the
+    entries found, whether they changed or not."""
+    day = day or today()
+    by_key = {key(w['ja']): w for w in state['words']}  # thousands of words: one lookup each
+    entries = [e for e in (by_key.get(key(name)) or find(state, name) for name in names) if e]
+    for e in entries:  # learning words keep learning; only words not introduced yet jump to known
+        if e['status'] == 'queue':
+            set_status(e, 'known', day)
+            e['origin'] = 'known'
+    return entries
+
+
 def blank(word):
-    """A lexicon entry as a queued word: days = extension seen days, assumed = opt-in unscanned chat days."""
-    return dict(word, status='queue', added='', changed='', days=[], assumed=[], peeks=[], last_bad='')
+    """A lexicon entry as a word not introduced yet."""
+    return dict(word, status='queue', added='', changed='')
 
 
 def merge_lexicon(state, lexicon=None):
@@ -281,7 +302,7 @@ def merge_lexicon(state, lexicon=None):
         if k in have:
             have[k].update(en=w['en'], hint=w['hint'], kana=w.get('kana', ''))
         else:
-            state['words'].append(blank(w))
+            state['words'].append(dict(blank(w), origin='new') if state.get('labels') else blank(w))
     state['words'].sort(key=lambda w: rank.get(key(w['ja']), len(rank)))
     return state
 
@@ -373,8 +394,8 @@ class RemoteState(RuntimeError):
 
 @contextlib.contextmanager
 def editing():
-    """Load, let the caller change, promote and save the state under the lock. Only where the state lives: with a
-    collector set, changes go through hub.submit instead."""
+    """Load, let the caller change, set the stage and save the state under the lock. Only where the state lives: with
+    a collector set, changes go through hub.submit instead."""
     if collector_url():
         raise RemoteState(f'the word state lives on {collector_url()}; change it with hub.submit')
     with locked():
@@ -382,7 +403,7 @@ def editing():
         before = json.dumps(state, sort_keys=True)
         merge_lexicon(state)
         yield state
-        promote(state)
+        state['stage'] = stage_for(state)
         if json.dumps(state, sort_keys=True) != before:  # unchanged: caches elsewhere needn't fetch it again
             save_state(state)
 
@@ -414,58 +435,18 @@ def set_status(word, status, day):
         word['added'] = day
 
 
+def legacy_origin(word):
+    """A word's origin (ORIGINS) from its status under the day-count rules (before labels came from the model): a queue
+    word new, an active one learning, a known or shaky one known (shaky words were known words opened again)."""
+    status = (word or {}).get('status')
+    return 'learning' if status == 'active' else 'known' if status in ('known', 'shaky') else 'new'
+
+
 def stage_for(state):
     if state.get('stage_pinned'):
         return state['stage']
     known = sum(w['status'] == 'known' for w in state['words'])
     return next((s for n, s in STAGES if known >= n), 1)
-
-
-def exposure_days(word, chat=None):
-    """{day: 'seen' | 'assumed'} since the word joined the learning set.
-
-    'seen' (counts 1): extension seen events and the word in a Claude Code or Codex reply (scanned transcripts are
-    genuine exposure). 'assumed' (counts ASSUMED_WEIGHT): opt-in log-chat-day marks for chats that can't be scanned."""
-    since = word.get('added') or '0000'
-    days = {d: 'assumed' for d in word.get('assumed') or [] if d >= since}
-    for d in list(word.get('days') or []) + list((chat or {}).get(word['ja'], {}).get('days', [])):
-        if d >= since:
-            days[d] = 'seen'
-    return dict(sorted(days.items()))
-
-
-def refill(state, day, cap=NEW_PER_DAY, looked=None, settled=None):
-    """Fill the learning set (active plus shaky words, which are being relearned) up to WINDOW, at most cap new words
-    per day: first the words you looked up (looked_up, most opened first), then lexicon order. A learning word the
-    gloss log says you know at a glance (settled) keeps its status but no longer takes a slot."""
-    words = state['words']
-    last_day, count = state.get('refilled') or ['', 0]
-    count = count if last_day == day else 0
-    settled = settled_words() if settled is None else settled
-    taken = sum(w['status'] in ('active', 'shaky') and w['ja'] not in settled for w in words)
-    room = min(WINDOW - taken, cap - count)
-    added = 0
-    if room > 0:
-        looked = looked_up() if looked is None else looked
-        queue = sorted((w for w in words if w['status'] == 'queue'), key=lambda w: -looked.get(w['ja'], 0))
-        for w in queue[:room]:
-            set_status(w, 'active', day)
-            added += 1
-    state['refilled'] = [day, count + added]
-    return added
-
-
-def graduates(word, chat=None):
-    """active -> known: GRADUATE_DAYS of exposure, no flip/asked/peek on the last GRADUATE_DAYS exposure days,
-    and at least one genuinely seen day (assumed days alone never graduate a word)."""
-    days = exposure_days(word, chat)
-    total = sum(1 if kind == 'seen' else ASSUMED_WEIGHT for kind in days.values())
-    if total < GRADUATE_DAYS or len(days) < GRADUATE_DAYS:
-        return False
-    streak = list(days)[-GRADUATE_DAYS]
-    peeks = word.get('peeks') or []
-    clean = (not word['last_bad'] or word['last_bad'] < streak) and not (peeks and peeks[-1] >= streak)
-    return clean and 'seen' in days.values()
 
 
 def looked_up():
@@ -491,36 +472,216 @@ def is_free(entry, offset=0.0):
     return number(entry.get('k')) and entry['k'] > least
 
 
-def settled_words(know=None):
-    """Words known at a glance by the gloss log: free in knowledge.json (is_free, at the browser offset) with evidence
-    there (obs; an entry without the field counts). A word the log has nothing on isn't, even when its prior says
-    free. Read here, not through knowledge.py, which imports this module."""
-    know = read_json(home() / 'knowledge.json', {}) if know is None else know
-    know = know if isinstance(know, dict) else {}
-    offset = know['offset'].get('browser') if isinstance(know.get('offset'), dict) else None
-    words = know['words'] if isinstance(know.get('words'), dict) else {}
-    return {ja for ja, e in words.items() if isinstance(e, dict) and e.get('obs', 1) and is_free(e, offset)}
+# ---- labels from the model ----
+
+def label(word, free):
+    """A word's status from the fitted model: known when it is known at a glance (free: knowledge.free_flag, with
+    hysteresis), else learning ('active') once it has come into use (it has an added day: taken in, marked, or once
+    free), else new ('queue')."""
+    if free:
+        return 'known'
+    return 'active' if word.get('added') else 'queue'
 
 
-def graduation_veto():
-    """Active words the gloss log says aren't known yet (knowledge.py): day counts alone don't graduate them."""
-    return set((read_json(home() / 'knowledge.json', {}) or {}).get('veto') or [])
+def relabel(state, changes, day):
+    """Label changes [[ja, from, to]] (knowledge.decide), each made only while the word's status is still `from`, so a
+    known or learn command since keeps its label. A label is not an origin: a word without one keeps 'new'. Returns
+    the changes made."""
+    by_ja = {w['ja']: w for w in state['words']}
+    done = []
+    for ja, before, after in changes:
+        w = by_ja.get(ja)
+        if w is not None and w['status'] == before != after and after in STATUSES:
+            w.setdefault('origin', 'new')
+            set_status(w, after, day)
+            done.append([ja, before, after])
+    return done
 
 
-def promote(state, day=None, chat=None, veto=None):
-    """Applies the promotion rules for today. Idempotent: safe to call as often as you like."""
-    day = day or today()
-    if chat is None:
-        chat = (read_json(home() / 'exposure.json', {}) or {}).get('words', {})
-    veto = graduation_veto() if veto is None else veto
+def switch(state, day):
+    """Once, before the first labels from the model: each word's status, added and changed days and day-count fields
+    (LEGACY_FIELDS) go under its "legacy" for LEGACY_DAYS, so the switch can be undone (restore), and it gets its
+    origin from its status then (legacy_origin). Returns whether it switched now."""
+    if state.get('labels'):
+        return False
     for w in state['words']:
-        if w['status'] == 'active' and w['ja'] not in veto and graduates(w, chat):
-            set_status(w, 'known', day)
-        elif w['status'] == 'shaky' and days_between(w['last_bad'] or w['changed'], day) >= SHAKY_DAYS:
-            set_status(w, 'known', day)
-    refill(state, day)
-    state['stage'] = stage_for(state)
-    return state
+        old = {k: w.pop(k) for k in LEGACY_FIELDS if k in w}
+        w['legacy'] = dict(old, status=w.get('status', 'queue'), added=w.get('added', ''), changed=w.get('changed', ''))
+        w.setdefault('origin', legacy_origin(w))
+    state['labels'] = {'from': 'model', 'since': day}
+    if 'refilled' in state:
+        state['legacy'] = {'refilled': state.pop('refilled')}
+    return True
+
+
+def expire_legacy(state, day):
+    """Drops the legacy fields LEGACY_DAYS after the switch. Returns whether it did."""
+    since = (state.get('labels') or {}).get('since')
+    if (state.get('labels') or {}).get('from') != 'model' or not since or days_between(since, day) < LEGACY_DAYS:
+        return False
+    had = state.pop('legacy', None) is not None
+    for w in state['words']:
+        had = w.pop('legacy', None) is not None or had
+    return had
+
+
+def restore(state, day):
+    """Undoes the switch while the legacy fields last: each word gets back its status, added and changed days and
+    day-count fields; one taken in since the switch comes back learning ('active') with empty day counts, any other
+    word not introduced then back to the queue. The experiment's arms and the origins stay (code from before the
+    switch ignores them). From then on labels come from the rules ("labels": {"from": "rules"}), which
+    knowledge.refresh leaves alone: check out the code from before the switch to run them (README "How words
+    advance"). Returns how many words went back, or None when there is nothing to restore."""
+    if (state.get('labels') or {}).get('from') != 'model' or not any(isinstance(w.get('legacy'), dict)
+                                                                       for w in state['words']):
+        return None
+    empty = {'days': [], 'assumed': [], 'peeks': [], 'last_bad': ''}
+    for w in state['words']:
+        old = w.pop('legacy', None)
+        old = old if isinstance(old, dict) else {'status': 'queue', 'added': '', 'changed': ''}
+        fields = {k: old.get(k, v) for k, v in empty.items()}
+        status, added, changed = old.get('status', 'queue'), old.get('added', ''), old.get('changed', '')
+        if status == 'queue' and w.get('origin') == 'learning':  # taken in since the switch
+            status, added, changed = 'active', w['added'], w['changed']
+        w.update(fields, status=status, added=added, changed=changed)
+    if isinstance(state.get('legacy'), dict) and state['legacy'].get('refilled'):
+        state['refilled'] = state['legacy']['refilled']
+    state.pop('legacy', None)
+    state['labels'] = {'from': 'rules', 'since': day}
+    return len(state['words'])
+
+
+# ---- intake ----
+
+def newcomers(state, looked=None, free=()):
+    """The words that may be taken in next, in order: not introduced yet (queue) and not known at a glance (free:
+    those are labeled known instead), the ones you looked up first (looked_up: most opened first), then the word
+    list's order."""
+    looked = looked_up() if looked is None else looked
+    queue = [w for w in state['words'] if w['status'] == 'queue' and w['ja'] not in free]
+    return sorted(queue, key=lambda w: -looked.get(w['ja'], 0))
+
+
+def taken_today(state, day):
+    """Words taken in on `day` so far (state["intake"])."""
+    last, count = state.get('intake') or ['', 0]
+    return count if last == day else 0
+
+
+def take_in(state, entries, day, at=None):
+    """Takes words in, [[ja, arm, draw]]: each a learning word from today, its origin learning, and in the delayed-start
+    experiment with its arm, draw, day and time (at, ms) and the day its probe is due (assign; arm None: outside it).
+    Counts toward the day's NEW_PER_DAY (state["intake"]). Returns the words taken in."""
+    by_ja = {w['ja']: w for w in state['words']}
+    done = []
+    for ja, arm, u in entries:
+        w = by_ja.get(ja)
+        if w is None or w['status'] != 'queue':
+            continue
+        set_status(w, 'active', day)
+        w['origin'] = 'learning'
+        if arm in ARMS:
+            w['arm'] = dict({'arm': arm, 'draw': u, 'day': day, 'probe': add_days(day, PROBE_DAY)},
+                            **({'at': at} if at is not None else {}))
+        done.append(ja)
+    state['intake'] = [day, taken_today(state, day) + len(done)]
+    return done
+
+
+# ---- the delayed-start experiment (PLAN.md section 7) ----
+# Each word taken in is drawn into an arm (assign): held back, appearing nowhere, for PROBE_DAY days; or shown like any
+# learning word for SHOW_DAYS, then paused until PROBE_DAY. From PROBE_DAY both are probed: each surface gives the
+# word one guaranteed showing at its first chance (the web admits it outside the budget once; the chat brief asks for
+# it once), and the outcome is its first showing that was read (knowledge.probe_outcomes): looked up or not, with its
+# read chance. Then it is an ordinary learning word. A probe with no showing read in PROBE_WAIT days is given up.
+ARMS = ('held', 'shown')
+SHOW_DAYS = 14
+PROBE_DAY = 21
+PROBE_WAIT = 14
+# Words the fixed texts name whatever the lists say: the chat brief's rules and example sentences (weave.py) and the
+# claude.ai and ChatGPT rules (export.py). Held back, they would still be named there, so they come in outside the
+# experiment (knowledge.decide). tests/test_labels.py checks the list against the texts.
+IN_THE_RULES = frozenset(('いいえ', 'いつも', 'しかし', 'だから', 'でも', 'まだ', 'もう', '今', '今日', '仕事', '例えば', '前', '問題',
+                          '多分', '大丈夫', '実は', '後', '新しい', '本当', '本当に', '確認', '簡単', '設定', '忙しい', '終わる'))
+
+
+def add_days(day, n):
+    return (dt.date.fromisoformat(day) + dt.timedelta(days=n)).isoformat()
+
+
+def draw(seed, ja):
+    """A word's draw, uniform on [0, 1): from the experiment's seed and the word alone, so it can be checked."""
+    return int(hashlib.sha256(f'{seed}:{ja}'.encode('utf-8')).hexdigest()[:13], 16) / 16 ** 13
+
+
+def assign(seed, ja):
+    """(arm, draw): held when the draw is under one half, else shown. The draw is kept to 6 places, under 1."""
+    u = draw(seed, ja)
+    return ('held' if u < 0.5 else 'shown'), min(round(u, 6), 0.999999)
+
+
+def phase(word, day=None):
+    """Where a word stands in the experiment on `day` (default today): None (not in it), 'held' or 'paused' (hidden),
+    'shown' (its shown days), 'probe' (due its guaranteed showing) or 'done' (probed, or the probe given up)."""
+    arm = word.get('arm')
+    if not isinstance(arm, dict) or arm.get('arm') not in ARMS or not arm.get('day'):
+        return None
+    if arm.get('outcome') or arm.get('missed'):
+        return 'done'
+    age = days_between(arm['day'], day or today())
+    if age >= PROBE_DAY:
+        return 'probe'
+    if arm['arm'] == 'held':
+        return 'held'
+    return 'shown' if age < SHOW_DAYS else 'paused'
+
+
+def hidden(word, day=None):
+    """The one test every surface makes before offering a word: whether the delayed-start experiment keeps it out of
+    sight on `day` (its held days, or its shown arm's paused days). A hidden word appears nowhere: not in the chat
+    brief's lists, the words sent to the browser (so neither the web model's list nor the planner's candidates), the
+    claude.ai and ChatGPT blocks, nor later the chat's topical words."""
+    return phase(word, day) in ('held', 'paused')
+
+
+def arm_label(word, day=None):
+    """A word's arm as plan and brief records give it: 'shown' in its shown days, 'held:probe' or 'shown:probe' while
+    its probe is due, else None (not in the experiment, hidden, or done)."""
+    now = phase(word, day)
+    return 'shown' if now == 'shown' else f'{word["arm"]["arm"]}:probe' if now == 'probe' else None
+
+
+def record_probes(state, outcomes, day):
+    """The probes' outcomes, [[ja, outcome]]: {at, surface, y, read} for the first showing read, or 'missed' (none in
+    PROBE_WAIT days). Only for a word whose probe is due. Returns how many were recorded."""
+    by_ja = {w['ja']: w for w in state['words']}
+    done = 0
+    for ja, outcome in outcomes:
+        w = by_ja.get(ja)
+        if w is None or phase(w, day) != 'probe':
+            continue
+        if outcome == 'missed':
+            w['arm']['missed'] = day
+        else:
+            w['arm']['outcome'] = dict(outcome)
+        done += 1
+    return done
+
+
+def apply_labels(state, op, day):
+    """A refresh's state edit (knowledge.decide; hub's labels op): the switch the first time (switch), the label
+    changes (relabel), the experiment's seed when it starts, the words taken in (take_in) and the probes' outcomes
+    (record_probes). Nothing once labels come from the rules again (restore). Returns what it did."""
+    if (state.get('labels') or {}).get('from') == 'rules':
+        return {'labels': [], 'intake': [], 'probes': 0, 'switched': False}
+    switched = switch(state, day)
+    expire_legacy(state, day)
+    changed = relabel(state, op.get('labels') or [], day)
+    if isinstance(op.get('experiment'), dict) and not isinstance(state.get('experiment'), dict):
+        state['experiment'] = {'name': 'delayed-start', 'seed': op['experiment']['seed'], 'since': day}
+    taken = take_in(state, op.get('intake') or [], day, op.get('at'))
+    return {'labels': changed, 'intake': taken, 'probes': record_probes(state, op.get('probes') or [], day),
+            'switched': switched}
 
 
 EVENTS = ('seen', 'assumed', 'flip', 'asked', 'peek', 'known', 'active')
@@ -529,46 +690,34 @@ EVENTS = ('seen', 'assumed', 'flip', 'asked', 'peek', 'known', 'active')
 def apply_event(state, ja, kind, day=None):
     """Extension and command events. Returns False for unknown words or kinds.
 
-    seen / assumed: exposure. asked: shaky. peek (hovered for the meaning) and flip (clicked back to English): block
-    graduation of an active word (a flip restarts its count), restart a shaky word's clock, and a known word opened
-    on 2 different days within PEEK_WINDOW days becomes shaky (one flip is often a test click). known / active: set
-    directly (commands)."""
+    known, and asked or active (learn): the word's label at once, known or learning; the next refresh labels it from
+    the model, which takes the command as evidence (knowledge.py). seen, assumed, peek and flip change nothing here:
+    no day counts any more, and the ops log keeps them."""
     day = day or today()
     w = find(state, ja)
     if w is None or kind not in EVENTS:
         return False
-    if kind in ('seen', 'assumed'):
-        field = 'days' if kind == 'seen' else 'assumed'
-        if w['status'] != 'queue' and day not in (w.get(field) or []):
-            w[field] = sorted((w.get(field) or []) + [day])[-60:]
-    elif kind == 'asked':
-        w['last_bad'] = day
-        set_status(w, 'shaky', day)
-    elif kind in ('peek', 'flip'):
-        if kind == 'flip' and w['status'] == 'active':
-            w['last_bad'] = day  # restarts its graduation count
-        peeks = w.setdefault('peeks', [])
-        if not peeks or peeks[-1] != day:
-            peeks.append(day)
-            del peeks[:-10]
-        if w['status'] == 'shaky':
-            w['last_bad'] = day
-        elif w['status'] == 'known' and len(peeks) >= 2 and days_between(peeks[-2], day) < PEEK_WINDOW:
-            w['last_bad'] = day
-            set_status(w, 'shaky', day)
-    elif kind == 'known':
+    if kind == 'known':
         set_status(w, 'known', day)
-    elif kind == 'active':
-        w['last_bad'] = day  # restart its graduation count
+    elif kind in ('asked', 'active'):
         set_status(w, 'active', day)
     return True
 
 
-def introduced(state):
-    """Words in use (active, shaky, known), learning words first."""
+def introduced(state, day=None):
+    """The words every surface may use on `day` (default today): in use (learning and known) and not hidden by the
+    delayed-start experiment (hidden), learning words first."""
+    day = day or today()
     order = {'shaky': 0, 'active': 1, 'known': 2}
-    words = [w for w in state['words'] if w['status'] in order]
+    words = [w for w in state['words'] if w['status'] in order and not hidden(w, day)]
     return sorted(words, key=lambda w: (order[w['status']], w['added']))
+
+
+def visible(state, day=None):
+    """A copy of the state for a surface that reads statuses itself (export.py): words hidden by the experiment read
+    as not introduced."""
+    day = day or today()
+    return dict(state, words=[dict(w, status='queue') if hidden(w, day) else w for w in state['words']])
 
 
 COLLAPSE_AT = 150      # from this many known words, the exports name a rank band instead of listing them (the chat
@@ -608,10 +757,18 @@ def version(state):
     return hashlib.sha1(blob.encode()).hexdigest()[:10]
 
 
-def public_state(state):
-    """What the extension gets: stage, pause flag, and the words in use."""
-    return {'version': version(state), 'stage': stage_for(state), 'paused': bool(state.get('paused')),
-            'words': [{k: w.get(k, '') for k in ('ja', 'en', 'hint', 'kana', 'status')} for w in introduced(state)]}
+def public_state(state, day=None):
+    """What the extension gets: stage, pause flag, and the words in use (introduced: none the experiment hides), each
+    with its arm while one is current (arm_label: the web plans record it, and a due probe is shown first)."""
+    day = day or today()
+    words = []
+    for w in introduced(state, day):
+        entry = {k: w.get(k, '') for k in ('ja', 'en', 'hint', 'kana', 'status')}
+        arm = arm_label(w, day)
+        if arm:
+            entry['arm'] = arm
+        words.append(entry)
+    return {'version': version(state), 'stage': stage_for(state), 'paused': bool(state.get('paused')), 'words': words}
 
 
 # ---- chat exposure from Claude Code transcripts ----
@@ -776,8 +933,8 @@ def scan_cursor():
 
 
 def refresh_exposure():
-    """Scan this machine's new transcript lines and count them, then re-apply promotion. With a collector set, the
-    replies go to it (hub.py). Skips if another refresh is running."""
+    """Scan this machine's new transcript lines and count them. With a collector set, the replies go to it (hub.py).
+    Skips if another refresh is running."""
     with locked('exposure.lock', blocking=False) as got:
         if not got:
             return False
@@ -792,6 +949,6 @@ def refresh_exposure():
             hub.run(hub.stamp({'kind': 'exposure', 'replies': found}))
         else:
             with editing():
-                pass  # promotion runs on save
+                pass  # the stage is set on save
         write_json(home() / SCAN, cursor)
     return True

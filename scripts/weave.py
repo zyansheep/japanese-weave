@@ -34,8 +34,8 @@ SYNC_EVERY = 120  # with a collector: sync the cache in the background when it i
 STAGES = {1: (6, 10, 2), 2: (12, 20, 4), 3: (25, 35, 4), 4: (40, 55, 4)}
 TAIL = 2_000_000  # bytes at the end of a transcript searched for the last reply and the last compaction
 SHORT = 40  # replies with fewer prose words are too short to measure
-RECALL_EVERY = 3
 LEARN_MAX = 24  # most learning words listed, best learning value first, at every level
+PROBES_MAX = 3  # most words a brief asks for once for the delayed-start experiment's probe
 DEFAULT_SWAPS = 12  # known connectors and adverbs (the base list's tier A), first first, named on every turn
 # Claude Code hands Claude at most 10,000 characters of a hook's context and puts the rest in a file it doesn't ask
 # Claude to read, so a brief stays under this; a known word that doesn't fit is named on the next turn.
@@ -43,8 +43,8 @@ BRIEF_MAX = 9500
 # The known words named besides the default swaps take at most this many characters, the most useful in chat first
 # (priority); the others are still known, just not named (capped). From Stage 3 (150 known words, so any list the
 # cap shortens, unless the stage is pinned lower), the rest of a whole brief takes at most about 4,900: the rules
-# 2,970 characters with <abbr> glosses (footer glosses are shorter by more than the recall cue), 24 learning words up
-# to 900, the default swaps 360, the feedback line on the last reply 430 and the known line's own words 220. So a
+# 2,970 characters with <abbr> glosses (footer glosses are shorter), 24 learning words up to 900, a probe line up to
+# 200, the default swaps 360, the feedback line on the last reply 430 and the known line's own words 220. So a
 # whole brief stays under BRIEF_MAX at any number of known words; a pinned lower stage's longer rules can push the
 # last few named words to the next turn. 250 to 290 words fit: on the 2026-10-20 state all 255 known at a glance,
 # 285 of 422 with 500 known and 255 of 1,318 with 1,500 (base-list meanings run longer than the Anki ones).
@@ -69,7 +69,7 @@ SENTENCES_MAX = 3
 # Learning words by lookup chance: the least chance in each group.
 TIERS = ((0.2, 'often'), (0.12, 'sometimes'), (0.0, 'rarely'))
 OVER, UNDER = 1.5, 0.5  # the feedback line: expected lookups past this many times the budget are over or under it
-EXTRA = re.compile(r'\s*(?:\**recall:|.*\s=\s.*")', re.I)  # recall cue and footer gloss lines
+EXTRA = re.compile(r'\s*(?:\**recall:|.*\s=\s.*")', re.I)  # footer gloss lines (and replies' old recall cue)
 ABBR = re.compile(r'<abbr\b[^>]*>(.*?)</abbr>', re.I | re.S)  # T3 gloss markup: count the word, not its title
 # Japanese left over once the listed words are taken out, counted as off-list words: each run of kanji or katakana,
 # and below Stage 3 hiragana outside whole sentences too, one word per two characters. The hiragana in a whole sentence
@@ -128,14 +128,22 @@ def examples(chances):
 def lists(state, seen=None, know=None, most=LEARN_MAX):
     """The word lists: (known at a glance, in list order; learning, best learning value first, at most `most` (None:
     all); {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
-    whatever the status; every other word in use is learning, known ones too."""
+    whatever the label; every other word in use is learning. Words in use are fwlib.introduced's, so none the
+    delayed-start experiment hides (fwlib.hidden)."""
     seen = seen or {}
-    p = {w['ja']: chance(w, know) for w in fwlib.introduced(state)}
+    words = fwlib.introduced(state)
+    p = {w['ja']: chance(w, know) for w in words}
     free = [w for w in state['words'] if w['ja'] in p and p[w['ja']] < fwlib.FREE_P]
-    learning = sorted((w for w in fwlib.introduced(state) if p[w['ja']] >= fwlib.FREE_P),
-                      key=lambda w: (-knowledge.learning_value(p[w['ja']]), w['status'] != 'shaky',
-                                     -seen.get(w['ja'], {}).get('n', 0)))
+    learning = sorted((w for w in words if p[w['ja']] >= fwlib.FREE_P),
+                      key=lambda w: (-knowledge.learning_value(p[w['ja']]), -seen.get(w['ja'], {}).get('n', 0)))
     return free, learning[:most], p
+
+
+def probes(state):
+    """The words whose delayed-start probe is due (fwlib.phase), at most PROBES_MAX, the longest due first: the brief
+    asks for each once, outside the budget, until a showing of it is read."""
+    due = [w for w in fwlib.introduced(state) if fwlib.phase(w) == 'probe']
+    return sorted(due, key=lambda w: w['arm']['probe'])[:PROBES_MAX]
 
 
 def lookup_budget(state, level=0):
@@ -314,8 +322,8 @@ def rules(stage, level, markup, like, n, m):
            'or a time, never joining clauses; はい and いいえ only as answers). ')
     plain = ('Plain English for code, commands, paths, numbers, names, IDs'
              + (' and option letters' if full else ', option letters and steps the user will follow')
-             + ', and no Japanese right before a path; zero Japanese, and no recall cue, for health, medication, '
-             'legal, money, safety, emergency, driving or urgent topics. Japanese goes only in your chat reply: never '
+             + ', and no Japanese right before a path; zero Japanese for health, medication, legal, money, safety, '
+             'emergency, driving or urgent topics. Japanese goes only in your chat reply: never '
              'in files, code, configs, commit or PR text, messages to other agents, subagent prompts, or drafts and '
              'documents meant to be shared. ')
     glosses = ('No bold on Japanese words and no glosses, readings or romaji in the text itself. Wrap each Japanese '
@@ -386,7 +394,7 @@ def digest(stage, level, markup, n, m):
             f'urgent topics; {gloss}.')
 
 
-def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None, tail='', room=BRIEF_MAX):
+def compose(state, seen, markup=False, know=None, level=0, had=None, tail='', room=BRIEF_MAX):
     """(brief, what the chat has after it, plan). had: what the chat already has from earlier turns, {known: the words
     named so far, rules: which rules}; None on its first turn (see chat_turn). Then the brief is whole: the rules, the
     learning words, the default swaps and the known words by name, the most useful in chat first, as many as fit
@@ -406,7 +414,11 @@ def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None
     plan: what the reply was offered, as a web passage's plan (feedback.py): level, its factor, the price of a whole
     sentence, the budget and the expected lookups per 100 words (none at full), the learning words and whole sentences
     asked for per 100 words (ask, sentences), the costly words offered with their lookup chances, the delayed-start
-    arms (none yet), the words known at a glance, and whether the brief was whole."""
+    arms of the words it offers or asks for (fwlib.arm_label: 'shown', 'held:probe', 'shown:probe'), the words known at
+    a glance, and whether the brief was whole.
+
+    The delayed-start experiment: words it hides (fwlib.hidden) are in no list, and the words whose probe is due
+    (probes) get a line of their own asking for each once, outside the budget, where it fits."""
     stage = fwlib.stage_for(state)
     full = intensity.is_full(level)
     free, learning, p = lists(state, seen, know)
@@ -424,31 +436,32 @@ def compose(state, seen, recall=None, markup=False, know=None, level=0, had=None
     if swaps:
         lines.append('Default swaps (write the Japanese every time the English word has that meaning): '
                      + '; '.join(f'{w["en"]} → {w["ja"]}' for w in swaps))
-    cue = [f'If this reply is longer than a few sentences, open it with "Recall: {recall["ja"]}?" on its own line and '
-           f'end it, after the footer, with: Recall: {recall["ja"]} = {recall["en"]}, "{recall["hint"]}"'
-           ] if recall and not markup else []  # with popover glosses every word already tests recall
+    due = [w for w in probes(state) if not intensity.is_full(level)]  # full uses every listed word anyway
+    probe = ['Use each of these once in this reply where it fits naturally, like a learning word and on top of the '
+             'amounts above: ' + '; '.join(f'{w["ja"]} = {w["en"]}' for w in due)] if due else []
     swapped = {w['ja'] for w in swaps}
     names = {w['ja'] for w in words}
     listed = capped([w for w in words if w['ja'] not in swapped], seen)
     unnamed = [w for w in listed if sent is None or w['ja'] not in sent]
     gone = [] if sent is None else sorted(ja for ja in sent if ja not in names)
-    left = room - sum(len(line) + 1 for line in lines + cue) - len(tail)
+    left = room - sum(len(line) + 1 for line in lines + probe) - len(tail)
     known, named, dropped = known_line(unnamed, gone, sent is None, left, bool(swaps),
                                        len(words) - len(swaps) - len(listed))
-    lines += [known] + cue
+    lines += probe + [known]
     after = {'known': sorted(((sent or set()) - set(dropped)) | swapped | {w['ja'] for w in named}), 'rules': key}
+    arms = {w['ja']: fwlib.arm_label(w) for w in learning + due + free if fwlib.arm_label(w)}
     plan = {'level': level, 'intensity': intensity.factor(level),
-            'offered': [[w['ja'], round(p[w['ja']], 3)] for w in learning], 'arms': {}, 'known': len(free),
-            'whole': sent is None, 'sentencePrice': round(price, 4)}
+            'offered': [[w['ja'], round(p[w['ja']], 3)] for w in learning], 'arms': dict(list(arms.items())[:200]),
+            'known': len(free), 'whole': sent is None, 'sentencePrice': round(price, 4)}
     if not full:
         mean = sum(p[w['ja']] for w in learning) / len(learning) if learning else 0
         plan.update(budget=round(budget, 3), ask=n or 0, sentences=m, expected=round((n or 0) * mean + m * price, 3))
     return '\n'.join(lines), after, plan
 
 
-def brief(state, seen, recall=None, markup=False, know=None, level=0, had=None):
+def brief(state, seen, markup=False, know=None, level=0, had=None):
     """The brief alone (compose): with had None, a chat's first turn."""
-    return compose(state, seen, recall, markup, know, level, had)[0]
+    return compose(state, seen, markup, know, level, had)[0]
 
 
 def abbr_glosses(state, host_check=None):
@@ -512,9 +525,9 @@ def compaction(lines):
 
 
 def uses(text, words):
-    """({ja: uses} for the words a reply uses, the prose left once they are taken out). Code (fwlib.strip_code), links,
-    glosses and the recall cue are skipped. Longest first, each match removed before the next search: 一緒に is not also
-    一緒."""
+    """({ja: uses} for the words a reply uses, the prose left once they are taken out). Code (fwlib.strip_code), links
+    and glosses are skipped (and an old reply's recall cue). Longest first, each match removed before the next search:
+    一緒に is not also 一緒."""
     prose = fwlib.norm(fwlib.strip_code(ABBR.sub(r'\1', text)))
     rest = '\n'.join(line for line in prose.split('\n') if not EXTRA.match(line))
     found = {}
@@ -599,23 +612,9 @@ def calibration(text, state, level=0, know=None, seen=None):
             f'{verdict}.')
 
 
-def recall_word(state, entry):
-    """Every third turn in a chat (1st, 4th, ...): the recall word, shaky first, then active, not yet used here; entry:
-    the chat's sessions.json entry, its turn already counted."""
-    if (entry['n'] - 1) % RECALL_EVERY:
-        return None
-    recalled = entry['recalled'] if isinstance(entry.get('recalled'), list) else []
-    pool = [w for w in fwlib.introduced(state) if w['status'] in ('shaky', 'active')]
-    pick = next((w for w in pool if w['ja'] not in recalled), None)
-    if pick:
-        entry['recalled'] = recalled + [pick['ja']]
-    return pick
-
-
-def chat_turn(state, session, build, mark=None, recall=True, now=None):
-    """One turn of a chat with a session id, under the sessions.json lock: counts the turn, picks the recall word when
-    the chat shows the recall cue (recall), and builds the brief with build(had, recall word) -> (text, what the chat
-    has after it, plan) (see compose). had is None, so the brief is whole, on the chat's first turn, after a compaction
+def chat_turn(state, session, build, mark=None, now=None):
+    """One turn of a chat with a session id, under the sessions.json lock: counts the turn and builds the brief with
+    build(had) -> (text, what the chat has after it, plan) (see compose). had is None, so the brief is whole, on the chat's first turn, after a compaction
     since the last whole one (mark: the transcript's latest, see compaction; None: none seen, nothing new) and
     FULL_EVERY turns after it, for a context lost in a way the transcript doesn't show. Returns (text, plan)."""
     path = fwlib.home() / 'sessions.json'
@@ -624,15 +623,14 @@ def chat_turn(state, session, build, mark=None, recall=True, now=None):
         sessions = sessions if isinstance(sessions, dict) else {}
         entry = sessions.get(session)
         if not isinstance(entry, dict) or not isinstance(entry.get('n'), int):
-            entry = sessions[session] = {'n': 0, 'recalled': []}
+            entry = sessions[session] = {'n': 0}
+        entry.pop('recalled', None)  # the recall cue's memory, from before it went
         entry['n'] += 1
         entry['t'] = int(now or time.time())
-        pick = recall_word(state, entry) if recall else None
         had = entry.get('brief') if isinstance(entry.get('brief'), dict) else {}
         whole = (not isinstance(had.get('at'), int) or not isinstance(had.get('known'), str)
                  or (mark is not None and mark != had.get('mark')) or entry['n'] - had['at'] >= FULL_EVERY)
-        text, after, plan = build(None if whole else dict(had, known=[ja for ja in had['known'].split('\n') if ja]),
-                                  pick)
+        text, after, plan = build(None if whole else dict(had, known=[ja for ja in had['known'].split('\n') if ja]))
         entry['brief'] = dict(after, known='\n'.join(after['known']), at=entry['n'] if whole else had['at'],
                               mark=mark if mark is not None else had.get('mark'))  # one line per chat in the file
         when = lambda k: (sessions[k].get('t') if isinstance(sessions[k], dict)
@@ -749,7 +747,7 @@ def off_note(until, codex=False):
     how = ('pressing heavier (Alt+Shift+.) or saying "japanese back on"' if codex else
            'pressing heavier (Alt+Shift+.), saying "japanese back on" or running /japanese-weave:intensity normal')
     return (f'Japanese Weave: the user turned Japanese off in chat replies for now, until {intensity.clock(until)}, so '
-            'reply in plain English, with no Japanese words, glosses or recall lines. They can bring it back sooner by '
+            'reply in plain English, with no Japanese words or glosses. They can bring it back sooner by '
             f'{how}.')
 
 
@@ -835,15 +833,15 @@ def main(argv):
         tail = calibration(reply, state, level, know, seen) if reply else ''
     except Exception:
         tail = ''
-    build = lambda had, recall: compose(state, seen, recall, markup=markup, know=know, level=level, had=had, tail=tail)
+    build = lambda had: compose(state, seen, markup=markup, know=know, level=level, had=had, tail=tail)
     try:
         if hook and session:
-            text, plan = chat_turn(state, session, build, mark, recall=not markup)
+            text, plan = chat_turn(state, session, build, mark)
         else:
-            text, _, plan = build(None, None)
+            text, _, plan = build(None)
     except Exception:  # the chat's memory unreadable or unwritable: the whole brief, as on a first turn
         try:
-            text, _, plan = build(None, None)
+            text, _, plan = build(None)
         except Exception as error:  # never block a prompt because of Japanese
             print(f'Japanese Weave: no brief ({error.__class__.__name__})', file=sys.stderr)
             return 0

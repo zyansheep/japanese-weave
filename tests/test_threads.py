@@ -197,7 +197,7 @@ class Hook(Home):
         self.assertEqual(self.hook('no japanese please')[0], threads.note())  # already off: nothing new to log
         context, _ = self.hook('japanese back on', transcript_path=str(log))
         self.assertIn('Japanese Weave (Stage', context)
-        self.assertIn('Recall:', context)
+        self.assertNotIn('Recall:', context)  # the recall cue is gone
         self.assertEqual(self.thread_ops(), [('s1', True, 'chat'), ('s1', False, 'chat')])
         self.assertEqual(threads.entry(fwlib.load_state(), 's1')['off'], False)
 

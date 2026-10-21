@@ -17,6 +17,7 @@ for name in ('CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED', 'JAPANESE
 
 import fwlib  # noqa: E402
 import fw  # noqa: E402
+import evaluate  # noqa: E402
 import feedback  # noqa: E402
 import hub  # noqa: E402
 import inflection  # noqa: E402
@@ -142,15 +143,16 @@ class Scoring(Home):
         got = knowledge.observations('t3', {'annotations': notes}, rows, lexicon().entry)
         self.assertEqual(sorted(got), [('する', 1.0, 1.0), ('熱', 0.0, 0.5)])
 
-    def test_queue_words_never_move(self):
-        state = {'words': [dict(fwlib.blank({'ja': ja, 'en': 'meaning', 'hint': 'hint', 'kana': ''}), status=status)
-                           for ja, status in (('熱', 'queue'), ('今', 'known'), ('情報', 'queue'))]}
-        words = {}
-        for ja in ('熱', '今', '情報'):
-            words[ja] = knowledge.Word(1.0)
-            words[ja].k, words[ja].n, words[ja].recent = (-2.0 if ja != '情報' else 4.0), 20, [1]
-        moves, veto = knowledge.plan_moves(state, words, {}, 2)
-        self.assertEqual((moves, veto), ([('今', 'known', 'shaky')], []))
+    def test_labels_follow_the_free_flag_and_new_words_stay_new(self):
+        state = {'words': [dict(fwlib.blank({'ja': ja, 'en': 'meaning', 'hint': 'hint', 'kana': ''}), status=status,
+                                added='' if status == 'queue' else '2026-10-01')
+                           for ja, status in (('熱', 'queue'), ('今', 'known'), ('情報', 'queue'), ('中', 'active'))]}
+        op = knowledge.decide(state, {'熱': False, '今': False, '情報': True, '中': True}, {}, {}, evaluate.Log([], {}, []),
+                              '2026-10-02')
+        self.assertEqual(op['labels'], [['今', 'known', 'active'], ['情報', 'queue', 'known'], ['中', 'active', 'known']])
+        self.assertEqual((op['intake'], op['probes']), ([], []))  # no plans: nothing read, nothing taken in
+        restored = dict(state, labels={'from': 'rules', 'since': '2026-10-01'})
+        self.assertEqual(knowledge.decide(restored, {'今': False}, {}, {}, None, '2026-10-02')['labels'], [])
 
     def test_commands_take_forms(self):
         result = hub.run(hub.stamp({'kind': 'mark', 'words': ['待っています'], 'as': 'known'}))
@@ -164,29 +166,37 @@ class Refill(Home):
         fwlib.write_json(self.home / 'fw' / knowledge.KNOWLEDGE,
                          {'words': {ja: {'k': 0.5, 'sd': 1.0, 'recent': n} for ja, n in counts.items()}})
 
+    UNSPENT = {'browser': {'plans': 9, 'budget': 2.0, 'spent': 0.5, 'share': 0.25}}
+
     def test_looked_up_words_come_in_first_most_opened_first(self):
         state = fwlib.new_state('2026-10-01')
         queue = [w['ja'] for w in state['words'] if w['status'] == 'queue']
-        self.looked({queue[40]: 2, queue[30]: 3, queue[50]: 2, queue[60]: 1, state['words'][0]['ja']: 9})
-        fwlib.promote(state, '2026-10-02', {})
-        added = {w['ja'] for w in state['words'] if w['changed'] == '2026-10-02'}
-        self.assertEqual(added, {queue[30], queue[40], queue[50], queue[0], queue[1]})  # then lexicon order
-        self.assertEqual(fwlib.find(state, queue[60])['status'], 'queue')  # opened in one message only: waits its turn
+        looked = {queue[40]: 2, queue[30]: 3, queue[50]: 2}  # as refresh counts them (fwlib.LOOKED_UP and up)
+        flags = {queue[0]: True}  # known at a glance: labeled known, never taken in
+        op = knowledge.decide(state, flags, looked, self.UNSPENT, evaluate.Log([], {}, []), '2026-10-02', seed=5)
+        self.assertEqual([ja for ja, _arm, _u in op['intake']], [queue[30], queue[40], queue[50], queue[1], queue[2]])
+        self.assertEqual(op['experiment'], {'seed': 5})
+        self.assertEqual([[ja, *(fwlib.assign(5, ja) if ja not in fwlib.IN_THE_RULES else (None, None))]
+                          for ja, _a, _u in op['intake']], op['intake'])  # the draws; none for a word the rules name
+        self.assertIn([queue[0], 'queue', 'known'], op['labels'])
 
     def test_the_order_and_the_limits(self):
         state = {'words': [dict(fwlib.blank({'ja': f'w{i}', 'en': 'meaning', 'hint': 'hint', 'kana': ''}))
-                           for i in range(30)]}
-        looked = {'w9': 2, 'w7': 4, 'w8': 2}
-        self.assertEqual(fwlib.refill(state, 'd1', cap=2, looked=looked), 2)
-        self.assertEqual([w['ja'] for w in state['words'] if w['status'] == 'active'], ['w7', 'w8'])  # most opened first
-        self.assertEqual(fwlib.refill(state, 'd1', looked=looked), fwlib.NEW_PER_DAY - 2)
-        self.assertEqual([w['ja'] for w in state['words'] if w['status'] == 'active'], ['w0', 'w1', 'w7', 'w8', 'w9'])
-        self.assertEqual(fwlib.refill(state, 'd1', looked={'w20': 5}), 0)  # today's new words are in
-        for day in ('d2', 'd3', 'd4'):
-            fwlib.refill(state, day, looked={'w20': 5})
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW)
-        self.assertEqual(fwlib.find(state, 'w20')['status'], 'active')
-        self.assertEqual(fwlib.refill(state, 'd5', looked={'w29': 5}), 0)  # the learning set is full
+                           for i in range(30)], 'labels': {'from': 'model', 'since': 'd0'}}
+        log, today = evaluate.Log([], {}, []), '2026-10-02'
+        decide = lambda looked: knowledge.decide(state, {}, looked, self.UNSPENT, log, today, seed=1)
+        op = decide({'w9': 2, 'w7': 4, 'w8': 2})
+        self.assertEqual([ja for ja, _a, _u in op['intake']], ['w7', 'w8', 'w9', 'w0', 'w1'])  # most opened first
+        state['intake'] = [today, 3]
+        self.assertEqual([ja for ja, _a, _u in decide({'w20': 5})['intake']], ['w20', 'w0'])  # 3 of today's 5 are in
+        state['intake'] = [today, fwlib.NEW_PER_DAY]
+        self.assertEqual(decide({'w20': 5})['intake'], [])
+        state['experiment'] = {'name': 'delayed-start', 'seed': 1, 'since': 'd0'}
+        state['intake'] = ['2026-10-01', fwlib.NEW_PER_DAY]
+        op = decide({})
+        self.assertNotIn('experiment', op)  # it has its seed
+        self.assertEqual(len(op['intake']), fwlib.NEW_PER_DAY)
+        self.assertEqual(knowledge.decide(state, {}, {}, {}, log, today)['intake'], [])  # no plans, no intake
 
     def test_status_and_calibrate_show_lookups(self):
         fwlib.load_state()  # today's five new words are in

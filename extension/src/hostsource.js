@@ -15,7 +15,10 @@ const ANNOTATIONS_MAX = 200;
 // Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k, its uncertainty sd and whether
 // it is known at a glance (free, with hysteresis); the challenge (normal's lookup budget), the budget, and the web's
 // price of a whole sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and
-// levels.js SENTENCE_PRICE stands in).
+// levels.js SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
+// 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
+// the experiment hides.
+const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const words = [];
@@ -28,7 +31,7 @@ export function parseState(data) {
     seen.add(ja);
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
       status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
-      ...(typeof w.free === 'boolean' ? { free: w.free } : {}) });
+      ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(armOk(w.arm) ? { arm: w.arm } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -127,20 +130,25 @@ export async function flushEvents({ storage, send }) {
 }
 
 // How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed. budget (the
-// passage's lookups to spend if read; none at full), expected (lookups predicted if it is read) and sentencePrice (the
-// lookups a whole sentence was priced at, 0 to 1) are optional, as plans from before levels meant a lookup budget have
-// none of them and plans from before whole sentences were priced (and their thinning took the budget down with it)
-// have no sentencePrice; the host checks the same (feedback.py _plan_ok).
+// passage's lookups to spend if read; none at full), spent (what its swaps within the budget cost), expected (lookups
+// predicted if it is read), sentencePrice (the lookups a whole sentence was priced at, 0 to 1) and arms (the
+// delayed-start arm of each word shown that has one) are optional, as plans from before levels meant a lookup budget
+// have none of them, plans from before whole sentences were priced (and their thinning took the budget down with it)
+// have no sentencePrice, and plans before extension 0.10 no spent or arms; the host checks the same (feedback.py
+// _plan_ok).
 function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
   const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
   const amount = (x, top = 1000) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= top);
+  const arms = (x) => x === undefined || (x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length <= 200
+    && Object.entries(x).every(([w, a]) => w.length > 0 && w.length <= 40 && armOk(a)));
   if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)
-    || !amount(plan.budget) || !amount(plan.expected) || !amount(plan.sentencePrice, 1)) return undefined;
+    || !amount(plan.budget) || !amount(plan.spent) || !amount(plan.expected) || !amount(plan.sentencePrice, 1) || !arms(plan.arms)) return undefined;
   const optional = (key) => (plan[key] !== undefined ? { [key]: plan[key] } : {});
   return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates,
-    ...optional('budget'), ...optional('expected'), ...optional('sentencePrice') };
+    ...optional('budget'), ...optional('spent'), ...optional('expected'), ...optional('sentencePrice'),
+    ...(plan.arms && Object.keys(plan.arms).length ? { arms: plan.arms } : {}) };
 }
 
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every

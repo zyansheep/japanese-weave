@@ -467,6 +467,9 @@ const TARGET_K = Math.log((1 - TARGET_P) / TARGET_P);
 const PRIOR_K = 1.0;
 const PRIOR_SD = Math.SQRT2;
 const peekChance = (k) => 1 / (1 + Math.exp(k));
+// A word whose delayed-start probe is due: the host sends its arm as 'held:probe' or 'shown:probe' (../scripts/fwlib.py
+// arm_label).
+const isProbe = (w) => typeof w?.arm === 'string' && w.arm.endsWith(':probe');
 
 // Seeded uniform [0, 1) (mulberry32) and standard normal (Box-Muller).
 export function seededRandom(seed) {
@@ -578,8 +581,11 @@ function costOf(s, words, price) {
 // A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates, a
 // new budget or another intensity on the same side of normal never cost a model call. Returns { swaps, plan }: plan says
 // how the amount was chosen ({ level, intensity: its factor, jitter: the share of free swaps kept, limit: swaps kept,
-// candidates: distinct ones the passage can place, budget: lookups the passage may spend if read, expected: lookups
-// predicted if it is read, sentencePrice: what a whole sentence cost }), logged with the passage's shown record.
+// candidates: distinct ones the passage can place, budget: lookups the passage may spend if read, spent: what the
+// swaps kept within the budget cost, expected: lookups predicted if it is read, sentencePrice: what a whole sentence
+// cost, arms: the delayed-start arm of each word kept that has one, as the host sends it }), logged with the passage's
+// shown record. With the plugin's word state, a candidate with a word the host didn't send never counts: the host
+// leaves out the words the delayed-start experiment hides (../scripts/fwlib.py hidden).
 // Only candidates text.js locate places in the passage count, as applySwaps will place them, and of those that overlap
 // only the first kept. A swap whose listed words are all known at a glance (mean lookup chance under FREE_P), and that
 // is not a whole sentence, is free: kept wherever the model offered it, bigger swaps first, but for the passage's random
@@ -588,8 +594,9 @@ function costOf(s, words, price) {
 // phrase costs the lookup chances of its words not known at a glance, a whole sentence sentencePrice (SENTENCE_PRICE
 // without one from the host) and the chances of its words not known at a glance. They go by learning value, a lookup
 // chance near TARGET_P: for the least-known word in them, judged on k drawn from N(k, sd) so uncertain words still get
-// shown, or for a sentence of free words, its price. One with an active word not shown today goes first, outside the
-// budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
+// shown, or for a sentence of free words, its price. One with a word whose delayed-start probe is due (arm ending in
+// ':probe') and that wasn't shown today goes first, outside the budget: the probe's guaranteed showing. Then the rest
+// while their cost fits, at most perSentence of them in one
 // sentence, a whole sentence only alone in its sentence (a full sentence passes to the next candidate). Whole sentences
 // spend up to SENTENCE_SHARE of the budget and words and phrases the rest, each going down the one ranking until the
 // first that doesn't fit its part; a part one of them can't use (its candidates ran out first) goes to the other, which
@@ -612,15 +619,19 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
     const key = JSON.stringify([s.kind || 'word', s.o, s.f, s.ctx || '']);
     const place = distinct.has(key) ? null : locate({ text: String(text) }, s.o, s.ctx);
     distinct.add(key);
-    if (place) items.push({ ...costOf(s, words, price), place, sentence: sentenceAt(place.start, starts) });
+    const cost = place && costOf(s, words, price);
+    if (cost && (!words.size || cost.listed.every((x) => x.w))) items.push({ ...cost, place, sentence: sentenceAt(place.start, starts) });
   }
   const share = full ? 1 : jitter;
   const budget = full ? Infinity : intensity <= INTENSITY_OFF ? 0
     : ((Number.isFinite(budgetPer100) ? Math.max(0, budgetPer100) : intensityBudget(intensity)) * wordCount(text)) / 100;
   const kept = [];
+  let spent = 0; // what the swaps kept within the budget cost
+  const armsOf = () => Object.fromEntries(kept.flatMap((c) => c.listed).filter((x) => typeof x.w?.arm === 'string').map((x) => [x.ja, x.w.arm]));
   const planOf = () => ({ swaps: items.filter((c) => kept.includes(c)).map((c) => c.s), plan: { level: intensity,
     intensity: full ? FULL_PLAN_FACTOR : intensityFactor(intensity), jitter: share, limit: kept.length, candidates: items.length,
-    ...(full ? {} : { budget: round3(budget) }), expected: round3(sum(kept.map((c) => c.expected))), sentencePrice: price } });
+    ...(full ? {} : { budget: round3(budget), spent: round3(spent) }), expected: round3(sum(kept.map((c) => c.expected))),
+    sentencePrice: price, ...(Object.keys(armsOf()).length ? { arms: armsOf() } : {}) } });
   if (intensity <= INTENSITY_OFF) return planOf();
   const cap = density > 0 && !full ? swapTarget(text, density) : Infinity;
   const most = full ? Infinity : perSentence(intensity);
@@ -632,7 +643,6 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
   for (const c of ranked) {
     const lead = c.due.length ? c.due.reduce((a, b) => (b.k < a.k ? b : a)) : null;
     c.value = -Math.abs((lead ? lead.k + lead.sd * normal(random) : priceK) - TARGET_K);
-    c.fresh = c.due.some((x) => x.w?.status === 'active' && !shown.has(x.ja.normalize('NFKC').toLowerCase()));
   }
   ranked.sort((a, b) => b.value - a.value || size(a) - size(b));
   // One use per Japanese word, decided as swaps are kept: a known word offered alone still shows where a phrase or
@@ -647,12 +657,16 @@ export function planSwaps(level, swaps, text, sharedWords, { density = 0, budget
     kept.push(c);
     for (const x of c.listed) used.add(exactJa(x.ja));
   };
-  const spend = (c) => {
+  const spend = (c, outside = false) => {
     take(c);
     inSentence.set(c.sentence, whole(c) ? Infinity : (inSentence.get(c.sentence) || 0) + 1);
+    if (!outside) spent += c.cost;
   };
-  const fresh = ranked.find((c) => c.fresh);
-  if (fresh && cap > 0) spend(fresh);
+  // A due probe first, outside the budget: the best ranked candidate with a word whose probe is due and that wasn't shown
+  // today, costly or free (thinning mustn't drop it).
+  const due = (c) => c.listed.some((x) => isProbe(x.w) && !shown.has(x.ja.normalize('NFKC').toLowerCase()));
+  const probe = full ? null : [...ranked, ...items.filter((c) => !c.cost)].find(due);
+  if (probe && cap > 0) spend(probe, true);
   // The budget's two parts: what is left of each, and stop, the place in the ranking of the first that didn't fit it
   const parts = [{ left: budget * (1 - SENTENCE_SHARE) }, { left: budget * SENTENCE_SHARE }];
   const partOf = (c) => parts[whole(c) ? 1 : 0];
