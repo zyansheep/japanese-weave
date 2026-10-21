@@ -58,8 +58,8 @@ level from [blocks/](blocks/level-01.md).
   shared, and never in scripted runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK
   sessions too, so the hook checks for a `t3 serve` parent and weaves there.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
-  word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
-  only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
+  word order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget
+  pays for, all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
   item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google results a snippet,
   the knowledge panel's description and AI answers (the overview, and People also ask once opened), never titles,
   links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or opened,
@@ -201,7 +201,8 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each
 intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a
 glance (under an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25%
-chance, at most one per sentence, on web pages and in chat. A challenge (`fw.py challenge 1.5`, the command above,
+chance, at most one per sentence, on web pages and in chat. On web pages a whole sentence in Japanese costs too, about
+0.08 lookups (how often a sentence's translation gets opened), and takes its sentence's one place. A challenge (`fw.py challenge 1.5`, the command above,
 or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget until your real
 rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works this way
 and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).

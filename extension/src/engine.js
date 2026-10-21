@@ -16,10 +16,10 @@ export const COOLDOWN_MS = { 429: 60000, 503: 30000, 529: 30000, timeout: 30000 
 // list allows, without the density. Returns { results, model, errors, usage }:
 // results are every validated swap, uncapped (selectSwaps picks from them when they're read from the cache); usage
 // lists every billed attempt ({ model, input, output, cached?, written? } tokens); a thrown error carries the same `usage`.
-export async function requestSwaps({ keys, apiKey, model, level, stage = 0, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0, full = false }) {
+export async function requestSwaps({ keys, apiKey, model, level, batch, words, shownToday, fetchImpl, timeoutMs, cooldown = new Map(), now = Date.now, density = 0, full = false }) {
   const keyFor = { gemini: apiKey, ...keys };
   const percent = density > 0 && !full ? density : 0;
-  const system = buildSystemParts(level, words, shownToday, percent, stage, full);
+  const system = buildSystemParts(level, words, shownToday, percent, full);
   const user = buildUserContent(batch, percent, { level, words, full });
   const candidates = candidatesFor(model, keyFor);
   if (!candidates.length) throw new Error(`No key for ${model}`);

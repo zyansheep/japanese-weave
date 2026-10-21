@@ -39,8 +39,11 @@ On the page a phrase or sentence is one group: each of its words is underlined a
 for that word), a sentence's 。 shows the translation of the whole sentence, and a click anywhere flips the group back
 to English. A flip of a group is logged but not counted against the word clicked.
 
-How many sentences go fully into Japanese follows the stage: about one in five at Stage 3 and 4, one in ten at Stage 2
-(or Level 2 without the plugin), none at Stage 1. The rest of the density rules are unchanged.
+How many sentences go fully into Japanese is up to the extension's lookup budget, not the stage: since prompt 6 the
+model is asked for every sentence the list can say, with the word and phrase swaps inside it, and `planSwaps` prices
+each sentence and shows those the budget pays for (below, and docs/adaptive-difficulty.md). Before, the prompt asked
+for about one sentence in five at Stage 3 and 4, one in ten at Stage 2 (or Level 2 without the plugin), and none at
+Stage 1.
 
 ## Which text is a passage
 
@@ -214,9 +217,10 @@ both through the lab once before relying on them.
 
 At the top of the reader's intensity scale the page gets all the Japanese the list allows. The amount paragraph is
 replaced: passages carry no target, and the model goes through each passage sentence by sentence, writing every
-sentence listed words and the grammar list can say completely as a sentence swap (at any stage), and elsewhere swapping
+sentence listed words and the grammar list can say completely as a sentence swap (at any stage), and then swapping
 every listed word, learning or known, whose listed meaning the passage says, in every place it says it (each with its
-own `c`), pronouns included. Each passage's hints come with every spelling found and how many places
+own `c`), pronouns included; since prompt 6 also inside the sentences it wrote whole, which +1 and +2 may leave in
+English. Each passage's hints come with every spelling found and how many places
 (`"watashi = i: I (3 places)"`, in Japanese script in the prompt), as places owed a swap unless a meaning rule forbids it. "Skip a
 passage if a swap would make it hard to follow" is left out; the meaning rules and the validation are the same.
 `planSwaps` shows everything that validates and can be placed, with no ceiling or thinning: a sentence rather than the
@@ -336,6 +340,38 @@ known at a glance, and it is its sentence's one budgeted swap. So the budget, no
 sentences a page gets, and at full, which has no budget, they are free. `planSwaps` also counts only the candidates
 `text.js locate` can place, and keeps none that overlaps one already kept, so a plan's swaps, `limit` and `expected`
 are what the page shows.
+
+## Sentences by budget, not by stage (prompt 6, 2026-10-20)
+
+`planSwaps` now prices a whole sentence (the chance its translation is opened, 0.08 until the host sends a fitted
+one) and lets the budget decide how many a page shows, so the prompt stops rationing them by stage. What changed
+(`PROMPT_VERSION` 6, so every passage is asked once more):
+
+- Normal's prompt asks, at every stage, for a sentence swap for every sentence listed words and the grammar can say
+  completely, outside the `target` (which now counts word and phrase swaps only), and for the word and phrase swaps
+  inside each such sentence too, so a sentence the budget leaves in English keeps its known words. The kinds section
+  says "give the sentence swap as well as the word and phrase swaps in it" instead of "prefer the sentence swap". The
+  phrase line ("Make it a phrase wherever one fits... Give every passage this care") now reaches Stage 1 too.
+- Full's prompt asks for the words inside its sentence swaps as well, since +1 and +2 pick from its answer and price
+  the sentences.
+- The prompt is about 270 characters longer at Stage 3 (about 70 tokens, in the cached prefix), 510 at Stage 1, 100 at
+  full.
+
+Not measured yet: no lab run on prompt 6 (it costs API calls). The risks, against the measurements above, which were
+tuned with the old rates:
+
+- More sentence swaps per answer. Sentences are where whole-swap sense errors show ("bad" in the oracle), and
+  validation catches unlisted words, not a wrong sense. Watch wrong-sense swaps (2.5-2.7%) and sentences judged bad.
+- Haiku settles on "one clean swap" when unsure; asked for a sentence and the words inside it, it may return one or
+  the other. If it drops the words, a sentence the budget can't afford leaves its known words in English, and coverage
+  at normal (51%) falls; if it drops the sentences, the page gets fewer than before.
+- Longer answers: sentence swaps are the longest items (pieces and a gloss), and full's answer, which came within 15 s
+  of the 60 s timeout in calls of 6, grows by the words inside its sentences. Watch seconds and output tokens per call
+  and $ per 1,000 passages.
+
+To check it: `lab.mjs` with Haiku on `web.json`, `live.json` and `eval16.json`, two seeds each, at normal and full,
+against prompt 5's numbers above: sentences offered and shown a passage, coverage, wrong senses, the oracle's
+sentences rendered whole, and the call's seconds and cost. `planSwaps` in the lab prices sentences the same way.
 
 ## Tuning it again
 

@@ -218,8 +218,8 @@ async function callModel(ctx, batch) {
     if (await callsToday(chromeStorage) >= DAILY_MODEL_CALLS) throw new Error(`Daily limit of ${DAILY_MODEL_CALLS} model calls reached; Japanese resumes tomorrow`);
     const data = await store.get(['wordState', ...KEY_NAMES]);
     const fetchImpl = async (...args) => { await countCall(chromeStorage); return fetch(...args); };
-    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, stage: data.wordState?.stage,
-      words: data.wordState?.words, fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
+    fresh = await requestSwaps({ keys: keysOf(data), model: ctx.settings.model, level: ctx.level, words: data.wordState?.words,
+      fetchImpl, shownToday: await shownToday(chromeStorage), cooldown, batch, density: ctx.settings.density,
       full: answerLevel(ctx.intensity.level) === INTENSITY_FULL });
   } catch (e) {
     await locked(async () => {
