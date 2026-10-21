@@ -238,9 +238,9 @@ async function callModel(ctx, batch) {
 }
 
 // Picks each passage's swaps from its cached candidates (planSwaps): the level's lookup budget (normal's from the host:
-// the challenge when set, steered, else intensity.py's), the host's per-word estimates, the intensity and the
-// passage's random thinning, seeded by the passage and the day so a passage repaints the same way. Returns
-// { swaps, plan }.
+// the challenge when set, steered, else intensity.py's), the host's per-word estimates and price of a whole sentence
+// (else levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage
+// and the day so a passage repaints the same way. Returns { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
@@ -249,7 +249,7 @@ async function chooser(ctx) {
   return (text, swaps) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
     return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
-      shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
+      sentencePrice: wordState?.sentencePrice, shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
   };
 }
 

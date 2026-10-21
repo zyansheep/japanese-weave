@@ -618,10 +618,13 @@ class FeedbackStore(Home):
         num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
         new = dict(shown['plan'], budget=0.186, expected=0.41)
         full = {'level': 3, 'intensity': 5, 'jitter': 1, 'limit': 9, 'candidates': 9, 'expected': 2.5}
-        for plan in (new, full, shown['plan'], dict(new, budget=0, expected=0)):
+        # since whole sentences cost a price (and the thinning no longer scales the budget): the price used
+        priced = dict(new, sentencePrice=0.08)
+        for plan in (new, full, shown['plan'], dict(new, budget=0, expected=0), priced, dict(full, sentencePrice=0.08)):
             self.assertTrue(feedback._plan_ok(plan, num), plan)
         for plan in (dict(new, budget=-0.1), dict(new, expected=1001), dict(new, budget=float('nan')), dict(new, budget='0.5'),
-                     dict(new, expected=None), dict(new, budget=True)):
+                     dict(new, expected=None), dict(new, budget=True), dict(priced, sentencePrice=1.5),
+                     dict(priced, sentencePrice=-0.1), dict(priced, sentencePrice='0.08')):
             self.assertFalse(feedback._plan_ok(plan, num), plan)
         stays = [dict(self.item(), kind='visible', y=0, height=40, ms=ms, wall=ms + 500, away=500, media=0, idle=0,
                       uid=f'v1-{ms}') for ms in (1500, 2500)]
@@ -1638,6 +1641,11 @@ class Knowledge(Home):
         state = fw_host.handle({'type': 'state'})
         # without a challenge, normal's own budget, which the controller doesn't steer
         self.assertEqual((state['challenge'], state['budget']), (0, intensity.BUDGETS[0]))
+        self.assertNotIn('sentencePrice', state)  # none fitted yet: the extension uses its own default
+        # the web's price of a whole sentence, once the fit puts one per surface in knowledge.json
+        for price, sent in ((0.11, 0.11), (2, None), ('0.1', None), (True, None)):
+            fwlib.write_json(knowledge.path(), {'updated': time.time(), 'sentencePrice': {'browser': price, 't3': 0.09}})
+            self.assertEqual(fw_host.handle({'type': 'state'}).get('sentencePrice'), sent, price)
         with self.assertRaises(SystemExit):
             fw.main(['challenge', '5'])
 

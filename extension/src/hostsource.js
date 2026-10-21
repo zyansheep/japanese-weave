@@ -13,7 +13,9 @@ const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
 // Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k and its uncertainty sd when the
-// gloss log has evidence; the dial (challenge, peeks per 100 words), its budget, and the realized peek rate.
+// gloss log has evidence; the dial (challenge, peeks per 100 words), its budget, the realized peek rate, and the web's
+// price of a whole sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and
+// levels.js SENTENCE_PRICE stands in).
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const words = [];
@@ -37,6 +39,7 @@ export function parseState(data) {
     challenge: num(data?.challenge) && data.challenge > 0 ? data.challenge : 0,
     intensity: cleanIntensity(data?.prefs?.intensity_browser), // the web pages' level, as last saved by any machine
     budget: num(data?.budget) && data.budget > 0 ? data.budget : 0,
+    sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
     rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
       shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
     words,
@@ -123,17 +126,20 @@ export async function flushEvents({ storage, send }) {
 }
 
 // How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed. budget (the
-// passage's lookups to spend; none at full) and expected (lookups predicted if it is read) are optional, as plans from
-// before levels meant a lookup budget have neither; the host checks the same (feedback.py _plan_ok).
+// passage's lookups to spend if read; none at full), expected (lookups predicted if it is read) and sentencePrice (the
+// lookups a whole sentence was priced at, 0 to 1) are optional, as plans from before levels meant a lookup budget have
+// none of them and plans from before whole sentences were priced (and their thinning took the budget down with it)
+// have no sentencePrice; the host checks the same (feedback.py _plan_ok).
 function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
   const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
-  const amount = (x) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1000);
+  const amount = (x, top = 1000) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= top);
   if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)
-    || !amount(plan.budget) || !amount(plan.expected)) return undefined;
+    || !amount(plan.budget) || !amount(plan.expected) || !amount(plan.sentencePrice, 1)) return undefined;
+  const optional = (key) => (plan[key] !== undefined ? { [key]: plan[key] } : {});
   return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates,
-    ...(plan.budget !== undefined ? { budget: plan.budget } : {}), ...(plan.expected !== undefined ? { expected: plan.expected } : {}) };
+    ...optional('budget'), ...optional('expected'), ...optional('sentencePrice') };
 }
 
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every

@@ -220,15 +220,17 @@ def _clean(item, now):
 
 
 def _plan_ok(plan, num):
-    """As the extension's cleanPlan (hostsource.js) checks it; budget and expected are optional, as plans from before
-    levels meant a lookup budget have neither (and full's has no budget)."""
+    """As the extension's cleanPlan (hostsource.js) checks it; budget, expected and sentencePrice are optional, as plans
+    from before levels meant a lookup budget have none of them (and full's has no budget), and plans from before whole
+    sentences were priced have no sentencePrice (their thinning also scaled the budget)."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
-    amount = lambda key: key not in plan or (num(plan[key]) and 0 <= plan[key] <= 1000)
+    amount = lambda key, top=1000: key not in plan or (num(plan[key]) and 0 <= plan[key] <= top)
     return (isinstance(plan, dict)
-            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected'}
+            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected', 'sentencePrice'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
-            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected'))
+            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected')
+            and amount('sentencePrice', 1))
 
 
 MAX_TRACE_POINTS = 200

@@ -219,8 +219,8 @@ every listed word, learning or known, whose listed meaning the passage says, in 
 own `c`), pronouns included. Each passage's hints come with every spelling found and how many places
 (`"watashi = i: I (3 places)"`, in Japanese script in the prompt), as places owed a swap unless a meaning rule forbids it. "Skip a
 passage if a swap would make it hard to follow" is left out; the meaning rules and the validation are the same.
-`planSwaps` shows everything that validates, with no ceiling or thinning, sentences first so `applySwaps` places a
-sentence before the word swaps inside it, and a word again where its English comes again. Since prompt 5 the heavier
+`planSwaps` shows everything that validates and can be placed, with no ceiling or thinning: a sentence rather than the
+word swaps inside it, and a word again where its English comes again. Since prompt 5 the heavier
 levels pick from this answer too (below), so it is asked once for +1, +2 and full, in calls of 3 passages for Haiku
 (`FULL_BATCH` in `models.js`), and has its own cache.
 
@@ -329,6 +329,13 @@ the passage's share (20% to 100% since 2026-10-20, 50% to 100% before) and leave
 the budget by the same share); full is unchanged. The prompt and its per-passage `target` are
 unchanged too, so the target now only says how many swaps to offer: with known words free, what the model offers is
 what bounds them. The lab's "ceiling" column still computes the old rule.
+
+Since 2026-10-20 a whole sentence is priced too: it costs the chance its translation is opened if it is read
+(`SENTENCE_PRICE`, 0.08, until the native host sends a fitted one), plus the lookup chances of any of its words not
+known at a glance, and it is its sentence's one budgeted swap. So the budget, not the stage, decides how many
+sentences a page gets, and at full, which has no budget, they are free. `planSwaps` also counts only the candidates
+`text.js locate` can place, and keeps none that overlaps one already kept, so a plan's swaps, `limit` and `expected`
+are what the page shows.
 
 ## Tuning it again
 

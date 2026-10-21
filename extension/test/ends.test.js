@@ -105,7 +105,8 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(shown(2).text).toBe('');
     gate.open(); gate = null;
     const plain = Object.values((await normal).plans)[0];
-    expect(plain).toMatchObject({ level: 0, candidates: 3 }); // one use per word: the sentence's words aren't swapped again
+    // every distinct candidate the passage can place; normal prices the sentence, and uses each word once
+    expect(plain).toMatchObject({ level: 0, candidates: 5, sentencePrice: 0.08 });
     await settle();
     expect(shown(1)).toMatchObject({ text: '', title: 'Japanese Weave' });
     // A page with nothing to weave (its content script says so once the page settles) is faded and says which. Only a
@@ -130,9 +131,11 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(calls[1].passages[0].target).toBeUndefined();
     expect(calls[0].passages[0].target).toBe(4);
     const [swaps] = Object.values(full.results);
-    // no budget at full; expected: the lookups predicted, 4 known words without estimates at 0.076 and the dog twice at 0.269
-    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 5, candidates: 5, expected: 0.841 });
-    expect(swaps.map((s) => s.f)).toEqual(['大きい日でした。', 'でも', '犬', '犬', '大きい']);
+    // no budget at full, so the sentence is free, and big inside it is left out; expected: the lookups predicted, 3 known
+    // words without estimates at 0.076, the dog twice at 0.269 and the sentence's translation at 0.08
+    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 4, candidates: 5, expected: 0.845,
+      sentencePrice: 0.08 });
+    expect(swaps.map((s) => s.f)).toEqual(['大きい日でした。', 'でも', '犬', '犬']);
     // Heavier at full stays full, for 3 hours from this press.
     const first = local.intensity.until;
     await new Promise((r) => setTimeout(r, 5));
@@ -173,7 +176,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect((await press(1)).intensity.level).toBe(-2);
     const back = await ask(passage());
     expect(back.stale).toBeUndefined();
-    expect(Object.values(back.plans)[0]).toMatchObject({ level: -2, candidates: 3 });
+    expect(Object.values(back.plans)[0]).toMatchObject({ level: -2, candidates: 5 });
     expect(calls).toHaveLength(3);
     await settle();
     expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '−2' });

@@ -1,5 +1,6 @@
 // Level schedule, word lists, and guards. Pure: no DOM, no chrome APIs.
 import { STARTER } from './starter.js';
+import { locate } from './text.js';
 
 // L3/L4 prompts are not built yet; anything above this uses L2 rules.
 export const MAX_BUILT_LEVEL = 2;
@@ -420,12 +421,8 @@ function sentenceStarts(text) {
   for (const m of t.matchAll(SENTENCE_BREAK)) if (wordCount(t.slice(starts.at(-1), m.index)) >= 3) starts.push(m.index + m[0].length);
   return starts;
 }
-// The sentence a swap sits in: where its context sits in the passage (its English inside it), else its English. null
-// when neither is there (text.js locate would not place it either).
-function sentenceOf(swap, text, starts) {
-  const ctx = swap.ctx ? text.indexOf(swap.ctx) : -1;
-  const at = ctx >= 0 ? ctx + Math.max(0, swap.ctx.indexOf(swap.o)) : text.indexOf(swap.o);
-  if (at < 0) return null;
+// The sentence a place in the passage is in.
+function sentenceAt(at, starts) {
   let i = 0;
   while (i + 1 < starts.length && starts[i + 1] <= at) i++;
   return i;
@@ -481,8 +478,8 @@ export function seededRandom(seed) {
 const normal = (random) => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 
 // Intensity (the reader's heavier/lighter shortcut, ../scripts/intensity.py): levels -3..3. The ends go further than a
-// budget: off (-3) weaves nothing and calls no model, full (3) shows every validated candidate of a prompt that asks for
-// all the Japanese the list allows. Between them, a lookup budget (INTENSITY_BUDGETS).
+// budget: off (-3) weaves nothing and calls no model, full (3) has no budget, so it shows every validated candidate of a
+// prompt that asks for all the Japanese the list allows. Between them, a lookup budget (INTENSITY_BUDGETS).
 export const INTENSITY_OFF = -3;
 export const INTENSITY_FULL = 3;
 export const INTENSITY_LEVELS = [-3, -2, -1, 0, 1, 2, 3];
@@ -493,15 +490,24 @@ export const INTENSITY_FACTORS = { '-3': 0, '-2': 0.5, '-1': 0.7, 0: 1, 1: 1.4, 
 export const intensityFactor = (level) => INTENSITY_FACTORS[level] ?? 1;
 // What a level means, as ../scripts/intensity.py BUDGETS, budget() and PER_SENTENCE and ../scripts/fwlib.py FREE_P and
 // KNOWN_PRIOR_K say (keep them the same): the lookups per 100 words read the reader puts up with, spent on words they
-// don't know at a glance yet. Words they do know (a mean predicted lookup chance under FREE_P) cost nothing and are
-// used wherever the model offered them, at every level but off. Normal starts at the chat's lookup rate before levels
-// meant this (0.33 per 100 words shown, 2026-10-20). Off has no budget and full no limit; normal's budget from the
-// host (the popup's challenge, when set, steered) scales the others with it. A word the log has nothing on yet starts
-// at KNOWN_PRIOR_K (log-odds of not looking it up) if its status is known, else at PRIOR_K.
+// don't know at a glance yet and on whole sentences in Japanese. Words they do know (a mean predicted lookup chance
+// under FREE_P) cost nothing and are used wherever the model offered them, at every level but off. Normal starts at the
+// chat's lookup rate before levels meant this (0.33 per 100 words shown, 2026-10-20). Off has no budget and full no
+// limit; normal's budget from the host (the popup's challenge, when set, steered) scales the others with it. A word the
+// log has nothing on yet starts at KNOWN_PRIOR_K (log-odds of not looking it up) if its status is known, else at PRIOR_K.
 export const INTENSITY_BUDGETS = { '-2': 0.15, '-1': 0.3, 0: 0.5, 1: 0.8, 2: 1.2 };
 export const INTENSITY_PER_SENTENCE = { '-2': 1, '-1': 1, 0: 1, 1: 2, 2: 2 }; // most budgeted (not-yet-known) swaps in one sentence
 export const FREE_P = 0.08;
 export const KNOWN_PRIOR_K = 2.5;
+// A whole sentence in Japanese costs its translation lookups: the chance that a reader who reads it opens its translation
+// (the gloss on its closing mark), whatever words it uses. The host sends the web's (knowledge.json sentencePrice, fitted
+// from the log); until it does, this. Measured 2026-10-20 on chat, since the web did not log those opens yet (text.js
+// does now): of the 439 sentence ends in the 123 T3 replies with a word count (2026-10-15 to 20), 24 were opened (a
+// peek of at least 300 ms, each sentence once), 5.5% a sentence shown (90% interval 3.5-7.6%, resampling replies).
+// Weighed by the chance each was read, as the replay weighs words (time on screen at 300 ms a word, at most 0.7, and
+// every line down to the lowest one opened), that is 8.4% a sentence read, 90% interval 5.4-11.4%. Chat opens a gloss
+// after 0.3 s and the web after 0.7 s, but the fitted chat offset (-0.06) says lookup chances differ little.
+export const SENTENCE_PRICE = 0.08;
 // Lookups per 100 words a level allows for words not known at a glance: 0 at off, null (no limit) at full. normal:
 // normal's budget (the host's word state budget), which scales every level.
 export function intensityBudget(level, normal) {
@@ -524,15 +530,16 @@ export function intensityLabel(level) {
 }
 // Full has no ceiling; its plan says 5, the largest factor a plan may record (hostsource.js cleanPlan).
 const FULL_PLAN_FACTOR = 5;
-// Sentences, then phrases, then words, so where a bigger swap and the smaller ones inside it are both offered, the
-// bigger one is placed (text.js applySwaps skips a swap overlapping one placed before it).
+// Sentences, then phrases, then words: where a bigger swap and smaller ones inside it are free alike, the bigger one is
+// kept.
 const SIZE = { sentence: 0, phrase: 1 };
+const size = (c) => SIZE[c.s.kind] ?? 2;
 // Random thinning of free words, so what words known at a glance cost in reading time and lookups can be measured
 // (knowledge.py calibrate): half the passages are left alone, the other half keep each free swap with a random share
-// between JITTER_MIN and 1. The budget and the swaps it pays for are the same either way. Until 2026-10-20 the share was
-// 0.5 to 1 and scaled the budget too: 5.3% Japanese against 6.5%, too little contrast to read, and no way to tell what
-// free words cost from what the budgeted ones do. Seeded by the passage and day like everything else here, so a
-// passage repaints the same way.
+// between JITTER_MIN and 1. The budget, the swaps it pays for and whole sentences are the same either way. Until
+// 2026-10-20 the share was 0.5 to 1 and scaled the budget too: 5.3% Japanese against 6.5%, too little contrast to
+// read, and no way to tell what free words cost from what the budgeted ones do. Seeded by the passage and day like
+// everything else here, so a passage repaints the same way.
 export const JITTER_SHARE = 0.5;
 export const JITTER_MIN = 0.2;
 export function jitterFor(seed) {
@@ -543,98 +550,110 @@ const round3 = (x) => Math.round(x * 1000) / 1000;
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 
 // A swap's listed words with their estimates: the host's k and sd (knowledge.json), else the prior for the word's status,
-// and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance.
-function costOf(s, words) {
+// and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance; a whole
+// sentence also costs its translation's price. expected: the lookups predicted if it is read, every word and the
+// translation.
+function costOf(s, words, price) {
   const listed = (s.words || [s.word || s.f]).map((ja) => {
     const w = words.get(ja);
     const k = Number.isFinite(w?.k) ? w.k : w?.status === 'known' ? KNOWN_PRIOR_K : PRIOR_K;
     return { ja, w, k, sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p: peekChance(k) };
   });
   const due = listed.filter((x) => x.p >= FREE_P);
-  return { s, listed, due, cost: sum(due.map((x) => x.p)), expected: sum(listed.map((x) => x.p)) };
+  const translation = s.kind === 'sentence' ? price : 0;
+  return { s, listed, due, cost: sum(due.map((x) => x.p)) + translation, expected: sum(listed.map((x) => x.p)) + translation };
 }
 
 // A passage's swaps, picked from every validated candidate when results are read from the cache, so new estimates, a
 // new budget or another intensity on the same side of normal never cost a model call. Returns { swaps, plan }: plan says
-// how the amount was chosen ({ level, intensity: its factor, jitter, limit: swaps kept, candidates, budget: lookups
-// the passage may spend, expected: lookups predicted if it is read }), logged with the passage's shown record.
-// A swap whose listed words are all known at a glance (mean lookup chance under FREE_P) is free: kept wherever the
-// model offered it, but for the passage's random thinning (jitter, the share kept: 1 for half the passages, see
-// jitterFor), which keeps each with that chance. The others spend the budget: budgetPer100 (the level's,
-// intensityBudget) per 100 words of the passage, whatever the thinning, each costing the lookup chances of its words
-// not known at a glance. They go by learning value, a lookup chance near TARGET_P for the least-known word in them, judged on k
-// drawn from N(k, sd) so uncertain words still get shown. One with an active word not shown today goes first, outside
-// the budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
-// sentence (a full sentence passes to the next candidate); the first that doesn't fit gets in with probability
-// remaining / cost, so short passages still get learning words on average. The popup's density, when set, caps the
-// total: budgeted swaps first, then free ones. One use per Japanese word. Seeded by the passage and day, so a passage
-// repaints the same way.
-// At full intensity every candidate is shown: no ceiling, no thinning, no budget, and a Japanese word may be used again
-// where the passage says its English again (only exact repeats are dropped); bigger swaps first.
+// how the amount was chosen ({ level, intensity: its factor, jitter: the share of free swaps kept, limit: swaps kept,
+// candidates: distinct ones the passage can place, budget: lookups the passage may spend if read, expected: lookups
+// predicted if it is read, sentencePrice: what a whole sentence cost }), logged with the passage's shown record.
+// Only candidates text.js locate places in the passage count, as applySwaps will place them, and of those that overlap
+// only the first kept. A swap whose listed words are all known at a glance (mean lookup chance under FREE_P), and that
+// is not a whole sentence, is free: kept wherever the model offered it, bigger swaps first, but for the passage's random
+// thinning (jitter, 1 for half the passages, see jitterFor), which keeps each with that chance. The others spend the
+// budget: budgetPer100 (the level's, intensityBudget) per 100 words of the passage, whatever the thinning. A word or
+// phrase costs the lookup chances of its words not known at a glance, a whole sentence sentencePrice (SENTENCE_PRICE
+// without one from the host) and the chances of its words not known at a glance. They go by learning value, a lookup
+// chance near TARGET_P: for the least-known word in them, judged on k drawn from N(k, sd) so uncertain words still get
+// shown, or for a sentence of free words, its price. One with an active word not shown today goes first, outside the
+// budget, so new words gather evidence. Then the rest while their cost fits, at most perSentence of them in one
+// sentence, a whole sentence only alone in its sentence (a full sentence passes to the next candidate); the first that
+// doesn't fit gets in with probability remaining / cost, so short passages still get learning words on average. The
+// popup's density, when set, caps the total: budgeted swaps first, then free ones. One use per Japanese word. Seeded by
+// the passage and day, so a passage repaints the same way.
+// Full is the same with no budget: everything is free, so every candidate is kept, bigger swaps first, with no
+// per-sentence cap, density cap or thinning, and a Japanese word again where the passage says its English again, as
+// the full prompt asks.
 export function planSwaps(level, swaps, text, sharedWords, { density = 0, budgetPer100, seed = 0, shownToday = [],
-  intensity = 0, jitter = 1 } = {}) {
+  intensity = 0, jitter = 1, sentencePrice } = {}) {
   const words = new Map((sharedWords || []).map((w) => [w.ja, w]));
-  if (intensity >= INTENSITY_FULL) {
-    const seen = new Set();
-    const all = swaps.filter((s) => {
-      const key = JSON.stringify([s.o, s.f, s.ctx || '']);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).sort((a, b) => (SIZE[a.kind] ?? 2) - (SIZE[b.kind] ?? 2)); // stable: the model's order within a size
-    return { swaps: all, plan: { level: INTENSITY_FULL, intensity: FULL_PLAN_FACTOR, jitter: 1, limit: all.length, candidates: all.length,
-      expected: round3(sum(all.map((s) => costOf(s, words).expected))) } };
+  const full = intensity >= INTENSITY_FULL;
+  const price = sentencePrice > 0 && sentencePrice <= 1 ? sentencePrice : SENTENCE_PRICE;
+  const starts = sentenceStarts(text);
+  const items = []; // distinct candidates the passage can place, in the model's order
+  const distinct = new Set();
+  for (const s of new Set(swaps)) {
+    const key = JSON.stringify([s.kind || 'word', s.o, s.f, s.ctx || '']);
+    const place = distinct.has(key) ? null : locate({ text: String(text) }, s.o, s.ctx);
+    distinct.add(key);
+    if (place) items.push({ ...costOf(s, words, price), place, sentence: sentenceAt(place.start, starts) });
   }
-  const unique = oncePerWord(swaps);
-  const planOf = (kept, budget, expected) => ({ swaps: kept, plan: { level: intensity, intensity: intensityFactor(intensity),
-    jitter, limit: kept.length, candidates: unique.length, budget: round3(budget), expected: round3(expected) } });
-  if (intensity <= INTENSITY_OFF) return planOf([], 0, 0);
-  const cap = density > 0 ? swapTarget(text, density) : Infinity;
-  const per100 = Number.isFinite(budgetPer100) ? Math.max(0, budgetPer100) : intensityBudget(intensity);
-  const budget = (per100 * wordCount(text)) / 100;
+  const share = full ? 1 : jitter;
+  const budget = full ? Infinity : intensity <= INTENSITY_OFF ? 0
+    : ((Number.isFinite(budgetPer100) ? Math.max(0, budgetPer100) : intensityBudget(intensity)) * wordCount(text)) / 100;
+  const kept = [];
+  const planOf = () => ({ swaps: items.filter((c) => kept.includes(c)).map((c) => c.s), plan: { level: intensity,
+    intensity: full ? FULL_PLAN_FACTOR : intensityFactor(intensity), jitter: share, limit: kept.length, candidates: items.length,
+    ...(full ? {} : { budget: round3(budget) }), expected: round3(sum(kept.map((c) => c.expected))), sentencePrice: price } });
+  if (intensity <= INTENSITY_OFF) return planOf();
+  const cap = density > 0 && !full ? swapTarget(text, density) : Infinity;
+  const most = full ? Infinity : perSentence(intensity);
   const random = seededRandom(seed);
   const thinning = seededRandom((seed ^ 0x85ebca6b) >>> 0);
-  const offered = [...new Set(swaps)];
-  const items = offered.map((s) => costOf(s, words));
   const shown = new Set(shownToday);
-  const starts = sentenceStarts(text);
-  const ranked = items.filter((c) => c.due.length).map((c) => {
-    const lead = c.due.reduce((a, b) => (b.k < a.k ? b : a));
-    return { ...c, value: -Math.abs(lead.k + lead.sd * normal(random) - TARGET_K), sentence: sentenceOf(c.s, text, starts),
+  const PRICE_K = Math.log((1 - price) / price);
+  const ranked = (full ? [] : items.filter((c) => c.cost > 0)).map((c) => {
+    const lead = c.due.length ? c.due.reduce((a, b) => (b.k < a.k ? b : a)) : null;
+    return { c, value: -Math.abs((lead ? lead.k + lead.sd * normal(random) : PRICE_K) - TARGET_K),
       fresh: c.due.some((x) => x.w?.status === 'active' && !shown.has(x.ja.normalize('NFKC').toLowerCase())) };
-  }).sort((a, b) => b.value - a.value);
-  const keep = new Map(); // swap -> its cost item
+  }).sort((a, b) => b.value - a.value || size(a.c) - size(b.c)).map(({ c, fresh }) => Object.assign(c, { fresh }));
   // One use per Japanese word, decided as swaps are kept: a known word offered alone still shows where a phrase or
-  // sentence with it was offered first but didn't fit the budget.
+  // sentence with it was offered first but didn't fit the budget. Full may use a word again.
   const used = new Set();
-  const unused = (c) => !c.listed.some((x) => used.has(exactJa(x.ja)));
-  const most = perSentence(intensity);
-  const inSentence = new Map(); // sentence -> budgeted swaps kept in it
-  const room = (c) => c.sentence === null || (inSentence.get(c.sentence) || 0) < most;
+  const unused = (c) => full || !c.listed.some((x) => used.has(exactJa(x.ja)));
+  const clear = (c) => !kept.some((k) => c.place.start < k.place.end && k.place.start < c.place.end);
+  const inSentence = new Map(); // sentence -> budgeted swaps kept in it; a whole sentence fills it
+  const whole = (c) => c.s.kind === 'sentence';
+  const room = (c) => (inSentence.get(c.sentence) || 0) < (whole(c) ? 1 : most);
   const take = (c) => {
-    keep.set(c.s, c);
+    kept.push(c);
     for (const x of c.listed) used.add(exactJa(x.ja));
-    if (c.sentence !== null) inSentence.set(c.sentence, (inSentence.get(c.sentence) || 0) + 1);
+  };
+  const spend = (c) => {
+    take(c);
+    inSentence.set(c.sentence, whole(c) ? Infinity : (inSentence.get(c.sentence) || 0) + 1);
   };
   const fresh = ranked.find((c) => c.fresh);
-  if (fresh && cap > 0) take(fresh);
+  if (fresh && cap > 0) spend(fresh);
   let remaining = budget;
   for (const c of ranked) {
-    if (keep.size >= cap) break;
-    if (keep.has(c.s) || !unused(c) || !room(c)) continue;
-    if (c.cost <= remaining) { take(c); remaining -= c.cost; continue; }
-    if (random() < remaining / c.cost) take(c);
+    if (kept.length >= cap) break;
+    if (kept.includes(c) || !unused(c) || !room(c) || !clear(c)) continue;
+    if (c.cost <= remaining) { spend(c); remaining -= c.cost; continue; }
+    if (random() < remaining / c.cost) spend(c);
     break;
   }
-  // Free swaps in the model's order; one thinned out uses its words too, so thinning keeps a word with chance jitter.
-  for (const c of items) {
-    if (keep.size >= cap) break;
-    if (c.due.length || !unused(c)) continue;
-    if (jitter >= 1 || thinning() < jitter) take({ ...c, sentence: null });
+  // Free swaps, bigger first, else in the model's order; one thinned out uses its words too, so thinning keeps a word
+  // with chance jitter.
+  for (const c of items.filter((x) => full || !x.cost).sort((a, b) => size(a) - size(b))) {
+    if (kept.length >= cap) break;
+    if (!unused(c) || !clear(c)) continue;
+    if (share >= 1 || thinning() < share) take(c);
     else for (const x of c.listed) used.add(exactJa(x.ja));
   }
-  const kept = offered.filter((s) => keep.has(s));
-  return planOf(kept, budget, sum(kept.map((s) => keep.get(s).expected)));
+  return planOf();
 }
 
 // planSwaps' swaps alone, at the usual intensity and without thinning.
