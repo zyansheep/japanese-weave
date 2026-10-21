@@ -1,6 +1,6 @@
 """The dictionary (data/dictionary.tsv, built by tools/build_dictionary.py; docs/dictionary.md): every common JMdict
-entry with its frequency rank, for finding the entry a word belongs to and for indexing English glosses. Python 3.9+,
-standard library only.
+entry and the other entries ranked as well as a typical common one, with their frequency ranks, for finding the entry
+a word belongs to and for indexing English glosses. Python 3.9+, standard library only.
 
   d = dictionary.load()
   d.find('なります')['ja'] == 'なる'       # as written or a conjugated form (inflection.py), as knowledge.py matches
@@ -9,11 +9,12 @@ standard library only.
 
 Entries are dicts: id (the JMdict sequence number, stable), ja (as normally written), kana (reading, hiragana),
 romaji, en (a short gloss), glosses ([[gloss, ...] per sense], the first sense first), pos (JMdict part-of-speech
-tags, the first sense's first), score (geometric mean of the JPDB and BCCWJ ranks, None without either), jpdb, bccwj,
-common (bit 1: the written form is marked common in JMdict, bit 2: the reading is), loan (JMdict's source languages,
-'kata' for a katakana word without one, '' if not a loanword), swap (build_candidates.py's filters: can stand in for
-an English word), forms (other spellings), rank (1 is the most frequent; entries without a score come last) and kanji
-(the kanji of the written form). The file is in rank order.
+tags, the first sense's first), score (geometric mean of the JPDB and BCCWJ ranks, None without either), jpdb,
+bccwj, common (0: JMdict marks no spelling common and the entry is kept for its rank; else bit 1: the written form
+is marked common, bit 2: the reading is), loan (JMdict's source languages, 'kata' for a katakana word without one,
+'' if not a loanword), swap (build_candidates.py's filters: can stand in for an English word), forms (other
+spellings), rank (1 is the most frequent; entries without a score come last) and kanji (the kanji of the written
+form). The file is in rank order.
 
 Loading splits the file into lines and nothing more; an entry becomes a dict when it is asked for, and each index is
 built on first use, so a caller pays only for the lookups it makes (docs/dictionary.md has the timings).
@@ -32,10 +33,11 @@ SENSES, GLOSSES, LIST = '|', ';', ','  # separators inside the glosses, pos and 
 NUMBERS = ('id', 'score', 'jpdb', 'bccwj', 'common')
 KANJI = re.compile('[㐀-䶿一-鿿豈-﫿]')
 JAPANESE = re.compile('[々ぁ-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]')
-WRITTEN, READING, SPELLING = 0, 1, 2  # how a spelling belongs to an entry, best first
+WRITTEN, READING, SPELLING = 0, 1, 2  # how a spelling belongs to an entry, best first: a kana form is a reading
 COMMONEST = {'the', 'and', 'for', 'not', 'one', 'with', 'something', 'someone', 'thing'}
 _KATAKANA = {c: c - 0x60 for c in range(ord('ァ'), ord('ヶ') + 1)}  # as kana.hiragana
 _SPACE = re.compile(r'[^\S\n]+')
+_KANA = re.compile('[\u3041-\u3096\u30a1-\u30fa\u30fc\u309d\u309e\u30fd\u30fe]+')  # as is_kana
 
 
 def fold_all(words):
@@ -144,7 +146,7 @@ class Dictionary:
                     forms = line[line.rindex('\t') + 1:]
                     if forms:
                         forms = forms.split(LIST)
-                        owners += [(i, SPELLING)] * len(forms)
+                        owners += [(i, READING if _KANA.fullmatch(f) else SPELLING) for f in forms]
                         words += forms
                 index = {}
                 for key, owner in zip(fold_all(words), owners):
@@ -169,7 +171,9 @@ class Dictionary:
     def written(self, word):
         """Entries written this way (their written form or another spelling, katakana and hiragana alike): written
         forms before other spellings, then by rank."""
-        found = [(via, i) for i, via in self.spellings().get(inflection.fold(word), ()) if via != READING]
+        key = inflection.fold(word)
+        found = [(via, i) for i, via in self.spellings().get(key, ())
+                 if via != READING or key in {inflection.fold(f) for f in self.entry(i)['forms']}]
         return [self.entry(i) for via, i in sorted(found)]
 
     def reading(self, kana):
@@ -192,10 +196,11 @@ class Dictionary:
     def find(self, word, kana='', en=''):
         """The entry a written word is, as written or a form of it (なります is なる, 確認します is 確認), or None.
         As inflection.Lexicon.entry: the fewest steps back from the word first, then its written form before its
-        reading before another spelling, then rank; a candidate must be of a kind the form can be (いります is 要る,
-        never 居る). With kana, an entry with that reading comes before one without. With en (a gloss, such as the
-        word state's), entries that tie on all that (homographs: つける attach and つける switch on) go to the one
-        whose glosses share the most English words with it. An affix written as on a card (〜時) is the word."""
+        reading or another kana spelling before another kanji spelling, then rank; a candidate must be of a kind the
+        form can be (いります is 要る, never 居る). With kana, an entry with that reading comes before one without.
+        With en (a gloss, such as the word state's), entries that tie on all that but rank (homographs: つける attach
+        and つける switch on) go to the one whose glosses share the most English words with it. An affix written as
+        on a card (〜時) is the word."""
         key = (word, kana, en)
         if key not in self._found:
             self._found[key] = self._find(word.strip('〜～~') or word, kana, en)

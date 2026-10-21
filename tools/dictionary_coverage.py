@@ -41,10 +41,11 @@ def how(d, word, entry):
 
 def resolve(d, words):
     """For (word, kana, en) triples (kana and en may be ''): {n, resolved, how: {way: n}, misses: [word],
-    entries: {word: [ja, kana, id, way]}, other_reading: [[word, kana, ja, kana]] (found, but not under the word's
-    reading), unrelated: [[word, en, ja, entry en]] (the word's gloss and the entry's share no English word: perhaps
-    the wrong entry; check by hand)}."""
-    out = {'n': 0, 'resolved': 0, 'how': {}, 'misses': [], 'entries': {}, 'other_reading': [], 'unrelated': []}
+    entries: {word: [ja, kana, id, way]}, frequent: [word] (resolved to an entry JMdict doesn't mark common),
+    other_reading: [[word, kana, ja, kana]] (found, but not under the word's reading), unrelated: [[word, en, ja,
+    entry en]] (the word's gloss and the entry's share no English word: perhaps the wrong entry; check by hand)}."""
+    out = {'n': 0, 'resolved': 0, 'how': {}, 'misses': [], 'entries': {}, 'frequent': [], 'other_reading': [],
+           'unrelated': []}
     for word, kana, en in words:
         out['n'] += 1
         entry = d.find(word, kana, en)
@@ -55,6 +56,8 @@ def resolve(d, words):
         way = how(d, word, entry)
         out['how'][way] = out['how'].get(way, 0) + 1
         out['entries'][word] = [entry['ja'], entry['kana'], entry['id'], way]
+        if not entry['common']:
+            out['frequent'].append(word)
         if kana and inflection.fold(kana) not in d._readings(entry['rank'] - 1):
             out['other_reading'].append([word, kana, entry['ja'], entry['kana']])
         if dictionary.english_words(en) and not dictionary.english_words(en) & dictionary.english_words(
@@ -124,6 +127,8 @@ def text(out):
         share = 100 * r['resolved'] / r['n'] if r['n'] else 100
         ways = ', '.join(f'{n} {way}' for way, n in sorted(r['how'].items(), key=lambda kv: -kv[1]))
         lines.append(f'{name}: {r["resolved"]}/{r["n"]} resolve ({share:.1f}%; {ways})')
+        if r['frequent']:
+            lines.append(f'  {len(r["frequent"])} to entries not marked common: {" ".join(r["frequent"])}')
         if r['misses']:
             lines.append(f'  misses: {" ".join(r["misses"])}')
         if r['other_reading']:

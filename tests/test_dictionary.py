@@ -64,16 +64,28 @@ WORDS = [
     word(2020680, [('時', True, [])], [('じ', True, [])], [(['suf', 'ctr'], [], ["hour", "o'clock"], [])]),
     word(1999990, [('稀語', True, [])], [('きご', True, [])], [(['n'], [], ['rare word'], [])]),
     word(1998880, [('珍語', True, [])], [('ちんご', True, [])], [(['n'], [], ['odd word'], [])]),
+    word(2029080, [], [('ね', True, []), ('ねえ', True, [])], [(['prt'], [], ['right?', "isn't it?"], [])]),
+    # not marked common: kept when ranked within FREQUENT by spellings no common entry has
+    word(1590880, [('関数', False, [])], [('かんすう', False, [])], [(['n'], [], ['function'], [])]),
+    word(2261500, [('伯母さん', False, [])], [('おばさん', False, [])], [(['n'], ['uk'], ['aunt'], [])]),
+    word(1292450, [('再帰', False, [])], [('さいき', False, [])], [(['n'], [], ['recursion'], [])]),
+    word(2654270, [], [('て', False, [])], [(['prt'], [], ['and'], [])]),
+    word(1997770, [('無名語', False, [])], [('むめいご', False, [])], [(['n'], [], ['unranked word'], [])]),
+    word(2266990, [('姉', False, [])], [('ねえ', False, [])], [(['n'], [], ['older sister'], [])]),
 ]
+COMMON = 19  # the first 19 words above have a spelling marked common
 JPDB = [('なる', 'なる', 16, ''), ('成る', 'なる', 500, ''), ('いる', 'いる', 18, 18), ('要る', 'いる', 600, ''),
         ('確認', 'かくにん', 400, ''), ('かける', 'かける', '', 202), ('掛ける', 'かける', 900, ''),
         ('いけない', 'いけない', 279, ''), ('オッケー', 'おっけー', 4753, ''), ('タバコ', 'たばこ', 10598, ''),
         ('実は', 'じつは', 595, ''), ('そう', 'そう', 31, 31), ('手', 'て', 114, ''), ('から', 'から', 9, 9),
-        ('殻', 'から', 20000, ''), ('早い', 'はやい', 300, ''), ('時', 'じ', 700, ''), ('稀語', 'きご', 90000, '')]
+        ('殻', 'から', 20000, ''), ('早い', 'はやい', 300, ''), ('時', 'じ', 700, ''), ('稀語', 'きご', 90000, ''),
+        ('関数', 'かんすう', 43708, ''), ('おばさん', 'おばさん', 4090, ''), ('再帰', 'さいき', 104426, ''),
+        ('て', 'て', 159, 159), ('ね', 'ね', 19, 19), ('姉', 'ねえ', 5000, '')]
 BCCWJ = [('なる', 'なる', 100044), ('成る', 'なる', 19), ('居る', 'いる', 13), ('要る', 'いる', 1409),
          ('確認', 'かくにん', 500), ('かける', 'かける', 536048), ('掛ける', 'かける', 159), ('実は', 'じつは', 473),
          ('そう', 'そう', 57), ('手', 'て', 131), ('から', 'から', 22), ('殻', 'から', 15000), ('早い', 'はやい', 200),
-         ('時', 'じ', 400)]
+         ('時', 'じ', 400), ('関数', 'かんすう', 3632), ('おばさん', 'おばさん', 2895), ('再帰', 'さいき', 43534),
+         ('て', 'て', 3)]
 LEXICON = [{'ja': '実は', 'en': 'actually', 'hint': 'jitsu wa', 'kana': 'じつは'},
            {'ja': 'そう', 'en': 'so / that way', 'hint': 'sō', 'kana': 'そう'}]
 
@@ -119,8 +131,8 @@ class Build(Fixture):
         self.assertIn('CC BY-SA 4.0', lines[1])
         self.assertIn('# jmdict: file fixture sha256 ' + '0' * 64, lines)
         self.assertIn('\t'.join(dictionary.FIELDS), lines)
-        self.assertEqual(len(self.d), len(WORDS))
-        self.assertEqual(len({e['id'] for e in self.d}), len(WORDS))
+        self.assertEqual(len(self.d), COMMON + 3)
+        self.assertEqual(len({e['id'] for e in self.d}), len(self.d))
 
     def test_written_as_normally_written(self):
         ja = {e['id']: e['ja'] for e in self.d}
@@ -175,6 +187,19 @@ class Build(Fixture):
         self.assertEqual(self.d.get(2137720)['en'], 'so / that way')  # the gloss goes to the swappable homograph
         self.assertEqual(self.d.get(1006610)['en'], 'appearing that / seeming that')
 
+    def test_entries_not_marked_common_are_kept_for_their_rank(self):
+        functions = self.d.get(1590880)
+        self.assertEqual((functions['common'], functions['score']), (0, round((43708 * 3632) ** 0.5)))
+        self.assertEqual((self.d.get(2261500)['ja'], self.d.get(2261500)['common']), ('おばさん', 0))
+        self.assertIsNone(self.d.get(1292450))  # ranked past FREQUENT
+        self.assertIsNone(self.d.get(2654270))  # its only rank is the common 手's reading て
+        self.assertIsNone(self.d.get(1997770))  # no rank
+        self.assertEqual(sum(e['common'] > 0 for e in self.d), COMMON)
+        self.assertEqual(sum(e['common'] == 0 for e in self.d), 3)
+        self.assertEqual(self.d.get(2266990)['common'], 0)  # 姉 read ねえ: its own spelling, not ね's
+        common_only = build_dictionary.build(WORDS, {}, {}, ({}, []), frequent=0)
+        self.assertEqual(len(common_only), COMMON)
+
     def test_gloss_cap(self):
         senses = [{'gloss': [{'text': f'gloss {i}-{j}'} for j in range(7)]} for i in range(3)]
         out = build_dictionary.glosses(senses)
@@ -199,6 +224,14 @@ class Lookups(Fixture):
         self.assertEqual(self.d.find('そう', 'そう', 'appearing / seeming')['id'], 1006610)
         self.assertEqual(self.d.find('そう', 'そう', 'in such manner / that way')['id'], 2137720)
         self.assertEqual(self.d.find('そう')['id'], 2137720)
+
+    def test_a_kana_spelling_counts_as_a_reading(self):
+        # ねえ is a kana spelling of ね and the reading of 姉 (an entry not marked common): rank decides, not which
+        self.assertEqual(self.d.find('ねえ')['id'], 2029080)
+        self.assertEqual(self.d.find('ねえ', 'ねえ', "right? / isn't it?")['id'], 2029080)
+        self.assertEqual(self.d.find('ねえ', 'ねえ', 'big sister')['id'], 2266990)
+        self.assertEqual([e['id'] for e in self.d.written('ねえ')], [2029080])
+        self.assertEqual([e['id'] for e in self.d.reading('ねえ')], [2029080, 2266990])
 
     def test_written_reading_romaji_and_id(self):
         self.assertEqual([e['id'] for e in self.d.written('速い')], [1404975])
@@ -236,7 +269,8 @@ class Coverage(Fixture):
             home = Path(home)
             state = {'words': [{'ja': ja, 'kana': kana, 'en': en} for ja, kana, en in
                                (('実は', 'じつは', 'actually'), ('そう', 'そう', 'so / that way'),
-                                ('タバコ', 'たばこ', 'cigarette'), ('マジ', 'まじ', 'serious'), ('察', 'さつ', 'none'))]}
+                                ('タバコ', 'たばこ', 'cigarette'), ('マジ', 'まじ', 'serious'), ('察', 'さつ', 'none'),
+                                ('おばさん', 'おばさん', 'aunt'))]}
             (home / 'state.json').write_text(json.dumps(state, ensure_ascii=False), encoding='utf-8')
             with open(home / 'anki.csv', 'w', encoding='utf-8', newline='') as f:
                 f.write('ja,en,hint,kana,interval\nタバコ,cigarette,tabako,たばこ,30\nマジ,serious,maji,まじ,20\n')
@@ -245,20 +279,22 @@ class Coverage(Fixture):
             con = sqlite3.connect(home / 'interactions.sqlite')
             con.execute('create table interactions (id integer primary key, at integer, surface text, kind text, '
                         'word text, dwell_ms integer, view text, context text, position integer, uid text)')
-            for w in ('なります', 'なります', '実は', '。', 'これは文です。', '関数'):
+            for w in ('なります', 'なります', '実は', '。', 'これは文です。', '関数', '再帰'):
                 con.execute("insert into interactions (at, surface, kind, word, dwell_ms, view, context, position) "
                             "values (0, 't3', 'peek', ?, 900, '', '', 0)", (w,))
             con.commit()
             con.close()
             out = dictionary_coverage.report(home, self.path, Path(self.tmp.name) / 'lexicon.csv')
         self.assertEqual((out['lexicon']['resolved'], out['lexicon']['n'], out['lexicon']['other_gloss']), (2, 2, []))
-        self.assertEqual((out['state']['resolved'], out['state']['n'], out['state']['misses']), (3, 5, ['マジ', '察']))
+        self.assertEqual((out['state']['resolved'], out['state']['n'], out['state']['misses']), (4, 6, ['マジ', '察']))
+        self.assertEqual(out['state']['frequent'], ['おばさん'])  # resolved to an entry not marked common
         self.assertEqual(out['state']['entries']['そう'][2], 2137720)
         self.assertEqual((out['anki']['resolved'], out['anki']['misses']), (1, ['マジ']))
         self.assertEqual(out['log']['translations'], 1)
         self.assertEqual(out['unlisted']['sentences'], ['これは文です。'])
         self.assertEqual((out['unlisted']['resolved'], out['unlisted']['misses'], out['unlisted']['how']),
-                         (1, ['関数'], {'form': 1}))
+                         (2, ['再帰'], {'form': 1, 'written': 1}))
+        self.assertEqual(out['unlisted']['frequent'], ['関数'])
         self.assertEqual(out['knowledge_unlisted']['sentences'], ['これは文です。'])
 
 
@@ -270,8 +306,10 @@ class Committed(unittest.TestCase):
         cls.d = dictionary.load()
 
     def test_every_common_entry_in_rank_order(self):
-        self.assertGreater(len(self.d), 22000)
         entries = list(self.d)
+        self.assertGreater(sum(e['common'] > 0 for e in entries), 22000)
+        frequent = [e for e in entries if e['common'] == 0]
+        self.assertTrue(frequent and all(e['score'] <= build_dictionary.FREQUENT for e in frequent))
         self.assertEqual(len({e['id'] for e in entries}), len(entries))
         scores = [e['score'] for e in entries]
         ranked = scores[:scores.index(None)] if None in scores else scores
@@ -290,6 +328,7 @@ class Committed(unittest.TestCase):
     def test_fast_folding_matches_inflection_on_every_spelling(self):
         words = [s for e in self.d for s in (e['ja'], e['kana'], *e['forms'])]
         self.assertEqual(dictionary.fold_all(words), [inflection.fold(w) for w in words])
+        self.assertEqual([bool(dictionary._KANA.fullmatch(w)) for w in words], [dictionary.is_kana(w) for w in words])
 
 
 if __name__ == '__main__':

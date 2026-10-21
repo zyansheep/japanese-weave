@@ -1,7 +1,8 @@
 // The dictionary (data/dictionary.tsv, built by tools/build_dictionary.py; docs/dictionary.md): every common JMdict
-// entry with its frequency rank, one per line in rank order. parse() gives the entries as scripts/dictionary.py does:
-// id (JMdict sequence number), ja, kana, romaji, en, glosses ([[gloss, ...] per sense]), pos, score, jpdb, bccwj,
-// common, loan, swap, forms, rank (1 is the most frequent) and kanji (of the written form).
+// entry and the others ranked as well as a typical common one, one per line in rank order. parse() gives the entries
+// as scripts/dictionary.py does: id (JMdict sequence number), ja, kana, romaji, en, glosses ([[gloss, ...] per
+// sense]), pos, score, jpdb, bccwj, common (0 for an entry kept for its rank alone), loan, swap, forms, rank (1 is the
+// most frequent) and kanji (of the written form).
 export const FIELDS = ['id', 'ja', 'kana', 'romaji', 'en', 'glosses', 'pos', 'score', 'jpdb', 'bccwj', 'common', 'loan',
   'swap', 'forms'];
 const NUMBERS = ['id', 'score', 'jpdb', 'bccwj', 'common'];

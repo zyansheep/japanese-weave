@@ -39,5 +39,7 @@ describe('dictionary', () => {
     expect(new Set(entries.map((e) => e.id)).size).toBe(entries.length);
     const jitsu = entries.find((e) => e.id === 1320830);
     expect([jitsu.ja, jitsu.romaji, jitsu.en]).toEqual(['実は', 'jitsu wa', 'actually']);
+    const functions = entries.find((e) => e.id === 1590880);  // not marked common in JMdict: kept for its rank
+    expect([functions.ja, functions.common, functions.score <= 20000]).toEqual(['関数', 0, true]);
   });
 });

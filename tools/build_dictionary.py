@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Builds data/dictionary.tsv: every common JMdict entry (about 22,600), with the frequency ranks of
-tools/build_candidates.py (the geometric mean of the JPDB and BCCWJ ranks) and without its word-by-word review.
-Entries without a rank are kept and come after the ranked ones. build_candidates.py's filters (parts of speech,
-register, katakana, length) become a flag on each entry, swap, instead of dropping it.
+tools/build_candidates.py (the geometric mean of the JPDB and BCCWJ ranks) and without its word-by-word review, plus
+the other JMdict entries ranked within FREQUENT (about 4,300: 関数, 変数, フォルダ, おばさん), which have common 0.
+Common entries without a rank are kept and come after the ranked ones. build_candidates.py's filters (parts of
+speech, register, katakana, length) become a flag on each entry, swap, instead of dropping it.
 
   python3 tools/build_dictionary.py             # downloads the sources once into ~/.cache/japanese-weave-build
-  python3 tools/build_dictionary.py --jmdict jmdict-eng-common.json --jpdb jpdb_freq.csv --bccwj term_meta_bank_1.json
+  python3 tools/build_dictionary.py --jmdict jmdict-eng.json --jpdb jpdb_freq.csv --bccwj term_meta_bank_1.json
 
 Sources (SOURCES below has the exact URLs and sha256 sums): JMdict (EDRDG, CC BY-SA 4.0) via jmdict-simplified,
-English, common entries only; JPDB v2.2 and BCCWJ frequency lists via Kuuuube/yomitan-dictionaries. Entries that are
+English, all entries (an entry is common when one of its spellings is); JPDB v2.2 and BCCWJ frequency lists via
+Kuuuube/yomitan-dictionaries. Entries that are
 in data/lexicon.csv keep its reviewed gloss and romaji (the review fixed romaji at morpheme boundaries, 実は jitsu wa,
 which kana.romaji can't). Three things differ from build_candidates.py: a word written in kana is ranked by its kanji
 spellings too (こと is 15th, not 1,419th: BCCWJ files it under 事), a search-only or rare kanji spelling is never the
@@ -37,10 +39,10 @@ from kana import hiragana, is_kana, romaji  # noqa: E402
 SOURCES = {
     'jmdict': {
         'url': 'https://github.com/scriptin/jmdict-simplified/releases/download/3.6.2%2B20261019180022/'
-               'jmdict-eng-common-3.6.2%2B20261019180022.json.zip',
-        'file': 'jmdict-eng-common-3.6.2+20261019180022.json.zip',
-        'sha256': 'd9a43b326561f9d88d7b1acc4cab5ea2b834d3634f119548c427ab2f772d7841',
-        'member': 'jmdict-eng-common-3.6.2.json',
+               'jmdict-eng-3.6.2%2B20261019180022.json.zip',
+        'file': 'jmdict-eng-3.6.2+20261019180022.json.zip',
+        'sha256': 'ef3ea475127ce2a85c60baa3ca5a8f7e33b836e02c4fad6633b3dd72d2b362c9',
+        'member': 'jmdict-eng-3.6.2.json',
     },
     'jpdb': {
         'url': 'https://raw.githubusercontent.com/Kuuuube/yomitan-dictionaries/'
@@ -67,7 +69,8 @@ MAX_GLOSS_CHARS = 60    # longer glosses are explanations, kept only when a sens
 ODD_KANJI = {'sK', 'rK', 'oK', 'iK'}  # search-only, rare, outdated, irregular: never the written form
 ODD_KANA = {'sk', 'ok', 'ik', 'rk'}
 KATAKANA = re.compile('^[ァ-ヺー・]+$')
-COMMON_WRITTEN, COMMON_READING = 1, 2  # bits of the common field
+COMMON_WRITTEN, COMMON_READING = 1, 2  # bits of the common field; 0 for an entry kept for its rank alone
+FREQUENT = 20000  # an entry JMdict doesn't mark common is kept when its score is at most this
 
 
 def sha256(path):
@@ -163,12 +166,15 @@ def swappable(w, written, reading):
     return bool(gloss) and not (gloss[:1].isupper() and not gloss.startswith('I '))
 
 
-def frequency(written, reading, kanji, jpdb, bccwj):
+def frequency(written, reading, kanji, jpdb, bccwj, taken=frozenset()):
     """(score, JPDB rank, BCCWJ rank) as build_candidates.py computes them; None where a list doesn't have the word.
     Kana-only entries collide with particles and homographs (殻 vs the particle から), so kanji words count only
     their written forms. Unlike build_candidates.py, a word written in kana counts its kanji spellings too: BCCWJ
-    files 掛ける under its kanji, so かける alone ranks 536,048th there."""
+    files 掛ける under its kanji, so かける alone ranks 536,048th there. Spellings in taken ((spelling, reading)
+    pairs) don't count: an entry JMdict doesn't mark common must not take the rank of a common homograph (the
+    particle て would rank as 手)."""
     forms = {written, *kanji[:2]} if not is_kana(written) else {written, reading, *kanji[:2]}
+    forms = [f for f in forms if (f, reading) not in taken]
     jr = min((jpdb[(f, reading)] for f in forms if (f, reading) in jpdb), default=None)
     br = min((bccwj[(f, reading)] for f in forms if (f, reading) in bccwj), default=None)
     if jr is None and br is None:
@@ -193,14 +199,27 @@ def read_lexicon(path):
     return {(r['ja'], hiragana(r['kana'])): r for r in rows}, rows
 
 
-def build(words, jpdb, bccwj, lexicon):
-    """The entries in rank order, as dicts with FIELDS."""
+def is_common(w):
+    """JMdict marks one of the entry's spellings common (jmdict-eng-common's entries)."""
+    return any(k['common'] for k in w['kanji'] + w['kana'])
+
+
+def build(words, jpdb, bccwj, lexicon, frequent=FREQUENT):
+    """The entries in rank order, as dicts with FIELDS: the common ones, and the others whose score is at most
+    frequent, counting only spellings no common entry has with the same reading."""
     by_spelling, _ = lexicon
+    taken = {(k['text'], hiragana(r['text'])) for w in words if is_common(w) for k in w['kanji'] + w['kana']
+             for r in w['kana']}
     entries = []
     for w in words:
+        common_entry = is_common(w)
+        if not (w['kana'] and (common_entry or frequent)):
+            continue
         written, reading, uk = written_form(w)
         kanji = [k['text'] for k in w['kanji'] if k['common']] or [k['text'] for k in w['kanji']]
-        score, jr, br = frequency(written, reading, kanji, jpdb, bccwj)
+        score, jr, br = frequency(written, reading, kanji, jpdb, bccwj, () if common_entry else taken)
+        if not common_entry and (score is None or score > frequent):
+            continue
         pos = list(dict.fromkeys(p for sense in w['sense'] for p in sense['partOfSpeech']))
         verb_u = reading.endswith('う') and any(p.startswith('v5u') for p in w['sense'][0]['partOfSpeech'])
         spellings = [k['text'] for k in w['kanji'] if k['common']] + [k['text'] for k in w['kanji'] if not k['common']]
@@ -208,6 +227,7 @@ def build(words, jpdb, bccwj, lexicon):
         forms = [f for f in dict.fromkeys(spellings) if f not in (written, reading)]
         common = (COMMON_WRITTEN if any(k['common'] and k['text'] == written for k in w['kanji'] + w['kana']) else 0) \
             | (COMMON_READING if any(k['common'] and hiragana(k['text']) == reading for k in w['kana']) else 0)
+        assert bool(common) == common_entry, w['id']  # 0 marks exactly the entries kept for their rank
         listed = by_spelling.get((written, reading))
         en = short_gloss(w['sense'][0]) or gloss_text(w['sense'][0]['gloss'][0]['text'])
         entries.append({
@@ -263,10 +283,13 @@ def write(path, entries, sources):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    p.add_argument('--jmdict', help='jmdict-eng-common JSON (default: download the pinned release)')
+    p.add_argument('--jmdict', help='jmdict-eng JSON, all entries (default: download the pinned release)')
     p.add_argument('--jpdb', help='JPDB v2.2 frequency TSV (default: download)')
     p.add_argument('--bccwj', help='BCCWJ term_meta_bank_1.json (default: download)')
     p.add_argument('--cache', default=str(CACHE), help='where downloads are kept (default: %(default)s)')
+    p.add_argument('--frequent', type=int, default=FREQUENT,
+                   help='keep entries JMdict does not mark common up to this score; 0 leaves them out '
+                        '(default: %(default)s)')
     p.add_argument('--lexicon', default=str(ROOT / 'data' / 'lexicon.csv'))
     p.add_argument('--out', default=str(ROOT / 'data' / 'dictionary.tsv'))
     args = p.parse_args()
@@ -275,16 +298,18 @@ def main():
     with open(paths['jmdict'], encoding='utf-8') as f:
         jmdict = json.load(f)
     lexicon = read_lexicon(args.lexicon)
-    entries = build(jmdict['words'], load_jpdb(paths['jpdb']), load_bccwj(paths['bccwj']), lexicon)
+    entries = build(jmdict['words'], load_jpdb(paths['jpdb']), load_bccwj(paths['bccwj']), lexicon, args.frequent)
     sources = {name: {'url': SOURCES[name]['url'], 'sha256': SOURCES[name]['sha256']} if not getattr(args, name)
                else {'file': paths[name].name, 'sha256': sha256(paths[name])} for name in SOURCES}
-    sources['jmdict'].update(version=jmdict.get('version'), dictDate=jmdict.get('dictDate'))
+    sources['jmdict'].update(version=jmdict.get('version'), dictDate=jmdict.get('dictDate'), frequent=args.frequent)
     write(args.out, entries, sources)
     keys = {(e['ja'], e['kana']) for e in entries}
     missing = [r['ja'] for r in lexicon[1] if (r['ja'], hiragana(r['kana'])) not in keys]
     ranked = sum(e['score'] is not None for e in entries)
-    print(f'{len(entries)} entries ({ranked} ranked, {sum(e["swap"] for e in entries)} swappable, '
-          f'{sum(bool(e["loan"]) for e in entries)} loanwords) -> {args.out}')
+    print(f'{len(entries)} entries ({sum(e["common"] > 0 for e in entries)} common, '
+          f'{sum(e["common"] == 0 for e in entries)} kept for their rank; {ranked} ranked, '
+          f'{sum(e["swap"] for e in entries)} swappable, {sum(bool(e["loan"]) for e in entries)} loanwords) '
+          f'-> {args.out}')
     if missing:
         print(f'{len(missing)} lexicon words have no entry with their spelling and reading: {" ".join(missing)}')
 
