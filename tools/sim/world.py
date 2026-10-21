@@ -74,6 +74,7 @@ DEFAULTS = dict(
     zipf_known=0.8, zipf_queue=1.0, zipf_offlist=1.0,
     # memory and habits
     rho=0.1, habit=0.9, check=0.02, form_check=0.1, sentence_p=0.2, day_sd=0.25,
+    inert=False,                # True: reading and lookups leave memory alone, and recall stays as when first shown
     chat_factor=1.0,            # chat scales both lookup chances by this too: a surface difference (PLAN.md row M)
     # reading: the true pace and cap, and the log of time on screen over the time reading it all takes
     pace=knowledge.PACE_MS, top=knowledge.READ_MAX, web_screen=(0.0, 1.0), chat_screen=(0.3, 0.8),
@@ -113,30 +114,41 @@ def day_name(at):
 class TrueWord:
     """One word's true memory and what the word state says about it."""
     __slots__ = ('row', 'ja', 'kind', 'S', 'last', 'ease', 'interval', 'form', 'weight', 'status', 'added',
-                 'changed', 'born', 'reads', 'lookups', 'shown', 'k0')
+                 'changed', 'born', 'reads', 'lookups', 'shown', 'frozen', 'k0')
 
     def __init__(self, row, kind, S, last, ease, interval=None):
         self.row, self.ja, self.kind, self.S, self.last, self.ease = row, row['ja'], kind, S, last, ease
         self.interval, self.form, self.weight = interval, None, 1.0
         self.status, self.added, self.changed, self.born = 'queue', '', '', None
         self.reads = self.lookups = self.shown = 0
+        self.frozen = None
         self.k0 = None  # with starting values from features: the true k on the first day (World._start_from_features)
 
-    def recall(self, t):
+    def recall(self, t, cfg=None):
+        """R at t; for an inert reader, R when the word was first shown, for good."""
+        if cfg is not None and cfg['inert']:
+            if self.frozen is None:
+                self.frozen = self.recall(t)
+            return self.frozen
         if self.S <= 0 or self.last is None:
             return 0.0
         return retention(self.S, (t - self.last) / DAY)
 
     def chance(self, t, cfg, factor=1.0, form=False):
         """True P(lookup | read) at t, as read() decides it."""
-        R = self.recall(t)
+        R = self.recall(t, cfg)
         return (1 - R) * min(1.0, factor * cfg['habit']) + R * min(1.0, factor * (cfg['form_check'] if form else
                                                                                    cfg['check']))
 
     def read(self, t, rng, cfg, factor=1.0, form=False):
-        """The word is read at t: whether it is looked up. Updates its memory."""
-        R = self.recall(t)
+        """The word is read at t: whether it is looked up. Updates its memory, unless the reader is inert."""
+        R = self.recall(t, cfg)
         self.reads += 1
+        if cfg['inert']:
+            looked = rng.random() < (1 - R) * min(1.0, factor * cfg['habit']) + R * min(
+                1.0, factor * (cfg['form_check'] if form else cfg['check']))
+            self.lookups += looked
+            return looked
         if rng.random() < R:
             looked = rng.random() < min(1.0, factor * (cfg['form_check'] if form else cfg['check']))
             if cfg['rho'] > 0:

@@ -135,11 +135,12 @@ def handle(message):
 
 def adaptive(state, words):
     """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
-    Never waits on the network: the refresh runs in its own process. Each word gets k, sd and free from knowledge.json
-    (fit: every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and
-    origin_at; free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own
-    priors. budget: normal's lookups per 100 words, the challenge when set, else intensity.BUDGETS[0]; the extension
-    scales the other levels from it (intensity.budget)."""
+    Never waits on the network: the refresh runs in its own process. Each word gets k (its long-term knowledge), sd,
+    free and read (when it was last read, for its current chance: knowledge.current_chance) from knowledge.json (fit:
+    every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and origin_at;
+    free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors.
+    recency: the fit's floor and the days back to the long-term chance. budget: normal's lookups per 100 words, the
+    challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget)."""
     know = knowledge.load()
     entries = know.get('words') if isinstance(know.get('words'), dict) else {}
     by_ja, today = {w['ja']: w for w in state['words']}, fwlib.today()
@@ -149,6 +150,8 @@ def adaptive(state, words):
             w['k'], w['sd'] = round(entry['k'], 2), round(entry['sd'], 2)
             if isinstance(entry.get('free'), bool):
                 w['free'] = entry['free']
+            if isinstance(entry.get('read'), list) and entry['read']:
+                w['read'] = entry['read']
             continue
         guess = knowledge.prior_estimate(know, knowledge.origin_at(by_ja.get(w['ja']), today))
         if guess is not None:
@@ -158,6 +161,9 @@ def adaptive(state, words):
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
     reply = {'challenge': challenge, 'budget': challenge or intensity.BUDGETS[0]}
+    recency = know.get('recency')
+    if isinstance(recency, dict) and isinstance(recency.get('floor'), (int, float)):
+        reply['recency'] = {'floor': recency['floor'], 'days': recency.get('days', knowledge.LONG_DAYS)}
     # knowledge.json sentencePrice: {surface: lookups per sentence read}, from the fit; without one the extension uses
     # its own default (levels.js SENTENCE_PRICE)
     prices = know.get('sentencePrice')

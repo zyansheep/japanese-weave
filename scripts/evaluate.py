@@ -27,7 +27,8 @@ same Log of the whole log.
 
   Command      at, word (its entry), kind: 'known' or 'learn'
   Group        one showing or episode: at (when it was scored), surface ('browser' or 't3'), key (surface, view,
-               context), episode (True for an episode), obs (its Observations)
+               context), episode (True for an episode), obs (its Observations), shown (when it was shown: its shown
+               record, else its first interaction, else at; the recency clock reads it, knowledge.read_clocks)
   Observation  at, day ('YYYY-MM-DD', local), surface, key, episode; word (the lexicon entry), written (the
                annotation), form (written is a conjugated form of word, not the word or its reading); y (1 opened,
                knowledge.GLANCE_Y a glance, 0 not opened); weight (replay's: 1 opened, else the larger of near and
@@ -37,10 +38,12 @@ same Log of the whole log.
                status (the word's that day: 'known', 'learning' or 'new', status_at); seen (the showings and
                episodes the word was in before this one)
 
-The models: "fit", the one fitter (knowledge.Fit, NEXT_STEPS step 4), refitted on everything before each day;
-"flat", the same with the prior by origin and Anki interval alone, without the word features (NEXT_STEPS step 13);
-"today", the online updates it replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance
-per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
+The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STEPS steps 4, 10 and 13), refitted on
+everything before each day, each observation at its clock (knowledge.read_clocks: the log up to its showing); "step4",
+the same fit without recency, every observation at the word's long-term chance; "flat", the fit with the prior by
+origin and Anki interval alone, without the word features (NEXT_STEPS step 13); "today", the online updates the fit
+replaced (knowledge.Online, fed the log in replay's order); and "constant", one chance per surface. CURRENT names the
+model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
 the model's own q against fwlib.FREE_P; first: each word's first FIRST exposures, where its prior decides most), the
@@ -49,7 +52,7 @@ difference against the first, day by day, with a 90% interval from resampling da
 model's q); on a simulated log (tools/sim), the true chances' loss too:
 the floor no model can beat.
 
-  python3 scripts/evaluate.py [--home DIR] [--models today,fit,constant] [--truth FILE] [--skip DAYS]
+  python3 scripts/evaluate.py [--home DIR] [--models step4,fit,today,constant] [--truth FILE] [--skip DAYS]
                               [--pace MS --top X]
 """
 import argparse
@@ -83,10 +86,11 @@ class Observation:
 
 
 class Group:
-    __slots__ = ('at', 'surface', 'key', 'episode', 'obs')
+    __slots__ = ('at', 'surface', 'key', 'episode', 'obs', 'shown')
 
-    def __init__(self, at, surface, key, episode, obs):
+    def __init__(self, at, surface, key, episode, obs, shown=None):
         self.at, self.surface, self.key, self.episode, self.obs = at, surface, key, episode, obs
+        self.shown = shown if shown is not None else at
 
 
 class Command:
@@ -168,7 +172,8 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
         notes = context['annotations']
         line = knowledge._line_height([n[2] for n in notes])
         day, surface, episode = day_of(at), key[0], kind == knowledge.EPISODE
-        group = Group(at, surface, key, episode, [])
+        shown = context.get('shown_at') or (items[0]['at'] if items else at)  # when it was read, for the clock
+        group = Group(at, surface, key, episode, [], min(shown, at))
         for ja, y, weight, index, near in found:
             written, _x, y_pos = notes[index]
             ms, count, share = knowledge.reading(surface, context, y_pos, line) or (0, 0, 1.0)
@@ -248,29 +253,43 @@ class Constant:
 
 
 class Fitted:
-    """The one fitter (knowledge.Fit, NEXT_STEPS step 4): a penalized maximum-likelihood fit of every event before the
-    day, at the log's reading pace and cap, each day starting from the day before's, with the free flags carried from
-    the day before as a refresh carries them (knowledge.free_flags, every word of the word state). frozen: the shared
-    parameters and prior widths held at their priors. plain: the prior without the word features (by origin and Anki
-    interval alone), the flat start the word features are compared with."""
+    """The one fitter (knowledge.Fit, NEXT_STEPS steps 4, 10 and 13): a penalized maximum-likelihood fit of every
+    event before the day, at the log's reading pace and cap, with the free flags carried from the day before as a
+    refresh carries them (knowledge.free_flags, every word of the word state). With recency each day's fit starts from
+    nothing, from two floors, as the day's first refresh does (knowledge.refresh); without, from the day before's.
+    frozen: the shared parameters and prior widths held at their priors. plain: the prior without the word features
+    (by origin and Anki interval alone), the flat start the word features are compared with."""
 
-    def __init__(self, frozen=False, plain=False):
-        self.frozen, self.plain, self.last, self.flags, self.origin = frozen, plain, None, {}, None
-        self.name = 'fit, priors held' if frozen else 'flat' if plain else 'fit'
+    def __init__(self, frozen=False, plain=False, recency=True):
+        self.frozen, self.plain, self.recency, self.last, self.flags, self.origin = frozen, plain, recency, None, {}, None
+        self.name = ('fit, priors held' if frozen else 'flat' if plain else 'fit') + ('' if recency else ', no recency')
 
     def fit(self, log, until):
         if log.origin is not self.origin:
             self.origin, self.last, self.flags = log.origin, None, {}
-        self.last = knowledge.Fit(log, until, start=self.last.state() if self.last else None, frozen=self.frozen,
-                                  free=self.flags, plain=self.plain)
+        start = self.last.state() if self.last and not self.recency else None  # with recency, from nothing each day
+        self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, free=self.flags, plain=self.plain,
+                                  recency=self.recency)
         self.flags = knowledge.free_flags(self.last, list(dict.fromkeys([w['ja'] for w in log.words] +
                                                                          self.last.words)), self.flags)
+        self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
+            else {}
 
     def predict(self, obs):
-        return self.last.q(obs.word, obs.surface, obs.form)
+        """At the observation's time since the word was last read (knowledge.read_clocks: the log up to its showing)."""
+        return self.last.q(obs.word, obs.surface, obs.form, *self.clocks.get(id(obs), (1.0, 0.0)))
 
 
-MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'flat': lambda: Fitted(plain=True)}
+class Stale(Fitted):
+    """The one fitter without recency (NEXT_STEPS step 4's model, with step 13's prior): every observation at the word's
+    long-term chance."""
+
+    def __init__(self):
+        super().__init__(recency=False)
+        self.name = 'step4'
+
+
+MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale, 'flat': lambda: Fitted(plain=True)}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 
@@ -444,7 +463,7 @@ def report_text(result, log):
 
 def add_arguments(parser):
     parser.add_argument('--home', help='the state dir (default: this one); a simulated one from tools/sim works too')
-    parser.add_argument('--models', default='today,fit,constant',
+    parser.add_argument('--models', default='step4,fit,today,constant',
                         help=f'comma-separated, the first is the reference: {", ".join(MODELS)}')
     parser.add_argument('--truth', help=f"a simulated log's ground truth (default: the state dir's {TRUTH}, if any)")
     parser.add_argument('--skip', type=int, default=0, metavar='DAYS', help='leave the first days unscored')

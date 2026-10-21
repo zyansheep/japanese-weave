@@ -12,15 +12,20 @@ const LOG_MAX = 500;
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
-// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k, its uncertainty sd and whether
-// it is known at a glance (free, with hysteresis); the challenge (normal's lookup budget), the budget, and the web's
-// price of a whole sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and
-// levels.js SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
+// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k (long-term), its uncertainty sd,
+// whether it is known at a glance (free, with hysteresis) and when it was last read (read: [time in ms, chance it was
+// the last read], for its current chance, levels.js currentChance); the recency term (the fit's floor and the days
+// back to the long-term chance); the challenge (normal's lookup budget), the budget, and the web's price of a whole
+// sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and levels.js
+// SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
 // 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
 // the experiment hides.
+const READS_MAX = 50;
 const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
+  const reads = (r) => (Array.isArray(r) ? r.filter((x) => Array.isArray(x) && x.length === 2 && num(x[0]) && num(x[1])
+    && x[1] >= 0 && x[1] <= 1).slice(0, READS_MAX) : []);
   const words = [];
   const seen = new Set();
   for (const w of data?.words || []) {
@@ -31,7 +36,8 @@ export function parseState(data) {
     seen.add(ja);
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
       status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
-      ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(armOk(w.arm) ? { arm: w.arm } : {}) });
+      ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(reads(w.read).length ? { read: reads(w.read) } : {}),
+      ...(armOk(w.arm) ? { arm: w.arm } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -44,6 +50,8 @@ export function parseState(data) {
     intensity: cleanIntensity(data?.prefs?.intensity_browser), // the web pages' level, as last saved by any machine
     budget: num(data?.budget) && data.budget > 0 ? data.budget : 0,
     sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
+    recency: num(data?.recency?.floor) && num(data?.recency?.days) && data.recency.days > 0
+      ? { floor: data.recency.floor, days: data.recency.days } : null,
     rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
       shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
     words,

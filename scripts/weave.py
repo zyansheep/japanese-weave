@@ -113,11 +113,12 @@ def exposure():
     return data.get('words', {}), days if isinstance(days, dict) else {}
 
 
-def chance(word, know=None):
+def chance(word, know=None, now_ms=None):
     """The chance the user looks a word up in chat: its estimate (knowledge.json, T3 offset) when the gloss log has
-    one, else from its status, known words at fwlib.KNOWN_PRIOR_K and the rest at the neutral prior."""
+    one, at now_ms its current chance if it isn't free (knowledge.word_estimate), else from its status, known words at
+    fwlib.KNOWN_PRIOR_K and the rest at the neutral prior."""
     know = know or {}
-    estimate = knowledge.word_estimate(know, word['ja'], 't3')
+    estimate = knowledge.word_estimate(know, word['ja'], 't3', now_ms)
     if estimate:
         return estimate[0]
     offset = (know.get('offset') or {}).get('t3', 0.0)
@@ -137,16 +138,20 @@ def examples(chances):
     return f'like "{a}" or "{b}"'
 
 
-def lists(state, seen=None, know=None, most=LEARN_MAX):
+def lists(state, seen=None, know=None, most=LEARN_MAX, now_ms=None, wait=True):
     """The word lists: (known at a glance, in list order; learning, best learning value first, at most `most` (None:
-    all); {ja: lookup chance} for every word in use). Known at a glance means a lookup chance under fwlib.FREE_P,
-    whatever the label; every other word in use is learning. Words in use are fwlib.introduced's, so none the
-    delayed-start experiment hides (fwlib.hidden)."""
+    all); {ja: lookup chance} for every word in use). Known at a glance means a long-term lookup chance under
+    fwlib.FREE_P (the free flag), whatever the label; every other word in use is learning, at its current chance at
+    now_ms (default: now). With wait, a learning word read so recently that its chance is under knowledge.SPACING_P,
+    where its long-term chance isn't, waits, in neither list (PLAN.md section 5, rule 2). Words in use are
+    fwlib.introduced's, so none the delayed-start experiment hides (fwlib.hidden)."""
     seen = seen or {}
     words = fwlib.introduced(state)
-    p = {w['ja']: chance(w, know) for w in words}
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    p = {w['ja']: chance(w, know, now_ms) for w in words}
+    waits = lambda w: wait and p[w['ja']] < knowledge.SPACING_P <= chance(w, know)
     free = [w for w in state['words'] if w['ja'] in p and p[w['ja']] < fwlib.FREE_P]
-    learning = sorted((w for w in words if p[w['ja']] >= fwlib.FREE_P),
+    learning = sorted((w for w in words if p[w['ja']] >= fwlib.FREE_P and not waits(w)),
                       key=lambda w: (-knowledge.learning_value(p[w['ja']]), -seen.get(w['ja'], {}).get('n', 0)))
     return free, learning[:most], p
 
@@ -212,8 +217,9 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     """The topical words for a chat's next reply, at most `most`, best first: dictionary entries code finds in the
     chat's latest turns (text: recent_turns; reading.Reader.found, so only spans a sense check can trust and never
     closed-class English). Each is a word of the state (one not introduced yet) or the entry as one ({ja, en, hint,
-    kana, id}), with p (its lookup chance in chat: its estimate, else its starting value, reading.starting_k), n (uses
-    in text) and days (the days of the last fwlib.READING_DAYS it came up on in the user's reading; days: exposure's).
+    kana, id}), with p (its lookup chance in chat: its estimate, its current chance now, else its starting value,
+    reading.starting_k; one read so recently that it waits, as in lists, is left out), n (uses in text) and days (the
+    days of the last fwlib.READING_DAYS it came up on in the user's reading; days: exposure's).
 
     Only words worth offering: an entry that can stand in for English (swap), not a number, counter or katakana word
     (the brief asks for neither); with no spelling in use (known or learning: listed already) or hidden by the
@@ -234,7 +240,7 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     finally:
         if own:
             reader.close()
-    blocked, queue = set(), {}
+    blocked, queue, now_ms = set(), {}, int(time.time() * 1000)
     for w in state['words']:
         if w['status'] != 'queue' or fwlib.hidden(w):
             blocked.add(fwlib.key(w['ja']))
@@ -249,10 +255,12 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
                 or KATAKANA.match(e['ja']) or e['en'].startswith('counter') or reading.is_number(e)):
             continue
         mine = next((queue[x] for x in spellings if x in queue), None)
-        estimate = knowledge.word_estimate(know or {}, mine['ja'], 't3') if mine else None
+        estimate = knowledge.word_estimate(know or {}, mine['ja'], 't3', now_ms) if mine else None
         chance = estimate[0] if estimate else knowledge.sigmoid(offset - reading.starting_k(know, e, mine))
         if chance < fwlib.FREE_P:
             continue
+        if estimate and chance < knowledge.SPACING_P <= knowledge.word_estimate(know or {}, mine['ja'], 't3')[0]:
+            continue  # read so recently it waits, as a learning word does (lists)
         word = dict(mine or {k: e[k] for k in ('ja', 'en', 'hint', 'kana', 'id')}, p=chance, n=n,
                     days=(days or {}).get(str(e['id']), 0))
         out.append(((word['days'] < fwlib.ELIGIBLE_DAYS, not e['common'], -n, e['rank']), word))
@@ -748,7 +756,7 @@ def calibration(text, state, level=0, know=None, seen=None, topical=()):
     total = english_words(rest) + sum(found.values()) + max(stray, len(fwlib.JAPANESE.findall(rest)) // 2)
     if total < SHORT:
         return ''
-    free_words, learning_words, p = lists(state, seen, know)
+    free_words, learning_words, p = lists(state, seen, know, wait=False)  # a word the reply used now waits
     free, learning = {w['ja'] for w in free_words}, {w['ja'] for w in learning_words}
     known = sum(n for ja, n in found.items() if ja in free)
     learned = sum(n for ja, n in found.items() if ja in learning)

@@ -249,7 +249,8 @@ async function chooser(ctx) {
   return (text, swaps) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
     return planSwaps(ctx.level, swaps, text, wordState?.words, { density: ctx.settings.density, budgetPer100,
-      sentencePrice: wordState?.sentencePrice, shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed) });
+      sentencePrice: wordState?.sentencePrice, shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed),
+      now: Date.now(), recency: wordState?.recency });
   };
 }
 
