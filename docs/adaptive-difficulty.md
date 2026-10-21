@@ -106,12 +106,17 @@ The update is the gradient of the log likelihood with P(open) = r * p (an open m
 
 The T3 offset follows the same gradients with respect to it, per message: s_offset (T3) += 0.02 * (sum over opened
 words of (y - p) - sum over the others of r * p * (1 - p) / (1 - r * p)) / (sum of the weights, 1 for an open).
+These updates are knowledge.Online, fed the log oldest first (knowledge.timeline); replay runs it on the whole log,
+and the evaluation harness (Checking the model, below) day by day.
 
 The reading model (pace, top) can't be checked on its own, but it changes how well opens are predicted. Once a day
 the replay is scored on a grid (pace 150-650 ms, top 0.5-0.9) by the mean log loss of P(open) for every listed word
 of every passage, each predicted before its own update with the read chance from time on screen alone; the best pair
 replaces the defaults once there are 60 browser opens to judge by (knowledge.json "reading"). Only browser passages
-are scored, but the pair is the reader's pace, so T3 messages use it too.
+are scored, but the pair is the reader's pace, so T3 messages use it too. This tuning can't be trusted yet: on the
+simulated reader (Checking the model, below), whose pace is 300 ms and cap 0.7, it picks 650 ms and 0.5, and on the
+live log a constant chance scores about as well as today's model on web rows. The one fitter (NEXT_STEPS step 4) fits
+pace and cap on both surfaces; until then the evaluation holds them fixed.
 
 ### Correcting for "only engaged episodes are seen" (T3 messages without a word count)
 
@@ -258,6 +263,8 @@ know is worth teaching it.
 ## Where it runs
 
 - `scripts/knowledge.py`: the model (pure replay from the log), selection value helpers, the controller, transitions.
+- `scripts/evaluate.py` and `tools/sim`: the evaluation harness and the simulated reader (Checking the model), run
+  by hand; nothing in the live path uses them.
 - With a collector, the replay runs there, next to the log and the word state: the collector refreshes
   knowledge.json every 10 minutes, and every other machine gets it with its cached copy of the state (hub.py). The
   collector only answers requests addressed to its own host name, so a web page can't read it through DNS rebinding.
@@ -303,11 +310,10 @@ counts as lighter and one into full as heavier, like any other step. Presses les
 decision, judged by where they end (trying the keys, or overshooting and stepping back, isn't evidence), and a level
 that ran out counts as normal before the next press. `fw.py calibrate` reports both (knowledge.json "calibration"):
 screen time per word and opens per 100 words by the share of Japanese in a passage, starting with passages that got
-none, the thinned-versus-untouched effect (or how far the two groups' shares are from the 0.5 points it needs), the chat
-side (T3 messages with a word count: lookups per 100 words, how many messages had none, and the lookups of listed words
-the model expected, read chance from the stays times p before each message's update, against those seen: how well
-calibrated the model is on chat), and per surface the presses and hours spent away from normal. Many lighter presses
-mean the default is too heavy, and the slowdown curve says how much each extra point of Japanese costs.
+none, the thinned-versus-untouched effect (or how far the two groups' shares are from the 0.5 points it needs), the
+model against what happened per surface and class, in lookups per 100 words read (Checking the model, below), and per
+surface the presses and hours spent away from normal. Many lighter presses mean the default is too heavy, and the
+slowdown curve says how much each extra point of Japanese costs.
 
 On web pages the scale goes one step further each way, -3..3. Off (-3) is no Japanese at all: woven pages go back to
 English at once, no passage goes to a model (not even one already queued), and no shown records, stays or other
@@ -326,8 +332,78 @@ further at an end restarts the clock.
   the most evidence.
 - `fw.py why WORD`: its prior, every scored observation with its weight, k over time, and moves. WORD may be a form
   of the word (なります).
-- `fw.py status`: the looked-up words lined up to come in next; `fw.py calibrate`: the 30 words opened most in the
-  last 30 days that the word list doesn't have, which is what chat replies slip in beyond it.
+- `fw.py status`: the looked-up words lined up to come in next; `fw.py calibrate`: the model per class against what
+  happened, and the 30 words opened most in the last 30 days that the word list doesn't have, which is what chat
+  replies slip in beyond it.
+- `fw.py evaluate [--models today,constant]`: models scored on the log day by day (Checking the model).
+
+## Checking the model
+
+PLAN.md section 10 says how model changes are judged; these are the tools.
+
+### The one unit: lookups per 100 words read
+
+Budgets and their checks share one unit (PLAN.md section 5). A planner assumes the passage will be read, so it
+divides the lookup chances it spends by the passage's words (levels.js planSwaps, weave.py's feedback line). A check
+weighs each shown word by its chance of having been read: knowledge.words_read gives a passage's words read, its words
+times the mean read chance (read_chance) over 20 evenly spaced depths, and a T3 message's paragraph by paragraph from
+its stays (stay_chance; where bands overlap, the paragraph's layout changed and it counts once), with the words of
+paragraphs T3 doesn't watch (those without Japanese) at the mean read chance of the ones it does. knowledge.per_100
+divides lookups by those words read.
+
+`fw.py calibrate` prints, from replay's record of every passage and message as the model stood before it
+(shown_record), per surface: the passages or messages with Japanese (blank ones have nothing to look up and don't
+count), words shown and read, lookups, and the budget in the same unit (a web passage's plan; for a chat message, the
+chat level in effect when it was shown, with the challenge as normal's; full has none). Then per class, the
+lookups expected (each word's best read chance times its P(peek)) and seen (a glance counts 0.6), per 100 words read,
+and seen over expected with a 90% interval from resampling days (knowledge.day_interval, a seeded percentile
+bootstrap over days, given from 5 days on). Calibrated means the interval lies inside 0.83-1.2. The classes:
+
+- costly: listed words with P(peek) at least 8% (fwlib.FREE_P) as the model stood; free: the others;
+- topical: chat words found by code (NEXT_STEPS step 14); none yet;
+- whole sentences: sentence translations (a 。 annotation, or a whole sentence glossed as one), not priced yet (step
+  5), so seen only;
+- off-list: words the lexicon doesn't have, at the prior's P(peek), as the chat feedback line prices them;
+- all lookups.
+
+On the simulated reader, an interval from a model 20% off passes 10-13% of the time with 3 days and 3-6% with 5, and
+a calibrated model's interval fits inside after about 14 days (`tools/sim/run.py calibration-days`).
+
+### The evaluation harness
+
+scripts/evaluate.py (`fw.py evaluate`) reads the log as replay does (knowledge.timeline and knowledge.observed: the
+same showings and episodes, read chances, line rule, glances, T3 noise and sentence translations) and scores models
+prequentially by day: each day, every model is fitted on the days before and predicts the day's observations. The
+score is the log loss of P(open) = read * q, with read from time on screen alone (at least 0.05) at a pace and cap held
+fixed for every model compared: the line rule depends on what was opened, so it weighs updates, never predictions.
+Chat rows count as well as web rows; episodes are fitted on but not scored. Per class (web and chat; known, learning
+and new by the word's status that day, from the word state's added and changed days; conjugated forms on their own;
+free and costly by each model's q) it gives the mean loss and seen over expected opens with an interval from
+resampling days; for each model against the first, the paired loss difference day by day with its interval and the
+days it did better; and on a simulated log, the loss of the true chances, the floor no model can beat.
+
+A model is any object with fit(log, until), which learns from the log's events before `until`, and predict(obs),
+its P(lookup | read) for one observation; the module docstring lists what a log and an observation carry, including
+each observation's time on screen, words and depth, so a model may fit its own pace. "today" is knowledge.Online,
+exactly replay's updates; "constant" is one chance per surface. The one fitter of step 4 is another model, and
+evaluate.CURRENT names the one knowledge.py runs.
+
+### The simulated reader
+
+tools/sim (`python3 tools/sim/run.py all`, about a minute) is a reader whose memory, reading and lookup habits are
+known: each word's recall decays on an FSRS-4.5 curve and grows more after longer gaps, and a lookup lowers it; a
+word is read with the chance the replay's own formula gives (one depth per passage, so the line rule holds); a word
+read and not recognised is looked up with chance 0.9, one recognised with chance 0.02 (0.1 for a conjugated form),
+both scaled by a mood factor per day. At the live log's volumes (web about 8,000 words and 5 lookups a day, chat about
+12,000 words and 35 lookups), its days go through feedback.record into a state dir with the truth beside them
+(truth.jsonl), so the real replay, calibrate and the harness read them unchanged. Its experiments: volumes,
+convergence of one word, recovery per class at 1, 2 and 4 weeks, the harness on a simulated log, the calibration
+window, the power of the delayed-start experiment, and recurrence intake. `run.py log DIR` writes a simulated state
+dir to look at.
+
+tests/test_yardsticks.py holds the check every model change must pass: a word starting at 27% whose true chance is
+5%, shown 3 times a day, crosses 8% within 300 exposures. Today's model settles near 11% (the pull toward the prior
+holds it there), so the test is an expected failure until step 4.
 
 ## Decisions from the review
 
