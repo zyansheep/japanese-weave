@@ -15,9 +15,11 @@ only where a sense check can trust it (Reader.trusted):
   is 中古 "used"). On the user's chats this halves what the most frequent option alone counts, mostly wrong senses
   ("script" as 本 "book / script", "data" as 資料), but some remain ("back" as 奥); the flags count about a quarter
   as many entries a day again.
-The chat's topical words take the main-meaning rule even with the flags (found(flags=False)): Claude places each one
-only where the English has its meaning, so it is the sense check there, and the flags, strict enough for code to
-swap alone, would leave out most words a conversation is about ("update" as 更新 is doubtful).
+The chat's topical words take the main-meaning rule even with the flags (topical), each span with whether the flags
+call it safe: weave.topical_words offers the safe ones first and a doubtful one only after them, and in a technical
+chat none, where a word's main meaning is often not the one meant ("frame" as 額, "value" as 価値). On 40 of the
+user's briefs the main-meaning rule alone offered 41% wrong senses, this 19%. The flags alone, strict enough for code
+to swap, would leave out words a conversation is about ("update" as 更新 is doubtful).
 Model-confirmed matches come through the Japanese a model wrote: in chat, Claude's own Japanese (japanese), through
 its <abbr> tags where a reply has them (dictionary.find on the word, its reading and its meaning), else the word
 state's words found by the script-aware matching (fwlib.pattern). A model's check of the doubtful spans in chat would
@@ -352,6 +354,18 @@ class Reader:
             i = self.trusted(span, node, flags)
             if i is not None:
                 out[i] += 1
+        return out
+
+    def topical(self, text):
+        """{entry position: (spans, safe spans)} for the English of a text (prose), by the main meaning (trusted with
+        flags False), for the chat's topical words: each span with whether the sense flags call its entry safe for that
+        English (without flags, none is)."""
+        out = {}
+        for span, node in self.spans(prose(text)):
+            i = self.trusted(span, node, False)
+            if i is not None:
+                n, safe = out.get(i, (0, 0))
+                out[i] = (n + 1, safe + (bool(self.flags) and any(h['safe'] for h in node['hits'] if h['entry'] == i)))
         return out
 
     def entries(self, positions):

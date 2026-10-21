@@ -272,21 +272,42 @@ SENSITIVE_FIELDS = frozenset(('med', 'pharm', 'dent', 'vet', 'psy', 'anat', 'phy
                               'stockm'))
 
 
+# A technical chat (is_technical): its latest turns have code, or a word whose first sense is computing (JMdict field
+# comp or internet: サーバー "server", 変数 "variable"). 86% of the user's prompts are. There a word's main meaning is
+# often not the one meant, so topical words take only matches the sense flags call safe, and a doubtful one only when
+# its own first sense is technical (TECHNICAL_WORD: 変数 "variable", 関数 "function").
+TECHNICAL = frozenset(('comp', 'internet'))
+TECHNICAL_WORD = TECHNICAL | {'math'}
+CODE_SPAN = re.compile(r'`[^`\n]+`')
+
+
+def is_technical(text, entries=()):
+    """Whether a chat's latest turns are technical: a fenced code block, two code spans or more, or one of the
+    dictionary entries found in them (entries: reading.Reader.entries) is a computing word by its first sense."""
+    raw = str(text or '')
+    return ('```' in raw or len(CODE_SPAN.findall(raw)) >= 2
+            or any(TECHNICAL.intersection(e.get('field') or ()) for e in entries))
+
+
 def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     """The topical words for a chat's next reply, at most `most`, best first: dictionary entries code finds in the
-    chat's latest turns (text: recent_turns; reading.Reader.found, so only spans a sense check can trust and never
-    closed-class English). Each is a word of the state (one not introduced yet) or the entry as one ({ja, en, hint,
-    kana, id}), with p (its lookup chance in chat: its estimate, its current chance now, else its starting value,
-    reading.starting_k; one read so recently that it waits, as in lists, is left out), n (uses in text) and days (the
-    days of the last fwlib.READING_DAYS it came up on in the user's reading; days: exposure's).
+    chat's latest turns (text: recent_turns; reading.Reader.topical: by the main meaning, never closed-class English).
+    The ones the sense flags call safe for the English they matched come first, a doubtful one only after them, and
+    in a technical chat (is_technical) only one whose own first sense is technical: there a word's main meaning is
+    often not the one meant ("frame" as 額, "value" as 価値, "type" as 種類). Without sense flags every match is
+    doubtful, and none is left out for it. Each is a word of the state (one not introduced yet) or the entry as one
+    ({ja, en, hint, kana, id}), with p (its lookup chance in chat: its estimate, its current chance now, else its
+    starting value, reading.starting_k; one read so recently that it waits, as in lists, is left out), n (uses in
+    text) and days (the days of the last fwlib.READING_DAYS it came up on in the user's reading; days: exposure's).
 
     None at all when the turns are about a topic the brief keeps free of Japanese (zero_japanese, on their prose).
     Only words worth offering: an entry that can stand in for English (swap), not a number, counter or katakana word
     (the brief asks for neither), nor a medical, legal or financial one (its field, SENSITIVE_FIELDS); with no
     spelling in use (known or learning: listed already) or hidden by the
     delayed-start experiment (fwlib.hidden: a held or paused word appears nowhere, here included); and not known at a
-    glance (a chance under fwlib.FREE_P: free, and the next refresh labels it known). The ones the user's reading
-    repeats come first (on fwlib.ELIGIBLE_DAYS days or more: they will come back, and are the ones intake nominates),
+    glance (a chance under fwlib.FREE_P: free, and the next refresh labels it known). After the safe ones, the ones
+    the user's reading repeats come first (on fwlib.ELIGIBLE_DAYS days or more: they will come back, and are the
+    ones intake nominates),
     then common entries (JMdict's common flag; the others are frequent but rarer in general text), each by the uses in
     text, then general frequency. reader: an open reading.Reader (default: the state dir's; none built yet, no
     words)."""
@@ -298,7 +319,7 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
     if reader is None:
         return []
     try:
-        found = reader.found(text, flags=False)  # Claude checks the sense as it places one
+        found = reader.topical(text)
         entries = reader.entries(found)
     finally:
         if own:
@@ -311,13 +332,16 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
             queue.setdefault(fwlib.key(w['ja']), w)
     offset = ((know or {}).get('offset') or {}).get('t3', 0.0)
     out = []
-    for i, n in found.items():
+    technical = bool(reader.flags) and is_technical(text, entries.values())  # without flags, all are doubtful
+    for i, (n, safe) in found.items():
         e = entries.get(i)
         spellings = [fwlib.key(x) for x in [e['ja']] + e['forms']] if e else []
         if (not e or not e['swap'] or any(x in blocked for x in spellings) or NUMBER.match(e['ja'])
                 or KATAKANA.match(e['ja']) or e['en'].startswith('counter') or reading.is_number(e)
                 or SENSITIVE_FIELDS.intersection(e.get('field') or ())):
             continue
+        if not safe and technical and not TECHNICAL_WORD.intersection(e.get('field') or ()):
+            continue  # a doubtful sense in a technical chat
         mine = next((queue[x] for x in spellings if x in queue), None)
         estimate = knowledge.word_estimate(know or {}, mine['ja'], 't3', now_ms) if mine else None
         chance = estimate[0] if estimate else knowledge.sigmoid(offset - reading.starting_k(know, e, mine))
@@ -327,7 +351,7 @@ def topical_words(state, know, days, text, reader=None, most=TOPICAL_MAX):
             continue  # read so recently it waits, as a learning word does (lists)
         word = dict(mine or {k: e[k] for k in ('ja', 'en', 'hint', 'kana', 'id')}, p=chance, n=n,
                     days=(days or {}).get(str(e['id']), 0))
-        out.append(((word['days'] < fwlib.ELIGIBLE_DAYS, not e['common'], -n, e['rank']), word))
+        out.append(((not safe, word['days'] < fwlib.ELIGIBLE_DAYS, not e['common'], -n, e['rank']), word))
     out.sort(key=lambda pair: pair[0])
     picked, names = [], set()
     for _key, word in out:
