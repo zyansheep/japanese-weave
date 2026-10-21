@@ -3,7 +3,7 @@
 known (world.py), whose days are written as the live system writes them (logs.py), and the experiments that check
 models and designs against the truth (experiments.py). Python 3.9+, standard library only; seeds are fixed.
 
-  python3 tools/sim/run.py all                 every experiment below, in about a minute
+  python3 tools/sim/run.py all                 every experiment below, in about five minutes
   python3 tools/sim/run.py volumes             words shown and lookups a day, against the live log's
   python3 tools/sim/run.py convergence         exposures needed to move one word from its prior to its true chance
   python3 tools/sim/run.py recovery            the fit and today's model per class (known, learning, new) at 1, 2
@@ -16,7 +16,8 @@ models and designs against the truth (experiments.py). Python 3.9+, standard lib
   python3 tools/sim/run.py delayed-start       power of the delayed-start experiment (PLAN.md section 7)
   python3 tools/sim/run.py recurrence          whether words nominated by the reader's text come back (section 6)
   python3 tools/sim/run.py priors              starting values from the word itself (step 13): coefficients
-                                               against the truth, and against the flat start on first exposures
+                                               against the truth, against the flat start on first exposures,
+                                               the days a replay needs, and words unlike any shown (3 minutes)
   python3 tools/sim/run.py log DIR [--days N] [--seed S]
                                                a simulated state dir (interactions.sqlite, state.json, anki.csv,
                                                truth.jsonl, and knowledge.json from the replay) for

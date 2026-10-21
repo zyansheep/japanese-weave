@@ -643,12 +643,12 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None,
     for seed in seeds:
         run, world = prior_run(seed, days, truth, extra, widths)
         runs.append((seed, run, world))
-    lines = [f'Starting values from the word itself: {len(seeds)} seeds of {days} days, {extra} extra dictionary entries '
-             f'in the queue. Each word not known starts at k0 = {truth["base"]} + sum beta x + {truth["noise"]} z '
-             '(world.py). Coefficients of a fit of the whole log, with 90% intervals (+- 1.645 sd), against the '
-             'truth and two oracles, least squares over the same words on the features of their true k on the first '
-             'day (k0) and averaged over their showings (shown: what a k for all of a word\'s exposures, as the '
-             'fit\'s, can recover when reading and lookups teach), per seed:']
+    lines = [f'Starting values from the word itself: {len(seeds)} seeds of {days} days, {extra} extra dictionary '
+             f'entries in the queue. Each word not known starts at k0 = {truth["base"]} + sum beta x + '
+             f'{truth["noise"]} z (world.py). Coefficients of a fit of the whole log, with 90% intervals (+- 1.645 '
+             'sd), against the truth and two oracles, least squares over the same words on the features of their '
+             'true k on the first day (k0) and averaged over their showings (shown: what a k for all of a word\'s '
+             'exposures, as the fit\'s, can recover when reading and lookups teach), per seed:']
     lines.append(f'  {"feature":<16} {"true":>6}' + ''.join(f'  {"seed " + str(s) + " fit":>21} {"k0":>6} {"shown":>6}'
                                                         for s, _r, _w in runs))
     oracles = [(_oracle(world, run[None]['fit'], names)) for _s, run, world in runs]
@@ -659,8 +659,8 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None,
             fit = run[None]['fit']
             j = knowledge.SHARED_NAMES.index(name)
             mean, sd = fit.theta[j], fit.theta_sd[j]
-            cells += (f'  {mean:+6.2f} ({mean - 1.645 * sd:+.2f} to {mean + 1.645 * sd:+.2f}) {oracle.get(name, 0):+6.2f}'
-                      f' {seen.get(name, 0):+6.2f}')
+            cells += (f'  {mean:+6.2f} ({mean - 1.645 * sd:+.2f} to {mean + 1.645 * sd:+.2f})'
+                      f' {oracle.get(name, 0):+6.2f} {seen.get(name, 0):+6.2f}')
         lines.append(f'  {name:<16} {truth.get(name, 0.0):+6.2f}' + cells)
     lines.append('  featured words in each fit: ' + ', '.join(str(n) for _o, n in oracles))
     for width in widths:
@@ -687,8 +687,8 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None,
     daily = _daily(run[None]['rows'], _first)
     lines.append(f'Seed {seed}, day by day (first exposures; difference x 1000, observations): ' + ', '.join(
         f'{day[5:]} {1000 * d / n:+.0f} ({n})' for day, (d, n) in sorted(daily.items())))
-    lines.append('Days of log needed: of the replays of each seed\'s first n days (a log n days old), how many have the '
-                 '90% interval of the difference on first exposures below 0:')
+    lines.append('Days of log needed: of the replays of each seed\'s first n days (a log n days old), how many have '
+                 'the 90% interval of the difference on first exposures below 0:')
     for n in windows:
         hits = 0
         for _seed, run, _world in runs:
@@ -696,6 +696,12 @@ def priors(seeds=(1, 2, 3), days=28, extra=2000, truth=None, widths=(0.25, None,
             interval = knowledge.day_interval(window, evaluate._mean_difference)
             hits += bool(len(window) == n and interval and interval[1] < 0)
         lines.append(f'  {n:>2} days: {hits} of {len(runs)}')
+    daily = [d / c for _s, run, _w in runs for _day, (d, c) in sorted(_daily(run[None]['rows'], _first).items())[1:]]
+    mean, sd = stats.mean(daily), stats.mean([(x - stats.mean(daily)) ** 2 for x in daily]) ** 0.5
+    if mean < 0:
+        lines.append(f'  Each day after the first (when both start alike): {mean:+.4f} a day, sd {sd:.4f}; a 90% '
+                     f'interval excludes 0 in half of the logs after about {(1.645 * sd / mean) ** 2:.0f} days, in 80% '
+                     f'after about {(2.487 * sd / mean) ** 2:.0f}.')
     if reach:
         lines.append(prior_reach(seeds, days, extra, truth))
     return '\n'.join(lines)
