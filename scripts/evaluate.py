@@ -230,17 +230,18 @@ class Constant:
 
 
 class Fitted:
-    """The one fitter (knowledge.Fit, NEXT_STEPS step 4): a penalized maximum-likelihood fit of every event before the
-    day, at the log's reading pace and cap, each day starting from the day before's. frozen: the shared parameters and
-    prior widths held at their priors."""
+    """The one fitter (knowledge.Fit, NEXT_STEPS steps 4 and 10): a penalized maximum-likelihood fit of every event
+    before the day, at the log's reading pace and cap. With recency each day's fit starts from nothing, from two floors,
+    as the day's first refresh does (knowledge.refresh); without, from the day before's. frozen: the shared parameters
+    and prior widths held at their priors."""
 
     def __init__(self, frozen=False, recency=True):
         self.frozen, self.recency, self.last = frozen, recency, None
         self.name = ('fit, priors held' if frozen else 'fit') + ('' if recency else ', no recency')
 
     def fit(self, log, until):
-        self.last = knowledge.Fit(log, until, start=self.last.state() if self.last else None, frozen=self.frozen,
-                                  recency=self.recency)
+        start = self.last.state() if self.last and not self.recency else None  # with recency, from nothing each day
+        self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, recency=self.recency)
         self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
             else {}
 

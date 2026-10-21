@@ -612,11 +612,13 @@ FIT_TOLERANCE = 1e-4       # the fit stops once no parameter moves more than thi
 WIDTH_TOLERANCE = 1e-3     # nor a prior width
 FIT_ITERATIONS = 60
 # The shared parameters, each with the prior that holds it while the data is thin: (mean, sd). The offsets: chat's
-# (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. Then a word's prior mean, a
-# regression on its features (features): with an Anki card, an intercept by status plus a slope on ln(1 + interval),
-# centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on the old neutral
-# prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
-SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (math.log(0.02), 1.0), 'context': (0.0, 0.5),
+# (the web's is 0, the reference: k is on the web's scale) and a conjugated form's. The recency term's (recency_log_odds):
+# the floor, the log odds of a lookup right after a read, centred above every word (no recency: the term enters only
+# as the reader's own log shows it), and the context offset for a repeat in the same page or window. Then a word's prior
+# mean, a regression on its features (features): with an Anki card, an intercept by status plus a slope on
+# ln(1 + interval), centred on the old prior 0.5 + 0.8 ln(1 + interval); without one, an intercept by status, centred on
+# the old neutral prior (1.0) and, for known words, the planner's fwlib.KNOWN_PRIOR_K.
+SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 SHARED_NAMES = tuple(SHARED)
@@ -636,7 +638,8 @@ SOFT_MIN = 8               # how sharply the floor gives way to a word known bet
 CLOCK_EPS = 0.01           # the last-read chances stop once no read in the newer showings is less likely than this
 CONTEXT_MS = 3_600_000     # an earlier showing in the same page view or T3 window this recent is the same context
 CLOCK_PASSES = 2           # fits, each weighing the showings for the clock by the chances the one before found
-NO_FLOOR = 1.0             # a fit with nothing to start from also starts from this floor (log odds), above every word
+NO_FLOOR = 1.0             # a fit with nothing to start from starts from this floor (log odds), above every word,
+LOW_FLOOR = math.log(0.02) # and from this one, a word looked up 2% of the time right after a read (the simulated reader)
 FLOOR_STEP = 0.5           # the most the floor moves in one Newton step
 SPACING_P = 0.10           # a costly word waits while recency holds its chance under this and its long-term chance
                            # isn't (PLAN.md section 5, rule 2; under it all along, it is cheap and never waits)
@@ -842,8 +845,10 @@ class Fit:
         shared = {} if frozen else start.get('shared') or {}
         theta = [shared.get(name, SHARED[name][0]) for name in SHARED_NAMES]
         widths = dict(WIDTHS) if frozen else dict(WIDTHS, **(start.get('widths') or {}))
-        self._fit(log, theta, widths, start.get('k') or {})
-        if recency and not frozen and not shared:  # nothing to start from: also try a floor above every word
+        cold = recency and not frozen and not shared  # nothing to start from: from a low floor and a high one
+        self._fit(log, [LOW_FLOOR if j == FLOOR and cold else v for j, v in enumerate(theta)], widths,
+                  start.get('k') or {})
+        if cold:
             first = dict(self.__dict__)
             self._fit(log, [NO_FLOOR if j == FLOOR else v for j, v in enumerate(theta)], widths,
                       start.get('k') or {})
@@ -1232,8 +1237,8 @@ class Standing:
 def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentences, flags=None, start=None,
                    done=()):
     """calibrate's records (shown_record) of the passages and messages shown from `since` on, each as the model stood
-    at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, each day starting from the
-    fit before: start, a fit's state, for the first), each word at its clock in the passage or message (read_clocks:
+    at the start of its day: the log (an evaluate.Log) fitted on everything before (Fit, from nothing, as the day's
+    first refresh fits; start is unused), each word at its clock in the passage or message (read_clocks:
     its current chance), the free flags carried from day to day (free_flags, from flags, else the priors'), and the
     sentence prices from the sentence ends before (sentence_prices of sentence_events).
     done: days to skip (their sums are known). Returns (records, {day: the free flags at its start})."""
@@ -1243,8 +1248,7 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
             continue
         if day_of(at) != day:
             day = day_of(at)
-            fit = Fit(log, day_start(day), pace, top, start=start)
-            start = fit.state()
+            fit = Fit(log, day_start(day), pace, top)  # from nothing, as the day's first refresh fits
             flags.update(free_flags(fit, fit.words, flags))
             starts[day] = dict(flags)
             found = read_clocks(log, pace, top, fit._chance())
