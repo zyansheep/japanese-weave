@@ -60,6 +60,16 @@ level from [blocks/](blocks/level-01.md).
   files, commits or anything meant to be shared, and never in scripted
   runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks
   for a `t3 serve` parent and weaves there.
+- **Chat replies in T3 Code: draft and weave** (the default where the chat shows hover glosses and node or bun is
+  installed). The brief has Claude write each reply in plain English first and pass it to `fw.py weave`, which weaves
+  in Japanese with the extension's own code: every place one of your words could go, picked by your word model and the
+  chat's level. Claude then rewrites the result, keeping the swaps whose sense fits and turning about as many sentences
+  as the level allows into Japanese or mixed Japanese and English, each with its translation on the closing 。. Finally
+  it runs `fw.py check-reply`, which lists what code can see is wrong (an "if" with no conditional ending, pronouns,
+  する on an English verb, unglossed grammar and the like), and sends the fixed reply. In four rounds of blind-judged
+  replies this beat Claude weaving as it writes on every question, with fewer errors and more Japanese grammar, in
+  about half the time ([docs/chat-weave.md](docs/chat-weave.md)). At full it also brings in dictionary words you
+  haven't met. `fw.py chat-style classic` goes back to the brief above; terminals and Codex always use it.
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
   order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
   all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a

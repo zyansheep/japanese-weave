@@ -92,9 +92,9 @@ def is_day(value):
     except ValueError:
         return False
     return True
-PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'challenge': knowledge.valid_challenge,
-         'extension_sites': lambda v: v in ('all', 'ask'), 'intensity_chat': intensity.valid,
-         'intensity_browser': intensity.valid}
+PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'chat_style': lambda v: v in ('draft', 'classic'),
+         'challenge': knowledge.valid_challenge, 'extension_sites': lambda v: v in ('all', 'ask'),
+         'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid}
 LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 
@@ -178,14 +178,16 @@ def validate(op):
 
 
 BRIEF_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'session', 'level', 'intensity', 'offered', 'arms', 'known',
-                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'topical', 'turn'}
+                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'topical', 'turn',
+                'mode'}
 
 
 def brief_error(op):
     """What is wrong with a brief record, as feedback._plan_ok checks a web passage's plan, or None. Amounts are per
     100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
     a web plan; briefs from before sentences were priced have none. topical: the topical words offered with their
-    lookup chances (weave.topical_words), like offered."""
+    lookup chances (weave.topical_words), like offered. mode: draft when the reply was drafted and woven by code
+    (weave.compose_draft), whose plan is the classic brief's lists."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
@@ -202,10 +204,11 @@ def brief_error(op):
             and count(op.get('known'), 100_000) and isinstance(op.get('whole'), bool) and count(op.get('chars'), 100_000)
             and amount('budget') and amount('ask') and amount('sentences') and amount('expected')
             and ('sentencePrice' not in op or (number(op['sentencePrice']) and 0 < op['sentencePrice'] <= 1))
-            and ('turn' not in op or threads.valid_session(op['turn'])))
+            and ('turn' not in op or threads.valid_session(op['turn']))
+            and op.get('mode', 'classic') in ('classic', 'draft'))
     return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
                               '"known", "whole", "chars", "budget"?, "ask"?, "sentences"?, "sentencePrice"?, '
-                              '"expected"?, "topical"?: [[word, p]], "turn"?}')
+                              '"expected"?, "topical"?: [[word, p]], "turn"?, "mode"?: draft or classic}')
 
 
 LABELS_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'labels', 'intake', 'probes', 'experiment'}

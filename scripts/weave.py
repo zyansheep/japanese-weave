@@ -627,6 +627,123 @@ def digest(stage, level, markup, n, m):
             f'urgent topics; {gloss}.')
 
 
+# Draft and weave, the default chat style where the chat shows <abbr> glosses (README "Chat replies"): Claude writes the
+# reply in English, fw.py weave swaps Japanese in by the word model and the level (chatweave.py), Claude rewrites that
+# into Japanese and mixed sentences, fw.py check-reply lists what code can see is wrong, and Claude sends the result.
+# Four rounds of blind-judged replies (docs/chat-weave.md) chose these steps and every rule in DRAFT_RULES.
+STYLES = ('draft', 'classic')
+DRAFT_RULES = """\
+   - Japanese and mixed sentences. Make about as many sentences Japanese or mixed as the weave's first line says, \
+choosing the ones that carry the content: the advice, the explanation, the conclusion. Never add stock lines on top. \
+Rewrite each around its Japanese words in Japanese word order with particles and grammar (verb endings, です/ます, \
+これ/それ), dropping English words whose meaning the Japanese carries and keeping English nouns where no Japanese word \
+was swapped in. Only an English noun or noun phrase may take a particle; an English adjective, adverb or verb never \
+does ("early に" and "quieter な" are wrong). Keep each English stretch inside a Japanese sentence to about four words; \
+a sentence that needs a longer one, or an English relative clause, stays English. Use polite です/ます form throughout. \
+Prefer a verb to "noun + があります". Never put する on an English word ("arrive します", "use して", "build しない", \
+"lose されたら"): use a Japanese verb from the weave's output, or keep that clause English. English nouns inside a \
+Japanese sentence stay singular, and Japanese words in it take no spaces between them (spaces only around the \
+English). Drop English articles inside a Japanese or mixed sentence, and never write "an" before a Japanese word. \
+Don't open a sentence with そして as "And...": use また or それに, or join the clauses with the て-form.
+   - Sentences that stay English keep only the swaps that are nouns, and adjectives right before an English noun. \
+Undo every other swap in them (verbs, adverbs, connectives like もし, そして and でも, and pronouns) by putting the \
+English back. Those words go only inside Japanese or mixed sentences.
+   - Senses. Each {{English→Japanese}}: keep the Japanese only if it means exactly what the English means there; \
+otherwise put the English back. Undo any other swap whose sense doesn't fit. Known traps: いつも is "always", never \
+"usually"; 穏やか is "calm" or "mild", never "quiet" or "uncrowded"; 高い is "pricey" or "tall", never "costly to \
+compute"; 簡単 is "easy", not "simple" in structure; 遅い is "slow" or "late", not "slow-paced" or "tedious"; 仕事 is a \
+job or task, not work on one's own project; つまり is "in other words", not "so"; 本当 is "true", not "correct"; 週間 \
+counts spans of weeks and isn't the noun "week"; 終わる is "to end" (nothing is ended by someone), so "finish \
+something" stays English; 古い is "old" as opposed to new, never an age; 動く is to move physically or to run, not to \
+shift in the abstract; 素晴らしい is "wonderful", not "great for" or "well suited"; 痛い is physical pain, not \
+"painful" as in costly or annoying; 約束 is a promise between people, not a protocol's guarantee; 変更 is a deliberate \
+change of plans or settings, not something changing by itself; 大切 is "precious" or "dear", so a technical \
+"important" stays English; 戦略 is a strategy, not a strategy game; 幾度 is literary, so leave it out. Don't translate \
+English idioms word for word: a project doesn't 死ぬ, ideas don't 来る, and "at the same time" isn't 同じ time.
+   - Grammar. もし only with a conditional ending (〜なら, 〜たら, 〜ば); otherwise keep "if" in English. Words that follow \
+their noun in Japanese (前 後 中 上 下 間 代わりに くらい まで) always follow it, as in "lock の前に". Japanese leaves out \
+"you" and "I": drop them rather than writing あなた or 私. 多い and 少ない come after their noun (人が少ない) or take の \
+(多くの); a な-adjective takes な before a noun.
+   - Vary the words: no content word more than four times in a reply.
+   - Keep every sentence guessable from the English around it, the English left in it, and the words the user can \
+hover.
+   - Use only Japanese words that appear in the weave's output (you may conjugate its verbs and adjectives), plus \
+particles and grammar. Add no other Japanese words and no katakana loanwords, and keep names whole.
+   - Code, commands, paths, numbers and names stay exactly as they are, and no Japanese word sits right next to a \
+number.
+   - Glosses. Wrap each Japanese word in <abbr title="reading · meaning"> (kana-only words: just the meaning). Wrap a \
+conjugated verb or adjective whole, with the reading and the meaning of that form, ending included (like "したい · want \
+to do"). Grammar that carries meaning is glossed too: だけ, それから, のある, ことができる, and a nominalising の (〜のは, \
+〜のが) with the word before it. Only the structural particles (は が を に で の へ と ね よ) and です/ます stay outside \
+the tags; every particle or ending that carries meaning is glossed: か (or), や (and so on), も (also), から, まで, より, \
+なら, けど, ので, のに, が or ですが meaning "but", と meaning "when". Gloss 自分で whole ("by oneself"). End every sentence \
+that is half Japanese or more with its 。 or ？ wrapped in an <abbr> whose title is the English translation of the whole \
+sentence. No bold on Japanese words, and no footer."""
+
+
+def chat_style(state, codex=False, markup=False, runtime=None):
+    """'draft' when the reply can be drafted and woven: the user hasn't chosen classic (fw.py chat-style), the chat shows
+    <abbr> glosses (the weave's output and the rewrite's sentence translations need them), it isn't Codex, and node or
+    bun is here to run the weave; else 'classic', the brief that has Claude weave as it writes."""
+    style = (state.get('prefs') or {}).get('chat_style', 'draft')
+    if style != 'draft' or codex or not markup:
+        return 'classic'
+    if runtime is None:
+        import chatweave
+        runtime = chatweave.runtime()
+    return 'draft' if runtime else 'classic'
+
+
+def fw_command():
+    """The command a brief tells Claude to run fw.py with, from this copy of the plugin."""
+    root = fwlib.PLUGIN_ROOT
+    return f'sh "{root / "scripts" / "run"}" "{root / "scripts" / "fw.py"}"'
+
+
+def draft_rules(stage, level, command):
+    """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
+    return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the user is a native English speaker '
+            'learning Japanese by reading, so your chat reply mixes English and Japanese at the level the user chose. '
+            'Code picks the Japanese words and says how many sentences to make Japanese; you make them read well and '
+            'teach grammar. Skip these steps, and reply in plain English with no Japanese, for health, medication, '
+            'legal, money, safety, emergency, driving or urgent topics, and for a reply of a sentence or two. Japanese '
+            'goes only in your chat reply: never in files, code, configs, commit or PR text, messages to other agents, '
+            'subagent prompts, or drafts and documents meant to be shared.\n'
+            '1. Write your whole reply in plain English, as you normally would, with no Japanese, and pass it to the '
+            f'weave on stdin, in one Bash call:\n{command} weave --level {level} <<\'DRAFT\'\n(your English reply)\nDRAFT\n'
+            '   It swaps in Japanese words by the user\'s word model and level, each wrapped as <abbr title="reading · '
+            'meaning">Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. '
+            'Its first line says how many sentences to make Japanese or mixed.\n'
+            '2. Rewrite its output into your reply:\n' + DRAFT_RULES + '\n'
+            f'3. Check the reply in one Bash call:\n{command} check-reply <<\'REPLY\'\n(your reply)\nREPLY\n'
+            '   It lists what code can see is wrong. Fix each item, keeping one only where the check is plainly wrong, '
+            'and check again if you changed much.\n'
+            '4. Send the reply as your final message. Leave out the weave\'s first line and the ----- under it. Don\'t '
+            'mention the draft, the commands or these steps: the user sees only your final message. If a command fails, '
+            'send the English reply as it is.')
+
+
+def draft_digest(stage, level, command):
+    """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
+    return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the steps earlier in this chat still '
+            f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, rewrite '
+            f'its output as those steps say, pass that to `{command} check-reply` and fix what it lists, then send it. '
+            'Plain English with no Japanese for health, medication, legal, money, safety or urgent topics, and for a '
+            'reply of a sentence or two.')
+
+
+def compose_draft(state, level, had=None, command=None, plan=None):
+    """(brief, what the chat has after it, plan) in draft style, as compose returns them: the steps in full on a
+    chat's first turn (had None) or when the chat last had the classic brief, else the digest. plan: the classic
+    brief's plan (compose), recorded with mode draft, so the log says what the lists were."""
+    command = command or fw_command()
+    stage = fwlib.stage_for(state)
+    whole = had is None or had.get('rules') != 'draft'
+    text = draft_rules(stage, level, command) if whole else draft_digest(stage, level, command)
+    after = {'known': list(had.get('known') or []) if had else [], 'rules': 'draft'}
+    return text, after, dict(plan or {}, whole=whole, mode='draft')
+
+
 def compose(state, seen, markup=False, know=None, level=0, had=None, tail='', room=BRIEF_MAX, topical=()):
     """(brief, what the chat has after it, plan). had: what the chat already has from earlier turns, {known: the words
     named so far, rules: which rules}; None on its first turn (see chat_turn). Then the brief is whole: the rules, the
@@ -1087,6 +1204,10 @@ def main(argv):
                          ensure_ascii=False))
         return 0
     markup = hook and abbr_glosses(state)
+    try:
+        style = chat_style(state, codex, markup) if hook else 'classic'
+    except Exception:
+        style = 'classic'
     (seen, days), know = exposure(), knowledge.load()
     reply = mark = lines = None
     if hook:
@@ -1095,18 +1216,22 @@ def main(argv):
             reply, mark = last_reply(None, lines), compaction(lines)
         except Exception:
             pass  # no transcript yet or unreadable: the brief alone still helps
-    try:
-        tail = calibration(reply, state, level, know, seen, offered_topical(session)) if reply else ''
+    try:  # in draft style the weave sets the amounts, so the reply needs no correction toward them
+        tail = (calibration(reply, state, level, know, seen, offered_topical(session))
+                if reply and style == 'classic' else '')
     except Exception:
         tail = ''
     topical = []
-    if hook:
+    if hook and style == 'classic':
         try:  # never block a prompt because of them: without the reading index (not built yet) there are none
             topical = topical_words(state, know, days, recent_turns(lines, data.get('prompt')))
         except Exception as error:
             print(f'Japanese Weave: no topical words ({error.__class__.__name__})', file=sys.stderr)
     build = lambda had: compose(state, seen, markup=markup, know=know, level=level, had=had, tail=tail,
                                 topical=topical)
+    if style == 'draft':
+        classic = build
+        build = lambda had: compose_draft(state, level, had, plan=classic(None)[2])
     try:
         if hook and session:
             text, plan = chat_turn(state, session, build, mark)

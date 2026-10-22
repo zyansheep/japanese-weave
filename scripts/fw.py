@@ -39,6 +39,12 @@
   fw.py glosses abbr|footer                          T3 Code chats: gloss each Japanese word in an <abbr> shown
                                                      on hover or click (needs a T3 build that renders them), or
                                                      in a footer line (default)
+  fw.py chat-style draft|classic                     T3 Code chats: draft and weave (the default: Claude writes
+                                                     in English, code weaves the Japanese in, Claude rewrites
+                                                     and checks it) or classic (Claude weaves as it writes)
+  fw.py weave [--level N] [FILE]                     weave an English draft (FILE, else stdin) at chat level N
+                                                     (-2 to 3, 3 full; default: the chat's level now)
+  fw.py check-reply [FILE]                           list what code can see is wrong in a woven reply
   fw.py intensity [chat|browser] [up|down|normal|off|full]
                                                      Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; off: none, full: every sentence
@@ -101,6 +107,8 @@ import knowledge  # noqa: E402
 import probe  # noqa: E402
 import relabel  # noqa: E402
 import threads  # noqa: E402
+import chatweave  # noqa: E402
+import check_reply  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -719,6 +727,30 @@ def collector_cmd(args):
         print('Lingering is off, so it stops when you log out: sudo loginctl enable-linger $USER')
 
 
+def chat_style(args):
+    queued_note(hub.submit({'kind': 'set', 'prefs': {'chat_style': args.style}}))
+    print('T3 Code chats: Claude drafts each reply in English, code weaves the Japanese in, and Claude rewrites and '
+          'checks it.' if args.style == 'draft' else 'T3 Code chats: Claude weaves the Japanese in as it writes.')
+
+
+def read_input(path):
+    return sys.stdin.read() if path in (None, '-') else Path(path).read_text(encoding='utf-8')
+
+
+def weave_cmd(args):
+    level = args.level if args.level is not None else intensity.current(fwlib.load_state().get('prefs'), 'chat')['level']
+    if intensity.is_off(level):
+        sys.exit('Japanese is off in chat: send the draft as it is.')
+    try:
+        print(chatweave.weave(read_input(args.file), level))
+    except Exception as error:
+        sys.exit(f'The weave failed ({error}): send the English draft as it is.')
+
+
+def check_reply_cmd(args):
+    print(check_reply.report(read_input(args.file)))
+
+
 def glosses(args):
     queued_note(hub.submit({'kind': 'set', 'prefs': {'chat_glosses': args.style}}))
     print('T3 Code chats: each Japanese word shows its romaji and meaning on hover or click.' if args.style == 'abbr' else
@@ -960,6 +992,16 @@ def main(argv=None):
     p = sub.add_parser('log')
     p.add_argument('limit', nargs='?', type=int, default=20)
     p.set_defaults(run=log_cmd)
+    p = sub.add_parser('chat-style')
+    p.add_argument('style', choices=['draft', 'classic'])
+    p.set_defaults(run=chat_style)
+    p = sub.add_parser('weave')
+    p.add_argument('--level', type=int, choices=[lv for lv in intensity.LEVELS if not intensity.is_off(lv)])
+    p.add_argument('file', nargs='?')
+    p.set_defaults(run=weave_cmd)
+    p = sub.add_parser('check-reply')
+    p.add_argument('file', nargs='?')
+    p.set_defaults(run=check_reply_cmd)
     p = sub.add_parser('glosses')
     p.add_argument('style', choices=['abbr', 'footer'])
     p.set_defaults(run=glosses)
