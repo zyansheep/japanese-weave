@@ -213,7 +213,7 @@ describe('phrase and sentence swaps', () => {
     expect(group.getAttribute('data-tip')).toBe('It was a fun day.');
     const pieces = [...group.querySelectorAll('.fw-part')];
     expect(pieces.map((p) => [p.textContent, swapWord(p), p.getAttribute('data-tip')])).toEqual([
-      ['楽しい', '楽しい', 'fun · tanoshii'], ['日', '日', 'day · hi'], ['でした。', '', 'It was a fun day.']]);
+      ['楽しい', '楽しい', 'fun · tanoshii'], ['日', '日', 'day · hi'], ['でした。', '。', 'It was a fun day.']]); // the 。 stands for the sentence
     expect(pieces[1].dataset.fwStatus).toBe('active');
     expect(pieces[2].classList.contains('fw-end')).toBe(true);
     expect(flatten(el).text).toBe('We went out. It was a fun day. Even ten minutes before bed helps.'); // reads as the English

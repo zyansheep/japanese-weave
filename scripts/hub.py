@@ -8,23 +8,41 @@ the cache meanwhile, so the change shows at once; the next sync sends it. The ho
 the cache and starts a background sync (`fw.py refresh`) when the cache is a few minutes old.
 
 Ops (each also carries uid, day, at and machine; see stamp):
-  events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser (fwlib.apply_event)
-  mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands
+  events    {"events": [{"word", "kind": "seen"|"peek"|"flip", "day"?}]}   from the browser; kept in the ops log only:
+                                                       nothing counts days any more (fwlib.apply_event)
+  mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands: the label at once
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
              "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
-  exposure  {"replies": [{"d": digest, "day", "words": [ja]}]}   chat replies scanned on some machine
-  chat_day  {}                                         log-chat-day: today counts as assumed exposure
-  exported  {"target": "claude-ai"|"chatgpt", "log_day": bool}
+  exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
+                                                       on some machine: the listed words each uses, and the
+                                                       dictionary entries it shows (reading.py)
+  chat_day  {}                                         from before the switch (log-chat-day): changes nothing now
+  exported  {"target": "claude-ai"|"chatgpt", "log_day"?: bool}   log_day changes nothing now
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
+  labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
+             "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
+                                                       labels from the model, the words taken in with their
+                                                       delayed-start arms (a dictionary word the state doesn't have
+                                                       yet with its entry id), the probes' outcomes (fwlib.apply_labels)
+  restore   {}                                         undo the switch to the model's labels (fwlib.restore; fw.py
+                                                       relabel --restore)
+  brief     {"session", "level", "intensity", "offered": [[ja, p]], "arms": {ja: arm}, "known", "whole", "chars",
+             "budget"?, "ask"?, "sentences"?, "sentencePrice"?, "expected"?, "topical"?: [[ja, p]], "turn"?}
+                                                       what one chat reply was offered (weave.compose); a record only
+  probe     {"via", "seconds", "weights", "top", "words": [[ja, id, band, weight, answer]], "fakes": [[ja, answer]],
+             "bands": [[share, words]], "estimate"}   a probe of the goal (probe.py), kept in state["probes"]; where
+             the gloss log is, the lookup habit of its words answered not known is added
 The collector records every op it applies (the ops table of its database), so the log of gloss interactions and the
-log of everything that changed the word state sit side by side.
+log of everything that changed the word state sit side by side. Records (RECORDS) change nothing: they are kept in
+the ops table and nowhere else (hub.keep; feedback.chat_briefs reads them back).
 """
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -56,7 +74,9 @@ REPLIES_PER_OP = 500
 MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
 PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed',  # applied to the cache while queued
-               'thread')
+               'thread', 'probe')
+RECORDS = ('brief',)       # ops only kept in the ops table: they change nothing in the word state
+RECORD_TIMEOUT = 2         # seconds a record waits for the database here before it is dropped
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
 MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')  # a machine's own state
 BEFORE = 'before-collector'  # where a machine's own state is kept when it first takes the collector's
@@ -130,10 +150,12 @@ def validate(op):
             return 'anki: known is a list of words'
     elif kind == 'exposure':
         replies = op.get('replies')
+        counts = lambda x: x is None or isinstance(x, dict) and len(x) <= 5000 and all(
+            k.isdigit() and len(k) <= 12 and integer(n, 1, 100_000) for k, n in x.items())
         if not isinstance(replies, list) or len(replies) > 5000 or not all(
                 isinstance(r, dict) and text(r.get('d'), 64) and day(r.get('day')) and texts(r.get('words'), 2000)
-                for r in replies):
-            return 'exposure: replies are {"d", "day", "words": [...]}'
+                and counts(r.get('entries')) for r in replies):
+            return 'exposure: replies are {"d", "day", "words": [...], "entries"?: {entry id: times}}'
     elif kind == 'exported':
         if op.get('target') not in ('claude-ai', 'chatgpt') or not isinstance(op.get('log_day', False), bool):
             return 'exported: {"target": "claude-ai"|"chatgpt", "log_day"?: bool}'
@@ -141,9 +163,114 @@ def validate(op):
         if not threads.valid_session(op.get('session')) or not isinstance(op.get('off'), bool) \
                 or not text(op.get('source'), 20):
             return 'thread: {"session", "off": true|false, "source"}'
+    elif kind == 'labels':
+        return labels_error(op)
+    elif kind == 'brief':
+        return brief_error(op)
+    elif kind == 'probe':
+        return probe_error(op)
+    elif kind == 'restore':
+        if set(op) - {'uid', 'day', 'at', 'machine', 'kind'}:
+            return 'restore: {}'
     elif kind not in ('chat_day', 'noticed'):
         return f'unknown op {kind!r}'
     return None
+
+
+BRIEF_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'session', 'level', 'intensity', 'offered', 'arms', 'known',
+                'whole', 'chars', 'budget', 'ask', 'sentences', 'sentencePrice', 'expected', 'topical', 'turn'}
+
+
+def brief_error(op):
+    """What is wrong with a brief record, as feedback._plan_ok checks a web passage's plan, or None. Amounts are per
+    100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
+    a web plan; briefs from before sentences were priced have none. topical: the topical words offered with their
+    lookup chances (weave.topical_words), like offered."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
+    amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
+    offered, arms = op.get('offered'), op.get('arms')
+    pairs = lambda xs: isinstance(xs, list) and len(xs) <= 200 and all(
+        isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1 for o in xs)
+    good = (set(op) <= BRIEF_FIELDS and threads.valid_session(op.get('session'))
+            and isinstance(op.get('level'), int) and not isinstance(op['level'], bool) and op['level'] in intensity.LEVELS
+            and number(op.get('intensity')) and 0 < op['intensity'] <= 5
+            and pairs(offered) and ('topical' not in op or pairs(op['topical']))
+            and isinstance(arms, dict) and len(arms) <= 200
+            and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())
+            and count(op.get('known'), 100_000) and isinstance(op.get('whole'), bool) and count(op.get('chars'), 100_000)
+            and amount('budget') and amount('ask') and amount('sentences') and amount('expected')
+            and ('sentencePrice' not in op or (number(op['sentencePrice']) and 0 < op['sentencePrice'] <= 1))
+            and ('turn' not in op or threads.valid_session(op['turn'])))
+    return None if good else ('brief: {"session", "level", "intensity", "offered": [[word, p]], "arms": {word: arm}, '
+                              '"known", "whole", "chars", "budget"?, "ask"?, "sentences"?, "sentencePrice"?, '
+                              '"expected"?, "topical"?: [[word, p]], "turn"?}')
+
+
+LABELS_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'labels', 'intake', 'probes', 'experiment'}
+
+
+def labels_error(op):
+    """What is wrong with a labels op (knowledge.decide), or None: label changes [[word, from, to]], words taken in
+    [[word, arm or null, draw or null]], probes [[word, {at, surface, y, read} or "missed"]] and the experiment's
+    seed when it starts."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 100
+    rows = lambda key, most, ok: key not in op or (isinstance(op[key], list) and len(op[key]) <= most
+                                                    and all(isinstance(r, list) and ok(r) for r in op[key]))
+    label = lambda r: (len(r) == 3 and word(r[0]) and r[1] in fwlib.STATUSES + ('shaky',)
+                       and r[2] in fwlib.STATUSES)
+    entry = lambda r: len(r) == 3 or (len(r) == 4 and isinstance(r[3], int) and not isinstance(r[3], bool)
+                                      and 0 < r[3] < 10 ** 9)
+    intake = lambda r: (entry(r) and word(r[0]) and (r[1] is None and r[2] is None
+                                                     or r[1] in fwlib.ARMS and number(r[2]) and 0 <= r[2] < 1))
+    outcome = lambda o: o == 'missed' or (isinstance(o, dict) and set(o) == {'at', 'surface', 'y', 'read'}
+                                          and isinstance(o['at'], int) and o['surface'] in feedback.SURFACES
+                                          and number(o['y']) and 0 <= o['y'] <= 1
+                                          and number(o['read']) and 0 <= o['read'] <= 1)
+    seed = op.get('experiment')
+    good = (set(op) <= LABELS_FIELDS and rows('labels', 100_000, label)
+            and rows('intake', fwlib.NEW_PER_DAY, intake)
+            and rows('probes', 10_000, lambda r: len(r) == 2 and word(r[0]) and outcome(r[1]))
+            and (seed is None or isinstance(seed, dict) and set(seed) == {'seed'} and isinstance(seed['seed'], int)
+                 and not isinstance(seed['seed'], bool) and 0 <= seed['seed'] < 2 ** 32))
+    return None if good else ('labels: {"labels": [[word, from, to]], "intake": [[word, arm, draw, entry id?]], '
+                              '"probes": [[word, outcome]], "experiment"?: {"seed"}}')
+
+
+PROBE_FIELDS = {'uid', 'day', 'at', 'machine', 'kind', 'via', 'seconds', 'weights', 'top', 'words', 'fakes', 'bands',
+                'estimate'}
+PROBE_SHARES = ('known', 'se', 'low', 'high', 'corrected', 'corrected_low', 'corrected_high', 'listed')
+PROBE_COUNTS = ('deff', 'n', 'claimed', 'fakes', 'claimed_year', 'fakes_year')
+
+
+def probe_error(op):
+    """What is wrong with a probe op (probe.record), or None: its words [[word, entry id, band, weight, answer]],
+    made-up words [[word, answer]] and bands [[share of the weight, words]], an answer 1, 0 or null (skipped), and
+    its estimate's shares between 0 and 1."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
+    word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
+    answer = lambda x: x is None or count(x, 1)
+    words, fakes, bands, found = op.get('words'), op.get('fakes'), op.get('bands'), op.get('estimate')
+    good = (set(op) <= PROBE_FIELDS and op.get('via') in ('terminal', 'chat') and count(op.get('seconds'), 10 ** 7)
+            and op.get('weights') in ('frequency', 'reading') and count(op.get('top'), 10 ** 6)
+            and isinstance(bands, list) and 0 < len(bands) <= 20
+            and all(isinstance(b, list) and len(b) == 2 and number(b[0]) and 0 <= b[0] <= 1 and count(b[1], 10 ** 6)
+                    and b[1] > 0 for b in bands)
+            and isinstance(words, list) and len(words) <= 200
+            and all(isinstance(w, list) and len(w) == 5 and word(w[0]) and count(w[1], 10 ** 9)
+                    and count(w[2], len(bands) - 1) and number(w[3]) and w[3] > 0 and answer(w[4]) for w in words)
+            and isinstance(fakes, list) and len(fakes) <= 50
+            and all(isinstance(f, list) and len(f) == 2 and word(f[0]) and answer(f[1]) for f in fakes)
+            and isinstance(found, dict) and set(found) <= set(PROBE_SHARES + PROBE_COUNTS)
+            and all(found[k] is None or number(found[k]) and 0 <= found[k] <= 1 for k in PROBE_SHARES if k in found)
+            and all(found[k] is None or number(found[k]) and 0 <= found[k] <= 10 ** 6 for k in PROBE_COUNTS
+                    if k in found))
+    return None if good else ('probe: {"via": "terminal"|"chat", "seconds", "weights", "top", "words": [[word, id, '
+                              'band, weight, answer]], "fakes": [[word, answer]], "bands": [[share, words]], '
+                              '"estimate": {...}}')
 
 
 def apply(state, op):
@@ -178,23 +305,25 @@ def apply(state, op):
     if kind == 'seed':
         return {'seeded': fwlib.seed_known(state, op['n'], day)}
     if kind == 'anki':  # the words reach the front of the list through anki.csv (run writes it first)
-        by_key = {fwlib.key(w['ja']): w for w in state['words']}  # thousands of words: one lookup each
-        entries = [e for e in (by_key.get(fwlib.key(name)) or fwlib.find(state, name) for name in op['known']) if e]
-        for e in entries:  # learning words keep learning; only words not introduced yet jump to known
-            if e['status'] == 'queue':
-                fwlib.set_status(e, 'known', day)
+        entries = fwlib.mark_known(state, op['known'], day)
         return {'words': len(op['words']), 'known': sum(e['status'] == 'known' for e in entries)}
-    if kind == 'chat_day':
-        return {'logged': export.log_chat_day(state, day)}
+    if kind == 'chat_day':  # it counted assumed exposure days, which nothing counts any more
+        return {'logged': 0}
     if kind == 'exported':
-        logged = export.log_chat_day(state, day) if op.get('log_day') else 0
         export.mark_exported(state, op['target'])
-        return {'logged': logged}
+        return {'logged': 0}
+    if kind == 'labels':
+        return fwlib.apply_labels(state, op, day)
+    if kind == 'restore':
+        return {'restored': fwlib.restore(state, day)}
     if kind == 'noticed':
         state.setdefault('exported', {})['noticed'] = True
         return {}
     if kind == 'thread':  # merged per chat: a later change from another machine is kept
         return {'off': threads.merge(state, op['session'], {'off': op['off'], 'at': op['at'], 'source': op['source']})}
+    if kind == 'probe':
+        import probe  # here: the hook needn't load the dictionary
+        return probe.keep(state, op)
     return {}  # exposure: run folds it into exposure.json
 
 
@@ -204,6 +333,16 @@ def run(op, db=None):
     error = validate(op)
     if error:
         return {'ok': False, 'error': error}
+    if op['kind'] in RECORDS:  # nothing to apply, so no wait for the ops lock (an Anki sync holds it for a while)
+        con = feedback.connect(db, timeout=RECORD_TIMEOUT)
+        try:
+            with con:
+                added = con.execute('INSERT OR IGNORE INTO ops (uid, at, machine, kind, body) VALUES (?, ?, ?, ?, ?)',
+                                    (op['uid'], op['at'], str(op.get('machine') or ''), op['kind'],
+                                     json.dumps(op, ensure_ascii=False))).rowcount
+        finally:
+            con.close()
+        return {'ok': True} if added else {'ok': True, 'duplicate': True}
     with fwlib.locked(OPS_LOCK):
         con = feedback.connect(db)
         try:
@@ -240,8 +379,14 @@ def _apply_here(op):
         fwlib.fold(index, replies, [w['ja'] for w in fwlib.load_state()['words']])
         fwlib.write_json(path, index)
         counted = len({r['d'] for r in replies} - before)
-    with fwlib.editing() as state:  # merges anki.csv into the list, applies, promotes, saves
+    habit = None
+    if kind == 'probe':  # the gloss log lives where the state does
+        import probe
+        habit = probe.habit_here(op)
+    with fwlib.editing() as state:  # merges anki.csv into the list, applies, sets the stage, saves
         result = apply(state, op)
+        if habit is not None and result.get('kept'):
+            result['habit'] = probe.attach(state, op['uid'], habit)
     if kind == 'mark' and result['canonical']:  # timestamped, so the knowledge replay applies them at the right moment
         knowledge.log_command(result['canonical'], 'known' if op['as'] == 'known' else 'learn', now=op['at'] / 1000)
     if counted is not None:
@@ -272,6 +417,19 @@ def submit(op, wait=True):
     if not wait:
         knowledge.start_refresh()
     return result
+
+
+def keep(op):
+    """Keeps a record (RECORDS) without waiting on the network or the ops lock: with a collector it joins the outbox
+    and goes with the next sync; else it goes into the ops table here. Returns its result."""
+    op = stamp(op)
+    error = validate(op)
+    if error:
+        raise ValueError(error)
+    if fwlib.collector_url():
+        queue(op)
+        return {'ok': True, 'queued': True}
+    return run(op)
 
 
 def post(url, ops, timeout=TIMEOUT):
@@ -317,7 +475,9 @@ def flush(url=None, timeout=TIMEOUT):
         if reply is None:
             break
         for op, result in zip(batch, reply['results']):
-            if not result.get('ok'):  # malformed, or it failed there: resending won't help
+            # malformed, or it failed there: resending won't help. A record refused (by a collector older than its
+            # kind, say) is only a gap in the log, so it goes quietly.
+            if not result.get('ok') and op.get('kind') not in RECORDS:
                 print(f'Japanese Weave: the collector refused a queued {op.get("kind")} change: '
                       f'{result.get("error")}', file=sys.stderr)
             sent.add(op.get('uid'))
@@ -434,7 +594,7 @@ def sync(scan=True, timeout=TIMEOUT):
 
 
 def current(max_age=0, wait=True):
-    """The state to read: where it lives, with today's promotion applied; or the cache, refreshed first when older
+    """The state to read: where it lives (its stage brought up to date); or the cache, refreshed first when older
     than max_age seconds (wait False: refreshed in the background instead). Returns (state, error): error says why a
     stale cache couldn't be refreshed."""
     if not fwlib.collector_url():
@@ -551,7 +711,8 @@ def snapshot(rev=''):
     exposure = fwlib.read_json(home / 'exposure.json', {}) or {}
     return 200, {'ok': True, 'rev': now, 'state': fwlib.load_state(create=False),
                  'knowledge': fwlib.read_json(home / 'knowledge.json', {}) or {},
-                 'exposure': {'words': exposure.get('words') or {}, 'updated': exposure.get('updated')}}
+                 'exposure': {'words': exposure.get('words') or {}, 'updated': exposure.get('updated'),
+                              'readingDays': exposure.get('readingDays') or {}}}
 
 
 def receive(body, db=None):
@@ -571,7 +732,8 @@ def receive(body, db=None):
 
 
 def maintain():
-    """On the collector, every few minutes: today's promotion (a new day can graduate words) and fresh estimates."""
+    """On the collector, every few minutes: fresh estimates, and with them the labels, the day's new words and the
+    probes (knowledge.refresh)."""
     if not (fwlib.home() / 'state.json').exists():
         return
     with fwlib.editing():

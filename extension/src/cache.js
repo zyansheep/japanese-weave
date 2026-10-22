@@ -1,4 +1,5 @@
-// Decision cache: key -> swaps. Storage adapter is injected (chrome.storage.local in the extension).
+// Answer cache: key -> a model's answer for one passage (pipeline.js storeAnswer). Storage adapter is injected
+// (chrome.storage.local in the extension).
 // Firefox has the same API as a promise-based `browser`; Chrome only has `chrome`. Looked up on use, not at import,
 // so a test that installs the global after another module imported this one still reaches it.
 const local = () => (globalThis.browser ?? globalThis.chrome).storage.local;
@@ -12,7 +13,7 @@ export function createCache(storage, { max = 5000, pruneBy = 1000, pruneEvery = 
       const out = {};
       for (const k of keys) {
         const v = obj[PREFIX + k];
-        if (v && Array.isArray(v.s)) out[k] = v.s;
+        if (v && 's' in v) out[k] = v.s;
       }
       return out;
     },

@@ -1,10 +1,11 @@
 import { test, expect } from 'bun:test';
 import { hashKey } from '../src/hash.js';
 import { ICONS, WAIT_FRAMES } from '../src/toolbar.js';
+import { checkAnswer, modelReply, userOf } from './checkmodel.js';
 
-// The worker at the ends of the intensity scale, and the toolbar button it draws per tab. Full: its own cache, a prompt
-// for everything, every candidate shown. Off: no swaps, no model call (not even one already queued), nothing logged,
-// every tab grey with "off"; a lighter press there keeps it off for 3 more hours, a heavier one brings Japanese back.
+// The worker at the ends of the intensity scale, and the toolbar button it draws per tab. Full: the same answer as every
+// level, every candidate shown. Off: no swaps, no model call (not even one already queued), nothing logged, every tab
+// grey with "off"; a lighter press there keeps it off for 3 more hours, a heavier one brings Japanese back.
 test('background: full and off, and the toolbar per tab (waiting, reasons, navigation, close)', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
@@ -34,14 +35,8 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     { ja: '大きい', en: 'big', hint: 'ōkii', kana: 'おおきい', status: 'known' },
     { ja: '日', en: 'day', hint: 'hi', kana: 'ひ', status: 'known' },
   ];
-  // Every candidate the passage has: a sentence, and words, one of them twice.
-  const answer = (ids) => ids.map((id) => ({ id, swaps: [
-    { k: 's', o: 'It was a big day.', f: '大きい日でした。', p: '大きい|日|でした|。', g: 'It was a big day.', c: 'It was a big day.' },
-    { k: 'w', o: 'But', f: 'でも', p: '', g: '', c: 'But the dog ran' },
-    { k: 'w', o: 'dog', f: '犬', p: '', g: '', c: 'the dog ran' },
-    { k: 'w', o: 'dog', f: '犬', p: '', g: '', c: 'the dog slept' },
-    { k: 'w', o: 'big', f: '大きい', p: '', g: '', c: 'a big day' },
-  ] }));
+  // The model takes every option code offers and writes the dense sentence: the passage's candidates are a sentence and
+  // words, one of them twice.
   const tabs = [{ id: 1, url: 'https://example.com/1', active: true }, { id: 2, url: 'https://mail.google.com/mail/u/0/' }, { id: 3 }];
   Object.assign(globalThis, {
     chrome: {
@@ -64,13 +59,11 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
       scripting: { getRegisteredContentScripts: async () => [], updateContentScripts: async () => {}, unregisterContentScripts: async () => {}, registerContentScripts: async () => {} },
     },
     fetch: async (url, init) => {
-      const body = JSON.parse(init.body);
-      const passages = JSON.parse(body.contents[0].parts[0].text.replace(/^Passages:\n/, ''));
-      calls.push({ body, passages });
+      const user = userOf(url, init);
+      calls.push({ body: JSON.parse(init.body), user });
       const held = gate;
       if (held) await held.promise;
-      const text = JSON.stringify({ passages: answer(passages.map((p) => p.id)) });
-      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }], usageMetadata: { promptTokenCount: 3000, candidatesTokenCount: 400 } }) };
+      return modelReply(url, checkAnswer(user, { swaps: (p) => (p.sentences.length ? [{ at: 's1', p: '大きい|日|でした|。' }] : []) }));
     },
   });
   const dispatch = (msg, sender) => new Promise((done) => {
@@ -85,7 +78,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
   const passage = (n = '') => `It was a big day. But the dog ran home, and the dog slept${n}.`;
   const ask = async (text, id = 1) => {
     const cfg = await dispatch({ type: 'config' }, tab(id));
-    return dispatch({ type: 'swaps', revision: cfg.revision, items: [{ key: `${cfg.revision}:${hashKey(text)}`, text }] }, tab(id));
+    return dispatch({ type: 'swaps', revision: cfg.revision, items: [{ key: `${cfg.revision}:${hashKey(text)}`, text }], wait: true }, tab(id));
   };
   const press = async (step, times = 1) => { let r; for (let i = 0; i < times; i++) r = await dispatch({ type: 'intensity', step }, popup); return r; };
   try {
@@ -105,7 +98,8 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(shown(2).text).toBe('');
     gate.open(); gate = null;
     const plain = Object.values((await normal).plans)[0];
-    expect(plain).toMatchObject({ level: 0, candidates: 3 }); // one use per word: the sentence's words aren't swapped again
+    // every distinct candidate the passage can place; normal prices the sentence, and uses each word once
+    expect(plain).toMatchObject({ level: 0, candidates: 6, sentencePrice: 0.08 });
     await settle();
     expect(shown(1)).toMatchObject({ text: '', title: 'Japanese Weave' });
     // A page with nothing to weave (its content script says so once the page settles) is faded and says which. Only a
@@ -118,21 +112,20 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(shown(1).title).toBe('Japanese Weave: no Japanese fit the text on this page');
     expect(shown(3).icon).toBe(ICONS.off);
 
-    // Full: three presses up; its own cache and prompt, and every candidate shown.
+    // Full: three presses up; the same answer, and every candidate shown.
     expect((await press(1, 3)).intensity.level).toBe(3);
     expect(natives.filter((m) => m.type === 'intensity').map((m) => m.set.level)).toEqual([1, 2, 3]);
     expect(toasts.at(-1)).toEqual([1, expect.objectContaining({ level: 3 })]);
     expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: 'full', title: expect.stringContaining('full until') }); // the level shows
     expect(shown(1).title).toContain('no Japanese fit');
     const full = await ask(passage());
-    expect(calls).toHaveLength(2);
-    expect(calls[1].body.systemInstruction.parts[0].text).toContain('The reader asked for FULL Japanese');
-    expect(calls[1].passages[0].target).toBeUndefined();
-    expect(calls[0].passages[0].target).toBe(4);
+    expect(calls).toHaveLength(1);
     const [swaps] = Object.values(full.results);
-    // no budget at full; expected: the lookups predicted, 4 known words without estimates at 0.076 and the dog twice at 0.269
-    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 5, candidates: 5, expected: 0.841 });
-    expect(swaps.map((s) => s.f)).toEqual(['大きい日でした。', 'でも', '犬', '犬', '大きい']);
+    // no budget at full, so the sentence is free, and big and day inside it are left out; expected: the lookups
+    // predicted, 3 known words without estimates at 0.076, the dog twice at 0.269 and the sentence's translation at 0.08
+    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 4, candidates: 6, expected: 0.845,
+      sentencePrice: 0.08 });
+    expect(swaps.map((s) => s.f)).toEqual(['でも', '犬', '犬', '大きい日でした。']); // code's words, then the model's sentence
     // Heavier at full stays full, for 3 hours from this press.
     const first = local.intensity.until;
     await new Promise((r) => setTimeout(r, 5));
@@ -143,14 +136,14 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     await press(0);
     gate = opened();
     const running = ask(passage(' again'));
-    await until(() => calls.length === 3);
+    await until(() => calls.length === 2);
     const queued = ask(passage(' once more'), 1);
     await settle();
     expect((await press(-1, 3)).intensity.level).toBe(-3);
     gate.open(); gate = null;
     expect((await queued).stale).toBe(true);
     await running;
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     await settle();
     // Off: grey everywhere with "off", nothing woven, called or logged.
     for (const id of [1, 2, 3, 'default']) expect(shown(id)).toMatchObject({ icon: ICONS.off, text: 'off' });
@@ -160,7 +153,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect(off.intensity.level).toBe(-3);
     expect(await ask(passage())).toEqual({ results: {}, stale: true });
     expect(await ask(passage(' never asked'))).toEqual({ results: {}, stale: true });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     expect(await dispatch({ type: 'event', word: '犬', event: 'seen' }, tab(1))).toEqual({ ok: false });
     const record = { type: 'interaction', kind: 'shown', at: Date.now(), view: 'v1', context: 'c1', words: 12, box: [0, 0, 1, 1], annotations: [] };
     expect(await dispatch(record, tab(1))).toEqual({ ok: false });
@@ -173,8 +166,8 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     expect((await press(1)).intensity.level).toBe(-2);
     const back = await ask(passage());
     expect(back.stale).toBeUndefined();
-    expect(Object.values(back.plans)[0]).toMatchObject({ level: -2, candidates: 3 });
-    expect(calls).toHaveLength(3);
+    expect(Object.values(back.plans)[0]).toMatchObject({ level: -2, candidates: 6 });
+    expect(calls).toHaveLength(2);
     await settle();
     expect(shown(1)).toMatchObject({ icon: ICONS.faded, text: '−2' });
     await dispatch({ type: 'nothing', why: '' }, tab(1)); // Japanese turned up
@@ -188,7 +181,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     gate = opened();
     const left = ask(passage(' left behind'));
     const closing = ask(passage(' closing'), 2);
-    await until(() => calls.length === 4);
+    await until(() => calls.length === 3);
     await settle();
     expect(shown(1).text).toBe(WAIT_FRAMES[0]);
     expect(shown(2).icon).toBe(ICONS.off); // a private site: no wait shows (its request was stale anyway)

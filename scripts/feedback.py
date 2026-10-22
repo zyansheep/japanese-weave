@@ -14,8 +14,11 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 how the amount was chosen ("plan", JSON {level: the reader's intensity -3..3, intensity: its factor,
                 jitter: the passage's random factor (1: none), limit: swaps kept (before 2026-10-20: allowed),
                 candidates: swaps the model offered, and since then budget: lookups the passage could spend on words
-                not known at a glance (none at full), expected: lookups predicted if it is read}); seq orders changes
-                for export
+                not known at a glance (none at full), expected: lookups predicted if it is read; plans with
+                sentencePrice, the lookups a whole sentence was priced at, are later still: their jitter is the share
+                of free swaps kept and leaves the budget alone (before, it thinned every swap and scaled the budget),
+                and candidates counts those the passage can place}); seq orders changes for export. A sentence's
+                closing mark (。) among the glossed words stands for its translation (in the browser since then too)
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -32,7 +35,8 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                   trace    the mouse path over a message (T3): ms: its span; detail {"points": [[ms since at, x, y]]}
 
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
-                and the op as JSON
+                and the op as JSON; also records that change nothing, such as what each chat reply was offered (kind
+                "brief", read back by chat_briefs)
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
 the peek rate). With a collector configured (setup --collector), the native host forwards items to it instead (see
@@ -129,10 +133,10 @@ def default_path():
     return fwlib.home() / DB_NAME
 
 
-def connect(path=None):
+def connect(path=None, timeout=10):
     path = Path(path or default_path())
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(path), timeout=10)
+    con = sqlite3.connect(str(path), timeout=timeout)
     con.execute('PRAGMA journal_mode=WAL')
     con.executescript(TABLES)
     version = con.execute('PRAGMA user_version').fetchone()[0]
@@ -220,15 +224,24 @@ def _clean(item, now):
 
 
 def _plan_ok(plan, num):
-    """As the extension's cleanPlan (hostsource.js) checks it; budget and expected are optional, as plans from before
-    levels meant a lookup budget have neither (and full's has no budget)."""
+    """As the extension's cleanPlan (hostsource.js) checks it; budget, spent, expected, sentencePrice and arms are
+    optional, as plans from before levels meant a lookup budget have none of them (and full's has no budget), plans
+    from before whole sentences were priced have no sentencePrice (their thinning also scaled the budget), and plans
+    from before extension 0.10 no spent (what the swaps within the budget cost) or arms (the delayed-start arm of each
+    word shown that has one: {word: 'shown' | 'held:probe' | 'shown:probe'})."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
-    amount = lambda key: key not in plan or (num(plan[key]) and 0 <= plan[key] <= 1000)
+    amount = lambda key, top=1000: key not in plan or (num(plan[key]) and 0 <= plan[key] <= top)
+    arms = plan.get('arms', {}) if isinstance(plan, dict) else None
     return (isinstance(plan, dict)
-            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'expected'}
+            and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'spent', 'expected',
+                              'sentencePrice', 'arms'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
-            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('expected'))
+            and integer(plan.get('candidates'), 1000) and amount('budget') and amount('spent') and amount('expected')
+            and amount('sentencePrice', 1)
+            and isinstance(arms, dict) and len(arms) <= 200
+            and all(isinstance(w, str) and 0 < len(w) <= 40 and isinstance(a, str) and 0 < len(a) <= 20
+                    for w, a in arms.items()))
 
 
 MAX_TRACE_POINTS = 200
@@ -506,6 +519,45 @@ def intensity_changes(path=None):
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],
                             'until': value.get('until') or 0, 'source': value.get('source') or ''})
     return out
+
+
+def chat_briefs(path=None, session=None):
+    """What each chat reply was offered (brief ops, weave.compose), oldest first, one chat's or every chat's: {at, machine,
+    session, level, intensity, budget, ask, sentences, expected (per 100 words; None at full), sentencePrice (None
+    before sentences were priced), offered: [[word, p]], arms, topical (the topical words offered, [[word, p]]; none
+    before there were any), known, whole, chars, turn (Codex; else None)}. The hook writes one as a prompt is sent, so
+    a reply's is the last of its chat at or before the reply (brief_for)."""
+    con = connect(path)
+    try:
+        query = "SELECT at, machine, body FROM ops WHERE kind = 'brief'" + (' AND body LIKE ?' if session else '')
+        rows = con.execute(query + ' ORDER BY at', (f'%"session": "{session}"%',) if session else ()).fetchall()
+    finally:
+        con.close()
+    out = []
+    for at, machine, body in rows:
+        try:
+            op = json.loads(body)
+        except ValueError:
+            continue
+        if session and op.get('session') != session:
+            continue
+        out.append({'at': at, 'machine': machine, 'session': op.get('session'), 'level': op.get('level'),
+                    'intensity': op.get('intensity'), 'budget': op.get('budget'), 'ask': op.get('ask'),
+                    'sentences': op.get('sentences'), 'expected': op.get('expected'),
+                    'sentencePrice': op.get('sentencePrice'), 'offered': op.get('offered') or [],
+                    'arms': op.get('arms') or {}, 'topical': op.get('topical') or [],
+                    'known': op.get('known'), 'whole': op.get('whole'), 'chars': op.get('chars'), 'turn': op.get('turn')})
+    return out
+
+
+def brief_for(briefs, session, at):
+    """The brief a chat reply was written under: the last of its chat (session id) sent at or before the reply's time
+    (ms), from chat_briefs; None when there is none."""
+    found = None
+    for b in briefs:
+        if b['session'] == session and b['at'] <= at and (found is None or b['at'] >= found['at']):
+            found = b
+    return found
 
 
 def request(url, body=None, timeout=5):

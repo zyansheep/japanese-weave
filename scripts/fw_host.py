@@ -3,23 +3,36 @@
 
 Messages (JSON, 4-byte native-endian length prefix, one per line of conversation):
   {"type": "ping"}                      -> {"ok": true, "host": 1}
-  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status}],
+  {"type": "state"}                     -> {"ok": true, "version", "stage", "paused", "words": [{ja, en, hint, status,
+                                            arm?, glosses, safe, id?}] (none the delayed-start experiment hides:
+                                            fwlib.public_state; glosses, safe and id: webdata.add_word_data),
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
+                                            "reading": {"version"} (of readingIndex's answer),
                                             "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
                                             (gemini_key by setup, anthropic_key by hand)}
+  {"type": "readingIndex"}              -> {"ok": true, "version", "entries": [[id, pos, "gloss;gloss"]]}: the safe
+                                            glosses of every swappable dictionary entry (webdata.reading_index), for
+                                            counting what the browser reads; asked for when "reading" changes
+  {"type": "reading", "passages": [{"d", "day", "entries": {entry id: times}}]} -> {"ok": true, "taken": n,
+                                            "queued"?: true}: the dictionary entries passages read on the web showed
+                                            (counts only, never text), into the same daily store as chat's: an
+                                            exposure op (hub.py), on the collector when one is set (hub.validate there);
+                                            the store keeps each passage once in 30 days, as a chat reply (fwlib.fold)
   {"type": "events", "events": [{"word", "kind": "seen"|"flip"|"peek", "day"?}]} -> {"ok": true, "applied": n}
   {"type": "log", "items": [{"kind": "peek"|"flip"|"click"|"select"|"visible"|"shown", ...}]}
                                         -> {"ok": true, "stored", "duplicates", "rejected"}  (see feedback.py)
   {"type": "stats", "since": ms}        -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
                                             "blankPassages", "readingMs", "last"}: what the log holds, on the collector
                                             when one is set
-  {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (adaptive difficulty dial, knowledge.py)
+  {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (normal's lookup budget, knowledge.py)
   {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
                                         -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither:
                                             read); level -3 is off, 3 full
 
-The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) when the gloss log has
-evidence for it, the dial (challenge), the peek budget per 100 words, and the realized peek rate.
+The state reply also carries adaptive difficulty: each word's knowledge estimate (k, sd) and whether it is known at a
+glance (free) from knowledge.json (the fit's, or for a word it hasn't seen yet, the fitted prior for its status), the
+challenge (normal's lookup budget per 100 words, if set), normal's budget, and the web's price of a whole sentence in
+Japanese (sentencePrice, its translation lookups per sentence read) once knowledge.json has one.
 
 With a collector set, the state lives on the collector: replies come from this machine's cache and changes are queued
 here and shown in it at once; a background sync (refreshed when the cache is over STATE_MAX_AGE seconds old) sends
@@ -27,6 +40,7 @@ them and refreshes the cache. The browser never waits on the network.
 """
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 
@@ -36,8 +50,13 @@ import feedback  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
+import webdata  # noqa: E402
 
 MAX_EVENTS = 500
+MAX_READ = 500             # passages a reading message may carry
+MAX_READ_ENTRIES = 2000    # entries one passage may count (a passage is at most 2,000 characters)
+WEB_DIGEST = re.compile(r'^web:[0-9a-f]{8,48}$')
+ENTRY_ID = re.compile(r'^[1-9][0-9]{0,11}$')
 STATE_MAX_AGE = 60
 
 
@@ -64,12 +83,26 @@ def handle(message):
         return {'ok': True, 'host': 1}
     if kind == 'state':
         state, _ = hub.current(STATE_MAX_AGE, wait=False)  # here: applies today's promotion; else the cache
-        reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {})
+        reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {},
+                     reading={'version': webdata.reading_version()})
+        webdata.add_word_data(reply['words'], state)
         for name, field in (('gemini_key', 'geminiKey'), ('anthropic_key', 'anthropicKey')):
             key = fwlib.home() / name
             if key.exists():
                 reply[field] = key.read_text().strip()
         return dict(reply, **adaptive(state, reply['words']))
+    if kind == 'readingIndex':
+        index = webdata.reading_index()
+        return dict(index, ok=True) if index else {'ok': False, 'error': 'no dictionary or sense flags here'}
+    if kind == 'reading':
+        passages = message.get('passages')
+        if not isinstance(passages, list):
+            return {'ok': False, 'error': 'passages must be a list'}
+        replies = [r for r in (web_reply(p) for p in passages[:MAX_READ]) if r]
+        if not replies:
+            return {'ok': True, 'taken': 0}
+        result = hub.submit({'kind': 'exposure', 'replies': replies}, wait=False)  # a collector's: sent by a sync
+        return {'ok': True, 'taken': len(replies), **({'queued': True} if result.get('queued') else {})}
     if kind == 'events':
         events = message.get('events')
         if not isinstance(events, list):
@@ -130,21 +163,61 @@ def handle(message):
     return {'ok': False, 'error': 'unknown message type'}
 
 
+def web_reply(passage):
+    """A passage read on the web (the extension's reading counts) as a reply of the exposure op, or None when it is
+    malformed: {d: "web:" and the passage's hash, day (not after today), words: [], entries: {entry id: times}}. Its
+    digest counts it once, as a chat reply's does (fwlib.fold)."""
+    if not isinstance(passage, dict):
+        return None
+    d, day, entries = passage.get('d'), passage.get('day'), passage.get('entries')
+    if not isinstance(d, str) or not WEB_DIGEST.match(d) or not hub.is_day(day):
+        return None
+    if not isinstance(entries, dict) or not 0 < len(entries) <= MAX_READ_ENTRIES:
+        return None
+    if not all(isinstance(k, str) and ENTRY_ID.match(k) and isinstance(n, int) and not isinstance(n, bool)
+               and 1 <= n <= 1000 for k, n in entries.items()):
+        return None
+    return {'d': d, 'day': min(day, fwlib.today()), 'words': [], 'entries': entries}
+
+
 def adaptive(state, words):
-    """Per-word estimates and the dial for the extension; starts a background refresh when they are stale. Never
-    waits on the network: the refresh runs in its own process. budget: normal's lookups per 100 words (the challenge
-    when set, else intensity.BUDGETS[0]) times the controller's scale, which only steers while a challenge is set; the
-    extension scales the other levels from it (intensity.budget)."""
+    """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
+    Never waits on the network: the refresh runs in its own process. Each word gets k (its long-term knowledge), sd,
+    free and read (when it was last read, for its current chance: knowledge.current_chance) from knowledge.json (fit:
+    every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and origin_at;
+    free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors.
+    recency: the fit's floor and the days back to the long-term chance. budget: normal's lookups per 100 words, the
+    challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget)."""
     know = knowledge.load()
+    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    by_ja, today = {w['ja']: w for w in state['words']}, fwlib.today()
     for w in words:
-        entry = (know.get('words') or {}).get(w['ja'])
-        if entry:
+        entry = entries.get(w['ja'])
+        if isinstance(entry, dict) and 'k' in entry:
             w['k'], w['sd'] = round(entry['k'], 2), round(entry['sd'], 2)
+            if isinstance(entry.get('free'), bool):
+                w['free'] = entry['free']
+            if isinstance(entry.get('read'), list) and entry['read']:
+                w['read'] = entry['read']
+            continue
+        guess = knowledge.prior_estimate(know, knowledge.origin_at(by_ja.get(w['ja']), today))
+        if guess is not None:
+            w['k'], w['sd'] = round(guess[0], 2), round(guess[1], 2)
+            w['free'] = knowledge.sigmoid(-guess[0]) < fwlib.FREE_P
     if not fwlib.collector_url() and knowledge.is_stale(know) and feedback.default_path().exists():
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)
-    scale = (know.get('controller') or {}).get('scale', 1.0) if challenge else 1.0
-    return {'challenge': challenge, 'budget': round((challenge or intensity.BUDGETS[0]) * scale, 3), 'rate': know.get('rate')}
+    reply = {'challenge': challenge, 'budget': challenge or intensity.BUDGETS[0]}
+    recency = know.get('recency')
+    if isinstance(recency, dict) and isinstance(recency.get('floor'), (int, float)):
+        reply['recency'] = {'floor': recency['floor'], 'days': recency.get('days', knowledge.LONG_DAYS)}
+    # knowledge.json sentencePrice: {surface: lookups per sentence read}, from the fit; without one the extension uses
+    # its own default (levels.js SENTENCE_PRICE)
+    prices = know.get('sentencePrice')
+    price = prices.get('browser') if isinstance(prices, dict) else None
+    if isinstance(price, (int, float)) and not isinstance(price, bool) and 0 < price <= 1:
+        reply['sentencePrice'] = round(price, 4)
+    return reply
 
 
 def main():

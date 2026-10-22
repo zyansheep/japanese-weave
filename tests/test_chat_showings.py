@@ -167,32 +167,168 @@ class Replay(unittest.TestCase):
 
 
 class Calibration(unittest.TestCase):
-    def test_chat_lookups_against_the_model(self):
+    def test_chat_lookups_against_the_model_per_class(self):
         rows, contexts = [], {}
         message(contexts, rows, 'a', NOW - 3_600_000, stays=[stay(A, 30_000, 30)])
         message(contexts, rows, 'b', NOW - 3_000_000, stays=[stay(A, 30_000, 30), stay(B, 20_000, 20)], opened=[3])
         rows.append(dict(rows[-1], id=9, kind='peek', word='でも', position=4, dwell_ms=200))  # passing over: no lookup
         message(contexts, rows, 'old', NOW - 40 * knowledge.DAY_MS, stays=[stay(A, 30_000, 30)], notes=[['他', 0, 3]],
                 opened=[0])  # an unlisted word, before the window
-        chat = []
-        knowledge.replay(rows, contexts, LISTED, {}, [], NOW, chat=chat)
-        self.assertEqual([(m['lookups'], m['observed']) for m in chat], [(1, 0.0), (0, 0.0), (1, 1.0)])
-        first = chat[1]  # before any evidence on these words: read chance times the prior's peek chance
+        shown = []
+        knowledge.replay(rows, contexts, LISTED, {}, [], NOW, shown=shown)
+        self.assertEqual([(m['lookups'], m['classes']['costly'][1], m['classes']['offlist'][1]) for m in shown],
+                         [(1, 0.0, 1.0), (0, 0.0, 0.0), (1, 1.0, 0.0)])
+        first = shown[1]  # before any evidence on these words: read chance times the prior's peek chance, all costly
         read = [knowledge.stay_chance(contexts[('t3', 'a', 'c')], y, LINE) for _w, _x, y in NOTES]
-        self.assertAlmostEqual(first['expected'], sum(read) * knowledge.sigmoid(-1.0))
-        report = knowledge.calibrate(rows, contexts, [], NOW, chat=chat)
-        c = report['chat']
-        self.assertEqual({k: c[k] for k in ('messages', 'words', 'lookups', 'per100', 'none', 'observed')},
-                         {'messages': 2, 'words': 240, 'lookups': 1, 'per100': 0.42, 'none': 1, 'observed': 1.0})
-        self.assertEqual(c['expected'], round(chat[1]['expected'] + chat[2]['expected'], 1))
+        self.assertAlmostEqual(first['classes']['costly'][0], sum(read) * knowledge.sigmoid(-1.0))
+        self.assertEqual(first['classes']['free'], [0.0, 0.0])
+        self.assertAlmostEqual(first['read'], knowledge.words_read('t3', contexts[('t3', 'a', 'c')]))
+        report = knowledge.calibrate(rows, contexts, [], NOW, shown=shown)
+        chat = report['classes']['t3']
+        self.assertEqual({k: chat[k] for k in ('n', 'words', 'lookups', 'none', 'days', 'budget')},
+                         {'n': 2, 'words': 240, 'lookups': 1, 'none': 1, 'days': 1, 'budget': 0.5})
+        read = shown[1]['read'] + shown[2]['read']
+        self.assertEqual(chat['read'], round(read))
+        costly = chat['classes']['costly']
+        self.assertEqual(costly['seen'], round(knowledge.per_100(1.0, read), 4))
+        self.assertIsNone(costly['interval'])  # one day: too few to resample
+        self.assertEqual(report['classes']['browser']['n'], 0)
         self.assertEqual(report['passages'], 0)  # chat messages stay out of the web bins
-        self.assertIn(f'\nChat: 2 messages of 240 words, 1 lookups (0.42 per 100 words), 1 messages with none; '
-                      f'listed words: {c["expected"]:.1f} lookups expected, 1.0 seen.\n',
-                      knowledge.calibration_text(report))
-        self.assertIn('No chat messages with a word count yet.',
-                      knowledge.calibration_text(knowledge.calibrate([], {}, [], NOW)))
-        old = {k: v for k, v in report.items() if k != 'chat'}  # knowledge.json from before
-        self.assertNotIn('Chat:', knowledge.calibration_text(old))
+        text = knowledge.calibration_text(report)
+        self.assertIn(f'\n  Chat: 2 messages (1 with no lookup) over 1 days, 240 words shown, {round(read)} read, 1 '
+                      'lookups; budget 0.50:\n', text)
+        self.assertIn(f'\n    costly words:    {costly["expected"]:.3f} expected, {costly["seen"]:.3f} seen: '
+                      f'{costly["ratio"]:.2f} (no interval before 5 days)\n', text)
+        self.assertIn('\n  Web: no passages with Japanese yet.\n', text)
+        self.assertIn('    topical words:   none yet', text)
+        old = {k: v for k, v in report.items() if k != 'classes'}  # knowledge.json from before
+        self.assertNotIn('Lookups per 100 words read', knowledge.calibration_text(old))
+
+    def test_a_word_offered_as_topical_in_the_hour_before_is_topical(self):
+        # 問題 a listed word (a queue word offered as topical), 燃料 a dictionary word, 食べました a form of an offered
+        # 食べる; 多分 and 中 listed, not offered; 他 off the list, offered too long before
+        rows, contexts = [], {}
+        notes = [['問題', 0, 3], ['燃料', 40, 27], ['食べました', 0, 51], ['多分', 0, 91], ['他', 0, 115]]
+        at = NOW - 3_600_000
+        message(contexts, rows, 'a', at, notes=notes, stays=[stay(A, 30_000, 30), stay(B, 20_000, 20)],
+                opened=[1, 4])
+        briefs = [{'at': at - 2 * 3_600_000, 'topical': [['他', 0.5]]},  # over the hour before: not this message's
+                  {'at': at - 20 * 60_000, 'topical': [['問題', 0.2], ['燃料', 0.3], ['食べる', 0.25]]},
+                  {'at': at - 10 * 60_000, 'topical': [['燃料', 0.4], 'bad', ['x', 'y']]},  # the latest price counts
+                  {'at': at + 60_000, 'topical': [['多分', 0.3]]}]  # after it was shown
+        offers = knowledge.Offers(briefs)
+        self.assertEqual(offers.price({'燃料'}, at), ('燃料', 0.4))
+        self.assertIsNone(offers.price({'他'}, at))
+        self.assertIsNone(offers.price({'多分'}, at))
+        self.assertTrue(offers.active(at) and not offers.active(at - 3 * 3_600_000))
+
+        class Model:
+            chance = staticmethod(lambda word, surface, _at: 0.1)
+
+        context = contexts[('t3', 'a', 'c')]
+        found = knowledge.shown_record(at, 't3', context, rows, Model(), lambda w: w if w in {'問題', '多分'} else None,
+                                       offers=offers)['classes']
+        read = {y: knowledge.stay_chance(context, y, LINE) for _w, _x, y in notes}
+        self.assertAlmostEqual(found['topical'][0], read[3] * 0.2 + read[27] * 0.4 + read[51] * 0.25)
+        self.assertEqual(found['topical'][1], 1.0)  # 燃料 opened
+        self.assertEqual(found['costly'], [read[91] * 0.1, 0.0])  # 多分 alone: 問題 is topical
+        self.assertEqual(found['offlist'], [read[115] * 0.1, 1.0])  # 他, opened
+        without = knowledge.shown_record(at, 't3', context, rows, Model(), lambda w: w if w in {'問題', '多分'} else None)
+        self.assertEqual(without['classes']['topical'], [0.0, 0.0])  # no briefs: as before
+        web = dict(context, surface='browser')
+        self.assertEqual(knowledge.shown_record(at, 'browser', web, rows, Model(), lambda w: None,
+                                                offers=offers)['classes']['topical'], [0.0, 0.0])  # chat only
+        report = knowledge.lookup_classes([knowledge.shown_record(at, 't3', context, rows, Model(),
+                                                                  lambda w: w if w in {'問題', '多分'} else None,
+                                                                  offers=offers)])
+        text = '\n'.join(knowledge.classes_text(report, 30))
+        self.assertIn('    topical words:   ', text)
+        self.assertNotIn('topical words:   none yet', text)
+
+    def test_sentence_translations_and_off_list_words_are_classes_of_their_own(self):
+        rows, contexts = [], {}
+        notes = NOTES[:3] + [['燃料', 0, 51], ['。', 60, 51]]
+        message(contexts, rows, 'a', NOW - 3_600_000, notes=notes, stays=[stay(A, 30_000, 30)], opened=[3, 4],
+                kind='peek')
+        rows[-2]['dwell_ms'] = 400  # a glance at 燃料
+        shown = []
+        knowledge.replay(rows, contexts, LISTED, {}, [], NOW, shown=shown)
+        classes = shown[0]['classes']
+        self.assertEqual((classes['offlist'][1], classes['sentences']), (knowledge.GLANCE_Y, [0.0, 1.0]))
+        offlist = knowledge.stay_chance(contexts[('t3', 'a', 'c')], 51, LINE) * knowledge.sigmoid(-1.0)
+        self.assertAlmostEqual(classes['offlist'][0], offlist)  # priced at the prior, as words off the list are
+        report = knowledge.lookup_classes(shown)['t3']['classes']
+        self.assertIsNone(report['sentences']['ratio'])
+        self.assertTrue(knowledge.is_sentence('。') and knowledge.is_sentence('私のおすすめは2です。'))
+        self.assertFalse(knowledge.is_sentence('燃料'))
+        rows.append(dict(rows[-1], id=99, word='私のおすすめは2です。'))
+        self.assertEqual(knowledge.unlisted(rows, LISTED, NOW)['top'], [['燃料', 1]])  # sentences aren't words
+
+    def test_a_sentence_costs_its_translation_lookups_per_sentence_read(self):
+        rows, contexts = [], {}
+        notes = NOTES[:2] + [['。', 60, 27], ['燃料', 0, 51], ['。', 60, 51]]  # two sentences in A
+        for e in range(10):  # each read once (A on screen 30 s), its first sentence's translation opened 4 times in 10
+            message(contexts, rows, f'v{e}', NOW - (20 - e) * 3_600_000, notes=notes, stays=[stay(A, 30_000, 30)],
+                    opened=[2] if e % 5 < 2 else [], kind='peek')
+        events = knowledge.sentence_events(rows, contexts, NOW)
+        self.assertEqual(len(events), 20)
+        read = sum(r for _at, _s, _y, r in events)
+        self.assertAlmostEqual(read, 10 * sum(knowledge.stay_chance(contexts[('t3', 'v0', 'c')], y, LINE)
+                                              for y in (27, 51)))
+        prices = knowledge.sentence_prices(events, NOW)
+        self.assertEqual(prices['browser'], {'p': knowledge.SENTENCE_PRICE, 'read': 0.0, 'opens': 0.0})  # no data
+        decay = lambda at: 0.5 ** ((NOW - at) / knowledge.DAY_MS / knowledge.EVIDENCE_DAYS)
+        opens = sum(decay(at) * y for at, _s, y, _r in events)
+        weight = sum(decay(at) * r for at, _s, _y, r in events)
+        self.assertAlmostEqual(prices['t3']['p'], (opens + 0.08 * knowledge.SENTENCE_WEIGHT) /
+                               (weight + knowledge.SENTENCE_WEIGHT), places=4)
+        self.assertGreater(prices['t3']['p'], knowledge.SENTENCE_PRICE)  # 4 opens in about 12 sentences read
+        self.assertEqual(knowledge.sentence_prices(events, NOW - 30 * 3_600_000)['t3']['p'], knowledge.SENTENCE_PRICE)
+
+    def test_words_read_weigh_each_word_by_its_read_chance(self):
+        passage = {'words': 40, 'height': 72, 'active': 600_000}  # long enough to read it all
+        self.assertAlmostEqual(knowledge.words_read('browser', passage), 40 * knowledge.READ_MAX, places=6)
+        self.assertEqual(knowledge.words_read('browser', dict(passage, active=0)), 0.0)
+        quick = knowledge.words_read('browser', dict(passage, active=8_000))
+        self.assertLess(quick, 40 * knowledge.READ_MAX)
+        self.assertGreater(quick, 40 * knowledge.read_chance(dict(passage, active=8_000), 48, LINE))  # the last line
+        # A read, B never on screen: B's words count at A's mean; the 70 words with no Japanese too
+        message_ = {'words': 120, 'height': 300, 'annotations': NOTES, 'stays': [stay(A, 600_000, 30)]}
+        self.assertAlmostEqual(knowledge.words_read('t3', message_), 120 * knowledge.READ_MAX, places=6)
+        both = dict(message_, stays=[stay(A, 600_000, 30), stay(B, 600, 20), stay((0, 80), 9_000, 30)])
+        a = 30 * knowledge.READ_MAX  # the overlapping band of A is the same paragraph: counted once
+        b = knowledge.words_read('browser', {'words': 20, 'active': 600})
+        self.assertAlmostEqual(knowledge.words_read('t3', both), a + b + 70 * (a + b) / 50, places=6)
+        self.assertEqual(knowledge.words_read('t3', dict(message_, stays=[])), 0.0)
+        self.assertIsNone(knowledge.per_100(3, 0))
+        # a reading model per surface (knowledge.tune): each surface reads its own
+        pace, top = {'browser': 300, 't3': 300}, {'browser': 0.3, 't3': knowledge.READ_MAX}
+        self.assertAlmostEqual(knowledge.words_read('browser', passage, pace, top), 40 * 0.3, places=6)
+        self.assertAlmostEqual(knowledge.words_read('t3', message_, pace, top), 120 * knowledge.READ_MAX, places=6)
+        self.assertAlmostEqual(knowledge.reader('browser', passage, pace, top)(48, LINE), 0.3, places=6)
+        self.assertEqual(knowledge.per_100(3, 600), 0.5)
+
+    def test_intervals_resample_days(self):
+        self.assertIsNone(knowledge.day_interval([(1.0, 1.0)] * 4, knowledge.ratio))  # too few days
+        self.assertEqual(knowledge.day_interval([(2.0, 1.0)] * 5, knowledge.ratio), (0.5, 0.5))
+        days = [(10.0, s) for s in (5, 8, 10, 12, 15, 9, 11)]
+        low, high = knowledge.day_interval(days, knowledge.ratio)
+        self.assertLess(low, knowledge.ratio(days))
+        self.assertGreater(high, knowledge.ratio(days))
+        self.assertGreater(low, 0.5)
+        self.assertLess(high, 1.5)
+        self.assertEqual((low, high), knowledge.day_interval(days, knowledge.ratio))  # seeded
+        self.assertIsNone(knowledge.day_interval([(0.0, 1.0)] * 5, knowledge.ratio))  # nothing expected
+
+    def test_the_chat_budget_follows_its_level(self):
+        changes = [{'surface': 'chat', 'at': 100, 'level': -2, 'until': 500},
+                   {'surface': 'browser', 'at': 200, 'level': 2, 'until': 900},
+                   {'surface': 'chat', 'at': 600, 'level': 3, 'until': 900}]
+        self.assertEqual(knowledge.chat_budget(changes, 50), 0.5)
+        self.assertEqual(knowledge.chat_budget(changes, 300), 0.15)
+        self.assertEqual(knowledge.chat_budget(changes, 550), 0.5)  # ran out
+        self.assertIsNone(knowledge.chat_budget(changes, 700))  # full: no budget
+        self.assertEqual(knowledge.chat_budget(changes, 300, challenge=1), 0.3)  # the challenge is normal's
 
 
 class Store(Home):
@@ -256,11 +392,33 @@ class Store(Home):
         items += [dict(s, annotations=notes) for s in self.stays(at + 1000)]
         feedback.record(items, 't3')
         know = knowledge.refresh(now)
-        self.assertEqual({k: know['calibration']['chat'][k] for k in ('messages', 'words', 'lookups', 'none')},
-                         {'messages': 1, 'words': 120, 'lookups': 0, 'none': 1})
-        self.assertGreater(know['calibration']['chat']['expected'], 0)
+        chat = know['calibration']['classes']['t3']
+        self.assertEqual({k: chat[k] for k in ('n', 'words', 'lookups', 'none')},
+                         {'n': 1, 'words': 120, 'lookups': 0, 'none': 1})
+        self.assertGreater(chat['classes']['costly']['expected'] + chat['classes']['free']['expected'], 0)
         self.assertGreater(know['words'][listed[0]]['k'], know['words'][listed[0]]['mu'])
         self.assertLess(know['offset']['t3'], 0)
+
+    def test_refresh_counts_the_words_a_brief_offered_as_topical(self):
+        import hub
+        state = fwlib.load_state()
+        queue = [w['ja'] for w in state['words'] if w['status'] == 'queue'][:2]
+        notes = [[queue[0], 0, 3], ['燃料', 40, 27], [queue[1], 0, 51]]
+        now = time.time()
+        at = int(now * 1000) - 3_600_000
+        items = [dict(self.where(at), kind='shown', words=120, annotations=notes)]
+        items += [dict(s, annotations=notes) for s in self.stays(at + 1000)]
+        items.append(dict(self.where(at + 5000), annotations=notes, kind='peek', word='燃料', position=1, dwellMs=1500,
+                          uid='p-topical'))
+        feedback.record(items, 't3')
+        hub.keep({'kind': 'brief', 'session': 's1', 'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {},
+                  'known': 3, 'whole': True, 'chars': 4000, 'budget': 0.5, 'ask': 2, 'expected': 0.5,
+                  'topical': [[queue[0], 0.3], ['燃料', 0.4]], 'at': at - 600_000})
+        chat = knowledge.refresh(now)['calibration']['classes']['t3']['classes']
+        self.assertGreater(chat['topical']['expected'], 0)
+        self.assertEqual(chat['topical']['seen'], chat['all']['seen'])  # the open was 燃料's, topical
+        self.assertEqual(chat['offlist'], {'expected': 0.0, 'seen': 0.0, 'ratio': None, 'interval': None})
+        self.assertGreater(chat['costly']['expected'] + chat['free']['expected'], 0)  # queue[1] wasn't offered
 
 
 if __name__ == '__main__':

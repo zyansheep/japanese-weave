@@ -39,8 +39,10 @@ class Home(unittest.TestCase):
         self.tmp.cleanup()
 
 
-def plan(jitter=1, limit=0, candidates=0, level=0):
-    return {'level': level, 'intensity': 1, 'jitter': jitter, 'limit': limit, 'candidates': candidates}
+def plan(jitter=1, limit=0, candidates=0, level=0, price=None):
+    """A passage's plan; with a sentence price, one from since thinning took free words only (extension 0.9.0)."""
+    out = {'level': level, 'intensity': 1, 'jitter': jitter, 'limit': limit, 'candidates': candidates}
+    return dict(out, sentencePrice=price) if price else out
 
 
 def records(context, notes, at, plan_, words=40, stays=(1500,)):
@@ -129,16 +131,18 @@ class BlankKnowledge(Home):
             'words': words, 'shown_at': at or self.NOW - 3_600_000, 'height': 80, 'active': active,
             'seen_until': at or self.NOW - 3_600_000, 'plan': plan_}
 
-    def thinning(self, offered_share, thinned_share, count=30):
+    def thinning(self, offered_share, thinned_share, count=30, price=0.08, contexts=None, prefix=''):
         """count untouched and count thinned passages with candidates, at these shares of 60 words, plus blank ones
-        without candidates; the reader slows 2% per point of Japanese."""
-        contexts = {}
+        without candidates; the reader slows 2% per point of Japanese. price: the plans' sentence price (None: plans
+        from before thinning took free words only)."""
+        contexts = {} if contexts is None else contexts
         for e in range(count):
             for name, share, jitter in (('u', offered_share, 1), ('t', thinned_share, 0.5)):
                 japanese = round(share * 60)
                 ms_per_word = 300 * math.exp(2 * japanese / 60)
-                self.showing(contexts, f'{name}{e}', japanese, ms_per_word * 60, plan_=plan(jitter, japanese, 3))
-            self.showing(contexts, f'n{e}', 0, 300 * 60, plan_=plan(1, 0, 0))
+                self.showing(contexts, f'{prefix}{name}{e}', japanese, ms_per_word * 60,
+                             plan_=plan(jitter, japanese, 3, price=price))
+            self.showing(contexts, f'{prefix}n{e}', 0, 300 * 60, plan_=plan(1, 0, 0, price=price))
         return contexts
 
     def test_blank_passages_get_their_own_bin(self):
@@ -162,20 +166,24 @@ class BlankKnowledge(Home):
     def test_thinning_is_compared_among_passages_with_candidates(self):
         contexts = self.thinning(0.05, 0.02)
         for e in range(10):  # thinned all the way to none: now on record, in the thinned group
-            self.showing(contexts, f'z{e}', 0, 300 * 60, plan_=plan(0.5, 0, 1))
+            self.showing(contexts, f'z{e}', 0, 300 * 60, plan_=plan(0.5, 0, 1, price=0.08))
+        self.thinning(0.05, 0.04, count=5, price=None, contexts=contexts, prefix='old')  # thinned budgeted words too
         report = knowledge.calibrate([], contexts, [], self.NOW)
         j = report['jitter']
         self.assertEqual((j['thinned']['n'], j['untouched']['n']), (40, 30))  # the 30 without candidates left out
         self.assertAlmostEqual(j['gap'], 0.05 - 0.75 * 0.0167, delta=0.001)
         self.assertAlmostEqual(j['effect'], 2.0, delta=0.05)
-        self.assertIn('Each extra point of Japanese changes screen time per word by about +2.0%.',
-                      knowledge.calibration_text(report))
-        self.assertEqual((report['passages'], report['bins'][0]['n']), (100, 40))  # still in the bins
+        self.assertEqual((report['jitterBefore']['thinned']['n'], report['jitterBefore']['untouched']['n']), (5, 5))
+        text = knowledge.calibration_text(report)
+        self.assertIn('Randomly thinned passages (thinning free words only, since 2026-10-20): 40 at', text)
+        self.assertIn('Each extra point of Japanese known at a glance changes screen time per word by about +2.0%.', text)
+        self.assertIn('\n  Before, when thinning scaled the budget too: 5 thinned at 3.3% Japanese', text)
+        self.assertEqual((report['passages'], report['bins'][0]['n']), (115, 45))  # still in the bins
 
     def test_calibration_text_says_when_the_gap_is_too_small(self):
         contexts = self.thinning(0.05, 0.05, count=25)
         for e in range(2):  # two of the 25 thinned passages lost a word: 0.13 points less Japanese on average
-            self.showing(contexts, f't{e}', 2, 300 * math.exp(4 / 60) * 60, plan_=plan(0.5, 2, 3))
+            self.showing(contexts, f't{e}', 2, 300 * math.exp(4 / 60) * 60, plan_=plan(0.5, 2, 3, price=0.08))
         report = knowledge.calibrate([], contexts, [], self.NOW)
         self.assertEqual((report['jitter']['gap'], report['jitter']['effect']), (0.0013, None))
         text = knowledge.calibration_text(report)
@@ -189,34 +197,36 @@ class BlankKnowledge(Home):
         self.assertEqual(few['jitter']['gap'], None)
         self.assertIn('  Not enough of either yet to measure the effect (20 each).', knowledge.calibration_text(few))
         old = dict(few, jitter={k: v for k, v in few['jitter'].items() if k != 'gap'})  # knowledge.json from before
+        del old['jitterBefore']
         self.assertIn('Not enough of either yet', knowledge.calibration_text(old))
+        before = knowledge.calibrate([], self.thinning(0.05, 0.02, count=10, price=None), [], self.NOW)
+        self.assertIn('No randomly thinned passages since thinning took free words only',
+                      knowledge.calibration_text(before))
 
-    def test_blank_passages_leave_the_dial_and_the_word_estimates_alone(self):
+    def test_blank_passages_leave_the_word_estimates_alone(self):
+        import evaluate
         contexts, rows = {}, []
         for e in range(4):
             self.showing(contexts, f'g{e}', 2, 30_000, words=50, at=self.NOW - 7_200_000 + e * 60_000)
         rows.append({'id': 1, 'at': self.NOW - 7_000_000, 'surface': 'browser', 'kind': 'peek', 'word': 'w0',
                      'dwell_ms': 1500, 'view': 'g0', 'context': 'c', 'position': 0, 'uid': None})
         listed = {'w0', 'w1'}
-        before = (knowledge.peek_rate(rows, contexts, self.NOW), knowledge.replay(rows, contexts, listed, {}, [], self.NOW))
-        losses = []
-        knowledge.replay(rows, contexts, listed, {}, [], self.NOW, losses=losses)
+        words = [{'ja': ja, 'kana': '', 'status': 'active', 'added': '2026-01-01', 'changed': '2026-01-01'}
+                 for ja in sorted(listed)]
+        fitted = lambda: knowledge.Fit(evaluate.extract(rows, contexts, words, {}, [], self.NOW), self.NOW)
+        before = (knowledge.replay(rows, contexts, listed, {}, [], self.NOW), fitted())
         for e in range(20):
             self.showing(contexts, f'b{e}', 0, 30_000, words=80, at=self.NOW - 7_100_000 + e * 60_000, plan_=plan())
-        self.assertEqual(knowledge.peek_rate(rows, contexts, self.NOW), before[0])
-        self.assertEqual(before[0], (0.5, 200, 1))
-        words, offset = knowledge.replay(rows, contexts, listed, {}, [], self.NOW)
-        self.assertEqual({ja: (w.k, w.n, w.obs) for ja, w in words.items()},
-                         {ja: (w.k, w.n, w.obs) for ja, w in before[1][0].items()})
-        self.assertEqual(offset, before[1][1])
+        words_, offset = knowledge.replay(rows, contexts, listed, {}, [], self.NOW)
+        self.assertEqual({ja: (w.k, w.n, w.obs) for ja, w in words_.items()},
+                         {ja: (w.k, w.n, w.obs) for ja, w in before[0][0].items()})
+        self.assertEqual(offset, before[0][1])
+        after = fitted()
+        self.assertEqual((after.k, after.n, after.terms), (before[1].k, before[1].n, before[1].terms))
         blank_showings = [s for s in knowledge.showings(rows, contexts, self.NOW) if not s[2]['annotations']]
         self.assertEqual(len(blank_showings), 20)
         self.assertEqual([knowledge.observations('browser', s[2], s[3], listed, lambda y, line: 1.0)
                           for s in blank_showings], [[]] * 20)  # no words there: no observations
-        after = []
-        knowledge.replay(rows, contexts, listed, {}, [], self.NOW, losses=after)
-        self.assertEqual(after, losses)
-        self.assertEqual(knowledge.tune(rows, contexts, listed, {}, [], self.NOW)['words'], len(losses))
 
 
 if __name__ == '__main__':

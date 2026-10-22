@@ -1,4 +1,5 @@
 """Offline tests for the hook, word state, native host and setup. Run: python3 -m unittest discover -s tests"""
+import copy
 import io
 import json
 import math
@@ -40,7 +41,7 @@ def line(text, day='2026-10-09', sidechain=False):
 
 def word(ja, status='known'):
     return {'ja': ja, 'en': 'meaning', 'hint': 'hint', 'status': status, 'added': '2026-10-01', 'changed': '',
-            'days': [], 'last_bad': ''}
+            'days': [], 'last_bad': ''}  # with the day-count fields, as before the switch
 
 
 class Home(unittest.TestCase):
@@ -122,83 +123,86 @@ class Rules(Home):
 
     def test_new_state_starts_small(self):
         state = fwlib.new_state('2026-10-01')
-        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
-        self.assertEqual(active, [w['ja'] for w in fwlib.load_lexicon()[:5]])  # 5 new a day
+        active = [w for w in state['words'] if w['status'] == 'active']
+        self.assertEqual([w['ja'] for w in active], [w['ja'] for w in fwlib.load_lexicon()[:5]])  # 5 new a day
+        self.assertTrue(all(w['origin'] == 'learning' and 'arm' not in w for w in active))  # every first word on show
+        self.assertEqual(fwlib.taken_today(state, '2026-10-01'), fwlib.NEW_PER_DAY)
+        self.assertEqual(state['labels'], {'from': 'model', 'since': '2026-10-01'})
         self.assertEqual(fwlib.stage_for(state), 1)
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'):
-            fwlib.promote(state, day, {})
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW)  # full at 20
+        self.assertEqual(fwlib.blank({'ja': 'x'}), {'ja': 'x', 'status': 'queue', 'added': '', 'changed': ''})
 
-    def test_graduation_needs_three_clean_days(self):
+    def test_labels_come_from_the_model(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'でも': {'n': 5, 'days': ['2026-10-01', '2026-10-02']}}
-        fwlib.promote(state, '2026-10-02', chat)
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')  # 2 days
-        fwlib.apply_event(state, 'でも', 'seen', '2026-10-03')  # extension day + chat days
-        fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'known')
+        learning, queued = state['words'][0], state['words'][40]
+        self.assertEqual([fwlib.label(learning, f) for f in (True, False)], ['known', 'active'])
+        self.assertEqual([fwlib.label(queued, f) for f in (True, False)], ['known', 'queue'])  # free: known, not new
+        fwlib.apply_event(state, learning['ja'], 'known', '2026-10-02')  # a command since the refresh decided
+        done = fwlib.relabel(state, [[learning['ja'], 'active', 'known'], [queued['ja'], 'queue', 'known'],
+                                     [state['words'][1]['ja'], 'queue', 'known']], '2026-10-03')
+        self.assertEqual(done, [[queued['ja'], 'queue', 'known']])  # only where the label is still the one decided on
+        self.assertEqual((queued['status'], queued['added'], queued['origin']), ('known', '2026-10-03', 'new'))
+        self.assertEqual(fwlib.label(queued, False), 'active')  # in use since: learning once it isn't free
 
-    def test_peek_blocks_graduation_and_assumed_alone_never_graduates(self):
+    def test_commands_set_the_label_at_once_and_events_change_nothing(self):
         state = fwlib.new_state('2026-10-01')
-        chat = {'もう': {'n': 3, 'days': ['2026-10-01', '2026-10-02', '2026-10-03']}}
-        fwlib.apply_event(state, 'もう', 'peek', '2026-10-02')
-        fwlib.promote(state, '2026-10-03', chat)
-        self.assertEqual(fwlib.find(state, 'もう')['status'], 'active')  # peek inside the last 3 days
-        chat['もう']['days'] += ['2026-10-04', '2026-10-05']
-        fwlib.promote(state, '2026-10-05', chat)
-        self.assertEqual(fwlib.find(state, 'もう')['status'], 'known')  # last 3 days (03-05) are peek-free
-        for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.apply_event(state, '今', 'assumed', day)
-        fwlib.promote(state, '2026-10-04', {})
-        self.assertEqual(fwlib.find(state, '今')['status'], 'active')  # 4 assumed days, never seen
-        fwlib.apply_event(state, '今', 'seen', '2026-10-05')
-        fwlib.promote(state, '2026-10-05', {})
-        self.assertEqual(fwlib.find(state, '今')['status'], 'known')
-
-    def test_flip_counts_like_a_peek_day_and_shaky_recovers_after_7_clean_days(self):
-        state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, '前', 'known', '2026-10-01')
-        fwlib.apply_event(state, '前', 'flip', '2026-10-02')  # one flip is often a test click
+        before = json.dumps(state, sort_keys=True)
+        for kind in ('seen', 'peek', 'flip', 'assumed'):
+            self.assertTrue(fwlib.apply_event(state, '前', kind, '2026-10-02'))
+        self.assertEqual(json.dumps(state, sort_keys=True), before)  # no day counts: the ops log keeps them
+        fwlib.apply_event(state, '前', 'known', '2026-10-02')
         self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'flip', '2026-10-05')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
-        learning = fwlib.find(state, state['words'][0]['ja'])
-        fwlib.apply_event(state, learning['ja'], 'flip', '2026-10-05')
-        self.assertEqual((learning['status'], learning['last_bad']), ('active', '2026-10-05'))  # restarts graduation
-        fwlib.apply_event(state, '中', 'asked', '2026-10-04')
-        fwlib.promote(state, '2026-10-10', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
-        fwlib.apply_event(state, '中', 'peek', '2026-10-09')  # restarts the clock
-        fwlib.promote(state, '2026-10-15', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'shaky')
-        fwlib.promote(state, '2026-10-16', {})
-        self.assertEqual(fwlib.find(state, '中')['status'], 'known')
+        fwlib.apply_event(state, '前', 'asked', '2026-10-03')
+        self.assertEqual(fwlib.find(state, '前')['status'], 'active')
+        self.assertFalse(fwlib.apply_event(state, 'nope', 'known'))
+        self.assertFalse(fwlib.apply_event(state, '前', 'jump'))
 
-    def test_known_word_peeked_twice_in_a_week_becomes_shaky(self):
+    def test_intake_order_and_the_days_count(self):
         state = fwlib.new_state('2026-10-01')
-        fwlib.apply_event(state, '前', 'known', '2026-10-01')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-02')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-02')  # same day: once
-        self.assertEqual(fwlib.find(state, '前')['status'], 'known')
-        fwlib.apply_event(state, '前', 'peek', '2026-10-08')
-        self.assertEqual(fwlib.find(state, '前')['status'], 'shaky')
+        queue = [w['ja'] for w in state['words'] if w['status'] == 'queue']
+        order = [w['ja'] for w in fwlib.newcomers(state, {queue[30]: 2, queue[9]: 5}, free={queue[0]})]
+        self.assertEqual(order[:4], [queue[9], queue[30], queue[1], queue[2]])  # looked up first; never a free word
+        self.assertEqual(fwlib.take_in(state, [[queue[9], 'held', 0.25], [queue[1], None, None], [queue[0], None, None],
+                                               [state['words'][0]['ja'], None, None]], '2026-10-02'),
+                         [queue[9], queue[1], queue[0]])  # a word in use already isn't taken again
+        self.assertEqual(fwlib.taken_today(state, '2026-10-02'), 3)
+        self.assertEqual(fwlib.taken_today(state, '2026-10-03'), 0)
+        held = fwlib.find(state, queue[9])
+        self.assertEqual((held['status'], held['origin'], held['arm']),
+                         ('active', 'learning', {'arm': 'held', 'draw': 0.25, 'day': '2026-10-02', 'probe': '2026-10-23'}))
+        self.assertNotIn('arm', fwlib.find(state, queue[1]))
 
-    def test_refill_cap_and_shaky_words_take_learning_slots(self):
-        state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.promote(state, day, {})
-        top = [w['ja'] for w in fwlib.load_lexicon()]
-        for ja in top[:6]:
-            fwlib.apply_event(state, ja, 'known', '2026-10-05')
-        fwlib.promote(state, '2026-10-05', {})
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW - 1)  # 20-6+5
-        for ja in top[6:11]:
-            fwlib.apply_event(state, ja, 'asked', '2026-10-06')
-        before = sum(w['status'] != 'queue' for w in state['words'])
-        fwlib.promote(state, '2026-10-06', {})
-        # 14 active + 5 shaky fill 19 of 20 slots: one new word, where 5 shaky words used to stop all new words
-        self.assertEqual(sum(w['status'] != 'queue' for w in state['words']), before + 1)
+    def test_the_switch_keeps_the_old_fields_a_month_and_can_be_undone(self):
+        words = [dict(word('今'), changed='2026-10-01', days=['2026-10-01'], peeks=['2026-10-02']),
+                 dict(word('前', 'shaky'), last_bad='2026-10-03'), dict(word('中', 'active')), dict(word('何', 'queue'), added=''),
+                 dict(word('多分', 'queue'), added='')]
+        state = {'stage': 1, 'stage_pinned': False, 'paused': False, 'words': words, 'refilled': ['2026-10-04', 2]}
+        result = fwlib.apply_labels(state, {'labels': [['前', 'shaky', 'active'], ['今', 'known', 'known']],
+                                            'intake': [['何', 'shown', 0.75]], 'experiment': {'seed': 7}}, '2026-10-05')
+        self.assertTrue(result['switched'])
+        self.assertEqual((result['labels'], result['intake']), ([['前', 'shaky', 'active']], ['何']))
+        by = {w['ja']: w for w in state['words']}
+        self.assertEqual([by[ja]['origin'] for ja in ('今', '前', '中', '何', '多分')],
+                         ['known', 'known', 'learning', 'learning', 'new'])  # the prior's feature, never the label
+        self.assertEqual(by['前']['legacy'], {'status': 'shaky', 'added': '2026-10-01', 'changed': '', 'days': [],
+                                             'last_bad': '2026-10-03'})
+        self.assertNotIn('peeks', by['今'])
+        self.assertEqual((state['legacy'], state['experiment']),
+                         ({'refilled': ['2026-10-04', 2]}, {'name': 'delayed-start', 'seed': 7, 'since': '2026-10-05'}))
+        self.assertFalse(fwlib.apply_labels(state, {}, '2026-10-06')['switched'])  # once
+        undone = copy.deepcopy(state)
+        self.assertEqual(fwlib.restore(undone, '2026-10-07'), 5)
+        back = {w['ja']: w for w in undone['words']}
+        self.assertEqual((back['前']['status'], back['前']['last_bad'], back['今']['peeks']), ('shaky', '2026-10-03',
+                                                                                            ['2026-10-02']))
+        self.assertEqual((back['何']['status'], back['何']['days']), ('active', []))  # taken in since: still learning
+        self.assertEqual((undone['labels']['from'], undone['refilled']), ('rules', ['2026-10-04', 2]))
+        self.assertEqual(fwlib.apply_labels(undone, {'labels': [['前', 'shaky', 'known']]}, '2026-10-08')['labels'], [])
+        self.assertIsNone(fwlib.restore(undone, '2026-10-08'))  # nothing left to restore
+        fwlib.expire_legacy(state, '2026-11-03')
+        self.assertIn('legacy', by['今'])  # 29 days on
+        fwlib.expire_legacy(state, '2026-11-04')
+        self.assertFalse(any('legacy' in w for w in state['words']) or 'legacy' in state)
+        self.assertIsNone(fwlib.restore(state, '2026-11-04'))  # too late to undo
 
     def test_stage_auto_and_pinned(self):
         state = fwlib.new_state('2026-10-01')
@@ -240,43 +244,57 @@ class Brief(Home):
         words = [word('でも'), word('中'), word('最悪'), word('一緒に', 'active'), word('結局', 'shaky'), word('何', 'queue')]
         return {'stage': stage, 'stage_pinned': True, 'paused': False, 'words': words}
 
-    def test_tiers(self):
-        self.assertEqual(weave.tier(word('でも'), self.seen), 'lot')
-        self.assertEqual(weave.tier(word('中'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('最悪'), self.seen), 'rare')
-        self.assertEqual(weave.tier(word('もっと'), self.seen), 'some')
-        self.assertEqual(weave.tier(word('一緒に', 'active'), self.seen), 'learn')
+    def test_known_words_by_name_in_list_order_connectors_as_swaps(self):
+        words = [word('犬'), word('イタリア'), word('二'), word('四つ'), word('〜時'), word('最悪'), word('中'), word('もっと'),
+                 word('でも')]
+        words[4]['en'] = 'hour / o\'clock'
+        named = weave.named_words(words)  # the base list's order; Anki words (犬) after it; no numbers or katakana
+        self.assertEqual([w['ja'] for w in named], ['でも', '中', 'もっと', '最悪', '犬'])
+        self.assertEqual([w['ja'] for w in weave.default_swaps(named)], ['でも', 'もっと'])  # tier A only
+        many = fwlib.new_state('2026-10-01')['words'][:400]
+        swaps = weave.default_swaps(weave.named_words(many))
+        self.assertEqual(len(swaps), weave.DEFAULT_SWAPS)
+        self.assertEqual([w['ja'] for w in swaps[:6]], ['でも', 'もう', '今', '前', 'そして', 'だから'])
 
     def test_brief_text(self):
         lines = weave.brief(self.state(), self.seen).split('\n')
         self.assertNotIn('%', lines[0])  # a lookup budget, not a share of the words
         self.assertIn('Known words cost the user nothing', lines[0])
-        self.assertIn('about 2 per 100 words (6 in a 300-word reply), at most one in a sentence', lines[0])
+        # normal's 0.5: 0.09 for whole sentences (intensity.SENTENCE_SHARE), 0.41 for learning words at 0.27 each
+        self.assertIn('about 1.5 learning words per 100 words (5 in a 300-word reply), at most one in a sentence',
+                      lines[0])
+        self.assertIn('about 1 whole sentence per 100 words (3 in a 300-word reply) fully in Japanese', lines[0])
         self.assertIn('never conjugated', lines[0])
-        self.assertIn('No Japanese outside these lists', lines[0])
+        self.assertIn('No other Japanese anywhere, not even a common word', lines[0])
         self.assertIn('never in files, code', lines[0])
         # no evidence yet: learning words at the neutral prior (about 1 in 4), known words free
         self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 4: '
                                    '結局 = meaning, "hint"; 一緒に = meaning, "hint"')
-        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
-                                   'meaning → でも; meaning → 中; meaning → 最悪')
-        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも')
+        self.assertEqual(lines[3], 'Known, besides the default swaps (each Japanese word, then its meaning; write the '
+                                   'Japanese every time the English has that meaning): 中 meaning; 最悪 meaning')
+        self.assertEqual(len(lines), 4)
         self.assertNotIn('何', '\n'.join(lines[1:]))  # queued words are not in use yet
         three = weave.brief(self.state(3), self.seen)
-        self.assertIn('one sentence in five should be fully Japanese', three)
+        self.assertIn('about 1 whole sentence per 100 words (3 in a 300-word reply) fully in Japanese', three)
         self.assertIn('sentences of known words, particles and これ/それ only', three)
         self.assertIn('No other Japanese anywhere, not even a common word', three)
-        self.assertNotIn('any common word', three)
+        self.assertNotIn('never conjugated', three)
         self.assertNotIn('"hint"', three)
         self.assertNotIn('%', three)
-        self.assertIn('two sentences in five', weave.brief(self.state(4), self.seen))
+        # the stage no longer sets how many sentences: the budget does, at every stage
+        for stage in (1, 4):
+            self.assertIn('about 1 whole sentence per 100 words', weave.brief(self.state(stage), self.seen))
 
-    def test_recall_every_third_turn_shaky_first(self):
+    def test_no_recall_cue_and_turns_still_count(self):
         state = self.state()
-        picks = [weave.next_recall(state, 's1') for _ in range(7)]
-        self.assertEqual([p and p['ja'] for p in picks], ['結局', None, None, '一緒に', None, None, None])
-        self.assertIsNone(weave.next_recall(state, None))
-        self.assertIn('Recall: 結局?', weave.brief(state, {}, picks[0]))
+        fwlib.write_json(fwlib.home() / 'sessions.json', {'s1': {'n': 3, 'recalled': ['結局']}})  # from before it went
+        build = lambda had: ('brief', {'known': [], 'rules': ''}, {})
+        self.assertEqual([weave.chat_turn(state, s, build)[0] for s in ('s1', 's2', 's2')], ['brief'] * 3)
+        sessions = fwlib.read_json(fwlib.home() / 'sessions.json')
+        self.assertEqual((sessions['s1']['n'], sessions['s2']['n'], 'recalled' in sessions['s1']), (4, 2, False))
+        self.assertNotIn('Recall', weave.brief(state, {}))
 
     def test_calibration(self):
         words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active'), word('もっと')]
@@ -288,9 +306,9 @@ class Brief(Home):
         self.assertIn('under budget, so use more learning words', weave.calibration(english, state))
         # 6 learning words at the neutral prior's 0.27 in 54 words: about 3 lookups per 100 words, budget 0.5
         line = weave.calibration(woven, state)
-        self.assertIn('had 18 Japanese words in 54 (12 known, 6 learning, 0 off the lists): about 2.99 expected lookups '
-                      'per 100 words against a budget of 0.5 (known words are free): over budget, so use fewer learning '
-                      'words', line)
+        self.assertIn('had 18 Japanese words in 54 (12 known, 6 learning, 0 off the lists) and 0 whole Japanese '
+                      'sentences: about 2.99 expected lookups per 100 words against a budget of 0.5 (known words are '
+                      'free, a whole sentence costs 0.08): over budget, so use fewer learning words this time.', line)
         self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
         japanese = ('README.md にセクションを追加しました。空のエクスポートは行を削除しますが、テーブルは残ります。'
                     '他の問題は sync.py にあるので、直すかどうか教えてください。') * 2
@@ -299,10 +317,36 @@ class Brief(Home):
         self.assertIn('outside the lists', weave.calibration(japanese, state3))  # off-list words at any stage
         listed = ('The cache was the cause. 問題は簡単です。 The rest of the build still runs the way it did before, '
                   'and nothing else in the release needs a change from you today. ') * 2
-        self.assertNotIn('outside the lists', weave.calibration(listed, state3))  # particles and です in a sentence
-        self.assertIn('outside the lists', weave.calibration(listed, state))  # but no grammar below Stage 3
+        # particles and です in a whole sentence, at any stage; a whole sentence costs its price: (4 * 0.27 + 2 * 0.08)
+        # lookups in 65 words, past both parts of the budget
+        for each in (state3, state):
+            self.assertIn('(0 known, 4 learning, 0 off the lists) and 2 whole Japanese sentences: about 1.90 expected '
+                          'lookups per 100 words against a budget of 0.5 (known words are free, a whole sentence costs '
+                          '0.08): over budget, so use fewer learning words and whole Japanese sentences this time.',
+                          weave.calibration(listed, each))
+        grammar = listed.replace('問題は簡単です。', 'The 問題は簡単です now.')
+        self.assertIn('outside the lists', weave.calibration(grammar, state))  # no grammar in English below Stage 3
+        self.assertNotIn('outside the lists', weave.calibration(grammar, state3))
+        # a challenge of 3: sentences may take 0.24 (3 per 100 words at most), learning words 1.35 (5 at 0.27); two
+        # sentences of a known word, 0.16 in 62 words, spend the sentences' part, so the line asks for learning words
+        line = weave.calibration(listed.replace('問題は簡単です。', '今です。'), dict(state3, prefs={'challenge': 3}))
+        self.assertIn('(2 known, 0 learning, 0 off the lists) and 2 whole Japanese sentences: about 0.26 expected', line)
+        self.assertTrue(line.endswith('under budget, so use more learning words this time unless the topic needs '
+                                      'zero Japanese or the user asked for none.'), line)
         overlap = [word('一緒'), word('一緒に'), word('今'), word('今日')]
         self.assertEqual(weave.share('Let us go 一緒に, 今日 then 一緒 it. ' * 6, overlap)[0], 18)  # 3 per sentence
+
+    def test_the_feedback_line_ignores_code(self):
+        state = {'stage': 2, 'stage_pinned': True, 'words': [word('でも'), word('簡単', 'active')]}
+        filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. ' * 5
+        quoted = ['\n```json\n{"ja": "設定"}\n```\n', 'The row is `設定,せってい` now.', '\n~~~\n設定 問題\n~~~\n',
+                  '\n````md\n```\n設定\n```\n````\n', 'Use ``設定`s`` here.', '\n  ```\n  設定\n  ```\n',
+                  'The fix: ```設定 = 1``` there.', '\n```\n設定 問題 状況\n']  # the last one never closed
+        for code in quoted:  # Japanese quoted as data is not woven
+            self.assertIn('(0 known, 0 learning, 0 off the lists)', weave.calibration(filler + code, state), code)
+        self.assertIn('(1 known, 1 learning, 1 off the lists)',
+                      weave.calibration(filler + 'Then `設定` and 設定 and でも and 簡単 stay. ``x`` ~~~', state))
+        self.assertEqual(fwlib.strip_code('a ``b` c`` d ``e'), 'a   d ``e')  # same-length runs pair; a lone one is text
 
     def test_last_reply(self):
         log = self.home / 'chat.jsonl'
@@ -324,7 +368,7 @@ class Brief(Home):
         context = out['hookSpecificOutput']['additionalContext']
         self.assertEqual(out['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
         self.assertIn('Japanese Weave (Stage 1)', context)
-        self.assertIn('Recall: でも?', context)
+        self.assertNotIn('Recall', context)
         self.assertLess(len(context), 3200)
         fw.main(['pause'])
         self.assertEqual(self.run_hook({'session_id': 'x'}), '')
@@ -377,14 +421,11 @@ class Brief(Home):
         state['prefs'] = {'chat_glosses': 'abbr'}
         self.assertTrue(weave.abbr_glosses(state, host_check=lambda: True))
         self.assertFalse(weave.abbr_glosses(state, host_check=lambda: False))  # a terminal would show raw tags
-        recall = {'ja': 'でも', 'kana': 'でも', 'en': 'but / however', 'hint': 'demo'}
-        footer, popover = weave.brief(state, {}, recall), weave.brief(state, {}, recall, markup=True)
+        footer, popover = weave.brief(state, {}), weave.brief(state, {}, markup=True)
         self.assertIn('footer line', footer)
         self.assertNotIn('<abbr', footer)
         self.assertIn('<abbr title="hiragana reading · meaning">', popover)
         self.assertNotIn('footer line', popover)
-        self.assertIn('Recall: でも?', footer)
-        self.assertNotIn('Recall', popover)  # popover glosses already test recall on every word
         with mock.patch('sys.stdout', new=io.StringIO()):
             fw.main(['glosses', 'abbr'])
         self.assertEqual(fwlib.load_state()['prefs']['chat_glosses'], 'abbr')
@@ -409,8 +450,9 @@ def grown(known, seed=1):
     chosen.update(range(known, min(len(words), known + known // 20)))
     for i in chosen:
         fwlib.apply_event(state, words[i]['ja'], 'known', '2026-01-01')
-    for day in range(2, 7):
-        fwlib.promote(state, f'2026-01-0{day}', {})
+    for day in range(2, 7):  # up to 20 learning words, 5 a day
+        room = min(fwlib.NEW_PER_DAY, 20 - sum(w['status'] == 'active' for w in words))
+        fwlib.take_in(state, [[w['ja'], None, None] for w in fwlib.newcomers(state, {})[:room]], f'2026-01-0{day}')
     return state
 
 
@@ -423,16 +465,124 @@ class Scale(Home):
         self.assertEqual(known, (band - set(missing) - {w['ja'] for w in state['words'][:n] if w['status'] in ('active', 'shaky')}) | set(extra))
 
     def test_brief_and_exports_stay_small(self):
+        later = {}
         for known in (50, 400, 1000):
             state = grown(known)
-            brief = weave.brief(state, {}, {'ja': 'でも', 'en': 'but', 'hint': 'demo'})
+            first, had, _ = weave.compose(state, {}, tail='x' * 300)
             about, respond = export.chatgpt(state)
             self.assertLessEqual(len(about), export.CHATGPT_LIMIT)
             self.assertLessEqual(len(respond), export.CHATGPT_LIMIT)
             self.assertLess(len(export.claude_ai(state)), 6000)
-            if known >= 400:
-                self.assertIn('most common Japanese words', brief)
-                self.assertLess(len(brief), 3400, known)
+            self.assertLessEqual(len(first) + 300, weave.BRIEF_MAX)  # Claude Code files away hook context over 10,000
+            self.assertNotIn('most common', first)
+            later[known] = weave.compose(state, {}, had=had)[0]
+            if known >= 400:  # the most useful named on the first turn, the rest never: a later turn has no list
+                self.assertIn('more the user knows, not named here: keep the English for any word not named', first)
+                self.assertNotIn('also known', later[known])
+                self.assertLess(len(later[known]), 2400, known)
+                self.assertIn('Known: as listed earlier in this chat. If you can no longer see that list', later[known])
+
+    def test_the_first_turn_fits_claude_codes_limit_at_1500_known_words(self):
+        """Claude Code hands Claude 10,000 characters of a hook's text and files away the rest, so a chat's first turn
+        stays under 9,500 at any number of known words: the known list names the most useful ones (weave.priority) in
+        KNOWN_ROOM characters. Measured through the hook on the 2026-10-20 state with <abbr> glosses and the feedback
+        line: 8,128 characters at 293 known words (all 255 named), 8,737 at 500 (285 named) and 8,717 at 1,500 (255
+        named)."""
+        state = fwlib.new_state('2026-01-01')
+        lexicon = state['words']
+        anki = [dict(word(f'語{i}'), en='it is i who should say so / i feel the same way') for i in range(30)]
+        for i, w in enumerate(lexicon):  # 24 learning words, then every other base-list word known
+            w.update(status='active' if i < 24 else 'known', added='2026-01-01')
+        state['words'] = anki + lexicon  # an Anki sync puts its words first
+        known = [w for w in state['words'] if w['status'] == 'known']
+        self.assertEqual(len(known), 1506)
+        for w in known[-6:]:
+            w['status'] = 'queue'
+        self.assertEqual(fwlib.stage_for(state), 4)
+        rare = known[-10]  # a word far down the base list that keeps coming up in the user's chats
+        seen = {rare['ja']: {'n': 5, 'days': ['2026-10-18', '2026-10-19', '2026-10-20']}}
+        tail = '\nYour last reply in this chat had ' + 'x' * 420  # about the longest feedback line
+        for markup in (False, True):
+            for level in (0, -2, 2, intensity.FULL):
+                first, _, plan = weave.compose(state, seen, markup=markup, level=level, tail=tail)
+                self.assertLess(len(first) + len(tail), 9500, (markup, level))
+                self.assertEqual(plan['known'], 1500)
+                lines = first.split('\n')
+                known_line = next(line for line in lines if line.startswith('Known, besides'))
+                named = known_line.split('has that meaning): ', 1)[1].split('; ')
+                left = int(named.pop().split(' ')[1].replace(',', ''))
+                self.assertEqual(named[0], weave.entry(rare))  # it came up in chat: named first
+                self.assertFalse(any(e.startswith('語') for e in named))  # Anki words, odd meanings: last, not named
+                self.assertGreater(len(named), 240)
+                self.assertEqual(len(named) + left + weave.DEFAULT_SWAPS, len(weave.named_words(
+                    [w for w in state['words'] if w['status'] == 'known'])))
+        # unnamed known words are still known: a reply that uses one is on budget, not off the lists
+        unnamed = next(w for w in reversed(lexicon) if w['status'] == 'known' and not weave.NUMBER.match(w['ja'])
+                       and not weave.KATAKANA.match(w['ja']) and w['ja'] not in first)
+        reply = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. ' * 4
+        self.assertIn('(1 known, 0 learning, 0 off the lists)', weave.calibration(reply + unnamed['ja'], state))
+
+    def test_exports_describe_known_words_in_the_base_lists_order(self):
+        """An Anki sync puts its words first in the state; the exports' band still counts ranks in the base list, so
+        "up to about the N-th most frequent" means the most frequent words, and the Anki words come after it."""
+        state = grown(400)
+        band = export.band_text(state)
+        anki = [dict(word(f'語{i}'), en='card meaning') for i in range(40)]
+        moved = [w for w in state['words'] if w['status'] == 'known'][100:200]  # reviewed on cards, so moved up too
+        state['words'] = anki + moved[::-1] + [w for w in state['words'] if w not in moved]
+        self.assertNotEqual(fwlib.known_band(state)[0], fwlib.known_band(grown(400))[0])  # the state's order misleads
+        n, missing, extra = fwlib.known_band({'words': export.by_lexicon(state)})
+        self.assertEqual(n, fwlib.known_band(grown(400))[0])
+        self.assertEqual(extra[-40:], [w['ja'] for w in anki])  # beyond the band, after the base list's words
+        self.assertTrue(export.band_text(state).startswith(band.split('; also: ')[0]))
+        everyone = export.band_text(state, extras=len(extra))
+        self.assertTrue(everyone.endswith(', '.join(extra)))
+        block = export.claude_ai(state, now=0)
+        self.assertLessEqual(len(block), export.CLAUDE_AI_MAX)
+        self.assertIn(f'up to about the {export.ordinal(n)} most frequent', block)
+        self.assertIn('語0', block)  # as many past the band named as fit
+        about, respond = export.chatgpt(state, now=0)
+        self.assertLessEqual(max(len(about), len(respond)), export.CHATGPT_LIMIT)
+        self.assertIn(f'; also: {extra[0]}, ', about)
+        few = fwlib.new_state('2026-01-01')  # under KNOWN_LIST_MAX, named one by one: the base list's order too
+        for w in few['words'][:20] + few['words'][40:50]:
+            w.update(status='known', added='2026-01-01')
+        few['words'] = few['words'][40:50] + anki[:3] + few['words'][:40] + few['words'][50:]
+        listed = export.state_line(few, now=0).split('Known (use freely; never gloss): ')[1].split(' | ')[0]
+        self.assertEqual(listed.split(', '), [w['ja'] for w in export.by_lexicon(few) if w['status'] == 'known'])
+        trimmed = export.state_line(few, now=0, known_max=10).split('never gloss): ')[1].split(' | ')[0]
+        self.assertTrue(trimmed.endswith(' and 23 more not named here'), trimmed)  # not the most common: unnamed
+
+    def test_exports_describe_known_words_in_the_base_lists_order(self):
+        """An Anki sync puts its words first in the state; the exports' band still counts ranks in the base list, so
+        "up to about the N-th most frequent" means the most frequent words, and the Anki words come after it."""
+        state = grown(400)
+        band = export.band_text(state)
+        anki = [dict(word(f'語{i}'), en='card meaning') for i in range(40)]
+        moved = [w for w in state['words'] if w['status'] == 'known'][100:200]  # reviewed on cards, so moved up too
+        state['words'] = anki + moved[::-1] + [w for w in state['words'] if w not in moved]
+        self.assertNotEqual(fwlib.known_band(state)[0], fwlib.known_band(grown(400))[0])  # the state's order misleads
+        n, missing, extra = fwlib.known_band({'words': export.by_lexicon(state)})
+        self.assertEqual(n, fwlib.known_band(grown(400))[0])
+        self.assertEqual(extra[-40:], [w['ja'] for w in anki])  # beyond the band, after the base list's words
+        self.assertTrue(export.band_text(state).startswith(band.split('; also: ')[0]))
+        everyone = export.band_text(state, extras=len(extra))
+        self.assertTrue(everyone.endswith(', '.join(extra)))
+        block = export.claude_ai(state, now=0)
+        self.assertLessEqual(len(block), export.CLAUDE_AI_MAX)
+        self.assertIn(f'up to about the {export.ordinal(n)} most frequent', block)
+        self.assertIn('語0', block)  # as many past the band named as fit
+        about, respond = export.chatgpt(state, now=0)
+        self.assertLessEqual(max(len(about), len(respond)), export.CHATGPT_LIMIT)
+        self.assertIn(f'; also: {extra[0]}, ', about)
+        few = fwlib.new_state('2026-01-01')  # under KNOWN_LIST_MAX, named one by one: the base list's order too
+        for w in few['words'][:20] + few['words'][40:50]:
+            w.update(status='known', added='2026-01-01')
+        few['words'] = few['words'][40:50] + anki[:3] + few['words'][:40] + few['words'][50:]
+        listed = export.state_line(few, now=0).split('Known (use freely; never gloss): ')[1].split(' | ')[0]
+        self.assertEqual(listed.split(', '), [w['ja'] for w in export.by_lexicon(few) if w['status'] == 'known'])
+        trimmed = export.state_line(few, now=0, known_max=10).split('never gloss): ')[1].split(' | ')[0]
+        self.assertTrue(trimmed.endswith(' and 23 more not named here'), trimmed)  # not the most common: unnamed
 
     def test_state_line_round_trips(self):
         for known in (30, 400):
@@ -462,12 +612,14 @@ class Scale(Home):
         self.assertIn('/japanese-weave:export', weave.export_notice(state, now=time.time() + 8 * 86400))
         self.assertIsNone(weave.export_notice(fwlib.load_state(), now=time.time() + 9 * 86400))  # only once
 
-    def test_log_chat_day_counts_but_never_graduates_alone(self):
+    def test_day_count_ops_from_before_change_nothing(self):
         state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04'):
-            self.assertGreater(export.log_chat_day(state, day), 0)
-            fwlib.promote(state, day, {})
-        self.assertEqual(fwlib.find(state, 'でも')['status'], 'active')
+        before = json.dumps(state, sort_keys=True)
+        self.assertEqual(hub.apply(state, hub.stamp({'kind': 'chat_day'})), {'logged': 0})
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+        self.assertEqual(hub.apply(state, hub.stamp({'kind': 'exported', 'target': 'chatgpt', 'log_day': True})),
+                         {'logged': 0})
+        self.assertEqual(state['exported']['target'], 'chatgpt')
 
 
 class Blocks(unittest.TestCase):
@@ -618,10 +770,13 @@ class FeedbackStore(Home):
         num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
         new = dict(shown['plan'], budget=0.186, expected=0.41)
         full = {'level': 3, 'intensity': 5, 'jitter': 1, 'limit': 9, 'candidates': 9, 'expected': 2.5}
-        for plan in (new, full, shown['plan'], dict(new, budget=0, expected=0)):
+        # since whole sentences cost a price (and the thinning no longer scales the budget): the price used
+        priced = dict(new, sentencePrice=0.08)
+        for plan in (new, full, shown['plan'], dict(new, budget=0, expected=0), priced, dict(full, sentencePrice=0.08)):
             self.assertTrue(feedback._plan_ok(plan, num), plan)
         for plan in (dict(new, budget=-0.1), dict(new, expected=1001), dict(new, budget=float('nan')), dict(new, budget='0.5'),
-                     dict(new, expected=None), dict(new, budget=True)):
+                     dict(new, expected=None), dict(new, budget=True), dict(priced, sentencePrice=1.5),
+                     dict(priced, sentencePrice=-0.1), dict(priced, sentencePrice='0.08')):
             self.assertFalse(feedback._plan_ok(plan, num), plan)
         stays = [dict(self.item(), kind='visible', y=0, height=40, ms=ms, wall=ms + 500, away=500, media=0, idle=0,
                       uid=f'v1-{ms}') for ms in (1500, 2500)]
@@ -891,10 +1046,9 @@ class Hub(Home):
         self.assertEqual(fwlib.load_state(), self.served())  # the cache was refreshed after each change
         peeked = self.learning(cache)[1]
         self.assertEqual(fw_host.handle({'type': 'events', 'events': [{'word': peeked, 'kind': 'peek'}]})['applied'], 1)
-        self.assertEqual(fwlib.find(fwlib.load_state(), peeked)['peeks'], [fwlib.today()])  # shown here at once
-        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [])  # the browser never waits: sent by a sync
+        self.assertEqual([op['kind'] for op in hub.pending()], ['events'])  # the browser never waits: sent by a sync
         self.assertEqual(hub.sync(), (True, None))
-        self.assertEqual(fwlib.find(self.served(), peeked)['peeks'], [fwlib.today()])
+        self.assertEqual(hub.pending(), [])
         self.assertEqual(fw_host.handle({'type': 'state'})['version'], fwlib.version(self.served()))
         self.assertEqual([k for k, _ in self.ops()], ['seed', 'mark', 'set', 'events'])  # seed: its own setup
         self.assertEqual({m for _, m in self.ops()}, {socket.gethostname()[:64]})
@@ -925,15 +1079,35 @@ class Hub(Home):
                          [('chat', 1, 't3'), ('chat', 2, 't3'), ('chat', 3, 't3'), ('chat', 3, 't3'),
                           ('chat', 0, 'command'), ('browser', -1, 'command')])
         brief = []
-        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+        compose = lambda *a, **k: brief.append(k['level']) or ('', {'known': [], 'rules': ''}, {})
+        with mock.patch.object(weave, 'compose', side_effect=compose):
             with mock.patch('sys.stdout', new=io.StringIO()):
                 weave.main([])
         self.assertEqual(brief, [0])
         hub.change_intensity('chat', -1, 't3')
-        with mock.patch.object(weave, 'brief', side_effect=lambda *a, **k: brief.append(k['level']) or ''):
+        with mock.patch.object(weave, 'compose', side_effect=compose):
             with mock.patch('sys.stdout', new=io.StringIO()):
                 weave.main([])
         self.assertEqual(brief, [0, -1])
+
+    def test_brief_records_wait_in_the_outbox_and_reach_the_collector(self):
+        fwlib.load_state()
+        payload = json.dumps({'session_id': 's1', 'prompt': 'Hi', 'transcript_path': str(self.home / 'none.jsonl')})
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(payload)), mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        context = json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+        self.assertEqual([op['kind'] for op in hub.pending()], ['brief'])  # the hook never waits on the network
+        self.assertEqual(hub.sync(scan=False), (True, None))
+        self.assertEqual(hub.pending(), [])
+        briefs = feedback.chat_briefs(self.server_home / 'interactions.sqlite')
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs], [('s1', True, len(context))])
+        self.assertEqual([k for k, _ in self.ops()], ['seed', 'brief'])
+        self.assertEqual(self.served()['words'], fwlib.load_state()['words'])  # it changed nothing
+        hub.queue(hub.stamp({'kind': 'brief', 'session': 's1'}))  # refused there (as by an older collector): dropped
+        with mock.patch('sys.stderr', new=io.StringIO()) as err:
+            self.assertEqual(hub.flush(), (True, 1))
+        self.assertEqual(err.getvalue(), '')
 
     def test_changes_wait_here_while_the_collector_is_down(self):
         fwlib.load_state()
@@ -1071,7 +1245,7 @@ class Hub(Home):
         rev = fwlib.read_json(fwlib.home() / hub.SYNCED)['rev']
         with fwlib.using_home(self.server_home):
             with fwlib.editing():
-                pass  # promotion with nothing to promote: nothing rewritten
+                pass  # nothing to change: nothing rewritten
             self.assertEqual(hub.snapshot(rev), (200, {'ok': True, 'rev': rev, 'unchanged': True}))
             hub.submit({'kind': 'set', 'stage': 2})
             self.assertNotIn('unchanged', hub.snapshot(rev)[1])
@@ -1233,15 +1407,14 @@ class Setup(Home):
     def test_rerun_never_resets_or_downgrades(self):
         self.run_setup()  # top 5 become learning words
         with fwlib.editing() as state:
-            fwlib.apply_event(state, 'でも', 'asked')  # shaky
-            fwlib.apply_event(state, 'もう', 'seen')
+            fwlib.apply_event(state, 'でも', 'known')
+            fwlib.apply_event(state, 'でも', 'asked')  # back to learning
         state = self.run_setup('--known-top', '150', '--sites', 'ask')
         by = {w['ja']: w for w in state['words']}
-        self.assertEqual(by['でも']['status'], 'shaky')
+        self.assertEqual(by['でも']['status'], 'active')
         self.assertEqual(by['もう']['status'], 'active')
-        self.assertEqual(by['もう']['days'], [fwlib.today()])
         self.assertEqual(sum(w['status'] == 'known' for w in state['words'][:150]), 145)
-        self.assertEqual(fwlib.stage_for(state), 2)  # 145 known: stage 3 comes once the learning words graduate
+        self.assertEqual(fwlib.stage_for(state), 2)  # 145 known: stage 3 once the model labels learning words known
         self.assertEqual(state['prefs'], {'extension_sites': 'ask'})
         before = json.dumps(state)
         state = self.run_setup('--known-top', '40')  # a lower answer later changes nothing
@@ -1403,18 +1576,19 @@ class Intensity(Home):
         self.assertEqual(intensity.describe({'level': 0}), 'normal')
 
     def test_the_chat_brief_follows_the_level(self):
-        self.assertEqual([weave.japanese_sentences(3, level) for level in (0, -1, 2)], [2, 1, 4])
-        self.assertEqual((weave.japanese_sentences(4, 2), weave.japanese_sentences(1, -2)), (6, 0))  # capped; none
         state = {'stage': 3, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
         plain, light, heavy = (weave.brief(state, {}, level=level) for level in (0, -1, 1))
-        self.assertIn('about 2 per 100 words', plain)
-        self.assertIn('one sentence in five', plain)
+        # whole sentences take intensity.SENTENCE_SHARE of the budget at 0.08 each, the learning word (0.27) the rest
+        self.assertIn('about 1.5 learning words per 100 words', plain)  # 0.41 / 0.27
+        self.assertIn('about 1 whole sentence per 100 words', plain)  # 0.09 / 0.08
         self.assertIn('(Stage 3, turned lighter for now by the user)', light)
-        self.assertIn('about 1 per 100 words (3 in a 300-word reply), at most one in a sentence', light)
-        self.assertIn('one sentence in ten', light)
-        self.assertIn('about 3 per 100 words (9 in a 300-word reply), at most 2 in a sentence', heavy)
+        self.assertIn('about 1 learning word per 100 words (3 in a 300-word reply), at most one in a sentence', light)
+        self.assertIn('about 0.5 whole sentences per 100 words (2 in a 300-word reply)', light)  # 0.054 / 0.08
+        self.assertIn('about 2 learning words per 100 words (6 in a 300-word reply), at most 2 in a sentence', heavy)
+        self.assertIn('about 2 whole sentences per 100 words', heavy)  # 0.144 / 0.08
         for brief in (plain, light, heavy):
-            self.assertIn('Known (write the Japanese every time the English word has that meaning): meaning → でも', brief)
+            self.assertIn('Default swaps (write the Japanese every time the English word has that meaning): '
+                          'meaning → でも', brief)
 
     def test_the_native_host_saves_and_reads_the_browser_level(self):
         fwlib.save_state(fwlib.new_state(known_top=40))
@@ -1474,73 +1648,45 @@ class Knowledge(Home):
         episode(rows, contexts, 'browser', 'v1', notes, [0], self.NOW - 60_000)  # still being read
         self.assertEqual([len(e[2]) for e in knowledge.episodes(rows, contexts, self.NOW)], [1, 1])
 
-    def word_entry(self, k, n, command_at=None):
-        w = knowledge.Word(1.0)
-        w.k, w.n, w.recent, w.command_at = k, n, [self.NOW], command_at
-        return w
-
-    def test_plan_moves(self):
-        state = {'words': [word('a', 'shaky'), word('b', 'shaky'), word('c', 'known'), word('d', 'active'),
-                           word('e', 'shaky'), word('f', 'known'), word('g', 'shaky')]}
-        words = {'a': self.word_entry(4, 20), 'b': self.word_entry(4, 1),  # b: too little evidence
-                 'c': self.word_entry(-2, 20), 'd': self.word_entry(-2, 20),
-                 'e': self.word_entry(4, 20, command_at=self.NOW - knowledge.DAY_MS),  # right after `learn`
-                 'f': self.word_entry(0.5, 20), 'g': self.word_entry(4, 20)}
-        moves, veto = knowledge.plan_moves(state, words, {}, self.NOW)
-        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky'), ('g', 'shaky', 'known')])
-        self.assertEqual(veto, ['d'])
-        moves, _ = knowledge.plan_moves(state, words, {'known': 2}, self.NOW)
-        self.assertEqual(moves, [('a', 'shaky', 'known'), ('c', 'known', 'shaky')])  # 3 a day per direction
-
-    def test_vetoed_words_wait_to_graduate(self):
-        state = {'words': [dict(word('今', 'active'), days=['2026-10-01', '2026-10-02', '2026-10-03'],
-                                changed='2026-10-01')]}
-        fwlib.promote(state, '2026-10-10', chat={}, veto={'今'})
-        self.assertEqual(state['words'][0]['status'], 'active')
-        fwlib.promote(state, '2026-10-10', chat={}, veto=set())
-        self.assertEqual(state['words'][0]['status'], 'known')
-
-    def test_steer(self):
-        self.assertEqual(knowledge.steer(None, 2, 0.5, 100, 'd1'), {'scale': 1.0, 'day': ''})  # too little reading
-        once = knowledge.steer(None, 2, 0.5, 400, 'd1')
-        self.assertEqual(once, {'scale': 2.0, 'day': 'd1'})
-        self.assertEqual(knowledge.steer(once, 2, 0.5, 400, 'd1'), once)  # once a day
-        self.assertEqual(knowledge.steer(once, 2, 0.01, 400, 'd2')['scale'], 4.0)
-        self.assertEqual(knowledge.steer(once, 0, 0.5, 400, 'd2'), once)  # dial off
-
-    def test_refresh_moves_words_and_ignores_a_shrunk_log(self):
+    def test_refresh_labels_words_from_the_model_and_ignores_a_shrunk_log(self):
         with fwlib.editing() as state:
             listed = [w for w in state['words'] if w['status'] != 'queue']
             target = listed[0]['ja']
-            fwlib.set_status(listed[0], 'shaky', fwlib.today())
             others = [w['ja'] for w in listed[1:]]
         now = time.time()
         items = []
-        for e in range(40):  # target never opened, another word opened each time
+        for e in range(40):  # target never opened, every other word opened each time
             notes = [[target, 0, 0]] + [[w, 40 * (i + 1), 0] for i, w in enumerate(others)]
-            items.append({'kind': 'peek', 'word': others[e % len(others)], 'at': int((now - 3600 - e * 60) * 1000),
-                          'dwellMs': 1500, 'view': f'v{e}', 'context': 'c', 'position': 1 + e % len(others),
-                          'box': [0, 0, 500, 40], 'annotations': notes, 'uid': f'u{e}'})
+            items += [{'kind': 'peek', 'word': w, 'at': int((now - 3600 - e * 60 + i) * 1000), 'dwellMs': 1500,
+                       'view': f'v{e}', 'context': 'c', 'position': 1 + i, 'box': [0, 0, 500, 40],
+                       'annotations': notes, 'uid': f'u{e}-{i}'} for i, w in enumerate(others)]
         feedback.record(items, 'browser')
-        know = knowledge.refresh(now)  # the dial is off: only the day rules move words
-        self.assertEqual((know['rows'], know['moves'], know['challenge']), (40, [], 0))
-        fw_host.handle({'type': 'prefs', 'challenge': 1.5})
         fwlib.write_json(knowledge.path(), {'rows': 10_000})  # the log used to be longer: don't trust it
         know = knowledge.refresh(now)
-        self.assertEqual((know['rows'], know['moves']), (40, []))
-        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'shaky')
-        know = knowledge.refresh(now)
-        self.assertEqual([(m['word'], m['to']) for m in know['moves']], [(target, 'known')])
-        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'known')
-        self.assertLess(know['words'][target]['k'] - know['words'][target]['mu'], 3)
+        self.assertEqual((know['rows'], know['moves']), (40 * len(others), []))
+        self.assertEqual(fwlib.find(fwlib.load_state(), target)['status'], 'active')
+        know = knowledge.refresh(now)  # whatever the challenge: labels always come from the model
+        self.assertEqual(know['challenge'], 0)
+        self.assertEqual([(m['word'], m['from'], m['to']) for m in know['moves']], [(target, 'active', 'known')])
+        state = fwlib.load_state()
+        self.assertEqual(fwlib.find(state, target)['status'], 'known')
+        self.assertTrue(know['words'][target]['free'])
+        self.assertEqual([fwlib.find(state, ja)['status'] for ja in others], ['active'] * len(others))
+        self.assertEqual(fwlib.find(state, target)['origin'], 'learning')  # the label never moves the prior
         self.assertGreater(know['words'][target]['k'], know['words'][others[0]]['k'])
+        con = feedback.connect()
+        ops = [json.loads(body) for (body,) in con.execute("SELECT body FROM ops WHERE kind = 'labels'")]
+        con.close()
+        self.assertEqual([op['labels'] for op in ops], [[[target, 'active', 'known']]])  # the ops log keeps it
+        self.assertEqual(knowledge.refresh(now)['moves'], know['moves'])  # nothing new to change
 
     def showing(self, contexts, rows, view, notes, at, active, words=60, opened=(), jitter=None, level=0):
         contexts[('browser', view, 'c')] = {'surface': 'browser', 'view': view, 'context': 'c', 'annotations': notes,
                                            'words': words, 'shown_at': at, 'height': 80, 'active': active,
                                            'seen_until': at,
                                            'plan': None if jitter is None else {'level': level, 'jitter': jitter,
-                                                                                 'candidates': 6}}
+                                                                                 'candidates': 6,
+                                                                                 'sentencePrice': 0.08}}
         for i in opened:
             rows.append({'id': len(rows) + 1, 'at': at + 1000 + i, 'surface': 'browser', 'kind': 'peek',
                          'word': notes[i][0], 'dwell_ms': 1500, 'view': view, 'context': 'c', 'position': i, 'uid': None})
@@ -1572,9 +1718,28 @@ class Knowledge(Home):
         losses = []
         knowledge.replay(rows, contexts, {'今'}, {}, [], self.NOW, losses=losses)
         self.assertEqual((len(losses), sum(o for o, _ in losses)), (21, 1))
-        tuned = knowledge.tune(rows, contexts, {'今'}, {}, [], self.NOW)
-        self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned']), (knowledge.PACE_MS, knowledge.READ_MAX, False))
-        self.assertEqual(len(tuned['grid']), len(knowledge.PACES) * len(knowledge.READ_MAXES))
+        import evaluate
+        words = [{'ja': '今', 'kana': 'いま', 'status': 'queue', 'added': '', 'changed': ''}]
+        log = evaluate.extract(rows, contexts, words, {}, [], self.NOW)
+        fit = knowledge.Fit(log, self.NOW)
+        self.assertGreater(fit.estimate('今')[0], fit.prior('今')[0])  # read and not opened, 20 times to 1
+        tuned = knowledge.tune(log, self.NOW)  # one open: too few to leave the defaults
+        both = lambda x: {surface: x for surface in knowledge.SURFACES}
+        self.assertEqual((tuned['pace'], tuned['top'], tuned['tuned'], tuned['opens']),
+                         (both(knowledge.PACE_MS), both(knowledge.READ_MAX), False, {'browser': 1.0, 't3': 0}))
+        for surface in knowledge.SURFACES:  # each surface's grid, the defaults scored
+            self.assertIn({'surface': surface, 'pace': knowledge.PACE_MS, 'top': knowledge.READ_MAX},
+                          [{k: g[k] for k in ('surface', 'pace', 'top')} for g in tuned['grid']])
+        # a reading model per surface: the web's alone changes the web's read chances, and the same numbers per
+        # surface are the shared model
+        slow = ({'browser': 1500, 't3': knowledge.PACE_MS}, {'browser': 0.3, 't3': knowledge.READ_MAX})
+        alike = evaluate.extract(rows, contexts, words, {}, [], self.NOW, *(both(x) for x in (300, 0.7)))
+        self.assertEqual([round(o.read, 9) for o in alike.scored()], [round(o.read, 9) for o in log.scored()])
+        self.assertAlmostEqual(knowledge.Fit(alike, self.NOW).estimate('今')[0], fit.estimate('今')[0], places=6)
+        apart = evaluate.extract(rows, contexts, words, {}, [], self.NOW, *slow)
+        self.assertTrue(all(o.read <= 0.3 for o in apart.scored()))
+        self.assertLess(sum(o.read for o in apart.scored()), sum(o.read for o in log.scored()))
+        self.assertIn('web 1500 ms a word, cap 0.3; chat 300 ms a word, cap 0.7', knowledge.reading_text(*slow))
 
     def test_calibrate_compares_thinned_passages_and_counts_presses(self):
         import random
@@ -1604,7 +1769,7 @@ class Knowledge(Home):
                                                         'verdict': None})
         self.assertEqual(report['presses']['chat']['hoursAt'], {'1': 3.0})
         text = knowledge.calibration_text(report)
-        self.assertIn('Randomly thinned passages: 40', text)
+        self.assertIn('Randomly thinned passages (thinning free words only, since 2026-10-20): 40', text)
         self.assertIn('Web pages: 2 lighter and 0 heavier presses', text)
 
     def test_commands_set_knowledge_and_immunity(self):
@@ -1617,18 +1782,29 @@ class Knowledge(Home):
         self.assertLess(words['今'].k, 1)
         self.assertEqual(words['今'].command_at, self.NOW - 3_600_000)
 
-    def test_host_and_commands_carry_the_dial(self):
+    def test_host_and_commands_carry_the_challenge(self):
         self.assertEqual(fw_host.handle({'type': 'prefs', 'challenge': 1.5}), {'ok': True, 'challenge': 1.5})
         self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': True})['ok'])
         self.assertFalse(fw_host.handle({'type': 'prefs', 'challenge': 7})['ok'])
         state = fw_host.handle({'type': 'state'})
-        first = state['words'][0]['ja']
+        first, second, third = (w['ja'] for w in state['words'][:3])
         fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'},
-                                            'words': {first: {'k': 0.3, 'sd': 0.9}}})
+                                            'words': {first: {'k': 0.3, 'sd': 0.9},
+                                                      second: {'k': 2.0, 'sd': 0.4, 'free': True}}})
         state = fw_host.handle({'type': 'state'})
-        self.assertEqual((state['challenge'], state['budget']), (1.5, 3.0))
+        self.assertEqual((state['challenge'], state['budget']), (1.5, 1.5))  # the challenge is normal's budget
+        self.assertNotIn('rate', state)
         self.assertEqual({k: state['words'][0][k] for k in ('k', 'sd')}, {'k': 0.3, 'sd': 0.9})
-        self.assertNotIn('k', state['words'][1])
+        self.assertNotIn('free', state['words'][0])  # no flag: the extension compares p with FREE_P
+        self.assertEqual({k: state['words'][1][k] for k in ('k', 'sd', 'free')}, {'k': 2.0, 'sd': 0.4, 'free': True})
+        self.assertNotIn('k', state['words'][2])
+        prior = {'card': {'new': 0.5, 'learning': 0.5, 'known': 0.5}, 'interval': 0.8,
+                 'none': {'new': 1.0, 'learning': 1.2, 'known': 2.8}, 'sd': {'card': 0.8, 'none': 1.1}}
+        fwlib.write_json(knowledge.path(), {'updated': time.time(), 'prior': prior, 'words': {}})
+        words = fw_host.handle({'type': 'state'})['words']  # no estimates yet: the fitted prior for the word's status
+        self.assertEqual({k: words[2][k] for k in ('k', 'sd', 'free')},
+                         {'k': 2.8 if words[2]['status'] == 'known' else 1.0 if words[2]['status'] == 'queue'
+                          else 1.2, 'sd': 1.1, 'free': words[2]['status'] == 'known'})
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
             fw.main(['challenge', 'off'])
             fw.main(['why', first])
@@ -1636,8 +1812,13 @@ class Knowledge(Home):
         self.assertIn('no evidence in the gloss log yet', out.getvalue())  # the refresh found no log
         fwlib.write_json(knowledge.path(), {'updated': time.time(), 'controller': {'scale': 2.0, 'day': 'x'}})
         state = fw_host.handle({'type': 'state'})
-        # without a challenge, normal's own budget, which the controller doesn't steer
+        # without a challenge, normal's own budget; a controller's scale from before is ignored
         self.assertEqual((state['challenge'], state['budget']), (0, intensity.BUDGETS[0]))
+        self.assertNotIn('sentencePrice', state)  # none fitted yet: the extension uses its own default
+        # the web's price of a whole sentence, once the fit puts one per surface in knowledge.json
+        for price, sent in ((0.11, 0.11), (2, None), ('0.1', None), (True, None)):
+            fwlib.write_json(knowledge.path(), {'updated': time.time(), 'sentencePrice': {'browser': price, 't3': 0.09}})
+            self.assertEqual(fw_host.handle({'type': 'state'}).get('sentencePrice'), sent, price)
         with self.assertRaises(SystemExit):
             fw.main(['challenge', '5'])
 
@@ -1650,6 +1831,8 @@ class Knowledge(Home):
         self.assertEqual(table('INTENSITY_BUDGETS'), intensity.BUDGETS)
         self.assertEqual(table('INTENSITY_PER_SENTENCE'), intensity.PER_SENTENCE)
         self.assertEqual((constant('FREE_P'), constant('KNOWN_PRIOR_K')), (fwlib.FREE_P, fwlib.KNOWN_PRIOR_K))
+        self.assertEqual((constant('SENTENCE_PRICE'), constant('SENTENCE_SHARE')),
+                         (intensity.SENTENCE_PRICE, intensity.SENTENCE_SHARE))  # one rule for both surfaces
 
     def test_the_extension_offers_the_same_dial(self):
         import re
@@ -1688,35 +1871,41 @@ class Budget(Home):
         self.assertEqual(lines[1], 'Learning now, by how often the user looks one up: often, about 1 in 3: '
                                    '一緒に = meaning, "hint"; 中 = meaning, "hint" | sometimes, about 1 in 5: '
                                    '多分 = meaning, "hint"')
-        self.assertEqual(lines[2], 'Known (write the Japanese every time the English word has that meaning): '
-                                   'meaning → でも; meaning → 最悪; meaning → 結局')
-        # mean chance (0.27 + 0.38 + 0.18) / 3: 0.5 / 0.28 is 1.8, so 2 per 100 words
-        self.assertIn('about 2 per 100 words (6 in a 300-word reply)', lines[0])
+        self.assertEqual(lines[2], 'Default swaps (write the Japanese every time the English word has that meaning): '
+                                   'meaning → でも; meaning → 結局')
+        self.assertTrue(lines[3].endswith('has that meaning): 最悪 meaning'), lines[3])
+        # mean chance (0.27 + 0.38 + 0.18) / 3: 0.41 (the budget less the sentences' 0.09) / 0.28 is 1.5 per 100 words
+        self.assertIn('about 1.5 learning words per 100 words (5 in a 300-word reply)', lines[0])
         none = weave.brief(state, {}, know=self.know({ja: 5.0 for ja in ('でも', '中', '最悪', '一緒に', '結局', '多分')}))
-        self.assertIn('No learning words right now, only known ones.', none)
+        # no learning words: whole sentences take the budget, up to their most (weave.SENTENCES_MAX)
+        self.assertIn('no learning words right now, only known ones; and about 3 whole sentences per 100 words', none)
         self.assertIn('Learning now, by how often the user looks one up: none\n', none)
 
-    def test_band_names_the_band_words_not_known_at_a_glance(self):
+    def test_the_brief_names_every_word_known_at_a_glance(self):
         state = fwlib.new_state('2026-01-01', known_top=200)  # and the next 5 words come in as learning words
         state.update(stage=3, stage_pinned=True)
         often = [w['ja'] for w in state['words'][10:40]]  # known, but the gloss log says they are looked up a lot
-        brief = weave.brief(state, {}, know=self.know({ja: 1.0 for ja in often}))
-        free, learning, _ = weave.lists(state, {}, self.know({ja: 1.0 for ja in often}))
+        know = self.know({ja: 1.0 for ja in often})
+        lines = weave.brief(state, {}, know=know).split('\n')
+        free, learning, _ = weave.lists(state, {}, know)
         self.assertEqual(len(free), 170)
         self.assertEqual(len(learning), weave.LEARN_MAX)
-        lines = brief.split('\n')
-        self.assertTrue(lines[2].startswith('Default swaps: '), lines[2])
-        band = lines[3]
-        self.assertTrue(band.startswith('Known (if unsure a word is one of them, keep the English): roughly the 205 '
-                                        'most common Japanese words and phrases, except these, not known at a glance '
-                                        'yet: '), band)
-        named = band.split('yet: ')[1].rstrip('.').split(', ')
-        unlisted = [ja for ja in often if ja not in {w['ja'] for w in learning}]
-        self.assertEqual(named, unlisted)  # the 6 that didn't make the learning list; the 24 that did are listed there
-        self.assertTrue(all(ja in lines[1] for ja in often if ja not in unlisted))
-        self.assertNotIn('use freely', brief)
-        self.assertLess(len(brief), 3400)
-        self.assertEqual(fwlib.known_band(state), (205, [], []))  # the default still describes status known
+        self.assertTrue(lines[2].startswith('Default swaps (write the Japanese every time the English word has that '
+                                            'meaning): '), lines[2])
+        swaps = [pair.split(' → ')[1] for pair in lines[2].split(': ', 1)[1].split('; ')]
+        self.assertTrue(lines[3].startswith('Known, besides the default swaps (each Japanese word, then its meaning; '), lines[3])
+        named = [entry.split(' ')[0] for entry in lines[3].split('meaning): ', 1)[1].split('; ')]
+        expected = [w['ja'] for w in weave.named_words(free)]
+        self.assertEqual(sorted(swaps + named), sorted(expected))  # every one, each once, in the swaps or the list
+        self.assertEqual(len(expected), 170 - sum(bool(weave.NUMBER.match(w['ja']) or weave.KATAKANA.match(w['ja']))
+                                                  for w in free))
+        self.assertEqual(swaps, [w['ja'] for w in weave.named_words(free)
+                                 if weave.base_list()[fwlib.key(w['ja'])][1] == 'A'][:weave.DEFAULT_SWAPS])
+        self.assertFalse(set(often) & set(swaps + named))  # looked up a lot: not named as known
+        self.assertTrue(all(ja in lines[1] for ja in often if ja in {w['ja'] for w in learning}))
+        self.assertNotIn('most common', '\n'.join(lines))
+        self.assertLess(len('\n'.join(lines)), weave.BRIEF_MAX)
+        self.assertEqual(fwlib.known_band(state), (205, [], []))  # the exports' band still describes status known
 
     def test_learning_words_per_100_words_spend_the_budget(self):
         self.assertIsNone(weave.per_100(0.5, []))
@@ -1730,21 +1919,51 @@ class Budget(Home):
         self.assertEqual([weave.most_per_100(level) for level in (-2, -1, 0, 1, 2)], [5, 5, 5, 8, 8])  # per sentence
         self.assertEqual(weave.per_100(1.5, [0.1], weave.most_per_100(0)), 5)  # 15, but one a sentence
         state = {'stage': 2, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
-        self.assertIn('about 0.5 per 100 words (2 in a 300-word reply), at most one in a sentence',
+        self.assertIn('about 0.5 learning words per 100 words (2 in a 300-word reply), at most one in a sentence',
                       weave.brief(state, {}, level=-2))
-        self.assertIn('about 4 per 100 words (12 in a 300-word reply), at most 2 in a sentence',
-                      weave.brief(state, {}, level=2))  # 1.2 / 0.27
+        self.assertIn('about 4 learning words per 100 words (12 in a 300-word reply), at most 2 in a sentence',
+                      weave.brief(state, {}, level=2))  # (1.2 - 0.216 for sentences) / 0.27
         self.assertEqual(weave.lookup_budget(state), intensity.BUDGETS[0])
         state['prefs'] = {'challenge': 1.5}  # the popup's challenge is normal's budget and scales the others
         self.assertEqual(weave.lookup_budget(state), 1.5)
         self.assertAlmostEqual(weave.lookup_budget(state, -1), 0.9)
-        self.assertIn('about 5 per 100 words', weave.brief(state, {}))  # 1.5 / 0.27 is 5.6, but one a sentence
+        # sentences take 0.24, their most (3 per 100 words); learning words the other 1.26: 4.7 at 0.27
+        self.assertIn('about 5 learning words per 100 words', weave.brief(state, {}))
+        self.assertIn('about 3 whole sentences per 100 words', weave.brief(state, {}))
         state['prefs'] = {'challenge': 3}
         reply = 'The build passes and the cache is warm, so we ship it 今. ' * 3 + 'Nothing else needs doing today. ' * 9
         line = weave.calibration(reply, state)  # 3 learning words in 84
         self.assertIn('about 0.96 expected lookups per 100 words against a budget of 3', line)
-        self.assertTrue(line.endswith(': on budget.'), line)  # 5 per 100 words, all it asks for, would spend 1.35
+        self.assertTrue(line.endswith(': on budget.'), line)  # all it asks for would spend 1.35 + 0.24
         self.assertIsNone(weave.lookup_budget(state, intensity.FULL))
+
+    def test_whole_sentences_take_a_share_of_the_budget(self):
+        split = lambda *args: tuple(round(x, 4) for x in intensity.split(*args))
+        self.assertEqual(split(0.5, None, None), (0.41, 0.09))  # SENTENCE_SHARE of normal's 0.5
+        self.assertEqual(split(0.5, 0.2, None), (0.2, 0.3))  # what learning words can't use goes to sentences
+        self.assertEqual(split(0.5, None, 0.04), (0.46, 0.04))  # and the other way
+        self.assertEqual(split(3, 1.35, 0.24), (1.35, 0.24))  # neither can use it all
+        self.assertEqual(split(0.5, 0, 0), (0, 0))
+        # normal asks for the sentences the Stage 3 brief asked for before they were priced: one in five, about 1.1 per
+        # 100 words
+        self.assertAlmostEqual(intensity.SENTENCE_SHARE * intensity.BUDGETS[0] / intensity.SENTENCE_PRICE, 1.125)
+        rounded = lambda result: tuple(round(x, 4) if isinstance(x, float) else x for x in result)
+        self.assertEqual(rounded(weave.amounts(0.5, [0.25] * 4, 0.08, 0)), (1.5, 1, 0.41, 0.09))
+        self.assertEqual(rounded(weave.amounts(0.5, [], 0.08, 0)), (None, 3, 0, 0.24))  # sentences at their most
+        self.assertEqual(rounded(weave.amounts(0.5, [0.25], 0.08, 0, sentences=False)), (2, 0, 0.5, 0))  # none known
+        self.assertEqual(rounded(weave.amounts(0.15, [0.25], 0.08, -2)), (0.5, 0.5, 0.123, 0.027))
+        self.assertEqual(rounded(weave.amounts(1.2, [0.25], 0.08, 2)), (4, 3, 0.984, 0.216))  # 2.7 sentences
+        # the price: knowledge.json's for chat (t3) once a fit makes one, else the default the extension also uses
+        self.assertEqual(intensity.sentence_price({'sentencePrice': {'t3': 0.045, 'browser': 0.2}}), 0.045)
+        for bad in ({}, None, {'sentencePrice': {'browser': 0.2}}, {'sentencePrice': {'t3': 0}},
+                    {'sentencePrice': {'t3': 1.5}}, {'sentencePrice': {'t3': True}}, {'sentencePrice': [0.1]}):
+            self.assertEqual(intensity.sentence_price(bad), intensity.SENTENCE_PRICE, bad)
+        state = {'stage': 3, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
+        cheap = dict(self.know({}), sentencePrice={'t3': 0.045})  # 0.09 buys 2 sentences per 100 words
+        text, _, plan = weave.compose(state, {}, know=cheap)
+        self.assertIn('about 2 whole sentences per 100 words (6 in a 300-word reply)', text)
+        self.assertEqual((plan['ask'], plan['sentences'], plan['sentencePrice']), (1.5, 2, 0.045))
+        self.assertAlmostEqual(plan['expected'], 1.5 * knowledge.sigmoid(-knowledge.prior(None)) + 2 * 0.045, places=3)
 
     def test_feedback_line_compares_expected_lookups_with_the_budget(self):
         words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active')]
@@ -1752,15 +1971,22 @@ class Budget(Home):
         filler = 'The build passes and the cache is warm so nothing else needs doing before the release goes out. '
         one = filler * 5 + 'Then the 問題 goes away. '  # 1 learning word, at the neutral prior's 0.27, in 95
         line = weave.calibration(one, state)
-        self.assertIn('had 1 Japanese words in 95 (0 known, 1 learning, 0 off the lists): about 0.28 expected lookups '
-                      'per 100 words', line)
-        self.assertIn('against a budget of 0.5 (known words are free): on budget.', line)
-        self.assertIn('over budget', weave.calibration(one, state, level=-2))  # 0.25 against 0.15
-        self.assertIn('under budget', weave.calibration(one, state, level=2))  # against 1.2
+        self.assertIn('had 1 Japanese words in 95 (0 known, 1 learning, 0 off the lists) and 0 whole Japanese '
+                      'sentences: about 0.28 expected lookups per 100 words', line)
+        self.assertIn('against a budget of 0.5 (known words are free, a whole sentence costs 0.08): on budget.', line)
+        # 0.28 against 0.15, the learning words' part 0.12
+        self.assertIn('over budget, so use fewer learning words this time', weave.calibration(one, state, level=-2))
+        self.assertIn('under budget, so use more learning words and whole Japanese sentences this time',
+                      weave.calibration(one, state, level=2))  # against 1.2: 0.98 for words, 0.22 for sentences
         known = filler.replace('so', 'だから') * 5  # known words are free, however many
-        self.assertIn('(5 known, 0 learning, 0 off the lists): about 0.00 expected lookups', weave.calibration(known, state))
-        settled = self.know({'簡単': 4.0, '問題': 4.0})  # no learning words to use more of: no nudge
-        self.assertTrue(weave.calibration(filler * 5, state, know=settled).endswith('are free): on budget.'))
+        self.assertIn('(5 known, 0 learning, 0 off the lists) and 0 whole Japanese sentences: about 0.00 expected '
+                      'lookups', weave.calibration(known, state))
+        settled = self.know({'簡単': 4.0, '問題': 4.0})  # no learning words to use more of: sentences get the budget
+        self.assertTrue(weave.calibration(filler * 5, state, know=settled).endswith(
+            'under budget, so use more whole Japanese sentences this time unless the topic needs zero Japanese or the '
+            'user asked for none.'))
+        none = {'stage': 2, 'stage_pinned': True, 'words': [word('中', 'queue')]}  # nor known words to write them with
+        self.assertTrue(weave.calibration(filler * 5, none).endswith(': on budget.'))
         # off the lists: a word not in use yet, a katakana loanword, or a listed word conjugated
         for reply in (filler * 5 + 'Then the 設定 goes away.', filler * 5 + 'Then the キャッシュ goes away.',
                       filler * 5 + 'Then it is 簡単です now.'):
@@ -1772,24 +1998,41 @@ class Budget(Home):
         self.assertEqual(weave.calibration(filler * 5, state, level=intensity.FULL), '')
         self.assertEqual(weave.calibration('Done, でも pushed.', state), '')
 
-    def test_words_known_at_a_glance_leave_their_learning_slot(self):
-        state = fwlib.new_state('2026-10-01')
-        for day in ('2026-10-02', '2026-10-03', '2026-10-04'):
-            fwlib.refill(state, day, settled=set())
-        active = [w['ja'] for w in state['words'] if w['status'] == 'active']
-        self.assertEqual(len(active), fwlib.WINDOW)
-        self.assertEqual(fwlib.refill(state, '2026-10-05'), 0)  # no knowledge.json: every word takes its slot
-        # the gloss log says 3 of them are known at a glance on the web (browser offset), whatever T3 says
-        fwlib.write_json(fwlib.home() / 'knowledge.json', self.know({active[0]: 4.0, active[1]: 3.5, active[2]: 2.5,
-                                                                     active[3]: 1.0}, t3=5.0, browser=1.0))
-        self.assertEqual(fwlib.settled_words(), {active[0], active[1]})  # sigmoid(1 - 2.5) is 0.18: not yet
-        self.assertEqual(fwlib.refill(state, '2026-10-05'), 2)
-        self.assertEqual([fwlib.find(state, ja)['status'] for ja in active[:2]], ['active', 'active'])  # unchanged
-        self.assertEqual(sum(w['status'] == 'active' for w in state['words']), fwlib.WINDOW + 2)
-        self.assertEqual(fwlib.refill(state, '2026-10-06'), 0)  # the learning set is full again
-        self.assertEqual(fwlib.settled_words({'offset': {'browser': True}, 'words': {'x': {'k': 'high'}, 'y': None}}), set())
-        self.assertEqual(fwlib.settled_words([]), set())
+    def test_the_free_flag_decides_what_is_known_at_a_glance(self):
+        know = self.know({'でも': 1.5, '中': 4.0, '多分': 1.5})
+        know['words']['でも']['free'] = True  # p 0.18 but free: one lookup didn't take it out
+        know['words']['中']['free'] = False  # p 0.018 but not free: not yet clearly known again
+        self.assertEqual({ja: fwlib.is_free(e) for ja, e in know['words'].items()},
+                         {'でも': True, '中': False, '多分': False})
+        self.assertLess(knowledge.word_estimate(know, 'でも', 't3')[0], fwlib.FREE_P)
+        self.assertEqual(knowledge.word_estimate(know, '中', 't3')[0], fwlib.FREE_P)
+        self.assertAlmostEqual(knowledge.word_estimate(know, '多分', 't3')[0], knowledge.sigmoid(-1.5))  # no flag
+        state = {'stage': 2, 'stage_pinned': True, 'paused': False,
+                 'words': [word('でも'), word('中'), word('多分', 'active')]}
+        free, learning, _p = weave.lists(state, {}, know)
+        self.assertEqual(([w['ja'] for w in free], [w['ja'] for w in learning]), (['でも'], ['多分', '中']))
 
+    def test_new_words_come_in_while_the_budget_goes_unspent(self):
+        now, hour = 1_800_000_000_000, 3_600_000
+        web = lambda i, plan, ago=hour: (('browser', f'v{i}', 'c'), {'surface': 'browser', 'shown_at': now - ago,
+                                                                       'plan': plan})
+        contexts = dict(web(i, {'budget': 0.2, 'spent': 0.05, 'expected': 0.3}) for i in range(5))
+        contexts.update([web(9, {'budget': 0.2, 'spent': 0}, 49 * hour), web(10, {'level': 3}),
+                         (('t3', 'm', 'c'), {'surface': 't3', 'shown_at': now, 'plan': None})])
+        briefs = [{'at': now - hour, 'budget': 0.5, 'expected': 0.45}] * 5 + [{'at': now, 'budget': None}]
+        spend = knowledge.spending(contexts, briefs, now)
+        self.assertEqual(spend, {'browser': {'plans': 5, 'budget': 1.0, 'spent': 0.25, 'share': 0.25},
+                                 't3': {'plans': 5, 'budget': 2.5, 'spent': 2.25, 'share': 0.9}})
+        self.assertTrue(knowledge.unspent(spend))  # the web's plans left three quarters of its budget
+        state = fwlib.new_state('2026-10-01')
+        self.assertEqual(knowledge.intake_room(state, spend, '2026-10-01'), 0)  # today's 5 are in
+        self.assertEqual(knowledge.intake_room(state, spend, '2026-10-02'), fwlib.NEW_PER_DAY)
+        spent = {'browser': dict(spend['browser'], share=0.85), 't3': spend['t3']}
+        self.assertEqual(knowledge.intake_room(state, spent, '2026-10-02'), 0)  # both spend 80% or more
+        few = {'browser': dict(spend['browser'], plans=4), 't3': {'plans': 0, 'budget': 0, 'spent': 0, 'share': None}}
+        self.assertEqual(knowledge.intake_room(state, few, '2026-10-02'), 0)  # too little reading to tell
+        old = dict(web(i, {'budget': 0.2, 'expected': 0.04}) for i in range(5))  # plans before spent was logged
+        self.assertEqual(knowledge.spending(old, [], now)['browser']['share'], 0.2)
 
 class DamagedState(Home):
     """A state.json cut short or edited by hand is kept aside and the copy from before the last save comes back."""
@@ -1829,6 +2072,205 @@ class DamagedState(Home):
         self.assertEqual(fwlib.read_json(fwlib.home() / fwlib.PREVIOUS), before)
 
 
+class OncePerChat(Home):
+    """A chat gets the whole brief once, with the known words most useful in chat by name, and later only a digest and
+    the changes."""
+
+    def setUp(self):
+        super().setUp()
+        state = grown(300)
+        state.update(stage=3, stage_pinned=True)
+        fwlib.save_state(state)
+        # a few known words looked up often enough to be learning words, so the learning list is full
+        learn = [w['ja'] for w in state['words'] if w['status'] == 'known'][40:70]
+        fwlib.write_json(fwlib.home() / 'knowledge.json', {'offset': {'t3': 0.0}, 'words': {
+            ja: {'k': 1.0 + i / 20, 'sd': 0.5} for i, ja in enumerate(learn)}})
+        self.log = self.home / 'chat.jsonl'
+        self.log.write_text(line('The build passes and the cache is warm, so nothing else needs doing today. ' * 4) + '\n')
+
+    def hook(self, session='s1', **extra):
+        payload = dict({'session_id': session, 'prompt': 'Next.', 'transcript_path': str(self.log)}, **extra)
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            self.assertEqual(weave.main(['--hook']), 0)
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def named(self, context):
+        """The known words a brief names: its default swaps and its known list (or the words it adds)."""
+        lines = context.split('\n')
+        swaps = [pair.split(' → ')[1] for pair in lines[2].split('meaning): ', 1)[1].split('; ')]
+        known = lines[3]
+        listed = (known.split('has that meaning): ', 1)[1] if known.startswith('Known, besides') else
+                  known.split('; also known: ', 1)[1].split('. If you', 1)[0] if '; also known: ' in known else '')
+        return swaps, [entry.split(' ')[0] for entry in listed.split('; ') if entry and not entry.startswith('and ')]
+
+    def test_the_known_list_goes_once_then_only_its_changes(self):
+        first = self.hook()
+        state, know = fwlib.load_state(), knowledge.load()
+        free = weave.lists(state, {}, know)[0]
+        swaps, listed = self.named(first)
+        words = weave.named_words(free)
+        self.assertEqual(swaps, [w['ja'] for w in weave.default_swaps(words)])
+        self.assertEqual(listed, [w['ja'] for w in weave.capped([w for w in words if w['ja'] not in swaps])])
+        left = len(words) - len(swaps) - len(listed)  # the most useful in chat named, as many as fit KNOWN_ROOM
+        self.assertGreater(left, 0)
+        self.assertIn(f'; and {left} more the user knows, not named here: keep the English for any word not named',
+                      first)
+        self.assertIn('the user is a native English speaker', first)
+        self.assertIn('Your last reply in this chat had', first)
+        second = self.hook()
+        self.assertIn('Known: as listed earlier in this chat. If you can no longer see that list', second)
+        self.assertIn('the Japanese Weave brief earlier in this chat still holds', second)
+        self.assertNotIn('the user is a native English speaker', second)
+        self.assertEqual(self.named(second), (swaps, []))  # the swaps every turn, the list once
+        self.assertIn('Your last reply in this chat had', second)
+        self.assertLess(len(second), len(first) / 3)
+        # a word becomes known at a glance, another stops being one: only they are named, the new one as it came up
+        # in the user's chat replies on two days, so it is among the most useful
+        newly = [w for w in state['words'] if w['status'] == 'queue'][-1]
+        with fwlib.editing() as edited:
+            fwlib.apply_event(edited, newly['ja'], 'known')
+        fwlib.write_json(fwlib.home() / 'knowledge.json', dict(know, words=dict(know['words'], **{listed[0]: {'k': 1.1, 'sd': 0.5}})))
+        fwlib.write_json(fwlib.home() / 'exposure.json', {'words': {newly['ja']: {'n': 3, 'days': ['2026-10-19',
+                                                                                                 '2026-10-20']}}})
+        third = self.hook()
+        # first, as it came up in chat; and the next word by priority, in the place the dropped one left in the list
+        self.assertIn(f'; also known: {weave.entry(newly)}; ', third)
+        self.assertEqual(len(third.split('; also known: ')[1].split('. If you')[0].split('; ')), 2)
+        self.assertIn(f'; no longer known at a glance, so keep the English unless listed as learning: {listed[0]};', third)
+        self.assertIn(f'{listed[0]} = ', third.split('\n')[1])  # it is a learning word now
+        fourth = self.hook()
+        self.assertNotIn(newly['ja'], fourth.split('\n')[3])  # said once
+        self.assertNotIn('no longer known', fourth)
+        self.assertIn('the user is a native English speaker', self.hook(session='s2'))  # another chat: its own list
+
+    def test_a_compaction_or_twenty_turns_bring_the_whole_brief_back(self):
+        whole = lambda context: context.split('\n')[3].startswith('Known, besides')
+        self.assertTrue(whole(self.hook()))
+        self.assertFalse(whole(self.hook()))
+        boundary = {'type': 'system', 'subtype': 'compact_boundary', 'uuid': 'c-1', 'isSidechain': False,
+                    'timestamp': '2026-10-20T12:00:00Z', 'content': 'Conversation compacted'}
+        with open(self.log, 'a') as file:
+            file.write(json.dumps(boundary) + '\n')
+        self.assertTrue(whole(self.hook()))  # what came before it, the earlier brief too, is gone
+        self.assertFalse(whole(self.hook()))  # the same compaction counts once
+        codex = {'timestamp': '2026-10-20T13:00:00Z', 'type': 'compacted', 'payload': {'message': '', 'window_id': 'w2'}}
+        with open(self.log, 'a') as file:
+            file.write(json.dumps(codex) + '\n')
+        self.assertTrue(whole(self.hook()))
+        turns = [whole(self.hook()) for _ in range(weave.FULL_EVERY)]
+        self.assertEqual(turns, [False] * (weave.FULL_EVERY - 1) + [True])  # in case the context lost it unseen
+        self.assertEqual(weave.compaction([json.dumps(boundary), 'not json "compacted"', line('"compact_boundary"')]),
+                         'c-1')
+        self.assertIsNone(weave.compaction([line('we talked about "compacted" logs')]))
+
+    def test_codex_and_chats_without_memory_still_get_a_brief(self):
+        first, second = self.hook('codex-1', turn_id='t1'), self.hook('codex-1', turn_id='t2')
+        self.assertIn('Known, besides', first)
+        self.assertIn('Known: as listed earlier in this chat', second)
+        self.assertIn('Known, besides', self.hook(None))  # no session id: whole every time
+        (fwlib.home() / 'sessions.json').write_text('{"s1": {"n": "x", "brief": [1]}, "s3": 5', encoding='utf-8')
+        self.assertIn('Known, besides', self.hook())  # a damaged memory: whole, as on a first turn
+        self.assertIn('Known: as listed', self.hook())  # and kept from then on
+        with mock.patch.object(weave, 'chat_turn', side_effect=OSError('read-only')):
+            self.assertIn('Known, besides', self.hook())
+        sessions = json.loads((fwlib.home() / 'sessions.json').read_text(encoding='utf-8'))
+        self.assertIsInstance(sessions['s1']['brief']['known'], str)  # one line per chat in the file
+        sessions['s1']['t'] = 'soon'
+        fwlib.write_json(fwlib.home() / 'sessions.json', sessions)
+        self.assertIn('Known: as listed', self.hook())  # a damaged time doesn't cost the chat its memory
+
+    def test_a_new_user_with_no_known_words(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01'))
+        fwlib.write_json(fwlib.home() / 'knowledge.json', {})
+        first, second = self.hook(), self.hook()
+        self.assertIn('\nKnown (each Japanese word, then its meaning; write the Japanese every time the English has '
+                      'that meaning): none', first)
+        self.assertNotIn('Default swaps', first)
+        self.assertNotIn('no longer known', second)
+        self.assertIn('\nKnown: as listed earlier in this chat. If', second)
+
+    def test_later_turns_stay_shorter_than_the_old_brief(self):
+        """Measured through the hook on a copy of the 2026-10-20 state (Stage 3, 293 words known at a glance, 24
+        learning words, <abbr> glosses as the user has them, with the feedback line): the old brief was 3,993
+        characters on every turn; now the first turn is 8,128 and later ones 2,294 (at full: 3,813 against 7,597 and
+        1,786). The old brief was the rules and the learning words plus a band or a list of known words, so a later
+        turn must stay under the first two alone, whatever the number of known words."""
+        for known in (150, 300, 800):
+            state = grown(known)
+            state.update(stage=3, stage_pinned=True)
+            for markup in (False, True):
+                for level in (0, -1, 1, intensity.FULL):
+                    _, had, _ = weave.compose(state, {}, markup=markup, level=level)
+                    while True:
+                        later, had, plan = weave.compose(state, {}, markup=markup, level=level, had=had)
+                        if 'also known' not in later:
+                            break
+                    head, learning = later.split('\n')[:2]
+                    old = weave.rules(3, level, markup, 'like "a" or "b"', plan.get('ask'), plan.get('sentences'))
+                    self.assertLess(len(later), len(old) + len(learning), (known, markup, level))
+                    self.assertLess(len(later) - len(learning), 1500, (known, markup, level))
+                    self.assertFalse(plan['whole'])
+
+
+class BriefRecords(Home):
+    """Each chat reply's brief is kept as a record of what it was offered, like a web passage's plan."""
+
+    def hook(self, session='s1', **extra):
+        payload = dict({'session_id': session, 'prompt': 'Next.', 'transcript_path': str(self.home / 'none.jsonl')},
+                       **extra)
+        with mock.patch.object(weave, 'interactive', return_value=True), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            weave.main(['--hook'])
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def test_every_reply_has_a_record_joined_by_chat_and_time(self):
+        fwlib.save_state(fwlib.new_state('2026-10-01', known_top=60))
+        before = int(time.time() * 1000)
+        first, second = self.hook(), self.hook()
+        self.hook('codex-1', turn_id='turn-9')
+        briefs = feedback.chat_briefs()
+        self.assertEqual([(b['session'], b['whole'], b['chars']) for b in briefs],
+                         [('s1', True, len(first)), ('s1', False, len(second)), ('codex-1', True, briefs[2]['chars'])])
+        b = briefs[0]
+        learning = [w['ja'] for w in fwlib.introduced(fwlib.load_state()) if w['status'] == 'active']
+        self.assertEqual(sorted(ja for ja, _ in b['offered']), sorted(learning))
+        self.assertTrue(all(abs(p - knowledge.sigmoid(-knowledge.prior(None))) < 0.001 for _, p in b['offered']))
+        self.assertEqual((b['level'], b['intensity'], b['budget'], b['arms'], b['known']), (0, 1.0, 0.5, {}, 60))
+        # the learning words asked for at their lookup chance and the whole sentences at their price
+        self.assertEqual((b['sentences'], b['sentencePrice']), (1, intensity.SENTENCE_PRICE))
+        self.assertAlmostEqual(b['expected'], b['ask'] * b['offered'][0][1] + b['sentences'] * b['sentencePrice'],
+                               places=2)
+        self.assertEqual(briefs[2]['turn'], 'turn-9')
+        self.assertEqual([b['session'] for b in feedback.chat_briefs(session='codex-1')], ['codex-1'])
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[1]['at'] + 5000), briefs[1])  # the latest before it
+        self.assertEqual(feedback.brief_for(briefs, 's1', briefs[0]['at']), briefs[0])
+        self.assertIsNone(feedback.brief_for(briefs, 's1', before - 1))
+        self.assertIsNone(feedback.brief_for(briefs, 's9', briefs[1]['at']))
+        self.assertEqual(weave.compose(fwlib.load_state(), {}, level=intensity.FULL)[2].keys()
+                         & {'budget', 'ask', 'sentences', 'expected'}, set())  # full has no budget
+        self.assertTrue(intensity.LEVELS)
+
+    def test_bad_records_are_refused(self):
+        good = hub.stamp({'kind': 'brief', 'session': 's1', 'level': 0, 'intensity': 1.0, 'offered': [['問題', 0.27]],
+                          'arms': {}, 'known': 3, 'whole': True, 'chars': 4000, 'budget': 0.5, 'ask': 2, 'expected': 0.54})
+        self.assertIsNone(hub.validate(good))
+        self.assertIsNone(hub.validate(dict(good, level=3, arms={'問題': 'held'}, turn='t-1')))
+        self.assertIsNone(hub.validate(dict(good, sentences=1, sentencePrice=0.08)))  # since sentences were priced
+        for bad in (dict(good, level=True), dict(good, level=4), dict(good, offered=[['問題', 1.5]]),
+                    dict(good, offered=[['問題']]), dict(good, session='a b'), dict(good, arms=[]),
+                    dict(good, whole='yes'), dict(good, chars=-1), dict(good, budget=float('nan')), dict(good, note='x'),
+                    dict(good, intensity=0), {k: v for k, v in good.items() if k != 'known'},
+                    dict(good, sentencePrice=0), dict(good, sentencePrice=1.5), dict(good, sentences=-1)):
+            self.assertIsNotNone(hub.validate(bad), bad)
+        self.assertEqual(hub.run(good), {'ok': True})
+        self.assertEqual(hub.run(good), {'ok': True, 'duplicate': True})  # a resend is kept once
+        self.assertFalse(hub.run(dict(good, uid='other', level=9))['ok'])
+        self.assertFalse((fwlib.home() / 'state.json').exists())  # a record changes no word state
+
+
 class Examples(unittest.TestCase):
     def test_example_sentences_use_words_known_at_a_glance(self):
         known = {'仕事': 0.02, '終わる': 0.03, '簡単': 0.05, '今日': 0.02, '忙しい': 0.3, '問題': 0.27}
@@ -1836,6 +2278,23 @@ class Examples(unittest.TestCase):
 
     def test_without_known_examples_the_brief_still_has_two(self):
         self.assertEqual(weave.examples({}), 'like "問題は設定です。" or "これは簡単です。"')
+
+
+class ZeroJapanese(unittest.TestCase):
+    def test_the_shared_cases(self):
+        # extension/test/zero.test.js checks the page guard on the same cases
+        cases = json.loads((Path(__file__).resolve().parent / 'zero_japanese_cases.json').read_text(encoding='utf-8'))
+        self.assertGreater(len(cases['cases']), 10)
+        for case in cases['cases']:
+            self.assertEqual((case['text'], weave.zero_japanese(case['text'])), (case['text'], case['chat']))
+
+    def test_one_strong_term_or_three_families_of_weak_ones(self):
+        self.assertTrue(weave.zero_japanese('my doctor said so'))
+        self.assertFalse(weave.zero_japanese('let me diagnose it: it was diagnosed as a race'))  # one family
+        self.assertFalse(weave.zero_japanese('the symptom and the diagnosis'))  # two: the talk of a bug, often
+        self.assertTrue(weave.zero_japanese('the symptom, the pain and the diagnosis'))
+        self.assertTrue(weave.zero_japanese('the IRS sent a letter'))
+        self.assertFalse(weave.zero_japanese('lower the IRs to bytecode'))  # a compiler's, not the tax office
 
 
 if __name__ == '__main__':

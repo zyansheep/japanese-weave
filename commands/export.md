@@ -1,6 +1,6 @@
 ---
 description: Paste-ready Japanese Weave block for claude.ai preferences or ChatGPT custom instructions
-argument-hint: "[--claude-ai | --chatgpt] [--log-day]"
+argument-hint: "[--claude-ai | --chatgpt]"
 allowed-tools: Bash(sh:*)
 ---
 !`sh "${CLAUDE_PLUGIN_ROOT}/scripts/run" "${CLAUDE_PLUGIN_ROOT}/scripts/fw.py" export $ARGUMENTS`

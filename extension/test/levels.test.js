@@ -1,8 +1,9 @@
 import { describe, test, expect } from 'bun:test';
 import {
-  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, capSwaps, selectSwaps,
+  resolveLevel, L1_WORDS, L2_WORDS, validateSwaps, isGrammar, wordCount, isZeroJapanese, normalizeJa, matchCase, selectSwaps,
   numberTrap, planSwaps, jitterFor, JITTER_MIN, misplaced, intensityLabel, intensityFactor, INTENSITY_LEVELS, INTENSITY_NAMES,
-  answerLevel, INTENSITY_FULL, intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K,
+  intensityBudget, perSentence, FREE_P, KNOWN_PRIOR_K, SENTENCE_PRICE, SENTENCE_SHARE, SPACING_P,
+  currentChance,
 } from '../src/levels.js';
 import { STARTER } from '../src/starter.js';
 
@@ -67,7 +68,7 @@ describe('validateSwaps', () => {
 });
 
 describe('choosing swaps', () => {
-  const text = 'It was a big day and a very long one, but fine.'; // 12 words, one sentence
+  const text = 'It was a big day and already a very long one, but fine.'; // 13 words, one sentence
   const words = [
     { ja: '大きい', en: 'big', hint: 'ōkii', status: 'active' },
     { ja: 'でも', en: 'but', hint: 'demo', status: 'known' },
@@ -79,61 +80,77 @@ describe('choosing swaps', () => {
     { o: 'already', f: 'もう', ctx: 'already' }, { o: 'big', f: '大きい', ctx: 'a big' },
   ], words);
   const p = (k) => 1 / (1 + Math.exp(k));
-  test('capSwaps: the level rule or the density, one use per word, learning words first', () => {
-    expect(capSwaps(1, swaps, text, words).map((s) => s.f)).toEqual(['大きい']);
-    expect(capSwaps(2, swaps, text, words).map((s) => s.f)).toEqual(['でも', '大きい']);
-    expect(capSwaps(2, swaps, text, words, 25).map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
-  });
-  test('planSwaps: known words wherever offered at every level but off, a new active word first, the plan', () => {
+  test('planSwaps: known words wherever offered at every level but off, the plan', () => {
     const plain = planSwaps(2, swaps, text, words);
     expect(plain.swaps.map((s) => s.f)).toEqual(['でも', 'とても', 'もう', '大きい']); // one use per word
-    // budget: normal's 0.5 lookups per 100 words; expected: three known words without estimates and the active one
-    expect(plain.plan).toEqual({ level: 0, intensity: 1, jitter: 1, limit: 4, candidates: 4, budget: 0.06,
-      expected: Math.round((3 * p(KNOWN_PRIOR_K) + p(1)) * 1000) / 1000 });
+    // candidates: every one the passage can place, both buts (in the one place "but" is); budget: normal's 0.5 lookups
+    // per 100 words; spent: the active word, over the budget but in with chance 0.065 / 0.27; expected: three known
+    // words without estimates and the active one
+    expect(plain.plan).toEqual({ level: 0, intensity: 1, jitter: 1, limit: 4, candidates: 5, budget: 0.065,
+      spent: Math.round(p(1) * 1000) / 1000, expected: Math.round((3 * p(KNOWN_PRIOR_K) + p(1)) * 1000) / 1000,
+      sentencePrice: SENTENCE_PRICE });
     for (const intensity of [-2, -1, 1, 2]) {
-      expect(planSwaps(2, swaps, text, words, { intensity }).swaps).toHaveLength(4); // lighter no longer thins known words
+      expect(planSwaps(2, swaps, text, words, { intensity }).swaps.map((s) => s.f)) // lighter no longer thins known words
+        .toEqual(expect.arrayContaining(['でも', 'とても', 'もう']));
     }
-    expect(planSwaps(2, swaps, text, words, { intensity: -2 }).plan).toMatchObject({ level: -2, intensity: 0.5, budget: 0.018 });
-    // shown today, the active word is one more for the budget: 0.06 lookups against its 0.27
+    expect(planSwaps(2, swaps, text, words, { intensity: -2 }).plan).toMatchObject({ level: -2, intensity: 0.5, budget: 0.02 });
+    // shown today, the active word is one more for the budget: 0.065 lookups against its 0.27
     const later = Array.from({ length: 1000 }, (_, seed) => planSwaps(2, swaps, text, words, { seed, shownToday: ['大きい'] }).swaps);
     expect(later.every((s) => ['でも', 'とても', 'もう'].every((f) => s.some((x) => x.f === f)))).toBe(true);
-    expect(later.filter((s) => s.length === 4).length / later.length).toBeCloseTo(0.06 / p(1), 1);
-    // the popup's density caps the total, budgeted swaps first: 25% of 12 words is 3
-    expect(planSwaps(2, swaps, text, words, { density: 25 }).swaps.map((s) => s.f)).toEqual(['でも', 'とても', '大きい']);
-    expect(planSwaps(2, swaps, text, words, { density: 25 }).plan.limit).toBe(3);
+    expect(later.filter((s) => s.length === 4).length / later.length).toBeCloseTo(0.065 / p(1), 1);
+    // a swap the passage doesn't say, or says twice with nothing to tell the places apart, can't be placed: no candidate
+    const nowhere = validateSwaps(1, [{ o: 'never', f: 'もう', ctx: 'never' }, { o: 'a', f: '大きい', ctx: '' }], words);
+    expect(planSwaps(2, nowhere, text, words).plan).toMatchObject({ limit: 0, candidates: 0 });
   });
-  test('the random thinning keeps each known word with chance jitter, and scales the budget', () => {
+  test("the host's free flag decides what is free, whatever k says: its hysteresis keeps one lookup from flipping a word", () => {
+    const flagged = words.map((w) => (w.ja === 'もう' ? { ...w, k: 2.0, sd: 0.5, free: true }
+      : w.ja === 'でも' ? { ...w, k: 4.0, sd: 0.5, free: false } : w));
+    const one = (f) => swaps.filter((s) => s.f === f);
+    // もう: a lookup chance of 0.12, over FREE_P, but free: kept at no cost, with no budget at all
+    expect(planSwaps(2, one('もう'), text, flagged, { budgetPer100: 0 }).swaps.map((s) => s.f)).toEqual(['もう']);
+    // でも: 0.018, under FREE_P, but not free: it costs its chance, and a budget of 0 keeps it out
+    expect(planSwaps(2, one('でも'), text, flagged, { budgetPer100: 0 }).swaps).toEqual([]);
+    // without the flag, k decides
+    const plain = flagged.map(({ free: _free, ...w }) => w);
+    expect(planSwaps(2, one('もう'), text, plain, { budgetPer100: 0 }).swaps).toEqual([]);
+    expect(planSwaps(2, one('でも'), text, plain, { budgetPer100: 0 }).swaps.map((s) => s.f)).toEqual(['でも']);
+  });
+  test('the random thinning keeps each free word with chance jitter, from JITTER_MIN (0.2) to 1, and leaves the budget', () => {
     const one = swaps.slice(0, 1); // でも, known
     const kept = Array.from({ length: 2000 }, (_, seed) => planSwaps(2, one, text, words, { seed, jitter: 0.6 }).swaps.length);
     expect(kept.reduce((a, b) => a + b, 0) / kept.length).toBeCloseTo(0.6, 1);
-    expect(planSwaps(2, one, text, words, { seed: 1, jitter: 0.6 }).plan).toMatchObject({ jitter: 0.6, budget: 0.036 });
+    expect(planSwaps(2, one, text, words, { seed: 1, jitter: 0.6 }).plan).toMatchObject({ jitter: 0.6, budget: 0.065 });
     expect(planSwaps(2, one, text, words, { seed: 1, intensity: -2 }).swaps).toHaveLength(1); // jitter 1: no thinning
-    const seeds = Array.from({ length: 2000 }, (_, i) => jitterFor(i * 7919));
+    const seeds = Array.from({ length: 4000 }, (_, i) => jitterFor(i * 7919));
     const thinned = seeds.filter((j) => j < 1);
     expect(thinned.length / seeds.length).toBeGreaterThan(0.45);
     expect(thinned.length / seeds.length).toBeLessThan(0.55);
+    expect(JITTER_MIN).toBe(0.2);
     expect(Math.min(...thinned)).toBeGreaterThanOrEqual(JITTER_MIN);
+    expect(Math.min(...thinned)).toBeLessThan(0.22); // the whole range, not just its top
+    expect(Math.max(...thinned)).toBeGreaterThan(0.97);
+    expect(thinned.reduce((a, b) => a + b, 0) / thinned.length).toBeCloseTo(0.6, 1);
     expect(jitterFor(42)).toBe(jitterFor(42)); // a passage repaints the same way
   });
 
-  test('planSwaps at full: every candidate, sentences first, a word again where its English is again; off: none', () => {
+  test('full is the same path with no budget: every candidate, sentences free, a word again where its English is again', () => {
     const listed = [...words, { ja: '日', en: 'day', hint: 'hi', status: 'known' }];
     const passage = 'It was a big day. It was a very long one, but fine, but late.';
     const [sentence] = validateSwaps(2, [{ k: 's', o: 'It was a big day.', f: '大きい日でした。', p: '大きい|日|でした|。',
       g: 'It was a big day.', c: 'It was a big day.' }], listed, passage);
     expect(sentence.kind).toBe('sentence');
-    const offered = [...swaps, sentence, swaps[0]]; // the model's order, and one exact repeat
-    const full = planSwaps(2, offered, passage, listed, { intensity: 3, density: 5, budgetPer100: 1, jitter: 0.5, seed: 3 });
-    expect(full.swaps[0]).toBe(sentence); // placed before the word swaps inside it (text.js applySwaps)
-    expect(full.swaps.slice(1)).toEqual(swaps); // both buts, in the model's order, the repeat dropped
-    // no budget; expected: every listed word of every swap (でも twice, 大きい in the sentence and alone)
-    expect(full.plan).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 6, candidates: 6,
-      expected: Math.round((5 * p(KNOWN_PRIOR_K) + 2 * p(1)) * 1000) / 1000 });
-    expect(planSwaps(2, offered, passage, listed).swaps.length).toBeLessThan(6);
+    const [big, but, very, late] = validateSwaps(2, [{ o: 'big', f: '大きい', ctx: 'a big day' }, { o: 'but', f: 'でも', ctx: 'one, but fine' },
+      { o: 'very', f: 'とても', ctx: 'a very long' }, { o: 'but', f: 'でも', ctx: 'fine, but late' }], listed, passage);
+    const offered = [big, but, very, late, sentence, { ...but }]; // the model's order, and one exact repeat
+    const full = planSwaps(2, offered, passage, listed, { intensity: 3, budgetPer100: 1, jitter: 0.5, seed: 3 });
+    // the sentence and not big inside it; both buts; no thinning or per-sentence cap
+    expect(full.swaps).toEqual([but, very, late, sentence]);
+    // no budget; expected: the lookups predicted, the sentence's translation too
+    expect(full.plan).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 4, candidates: 5,
+      expected: Math.round((4 * p(KNOWN_PRIOR_K) + p(1) + SENTENCE_PRICE) * 1000) / 1000, sentencePrice: SENTENCE_PRICE });
+    const normal = planSwaps(2, offered, passage, listed, { seed: 3 }).swaps;
+    expect(normal.filter((s) => s.f === 'でも')).toHaveLength(1); // one use per word below full
     expect(planSwaps(2, offered, passage, listed, { intensity: -3, seed: 3 }).swaps).toEqual([]);
-  });
-  test('the lighter levels pick from the answer at normal, the heavier ones from the full answer', () => {
-    expect(INTENSITY_LEVELS.map(answerLevel)).toEqual([0, 0, 0, 0, INTENSITY_FULL, INTENSITY_FULL, INTENSITY_FULL]);
   });
   test('intensity levels -3..3: names, labels, factors, lookup budgets and the per-sentence rule', () => {
     expect(INTENSITY_LEVELS.map((l) => INTENSITY_NAMES[l])).toEqual(['off', 'much lighter', 'lighter', 'normal', 'heavier', 'much heavier', 'full']);
@@ -167,6 +184,34 @@ describe('the lookup budget', () => {
     expect(spent.reduce((a, b) => a + b, 0)).toBeLessThan(1 + Math.max(...spent)); // only the last may go over
     expect(pick(learning, { budgetPer100: 0.5 }).swaps).toEqual(pick(learning, { budgetPer100: 0.5 }).swaps); // same passage, same day
     expect(pick(learning, { budgetPer100: 0, intensity: -2 }).swaps.map((s) => s.word)).toEqual(['l5', 'l6', 'l7', 'l8', 'l9']);
+  });
+  test('recency: a learning word read an hour ago is neither free nor picked; one unread for its half-life is', () => {
+    // PLAN.md section 5, rules 1 and 2. 結局's long-term chance is 25% (k 1.1, not free); right after a read its chance
+    // falls to the floor (2%) and climbs back over a week, halfway (in odds above the floor) at 3.5 days.
+    const now = 1_800_000_000_000;
+    const recency = { floor: Math.log(0.02), days: 7 };
+    const hour = 3_600_000;
+    const learning = (ago) => ({ ...word('結局', 1.1, 'active'), free: false, read: [[now - ago, 1]] });
+    const known = { ...word('今', 4, 'known'), free: true, read: [[now - hour, 1]] };
+    const plan = (ago) => pick([learning(ago), known], { budgetPer100: 2, now, recency, shownToday: ['結局'] });
+    expect(currentChance(1.1, learning(hour).read, now, recency)).toBeLessThan(0.03); // near the floor
+    expect(plan(hour).swaps.map((s) => s.word)).toEqual(['今']); // waits, though the budget has room; 今 stays free
+    expect(pick([learning(hour), known], { budgetPer100: 2, now, recency }).swaps.map((s) => s.word)).toEqual(['今']); // not
+    // even as an active word not shown on the web today
+    expect(plan(hour).plan.expected).toBeCloseTo(p(4), 3); // the waiting word isn't shown, so costs nothing
+    const half = currentChance(1.1, learning(3.5 * 24 * hour).read, now, recency);
+    expect(half).toBeGreaterThan(SPACING_P);
+    expect(half / (1 - half)).toBeCloseTo((0.02 + (Math.exp(-1.1) - 0.02) / 2), 2); // halfway back, in odds
+    expect(plan(3.5 * 24 * hour).swaps.map((s) => s.word)).toEqual(['結局', '今']); // picked, at its current chance
+    expect(plan(3.5 * 24 * hour).plan.expected).toBeCloseTo(half + p(4), 3);
+    expect(currentChance(1.1, learning(8 * 24 * hour).read, now, recency)).toBeCloseTo(p(1.1), 9); // a week on: long term
+    // read probably not at all, or without the host's recency: its long-term chance
+    expect(currentChance(1.1, [[now - hour, 0]], now, recency)).toBeCloseTo(p(1.1), 9);
+    expect(currentChance(1.1, learning(hour).read, now, null)).toBeCloseTo(p(1.1), 9);
+    // a word known better than the floor has no recency; one whose long-term chance is under SPACING_P never waits
+    expect(currentChance(5, [[now - hour, 1]], now, recency)).toBeCloseTo(p(5), 3);
+    const near = { ...word('多分', 2.3, 'shaky'), free: false, read: [[now - hour, 1]] }; // 9%: cheap, not free
+    expect(pick([near], { budgetPer100: 2, now, recency, shownToday: ['多分'] }).swaps.map((s) => s.word)).toEqual(['多分']);
   });
   test('a known word without an estimate is free; a learning one, or one the word state lacks, is not', () => {
     const list = [word('k0', undefined, 'known'), word('s0', undefined, 'shaky'), word('a0', undefined, 'active')];
@@ -219,35 +264,170 @@ describe('the lookup budget', () => {
     const share = counts.filter((n) => n === 1).length / counts.length; // one word 40% of the time
     expect(share).toBeGreaterThan(0.3);
     expect(share).toBeLessThan(0.5);
-    const plan = pick(halves, { budgetPer100: 0.8, intensity: 1, jitter: 0.5 }).plan; // 200 words at 0.8 per 100, halved
-    expect(plan.budget).toBe(0.8);
+    const plan = pick(halves, { budgetPer100: 0.8, intensity: 1, jitter: 0.5 }).plan; // 200 words at 0.8 per 100, thinned or not
+    expect(plan.budget).toBe(1.6);
     expect(plan.expected).toBe(plan.limit * 0.5);
-    expect(plan.limit).toBeGreaterThanOrEqual(1);
-    expect(plan.limit).toBeLessThanOrEqual(2);
+    expect(plan.limit).toBeGreaterThanOrEqual(3);
+    expect(plan.limit).toBeLessThanOrEqual(4);
+  });
+  test('the thinning takes free words only: the budget and what it pays for are the same in thinned and untouched passages', () => {
+    const learning = Array.from({ length: 6 }, (_, i) => word(`l${i}`, 0.4 + 0.3 * i)); // lookup chances 0.4 to 0.13
+    const known = Array.from({ length: 6 }, (_, i) => word(`k${i}`, 4, 'known'));
+    const list = [...learning, ...known];
+    const budgeted = (r) => r.swaps.filter((s) => s.word.startsWith('l')).map((s) => s.word);
+    let free = 0;
+    for (let seed = 0; seed < 300; seed++) {
+      const untouched = pick(list, { seed, budgetPer100: 0.6 });
+      expect(untouched.swaps.filter((s) => s.word.startsWith('k'))).toHaveLength(6);
+      for (const jitter of [0.2, 0.55]) {
+        const thinned = pick(list, { seed, budgetPer100: 0.6, jitter });
+        expect(thinned.plan.budget).toBe(untouched.plan.budget); // 0.6 per 100 words of 240
+        expect(budgeted(thinned)).toEqual(budgeted(untouched));
+        if (jitter === 0.2) free += thinned.swaps.length - budgeted(thinned).length;
+      }
+    }
+    expect(free / (300 * 6)).toBeCloseTo(0.2, 1); // each free word kept with chance jitter
   });
   test('at most perSentence budgeted swaps in one sentence; a full sentence passes to the next candidate', () => {
     // three learning words in the first sentence, the best ones, and a worse one in the second; a known word in the first
     const list = [word('a', 1.1), word('b', 1.0), word('c', 1.2), word('d', 2.0), word('k', 4, 'known')];
-    const offered = offer(list, (i) => (i === 3 ? 1 : 0));
-    const run = (intensity) => planSwaps(2, offered, passage(2), list, { budgetPer100: 10, intensity, seed: 7 }).swaps.map((s) => s.word);
+    const text = `The wa wb wc wk ${'x '.repeat(14)}end. The wd ${'x '.repeat(17)}end.`;
+    const offered = list.map((w) => ({ o: `w${w.ja}`, f: w.ja, g: 'x', h: '', ctx: '', word: w.ja, status: w.status }));
+    const run = (intensity) => planSwaps(2, offered, text, list, { budgetPer100: 10, intensity, seed: 7 }).swaps.map((s) => s.word);
     expect(run(0)).toHaveLength(3); // one of a, b, c; then d; and k, free
     expect(run(0)).toEqual(expect.arrayContaining(['d', 'k']));
     expect(run(1)).toHaveLength(4); // heavier: two a sentence
     expect(run(1)).toEqual(expect.arrayContaining(['d', 'k']));
     expect(run(-2).filter((w) => ['a', 'b', 'c'].includes(w))).toHaveLength(1);
   });
-  test('the density caps the total, budgeted swaps first, then free ones', () => {
-    const list = [word('k0', 4, 'known'), word('k1', 4, 'known'), word('k2', 4, 'known'), word('l0', 1.1), word('l1', 1.1)];
-    const out = pick(list, { budgetPer100: 10, density: 1.5 }); // 1.5% of 100 words: 2 (rounded from 1.5)
-    expect(out.swaps.map((s) => s.word)).toEqual(['l0', 'l1']);
-    expect(pick(list, { budgetPer100: 10, density: 3 }).swaps.map((s) => s.word)).toEqual(['k0', 'l0', 'l1']);
-    expect(pick(list, { budgetPer100: 10 }).swaps).toHaveLength(5); // no density: no other ceiling
+  test('a whole sentence costs its price and is its sentence\'s one budgeted swap; when it does not fit, its words show', () => {
+    const text = 'It was a big day. The big tree fell over in the wind.'; // 13 words
+    const sentenceOf = (list) => validateSwaps(2, [{ k: 's', o: 'It was a big day.', f: '大きい日でした。', p: '大きい|日|でした|。',
+      g: 'It was a big day.', c: 'It was a big day.' }], list, text)[0];
+    const big = { o: 'big', f: '大きい', g: 'big', h: '', ctx: 'a big day', word: '大きい', status: 'known' };
+    const day = (status) => ({ o: 'day', f: '日', g: 'day', h: '', ctx: 'big day', word: '日', status });
+    // known words only: free alone, but the sentence costs SENTENCE_PRICE
+    const known = [word('大きい', 4, 'known'), word('日', 4, 'known')];
+    const sentence = sentenceOf(known);
+    const offered = [sentence, big, day('known')];
+    const words = Math.round(2 * p(4) * 1000) / 1000;
+    expect(planSwaps(2, offered, text, known, { budgetPer100: 0 })).toEqual({ swaps: [big, day('known')], plan: { level: 0, intensity: 1,
+      jitter: 1, limit: 2, candidates: 3, budget: 0, spent: 0, expected: words, sentencePrice: SENTENCE_PRICE } });
+    const enough = 100 * SENTENCE_PRICE / 13 + 1e-9; // the budget is the price
+    for (let seed = 0; seed < 50; seed++) { // never thinned, and the words inside it are left out
+      const r = planSwaps(2, offered, text, known, { budgetPer100: enough, seed, jitter: 0.2 });
+      expect(r.swaps).toEqual([sentence]);
+      expect(r.plan.expected).toBe(Math.round((2 * p(4) + SENTENCE_PRICE) * 1000) / 1000);
+    }
+    // the host's price instead: 0.2 against a budget of 0.08, so in 40% of passages; else its words
+    const priced = Array.from({ length: 1000 }, (_, seed) => planSwaps(2, offered, text, known, { budgetPer100: enough, seed,
+      sentencePrice: 0.2 }));
+    expect(priced.filter((r) => r.swaps[0] === sentence).length / priced.length).toBeCloseTo(0.4, 1);
+    expect(priced.every((r) => r.plan.sentencePrice === 0.2 && (r.swaps[0] === sentence || r.swaps.length === 2))).toBe(true);
+    // with a learning word in it, the sentence or the word in its sentence, never both, even when two a sentence fit;
+    // 2.6 lookups, so the sentences' part (SENTENCE_SHARE) pays for the sentence's 0.33 and the word goes by rank
+    const learning = [word('大きい', 4, 'known'), word('日', 1.1, 'shaky')];
+    const withDay = [sentenceOf(learning), big, day('shaky')];
+    for (const intensity of [0, 2]) {
+      const picks = Array.from({ length: 200 }, (_, seed) => planSwaps(2, withDay, text, learning, { budgetPer100: 20, seed, intensity }).swaps);
+      expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(withDay[2]))).toBe(true);
+      expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(big))).toBe(true); // big shows where the sentence doesn't
+      expect(picks.some((s) => s.includes(withDay[0]))).toBe(true);
+      expect(picks.some((s) => s.includes(withDay[2]))).toBe(true);
+    }
   });
-  test('one active word not yet shown today goes first, outside the budget', () => {
+  test('whole sentences spend up to SENTENCE_SHARE of the budget, words the rest; what one cannot use goes to the other', () => {
+    // 40 sentences of 20 words: a learning word (0.25) in each of the first 20, a whole sentence of a known word to be had
+    // for each of the last 20 (SENTENCE_PRICE); 0.5 lookups per 100 words of 800 is 4
+    const learning = Array.from({ length: 20 }, (_, i) => word(`l${i}`, 1.1));
+    const known = Array.from({ length: 20 }, (_, i) => word(`k${i}`, 4, 'known'));
+    const list = [...learning, ...known];
+    const sentences = known.map((k, i) => ({ kind: 'sentence', o: `The w${20 + i} ${'x '.repeat(17)}end.`,
+      f: `${k.ja}です。`, g: 'x', ctx: '', words: [k.ja], word: k.ja }));
+    const plan = (offered) => {
+      const r = planSwaps(2, offered, passage(40), list, { budgetPer100: 0.5, seed: 7 });
+      const whole = r.swaps.filter((s) => s.kind === 'sentence');
+      return { words: r.swaps.length - whole.length, whole: whole.length, expected: r.plan.expected };
+    };
+    expect(SENTENCE_SHARE).toBe(0.18);
+    expect(SENTENCE_SHARE * intensityBudget(0) / SENTENCE_PRICE).toBeCloseTo(1.125); // sentences per 100 words at normal
+    const both = plan([...offer(learning), ...sentences]);
+    expect(both.whole).toBe(Math.floor(4 * SENTENCE_SHARE / SENTENCE_PRICE + 1e-9)); // 0.72 buys 9
+    expect(both.words).toBeGreaterThanOrEqual(13); // 3.28 buys 13, and a 14th with chance 0.03 / 0.25
+    expect(both.words).toBeLessThanOrEqual(14);
+    // either alone gets the whole budget: 16 words, or every sentence (20 cost 1.6 of the 4)
+    expect(plan(offer(learning))).toMatchObject({ words: 16, whole: 0 });
+    expect(plan(sentences)).toMatchObject({ words: 0, whole: 20 });
+    // a sentence that does not fit its part waits for what words leave: with only 2 learning words, the other 3.5 pay
+    // for sentences priced at 0.3, 11 of them and a 12th with chance 0.2 / 0.3
+    const dear = Array.from({ length: 30 }, (_, seed) => planSwaps(2, [...offer(learning.slice(0, 2)), ...sentences],
+      passage(40), list, { budgetPer100: 0.5, seed, sentencePrice: 0.3 }).swaps.filter((s) => s.kind === 'sentence').length);
+    expect(Math.min(...dear)).toBe(11);
+    expect(Math.max(...dear)).toBe(12);
+  });
+  test('no ceiling but the budget: every free word and every costly one it pays for', () => {
+    const list = [word('k0', 4, 'known'), word('k1', 4, 'known'), word('k2', 4, 'known'), word('l0', 1.1), word('l1', 1.1)];
+    expect(pick(list, { budgetPer100: 10 }).swaps).toHaveLength(5);
+  });
+  test('keep: swaps already on the page stay, first and in the budget, and the rest is planned around them', () => {
+    const list = [word('k0', 4, 'known'), word('l0', 1.1), word('l1', 1.1), word('l2', 1.1)];
+    const all = offer(list);
+    // a budget of one learning word: kept l2 takes it, so neither l0 nor l1 gets in, whatever the seed
+    for (let seed = 0; seed < 20; seed++) {
+      const r = pick(list, { budgetPer100: 0.27, seed, keep: [all[3]] });
+      expect(r.swaps.map((s) => s.word).sort()).toEqual(['k0', 'l2']);
+      expect(r.plan.spent).toBeCloseTo(1 / (1 + Math.exp(1.1)), 3);
+    }
+    // kept past a budget that has shrunk since (no budget at all): still kept, and nothing else costly
+    expect(pick(list, { budgetPer100: 0, keep: [all[1], all[2]] }).swaps.map((s) => s.word)).toEqual(['k0', 'l0', 'l1']);
+    // a kept free word is never thinned out
+    for (let seed = 0; seed < 20; seed++) {
+      expect(pick(list, { budgetPer100: 0, jitter: 0.2, seed, keep: [all[0]] }).swaps.map((s) => s.word)).toEqual(['k0']);
+    }
+  });
+  test('keep with a probe: the shown probe stays outside the budget, and no second showing or overlap is added', () => {
+    const list = [{ ...word('new', undefined, 'active'), arm: 'held:probe' }, word('k0', 4, 'known')];
+    const text = passage(2);
+    const at = (n) => ({ o: `w${n}`, f: 'new', g: 'x', h: '', ctx: `The w${n} x`, word: 'new', status: 'active' });
+    const phrase = { kind: 'phrase', o: 'w0 x', f: 'newk0', g: 'x', ctx: 'The w0 x x', words: ['new', 'k0'], word: 'new',
+      parts: [{ t: 'new', word: 'new' }, { t: 'k0', word: 'k0' }] };
+    const first = planSwaps(2, [at(0)], text, list, { seed: 7, budgetPer100: 1e-6 });
+    expect(first.swaps.map((s) => s.ctx)).toEqual(['The w0 x']);
+    expect(first.plan.spent).toBe(0);
+    for (const offered of [[at(0), at(1)], [phrase, at(0)]]) {
+      const again = planSwaps(2, offered, text, list, { seed: 7, budgetPer100: 1e-6, keep: first.swaps });
+      expect(again.swaps).toEqual([at(0)]); // not new at w1 again, not the phrase over the shown word
+      expect(again.plan).toMatchObject({ spent: 0, arms: { new: 'held:probe' } });
+    }
+    // seen today already (its 'seen' event in before the answer): still the probe it was, outside the budget
+    const seen = planSwaps(2, [at(0), at(1)], text, list, { seed: 7, budgetPer100: 1e-6, keep: first.swaps, shownToday: ['new'] });
+    expect(seen.swaps).toEqual([at(0)]);
+    expect(seen.plan.spent).toBe(0);
+  });
+  test('a word whose delayed-start probe is due goes first, outside the budget, once a day; plans record the arms', () => {
     const learning = [...Array.from({ length: 10 }, (_, i) => word(`l${i}`, 0.5)), word('new', undefined, 'active')];
-    expect(pick(learning, { budgetPer100: 1e-6 }).swaps.map((s) => s.word)).toEqual(['new']);
-    expect(pick(learning, { budgetPer100: 1e-6, shownToday: ['new'] }).swaps).toEqual([]);
-    expect(pick(learning, { budgetPer100: 1e-6, density: 0.01 }).swaps).toEqual([]); // a density of none leaves none
+    expect(pick(learning, { budgetPer100: 1e-6 }).swaps).toEqual([]); // a new word alone no longer jumps the budget
+    const probed = learning.map((w) => (w.ja === 'new' ? { ...w, arm: 'held:probe' } : w));
+    const first = pick(probed, { budgetPer100: 1e-6 });
+    expect(first.swaps.map((s) => s.word)).toEqual(['new']);
+    expect(first.plan).toMatchObject({ spent: 0, arms: { new: 'held:probe' } }); // outside the budget
+    expect(pick(probed, { budgetPer100: 1e-6, shownToday: ['new'] }).swaps).toEqual([]); // shown today: the probe is had
+    // free, it still goes first: thinning can't drop it
+    const free = probed.map((w) => (w.ja === 'new' ? { ...w, k: 4, sd: 0.1, free: true, arm: 'shown:probe' } : w));
+    for (let seed = 0; seed < 20; seed++) {
+      expect(pick(free, { budgetPer100: 1e-6, jitter: 0.2, seed }).swaps.map((s) => s.word)).toEqual(['new']);
+    }
+    const shown = learning.map((w) => (w.ja === 'l3' ? { ...w, arm: 'shown' } : w));
+    const budgeted = pick(shown, { budgetPer100: 50 });
+    expect(budgeted.plan.arms).toEqual({ l3: 'shown' }); // a word in its shown days: no priority, but recorded
+    expect(pick(learning, { budgetPer100: 50 }).plan.arms).toBeUndefined();
+  });
+  test('a candidate with a word the host did not send is never offered: the host leaves out the words the experiment hides', () => {
+    const list = [word('l0', 0.5), word('l1', 0.5)];
+    const offered = offer([...list, word('held', 0.5)]);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7, budgetPer100: 50 }).swaps.map((s) => s.word)).toEqual(['l0', 'l1']);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7, intensity: 3 }).swaps.map((s) => s.word)).toEqual(['l0', 'l1']);
+    expect(planSwaps(2, offered, passage(3), list, { seed: 7 }).plan.candidates).toBe(2);
   });
 });
 
@@ -326,8 +506,8 @@ describe('phrase and sentence swaps', () => {
       { o: 'day', f: '日', ctx: 'a long day' },
       { o: 'store', f: '店', ctx: 'the store' },
     ], words);
-    expect(capSwaps(2, swaps, 'It was a fun day. The store was busy all day long today.', words).map((s) => s.f))
-      .toEqual(['楽しい日でした。', '店']);
+    expect(planSwaps(2, swaps, 'It was a fun day. The store was busy all day long today.', words, { budgetPer100: 10 }).swaps
+      .map((s) => s.f)).toEqual(['楽しい日でした。', '店']);
   });
 });
 
@@ -447,6 +627,55 @@ describe('word swaps where the word cannot go', () => {
     expect(misplaced({ o: 'I', f: '私', ctx: '' }, "I've seen it. I'm sure.")).toBe(true);
     expect(misplaced({ o: 'grandfather', f: 'おじいさん', ctx: '' }, "It was my grandfather's house.")).toBe(false);
   });
+  test('"\'s" after a word whose "\'s" is a verb is a contraction\'s tail; a pronoun with its contracted verb is not one word', () => {
+    expect(misplaced({ o: 'That', f: 'それ', ctx: '' }, "That's my favorite song.")).toBe(true);
+    expect(misplaced({ o: 'That', f: 'それ', ctx: '' }, 'That is my favorite song.')).toBe(false);
+    expect(misplaced({ o: 'What', f: 'どれ', ctx: '' }, "What's the plan?")).toBe(true);
+    expect(misplaced({ o: 'Here', f: 'ここ', ctx: '' }, "Here's what I said.")).toBe(true);
+    expect(misplaced({ o: "I'm", f: '私', ctx: '' }, "I'm busy today.")).toBe(true);
+    expect(misplaced({ o: "it's", f: 'それ' }, '')).toBe(true);
+    expect(misplaced({ o: "There's", f: 'ある', ctx: '' }, "There's a bench in the yard.")).toBe(false); // the existence verb's English
+  });
+  test('no word swap in front of what a joiner joins: while, though, when, until; a question\'s "when" or "where" stays', () => {
+    expect(misplaced({ o: 'while', f: '間', ctx: '' }, 'We talked while we waited for the bus.')).toBe(true);
+    expect(misplaced({ o: 'though', f: 'だけど', ctx: '' }, 'Even though it rained, we went out.')).toBe(true);
+    expect(misplaced({ o: 'When', f: '時', ctx: '' }, 'When I got home, the lights were off.')).toBe(true);
+    expect(misplaced({ o: 'When', f: 'いつ', ctx: '' }, 'When I got home, the lights were off.')).toBe(true);
+    expect(misplaced({ o: 'where', f: 'どこ', ctx: '' }, 'This is the town where I grew up.')).toBe(true);
+    expect(misplaced({ o: 'When', f: 'いつ', ctx: '' }, 'When did you get home?')).toBe(false);
+    expect(misplaced({ o: 'Where', f: 'どこ', ctx: '' }, 'Where is the station?')).toBe(false);
+    expect(misplaced({ o: 'though', f: 'だけど', ctx: '' }, 'No rush though.')).toBe(false); // at the end it joins nothing ahead
+    expect(misplaced({ o: 'If', f: 'もし', ctx: '' }, 'If it rains, we stay home.')).toBe(false); // moshi comes first in Japanese too
+    expect(misplaced({ o: 'between', f: '間', ctx: '' }, 'There is a gap between the two models.')).toBe(false);
+  });
+  test('suru and yaru only for "do"; aru and nai never for people or animals', () => {
+    expect(misplaced({ o: 'made', f: 'する', ctx: '' }, 'She made a cake for the party.')).toBe(true);
+    expect(misplaced({ o: 'Make', f: 'する', ctx: '' }, 'Make sure the tests pass.')).toBe(true);
+    expect(misplaced({ o: 'did', f: 'する', ctx: '' }, 'I did the dishes.')).toBe(false);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'My sister has a dog and two cats.')).toBe(true);
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, 'We have a lot of friends here.')).toBe(true);
+    expect(misplaced({ o: 'There are', f: 'ある', ctx: '' }, 'There are many people in the park.')).toBe(true);
+    expect(misplaced({ o: "There's", f: 'ある', ctx: '' }, "There's a puppy in the yard.")).toBe(true);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'My sister has a car and a dog.')).toBe(false); // the car
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, "I have my mom's old car.")).toBe(false);
+    expect(misplaced({ o: 'have', f: 'ある', ctx: '' }, 'I have a picture of my dog.')).toBe(false);
+    expect(misplaced({ o: 'have', f: 'いる', ctx: '' }, 'We have a dog.')).toBe(false);
+    expect(misplaced({ o: 'has', f: 'ある', ctx: '' }, 'The release has a bug in the parser.')).toBe(false); // software
+  });
+  test('no "all" over a stretch of time; free-choice "anything" only where it is free', () => {
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I slept all day yesterday.')).toBe(true);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I have lived here all my life.')).toBe(true);
+    expect(misplaced({ o: 'whole', f: '全部', ctx: '' }, 'I was there the whole week.')).toBe(true);
+    expect(misplaced({ o: 'all', f: 'みんな', ctx: '' }, 'He knew it all along.')).toBe(true);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'I ate all the cookies.')).toBe(false);
+    expect(misplaced({ o: 'all', f: '全部', ctx: '' }, 'She read all of the books this year.')).toBe(false); // the books
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, "I didn't say anything.")).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'I dont need anything else.')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'Do you need anything?')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'Before you buy anything, read the reviews.')).toBe(true);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'I will eat anything.')).toBe(false);
+    expect(misplaced({ o: 'anything', f: '何でも', ctx: '' }, 'You can ask me anything you want.')).toBe(false);
+  });
 });
 
 describe('number words that are labels, ranks or pronouns', () => {
@@ -478,6 +707,13 @@ describe('number words that are labels, ranks or pronouns', () => {
     expect(kept('I waited two hours for the bus', 'two', '二')).toBe(true);
     expect(kept('I have two ideas for the name', 'two', '二つ')).toBe(true);
     expect(kept('Only one of the ideas worked out', 'one', '一つ')).toBe(true);
+    expect(kept('At least one of them works', 'one', '一つ')).toBe(true);
+    expect(kept('One of my friends called', 'One', '一つ')).toBe(false); // one member: a pronoun
+    expect(kept('It is one of the best songs', 'one', '一')).toBe(false);
+    expect(kept('I like the most recent one', 'one', '一つ')).toBe(false);
+    expect(kept('I want that red one', 'one', '一つ')).toBe(false);
+    expect(kept('That leaves one question', 'one', '一つ')).toBe(true);
+    expect(kept('This is one idea we had', 'one', '一つ')).toBe(true);
     expect(kept('I met two of the founders today', 'two', '二つ')).toBe(false);
     expect(kept('I met two founders today', 'two', '二つ')).toBe(false);
     expect(kept('I met two of the founders today', 'two', '二')).toBe(true);

@@ -1,10 +1,39 @@
 # Next steps
 
-Status: 2026-10-20, revised after the adversarial review. In order, each with what "done" means. Why each one
-matters is in [PLAN.md](PLAN.md); the letters in brackets are its simplifications (section 8).
+Status: 2026-10-21; the steps were written on 2026-10-20, after the adversarial review. In order, each with what "done"
+means. Why each one matters is in [PLAN.md](PLAN.md); the letters in brackets are its simplifications (section 8).
 
 The order follows one rule: build the yardsticks before changing what they measure. Every model change is checked on
 a simulated reader with known truth, then on the replayed log, so the measuring tools come first.
+
+## Where each step stands (2026-10-21)
+
+Built on the integration branch `plan`, merged step by step after review and a green test run; not deployed yet (see
+"After deployment" at the end). "Met" means the step's own "done when"; where it is only partly met, the reason is
+given. The numbers come from the simulated reader (sim), the 5-day snapshot of the live log (snapshot), or the prompt
+lab's judged passages (lab, fresh, fresh2).
+
+| Step | State | Done when met? |
+|---|---|---|
+| 1 T3 word counts | Done: T3 vendored.9 is running; live stays carry paragraph word counts since 2026-10-21 | Met |
+| 2 Known words named | Done: first turn names every known word (about 8,000 characters), later turns about 2,200 | Met |
+| 3 Yardsticks | Done: tools/sim, `fw.py evaluate`, `calibrate` per class with intervals, a record per chat brief | Met |
+| 4 One fitter | Done: a penalized fit of the whole log | Partly: the convergence check passes and known and new words are within 15% in the sim; learning words were 2.1 times over until step 10 (1.5 now); on the snapshot it ties the old model (5 days can't separate them) |
+| 5 Fewer controls | Done: no daily controller; sentences take up to 18% of the budget at their price on both surfaces; thinning keeps 20% to 100% of free words only | Met |
+| 6 Delayed-start experiment | Built; starts with the first refresh after deployment | Met in the sim (no hidden word shown in 2,482 hidden word-days; the planted effect read back at p = 0.001); power at 80 words a side is 33% to 91%, lower than planned |
+| 7 Probe | Done: `fw.py probe`, `/japanese-weave:probe` | Met: standard error 4 to 5 points at 60 words; interval coverage 89% to 94% in simulation |
+| 8 Status from the model | Built; the switch happens at the first refresh after deployment (`fw.py relabel --dry-run` lists the 73 words it changes; `--restore` undoes it for 30 days) | Met |
+| 9 Live check | Waiting: needs 2 to 4 weeks of data after deployment | Not yet |
+| 10 Shared recency | Done, self-disabling: it stays off until the reader's own log shows short-term forgetting | Partly: the sim recovers the decay within a factor of 2 and learning words improve from 2.1 to 1.5 times (not within 20%); on the snapshot the fitted floor sits above every word, so the term is off |
+| 11 Dictionary and matcher | Done: 26,969 entries; the matcher covers 93% of the lab's judged places | Met: 99.8% of the state's words and 39 of 42 unlisted lookups resolve |
+| 12 Sense flags and Haiku's new job | Done and wired into the extension: safe swaps show within a second, the check adds the rest; the extension's own code reproduces the lab on fresh2 (83% to 88% coverage, 0.5% to 0.6% wrong) | Met against a relative bar: on fresh2, 83% coverage and 0.6% wrong senses at full against today's Haiku at 73% and 3.5%; on fresh, 81% and 1.1% after the fixes. Every passage still needs a call (closed-class words are always doubtful); the safe swaps show first |
+| 13 Starting values and words from reading | Done: chat and web reading counts reach intake | Partly: features beat a flat start on first exposures in the sim (better on 55 of 84 days); the snapshot can't show it in 5 days (about 2 to 4 weeks) |
+| 14 Topical words | Done: code finds them in the last turns, at most 5, never in health, legal or money chats | Met in part: 19% of offers are the wrong sense (from 41%); calibrate has a topical class, linked by time |
+| 15 Experiment readout | Waiting: about 8 weeks after deployment | Not yet |
+| 16 Per-word memory strength | Waiting: needs 60 days of log and a positive step 15; its place in the code is marked | Not yet |
+| 17 One planner, two executors | Deferred: a large refactor that changes exploration (draws per word per refresh instead of per passage); worth doing only after the live check shows the two planners disagree in a way that costs | Not started |
+| 18 Prompt iteration | Web: done in the labs (three prompt versions, two fresh sets). Chat: a replay lab would spend the user's Claude limits; deferred | Partly |
+| 19 Reading speed as evidence | Built, off (`knowledge.SPEED`): in the sim it recovers the effect and fits nothing on a null reader, but it doesn't improve predictions, since one paragraph's time says little about any one word; on the snapshot it is slightly worse. docs/adaptive-difficulty.md gives the rule for turning it on | Built; gate not passed |
 
 ## Now: fix what is broken, build the yardsticks, start the slow experiment (days to two weeks)
 
@@ -145,3 +174,37 @@ a simulated reader with known truth, then on the replayed log, so the measuring 
     is evidence even without a lookup.
 20. **Later:** a tolerance model by context [C], a lookup habit that changes over time [R], and grammar patterns as
     items.
+
+## After deployment
+
+**Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
+entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
+
+1. **The collector first** (functor): update its app to this code and restart the collector service. Optionally run
+   `fw.py relabel --dry-run` there first: on the 2026-10-20 snapshot the switch to labels from the model changes 73 of
+   1,766 words (49 Anki cards with 11 to 19 day intervals and all 21 shaky words become known). The first refresh
+   applies the switch, starts the delayed-start experiment and refits from nothing under the new model version (about
+   20 s on today's log, once).
+2. **Then this machine:** merge `plan` into `main` (the chat hook runs from this checkout, so this is the moment it goes
+   live) and run setup, which copies the host scripts, the data files and the extension. The hook's first run
+   re-reads the last 30 days of chats for entry counts (about 15 s and 250 MB, once) and builds the reading index in
+   the background (17 MB).
+3. **Then the extension:** reload it (Chrome: the unpacked folder; Firefox: re-sign with `tools/sign-firefox.sh`, or
+   load it as a temporary add-on). Bump its version at release. A remote native host is updated on its own machine.
+
+**Undoing:** `fw.py relabel --restore` within 30 days puts back the old labels and stops the model from labeling;
+then revert the merge on `main` and reload the previous extension.
+
+**What to watch, and when:**
+
+- **Day 1:** `fw.py status` (labels from the model, intake, held-back words), a web page showing its first Japanese
+  within a second, and `fw.py calibrate` running.
+- **Week 1:** the share of chat lookups on Japanese outside the lists (was 72%; topical words now have their own class),
+  and whether the web spends its budget now that its candidates come from code.
+- **Weeks 2 to 4, step 9:** each class's interval of seen against predicted within 0.83 to 1.2; `fw.py evaluate` for
+  the fit against step 4's, word features against a flat start, and recency, each by day. Decide then whether to turn
+  on the per-surface reading model (`SURFACE_TUNING`) and reading speed as evidence: each switch says in
+  docs/adaptive-difficulty.md what result should turn it on.
+- **Day 30:** the first probe (`fw.py probe`), and every 30 days after.
+- **About week 8, step 15:** `fw.py experiment` reads out the delayed-start experiment.
+- **Day 60 or later, step 16:** a memory strength per word, if the experiment shows that exposure teaches.

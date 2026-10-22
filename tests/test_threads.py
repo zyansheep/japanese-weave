@@ -197,7 +197,7 @@ class Hook(Home):
         self.assertEqual(self.hook('no japanese please')[0], threads.note())  # already off: nothing new to log
         context, _ = self.hook('japanese back on', transcript_path=str(log))
         self.assertIn('Japanese Weave (Stage', context)
-        self.assertIn('Recall:', context)
+        self.assertNotIn('Recall:', context)  # the recall cue is gone
         self.assertEqual(self.thread_ops(), [('s1', True, 'chat'), ('s1', False, 'chat')])
         self.assertEqual(threads.entry(fwlib.load_state(), 's1')['off'], False)
 
@@ -244,7 +244,8 @@ class Unreachable(Home):
         out = self.fw('intensity', 'normal', 'here', '--session', 's1')
         self.assertIn('Note: collector unreachable; queued.', out)
         self.assertIn('Japanese Weave (Stage', self.hook('And a Hilbert space?')[0])
-        self.assertEqual([op['off'] for op in hub.pending()], [True, False])
+        self.assertEqual([op['off'] for op in hub.pending() if op['kind'] == 'thread'], [True, False])
+        self.assertEqual([op['session'] for op in hub.pending() if op['kind'] == 'brief'], ['s1'])  # waits too
 
 
 class Collector(Home):

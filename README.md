@@ -51,34 +51,41 @@ level from [blocks/](blocks/level-01.md).
 
 ## What it does
 
-- **Claude Code, Codex and T3 Code**: a prompt hook gives the model your stage and word lists every turn. Every
-  sentence stays an English sentence; listed words drop in as written, with no particles or conjugation below
-  Stage 3, suru-nouns standing in for English verbs ("let me 確認 the logs"). New words get a footer gloss with
-  romaji, and every third reply opens with a recall cue. Never in code, files, commits or anything meant to be
-  shared, and never in scripted runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK
-  sessions too, so the hook checks for a `t3 serve` parent and weaves there.
-- **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese
-  word order ("before bed" -> 寝る前), and from Stage 2 a few short sentences written fully in Japanese, all built
-  only from your words plus particles and endings. A passage is English prose of at least 6 words: a paragraph, list
-  item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google results a snippet,
-  the knowledge panel's description and AI answers (the overview, and People also ask once opened), never titles,
-  links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or opened,
-  never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。
-  for its translation; click to flip back to English. Swaps are chosen by a model on your own key: Gemini 3.8 Flash by
-  default, Gemini 4 Argon (popup, Model) for Japanese close to Claude's at about three times the cost (paid keys
-  only), or Claude Haiku 5.5 with an Anthropic key: light thinking, near Argon's Japanese at Flash's price, about 20 s
-  for a page's first passages. Passages from every tab share calls, up to 16 a call
-  ([docs/swap-prompt.md](docs/swap-prompt.md)).
+- **Claude Code, Codex and T3 Code**: a prompt hook gives the model your stage and word lists. The first turn of a
+  chat names the words you know at a glance that are most useful in chat, with their meanings; later turns carry a
+  short reminder, the learning words and only what changed, since the hook's text stays in the conversation. Most
+  sentences stay English sentences, with listed words dropped in as written (no particles or conjugation below Stage
+  3, suru-nouns standing in for English verbs: "let me 確認 the logs"), and a few are short Japanese sentences of
+  words you know, as many as your lookup budget pays for. New words get a footer gloss with romaji. Never in code,
+  files, commits or anything meant to be shared, and never in scripted
+  runs (`claude -p`, Agent SDK scripts, `codex exec`). T3 Code threads are Agent SDK sessions too, so the hook checks
+  for a `t3 serve` parent and weaves there.
+- **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
+  order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
+  all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a
+  paragraph, list item or quote (never links, buttons, menus, code or anything you type); on X a tweet; on Google
+  results a snippet, the knowledge panel's description and AI answers (the overview, and People also ask once opened),
+  never titles, links, chips, dates or ads; on YouTube comments, community posts and the video description, collapsed or
+  opened, never titles or channel names. Hover a word for its meaning, romaji and kana, or a sentence's 。 for its
+  translation; click to flip back to English. Code finds every place one of your words could go and takes the ones it
+  is sure of, which show within a second of the page loading; a model on your own key settles the rest and writes the
+  sentences and phrases, one call per batch of passages from every tab, and its additions follow in 20 to 30 s
+  without moving what you already see: Claude Haiku 5.5 with an Anthropic key (on passages nobody tuned against, 80%
+  to 88% of the places your words fit at full, about 1% of them in the wrong sense, about $0.44 per 1,000 passages),
+  or Gemini 3.8 Flash or 4 Argon (popup, Model; not yet measured on this job). Without a key you get the sure swaps alone and no text leaves the browser. Each
+  answer is kept, so revisiting a page, changing the level or learning a new word costs no new call except where the
+  new word adds a doubtful place ([docs/swap-prompt.md](docs/swap-prompt.md), "The web pipeline"). Passages you read
+  are counted per dictionary entry, counts only, for the words your reading brings in.
 - **From off to full on pages** (extension): Alt+Shift+Comma and Alt+Shift+Period (or the popup's Less and More) step
   the Japanese on pages from **Off** to **Full** for 3 hours after the last press: off (−3), much lighter, lighter,
   normal, heavier, much heavier, full (+3). Off puts every woven page back in English at once, sends nothing to the
-  model and logs nothing, until a heavier press or the popup's **Turn back on**. Full asks the model for every listed
-  word, learning or known, that a passage says in that sense, and every sentence your words and simple grammar can say
-  whole, and shows all of it, still checked word by word; heavier and much heavier show part of that same answer. The
+  model and logs nothing, until a heavier press or the popup's **Turn back on**. Full shows every candidate: each of
+  your words, learning or known, wherever the passage says it in that sense, and every sentence your words and simple
+  grammar can say whole, still checked word by word; every level picks from that same set, with no new call. The
   toolbar badge shows the level (`−2`, `+1`, `off`, `full`) and `···` while the model works on that tab's page; the
   icon turns grey where a page gets no Japanese, and
-  its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, no
-  key, or a page extensions can't run on. Once a page has settled, the icon is faded where it has nothing to weave,
+  its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, or a
+  page extensions can't run on. Once a page has settled, the icon is faded where it has nothing to weave,
   and its tooltip says whether no English paragraphs were found or no Japanese fit the text; it comes back when
   Japanese turns up (more comments, the next results, another video).
 
@@ -89,28 +96,35 @@ way round.
 
 | Command | What it does |
 |---|---|
-| `/japanese-weave:status` | Stage, word counts, the words you're learning |
+| `/japanese-weave:status` | Stage, word counts by label, the words you're learning, new words today |
 | `/japanese-weave:known <word>` | Mark a word known: kanji, kana or romaji (`多分`, `たぶん`, `tabun`) |
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
-| `/japanese-weave:challenge off\|0.5-3` | Aim for this many glosses opened per 100 words on web pages |
+| `/japanese-weave:challenge off\|0.5-3` | Set normal's lookup budget per 100 words (the other levels scale with it) |
 | `/japanese-weave:intensity [chat\|browser] up\|down\|normal\|off\|full` | More or less Japanese, none (off) or all you can follow (full), for the next 3 hours |
 | `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
+| `/japanese-weave:probe` | Once a month, about 3 minutes: how much of your reading you would read without a lookup |
 
 From a terminal: `sh ~/.japanese-weave/app/scripts/run ~/.japanese-weave/app/scripts/fw.py <command>`.
 
 ## The word list
 
-[`data/lexicon.csv`](data/lexicon.csv): `ja, en, hint (romaji), kana`, in teaching order. Built from
+[`data/lexicon.csv`](data/lexicon.csv): `ja, en, hint (romaji), kana, tier`, in teaching order. Built from
 [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html) (CC BY-SA 4.0) common words that can stand in for an English
 word (nouns, suru-nouns, adverbs, connectors, adjectives), ranked by the geometric mean of their
 [JPDB](https://jpdb.io) and BCCWJ frequency ranks, then reviewed word by word: wrong-sense glosses fixed, grammar
 words and counters dropped, romaji fixed at morpheme boundaries (場合 baai, 実は jitsu wa). Connectors and words
-technical chat uses come first. `tools/` has the pipeline (`build_candidates.py`, the reviews in `curation/`,
-`assemble_lexicon.py`).
+technical chat uses come first; the tier says which (A: connectors and adverbs, T: technical, B: everyday, C: poor
+fits), and the chat brief's default swaps are your known A words. `tools/` has the pipeline (`build_candidates.py`,
+the reviews in `curation/`, `assemble_lexicon.py`).
+
+**The dictionary.** [`data/dictionary.tsv`](data/dictionary.tsv) has every common JMdict entry (22,647) and the
+4,322 others ranked as well as a typical common one, with their frequency ranks, built by the same pipeline without
+the review (`tools/build_dictionary.py`). It is planned to become the vocabulary and isn't used at run time yet;
+[docs/dictionary.md](docs/dictionary.md) describes it.
 
 **Anki.** `fw.py anki <collection.anki2>` reads your collection (a temporary copy, so Anki can stay open) and puts
 every word on a card in learning or review (not new, not suspended) at the front of the list, most familiar first.
@@ -121,34 +135,85 @@ whose name contains NAME.
 
 ## How words advance
 
-- **Exposure day**: a day you saw the word in a chat reply, or on a web page.
-- **Learning (active)**: up to 20 learning slots, shared with shaky words; at most 5 new words a day. Words you
-  looked up before they were introduced (opened in 2 different messages or passages within 14 days) come in first,
-  most opened first; then the list order. A learning or shaky word the gloss log says you know at a glance (under an
-  8% chance of a lookup) keeps its status but gives its slot to a new word.
-- **Learning → known**: 3 exposure days, with no flip, `learn` or peek on the last 3.
-- **`learn` → shaky**, and so is a known word you peek at or flip on 2 different days within a week (one flip is
-  often a test click); a flip on a learning word restarts its count. **Shaky → known** after 7 days with no flip or
-  peek. With adaptive difficulty on, evidence from the gloss log can also move words (see
-  [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md)).
+Every word has a label, and the fitted model sets it on each refresh (see [Adaptive difficulty](#adaptive-difficulty)):
+
+- **Known**: you know it at a glance, a lookup chance under 8%, judged with a margin for doubt so that one lookup
+  doesn't change it. Known words are free: they appear wherever they fit.
+- **Learning** (status `active`): in use, and not known at a glance yet.
+- **New** (status `queue`): not introduced yet.
+
+A word moves between known and learning as the evidence does: one you keep reading without a lookup becomes known,
+one you look up often enough is learning again. There are no exposure days, learning slots or shaky words. `known` and
+`learn` set a word's label at once, and the fit takes them as strong evidence, so the next refresh keeps the label
+unless your lookups say otherwise.
+
+- **New words**: up to 5 a day come in, and only while the lookup budget goes unspent: when, over the last 48 hours,
+  the web's passages or the chat's briefs (at least 5 of either) planned to spend under 80% of their budget, so there
+  aren't enough learning words to spend it on. Words you looked up before they were introduced (opened in 2 different
+  messages or passages within 14 days) come first, most opened first; then the words your reading nominates (below).
+  Until your chats have been counted on 3 days, the list order instead. A word the model already says you know at a
+  glance is labeled known instead.
+- **Words from your reading**: each chat reply is counted per dictionary entry and day (`data/dictionary.tsv`, 26,969
+  entries; counts only, never text): its English through the code matcher, which marks every place an entry could
+  go, and its Japanese through the `<abbr>` tags where it has them, else the listed words. An English place counts
+  only where a sense check can trust it: never closed-class words ("about", "one", "so"), and only the most frequent
+  option the sense flags (`data/senses.tsv`) call safe for that English (without that file, the most frequent entry
+  there when that English is its main meaning). A word is eligible once it came up on 3 different days in 30, can
+  stand in for English, isn't a number and isn't in use; the eligible words come in by the days they came up (most
+  first), then the predicted chance you'd look one up (nearest 25% first), then general frequency. A dictionary word
+  the list doesn't have joins the word state when it comes in. The first scan after an update counts the last 30 days
+  of chats again.
+- **The delayed-start experiment** (PLAN.md section 7) tests whether being shown a word teaches it. Each new word is
+  drawn into one of two arms: held back, appearing nowhere for 3 weeks, or shown like any learning word for 2 weeks
+  and then paused for 1. At week 3 both are probed: the first web passage that can show the word shows it outside the
+  budget, once a day until one is read, and the chat brief asks for it once; the first of its showings you read is
+  the outcome, looked up or not. Then it is an ordinary learning word. The draw comes from a seed and the word alone,
+  and every web plan and chat brief record says the arms of the words it offers. `fw.py status` counts the held-back
+  words without naming them; `fw.py experiment` shows the arms, the probes, the outcome so far, and when each arm will
+  have 80 words probed (`--power`: the simulated reader's power at your rate of showings). The 25 words the fixed rules
+  name (でも, だから and the like) come in outside it.
 - **Stage** follows your known words: 1 to start, 2 at 40 known, 3 at 150, 4 at 400.
 
-In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
-glance goes in wherever the English has its meaning, and learning words go in as often as your intensity's lookup
-budget allows (see [Adaptive difficulty](#adaptive-difficulty)). The stage sets the shape:
+**The switch from day counts.** Until then labels came from rules inherited from French Weave: 20 learning slots, 3
+exposure days to graduate, shaky words after two peek days, and evidence moves with a challenge set. `fw.py relabel
+--dry-run` lists the words whose labels the model would change, grouped by kind and explained, and changes nothing.
+The first refresh with the model's labels switches: each word keeps its old status, days and peeks under `legacy` for
+30 days. To undo it in that time, run `fw.py relabel --restore` (where the state lives, or queued for the collector):
+it puts the old statuses and fields back (a word taken in since stays learning) and stops refreshes from labeling
+words; then check out the code from before the switch.
 
-| Stage | Shape of a chat reply |
-|---|---|
-| 1, 2 | English sentences with swapped words |
-| 3 | plus one short です/ます sentence in five, made of known words |
-| 4 | plus two in five |
+In chat, how much Japanese a reply gets comes from your words, not a share of the reply: every word you know at a
+glance goes in wherever the English has its meaning, and learning words and short です/ます sentences of known words go
+in as often as your intensity's lookup budget allows, at any stage (see [Adaptive difficulty](#adaptive-difficulty)).
+The brief names the words you know at a glance on a chat's first turn: a dozen connectors and adverbs as default
+swaps, written in Japanese every time, then others with their meanings, the most useful in chat first: the ones that
+keep coming up in your chats, then the most common, then your Anki words (numbers and katakana words stay English).
+That list stops at about 250 to 290 words to stay inside Claude Code's 10,000-character limit on hook text; the words
+it leaves out are still known, just not named. Later turns repeat the default swaps and name only the words that
+became known or stopped being known. The whole brief comes back after the chat is compacted (Claude Code and Codex
+mark it in the transcript) and every 20 turns. Below Stage 3 every other sentence keeps English grammar, with listed
+words never conjugated and no particles around them.
+
+Each brief also offers up to 5 **topical words**: dictionary entries the code matcher finds in the chat's last three
+turns (your prompts and Claude's replies, the prompt being sent included), the most frequent entry at each place when
+the English there is its main meaning (not only the safe ones: Claude checks the sense as it places them). Only words
+worth offering: ones that can stand in for English, not numbers or katakana, not in use, never one the delayed-start
+experiment holds back, and not ones you know at a glance; the ones your reading keeps repeating first, then common
+ones. Each comes with its odds, like a learning word, and counts toward the learning words' amount, at most half of
+it. The feedback line on the next reply counts them as their own class, not as Japanese outside the lists, and the
+brief record lists them.
 
 The claude.ai and ChatGPT blocks (`/japanese-weave:export`) can't see your lookups, so they still ask for a share
-of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4.
+of the words: about 6% at Stage 1, 12% at 2, 25% at 3 and 40% at 4. They describe your known words as the most
+common words up to a rank in the base list, then name the known words past it, the more common first, as many as fit
+(ChatGPT's fields hold 1,500 characters).
 
 Japanese has no spaces, so chat exposure is counted with script-aware matching: a kanji word can't sit inside a
 longer kanji run (今 isn't counted in 今日), a kana word can't sit inside a kana run, and readings of three or more
-kana count for their word.
+kana count for their word. With a collector, each machine counts its own transcripts and sends the counts (never the
+text) with its chat exposure; the collector keeps the counts by day where intake runs, and the caches get how many
+days each entry came up on. The index the matcher reads (`reading-index.sqlite` in the state dir, about 17 MB) is
+built in the background on first use, in about 5 seconds.
 
 `JAPANESE_WEAVE_OFF=1` turns the hook off anywhere; `JAPANESE_WEAVE_FORCE=1` weaves in a script. Health,
 medication, legal, money, safety, emergency and driving topics get no Japanese at all.
@@ -198,39 +263,50 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 
 ## Adaptive difficulty
 
-From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss). Each
-intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal): words you know at a
-glance (under an 8% chance) are free and appear wherever they fit, and the budget goes to the words closest to a 25%
-chance, at most one per sentence, on web pages and in chat. A challenge (`fw.py challenge 1.5`, the command above,
-or the popup) replaces normal's budget, and while it is set a daily controller nudges the web budget until your real
-rate matches it. Strong evidence also moves words between learning and known, a few a day. Why it works this way
-and what comes next: [PLAN.md](PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md).
+From the log, Japanese Weave estimates for every word how likely you are to look it up (open its gloss): one fit of the
+whole log, redone on every refresh, which starts each word from its Anki interval and how it came into use (taken in
+to learn, marked known at setup or by Anki, or neither; never its label, which the fit itself sets) and moves it by
+what you opened and didn't. Each intensity level is a lookup budget, the lookups per 100 words you put up with (0.5 at normal):
+words you know at a glance (under an 8% chance, judged with a margin for doubt so one lookup doesn't change it) are free
+and appear wherever they fit, and the budget goes to the words closest to a 25% chance, at most one per sentence, on web
+pages and in chat. Once your log shows that a word's chance falls right after you read it and climbs back over a week,
+the fit follows that too: known at a glance is judged on the chance a week on, a lookup costs the chance now, and a word
+read too recently waits. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted
+from your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the
+budget and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the
+command above, or the popup) is normal's budget. The same fit labels every word
+([How words advance](#how-words-advance)). Why it works this way and what comes next: [PLAN.md](PLAN.md) and
+[NEXT_STEPS.md](NEXT_STEPS.md).
 
 Every passage shown on the web counts as evidence, weighted by the chance you read it, from how long it was on
 screen while you were reading.
 
-**For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours,
-in the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut
-(for chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each
-press is logged, and half of the web passages are thinned at random, so `fw.py calibrate` can tell whether the
-default amount is right: reading speed and opens by how much Japanese a passage had, and how often you turned it
-down or up.
+**For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours, in
+the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut (for
+chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each press is
+logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a glance, so
+`fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed and opens by
+how much Japanese a passage had, and how often you turned it down or up. It also checks the model, per surface and class
+of word (costly, free, whole sentences, words off the list): the lookups per 100 words read it expected against those
+you made, with a 90% interval from resampling days, and the budget in the same unit.
 
 **In chat, a level is a lookup budget**: how many lookups per 100 words you put up with, spent only on words you
 don't know at a glance yet: 0.15 much lighter, 0.3 lighter, 0.5 normal, 0.8 heavier, 1.2 much heavier (a challenge,
 when set, is normal's budget and scales the others). Words you know at a glance (under an 8% chance of a lookup)
 cost nothing and go in wherever they fit at every level but off, so lighter and heavier change the learning words
-only: the brief asks for as many per 100 words as spend about the budget, at most one in a sentence (two at heavier
-and much heavier), and the line on the last reply says whether it went over or under.
+and whole sentences only: the brief asks for as many per 100 words as spend about the budget (at normal about 1
+sentence per 100 words, the one in five it asked for at Stage 3 before), at most one learning word in a sentence (two
+at heavier and much heavier), and the line on the last reply says whether it went over or under, and with which.
 
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
 for 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
 means the hook sends only a one-line note to reply in plain English, until the time runs out, you press heavier,
 or you say "japanese back on" in any chat.
-Full has no budget: every sentence you could follow in plain Japanese (your known and learning words plus
-common grammar) is written in Japanese, and the sentences that must stay English (steps, code, commands, exact
-technical detail) swap in every known or learning word. A chat turned off with `off here` stays off at any level.
+In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
+known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English
+(steps, code, commands, exact technical detail) swap in every known or learning word, with no cap per sentence. A
+chat turned off with `off here` stays off at any level.
 `fw.py calibrate` counts a press into off as lighter and into full as heavier.
 
 **Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
@@ -242,16 +318,31 @@ switch is kept per session id, recorded as a `thread` op (so the collector has i
 of reach still holds here at once), and forgotten 60 days after its last change. `fw.py calibrate` counts each chat
 turned off as a lighter press.
 
-`fw.py knowledge` shows the dial, your recent rate, and the words with the most evidence; `fw.py why <word>` shows
-one word's estimate and every observation behind it. The design, with its sources:
+`fw.py knowledge` shows normal's budget, the fitted chat offset and reading model, and the words with the most
+evidence; `fw.py why <word>` shows one word's estimate and every observation behind it; `fw.py evaluate` scores the
+model on your log day by day, each day predicted from the days before, against the online model it replaced and a
+constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
+
+**Once a month: the probe.** `/japanese-weave:probe`, or `fw.py probe` in a terminal (one word at a time: y, n, s to
+skip, b back, q quit), asks which of about 60 words you would read without a lookup, plus 6 made-up ones, in about 3
+minutes. It measures the goal directly: the share of the words in your reading you would read in Japanese without a
+lookup, each word weighted by how often it comes up (by general frequency, among the 10,000 most frequent words, until
+your reading is counted), with a 90% interval of about plus or minus 8 points. It also shows how many made-up words you
+claimed and the share corrected for that guessing, what your word list marks known of the same words, and, for the
+words you didn't know, how often you looked them up when they were shown. Its answers never feed the model: it is the
+check on the model, whose own number moves when you get used to the glosses. A word isn't asked again within 90 days.
+`fw.py status` says when the next is due; `fw.py probe --history` lists them all. The design is in
+`scripts/probe.py`; `tools/probe_sim.py` checks it on simulated readers.
 
 ## Privacy
 
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your
-local Claude Code and Codex transcripts to count exposure and never sends them anywhere. The extension sends
+local Claude Code and Codex transcripts to count exposure and words from your reading, and sends only counts (to your
+collector, if you set one), never the text. The extension sends
 readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
-(free-tier Gemini keys allow Google to train on prompts). Private sites start off even when every site is on: webmail and messaging, AI chat, password
+(free-tier Gemini keys allow Google to train on prompts); without a key no text leaves the browser. Of what you read on
+those sites it sends the plugin counts per dictionary entry and a hash of each passage, never the text. Private sites start off even when every site is on: webmail and messaging, AI chat, password
 managers, banking and payments, health portals, government, and local or intranet addresses (subdomains included;
 the popup can turn any of them on). It talks to the plugin through a native messaging host that only this extension
 may call.
@@ -259,7 +350,8 @@ may call.
 ## Develop
 
 ```sh
-python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex
+python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex, yardsticks
+python3 tools/sim/run.py all                     # the simulated reader's experiments (about a minute)
 python3 scripts/make_blocks.py                   # regenerate blocks/ and extension/src/starter.js
 cd extension && bun install && bun test           # extension (happy-dom)
 sh tools/make-icons.sh                            # redraw the extension's icons from tools/icons/icon.svg
@@ -268,5 +360,6 @@ python3 tests/model_eval.py --out /tmp/jw-eval    # live check via claude -p
 
 ## License
 
-MIT (French Weave © Jackie Oliver). The word list includes data derived from JMdict, © the Electronic Dictionary
-Research and Development Group, CC BY-SA 4.0.
+MIT (French Weave © Jackie Oliver). The word list and the dictionary (`data/lexicon.csv`, `data/dictionary.tsv`)
+include data derived from JMdict, © the Electronic Dictionary Research and Development Group, and are shared under its
+license, CC BY-SA 4.0.

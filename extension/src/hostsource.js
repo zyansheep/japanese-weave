@@ -8,14 +8,33 @@ export const STATE_KEY = 'wordState';
 export const PENDING_KEY = 'pendingEvents';
 export const SENT_KEY = 'seenSent';
 export const LOG_KEY = 'pendingLog';
+export const READING_KEY = 'pendingReading'; // passages read, counted, waiting for the host
+export const READ_SENT_KEY = 'readingSent'; // passages counted today
+export const INDEX_KEY = 'readingIndex'; // the host's reading index: { version, entries }
 const LOG_MAX = 500;
+const READING_MAX = 500;
+const READ_SENT_MAX = 3000;
 const ANNOTATIONS_MAX = 200;
 
 // Drops unusable rows, keeps the rest. Throws when nothing usable is left, so a bad reply never replaces a good list.
-// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k and its uncertainty sd when the
-// gloss log has evidence; the dial (challenge, peeks per 100 words), its budget, and the realized peek rate.
+// Adaptive difficulty (docs/adaptive-difficulty.md) comes along: per word, knowledge k (long-term), its uncertainty sd,
+// whether it is known at a glance (free, with hysteresis) and when it was last read (read: [time in ms, chance it was
+// the last read], for its current chance, levels.js currentChance); the recency term (the fit's floor and the days
+// back to the long-term chance); the challenge (normal's lookup budget), the budget, and the web's price of a whole
+// sentence in Japanese (its translation lookups per sentence read; 0 when the host has none yet, and levels.js
+// SENTENCE_PRICE stands in). A word in the delayed-start experiment has its arm ('shown', 'held:probe' or
+// 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
+// the experiment hides. For the web pipeline (pipeline.js) each word comes with its glosses as the matcher indexes them,
+// those of them code may swap alone (safe: data/senses.tsv), and its dictionary entry id (the reading counts' key), and
+// the reply says which version of the reading index (readingIndex) goes with it.
+const READS_MAX = 50;
+const GLOSSES_MAX = 60;
+const gloss = (x) => typeof x === 'string' && x.length > 0 && x.length <= 200;
+const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
+  const reads = (r) => (Array.isArray(r) ? r.filter((x) => Array.isArray(x) && x.length === 2 && num(x[0]) && num(x[1])
+    && x[1] >= 0 && x[1] <= 1).slice(0, READS_MAX) : []);
   const words = [];
   const seen = new Set();
   for (const w of data?.words || []) {
@@ -24,8 +43,13 @@ export function parseState(data) {
     const en = w.en.trim();
     if (!ja || !en || seen.has(ja)) continue;
     seen.add(ja);
+    const glosses = Array.isArray(w.glosses) ? w.glosses.filter(gloss).slice(0, GLOSSES_MAX) : [];
+    const safe = Array.isArray(w.safe) ? w.safe.filter((g) => glosses.includes(g)) : [];
     words.push({ ja, en, hint: typeof w.hint === 'string' ? w.hint.trim() : '', kana: typeof w.kana === 'string' ? w.kana.trim() : '',
-      status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}) });
+      status: typeof w.status === 'string' ? w.status : 'active', ...(num(w.k) && num(w.sd) ? { k: w.k, sd: w.sd } : {}),
+      ...(typeof w.free === 'boolean' ? { free: w.free } : {}), ...(reads(w.read).length ? { read: reads(w.read) } : {}),
+      ...(armOk(w.arm) ? { arm: w.arm } : {}), ...(glosses.length ? { glosses, safe } : {}),
+      ...(Number.isInteger(w.id) && w.id > 0 ? { id: w.id } : {}) });
   }
   if (!words.length) throw new Error('host sent no usable words');
   const stage = Math.floor(Number(data?.stage));
@@ -37,8 +61,10 @@ export function parseState(data) {
     challenge: num(data?.challenge) && data.challenge > 0 ? data.challenge : 0,
     intensity: cleanIntensity(data?.prefs?.intensity_browser), // the web pages' level, as last saved by any machine
     budget: num(data?.budget) && data.budget > 0 ? data.budget : 0,
-    rate: num(data?.rate?.per100) ? { per100: data.rate.per100, peeks: Number(data.rate.peeks) || 0,
-      shownWords: Number(data.rate.shownWords) || 0, days: Number(data.rate.days) || 0 } : null,
+    sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
+    recency: num(data?.recency?.floor) && num(data?.recency?.days) && data.recency.days > 0
+      ? { floor: data.recency.floor, days: data.recency.days } : null,
+    reading: typeof data?.reading?.version === 'string' && /^[\w.-]{1,64}$/.test(data.reading.version) ? data.reading.version : '',
     words,
   };
 }
@@ -72,6 +98,64 @@ export async function refresh({ storage, send, now = () => Date.now() }) {
     return { state: stored, changed, error: null };
   } catch (e) {
     return { state: cached, changed: false, error: String(e?.message || e) };
+  }
+}
+
+// The reading index (fw_host readingIndex: the safe glosses of every swappable dictionary entry, [[entry id, pos codes,
+// "gloss;gloss"]]), asked for once per version the state names and kept here; pipeline.js readingIndexOf indexes it.
+// Never throws: without a host, or with an older one, no index, and only the words in use are counted.
+export async function refreshReadingIndex({ storage, send, version }) {
+  if (!version) return { changed: false };
+  const stored = (await storage.get([INDEX_KEY]))[INDEX_KEY];
+  if (stored?.version === version) return { changed: false };
+  try {
+    const reply = await send({ type: 'readingIndex' });
+    if (!reply?.ok || !Array.isArray(reply.entries)) throw new Error(reply?.error || 'no reading index from the host');
+    const entries = reply.entries.filter((e) => Array.isArray(e) && e.length === 3 && Number.isInteger(e[0]) && e[0] > 0
+      && typeof e[1] === 'string' && typeof e[2] === 'string' && e[2].length > 0 && e[2].length <= 2000);
+    await storage.set({ [INDEX_KEY]: { version: typeof reply.version === 'string' ? reply.version : version, entries } });
+    return { changed: true, count: entries.length };
+  } catch (e) {
+    return { changed: false, error: String(e?.message || e) };
+  }
+}
+
+// A passage read on the web, counted (pipeline.js readingCounts): { d: 'web:' and its text's hash, day, entries: {entry
+// id: times} }, queued for the host once per passage and day. Counts only, never text. Returns whether it was queued.
+export async function queueReading(storage, item) {
+  const ok = item && typeof item.d === 'string' && /^web:[0-9a-f]{8,48}$/.test(item.d) && /^\d{4}-\d{2}-\d{2}$/.test(item.day)
+    && item.entries && typeof item.entries === 'object' && Object.keys(item.entries).length > 0
+    && Object.entries(item.entries).every(([k, n]) => /^\d{1,12}$/.test(k) && Number.isInteger(n) && n >= 1 && n <= 1000);
+  if (!ok) return false;
+  const obj = await storage.get([READING_KEY, READ_SENT_KEY]);
+  const sent = obj[READ_SENT_KEY]?.day === item.day ? obj[READ_SENT_KEY] : { day: item.day, ds: [] };
+  if (sent.ds.includes(item.d)) return false;
+  sent.ds = [...sent.ds, item.d].slice(-READ_SENT_MAX);
+  const pending = Array.isArray(obj[READING_KEY]) ? obj[READING_KEY] : [];
+  pending.push({ d: item.d, day: item.day, entries: item.entries });
+  await storage.set({ [READING_KEY]: pending.slice(-READING_MAX), [READ_SENT_KEY]: sent });
+  return true;
+}
+// Was this passage counted today already (queueReading)?
+export async function readToday(storage, d, day) {
+  const sent = (await storage.get([READ_SENT_KEY]))[READ_SENT_KEY];
+  return sent?.day === day && sent.ds.includes(d);
+}
+
+// Sends the queued reading counts to the host, which adds them to the daily store intake reads (its own, or the
+// collector's); keeps them queued if the host is missing, older than the counts or fails.
+export async function flushReading({ storage, send }) {
+  const obj = await storage.get([READING_KEY]);
+  const pending = Array.isArray(obj[READING_KEY]) ? obj[READING_KEY] : [];
+  if (!pending.length) return { sent: 0 };
+  try {
+    const reply = await send({ type: 'reading', passages: pending });
+    if (!reply?.ok) throw new Error(reply?.error || 'host refused the reading counts');
+    const now = await storage.get([READING_KEY]);
+    await storage.set({ [READING_KEY]: (now[READING_KEY] || []).slice(pending.length) });
+    return { sent: pending.length, taken: reply.taken };
+  } catch (e) {
+    return { sent: 0, error: String(e?.message || e) };
   }
 }
 
@@ -123,17 +207,25 @@ export async function flushEvents({ storage, send }) {
 }
 
 // How a passage's amount was chosen (levels.js planSwaps): null when absent, undefined when malformed. budget (the
-// passage's lookups to spend; none at full) and expected (lookups predicted if it is read) are optional, as plans from
-// before levels meant a lookup budget have neither; the host checks the same (feedback.py _plan_ok).
+// passage's lookups to spend if read; none at full), spent (what its swaps within the budget cost), expected (lookups
+// predicted if it is read), sentencePrice (the lookups a whole sentence was priced at, 0 to 1) and arms (the
+// delayed-start arm of each word shown that has one) are optional, as plans from before levels meant a lookup budget
+// have none of them, plans from before whole sentences were priced (and their thinning took the budget down with it)
+// have no sentencePrice, and plans before extension 0.10 no spent or arms; the host checks the same (feedback.py
+// _plan_ok).
 function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
   const count = (x) => Number.isInteger(x) && x >= 0 && x <= 1000;
-  const amount = (x) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1000);
+  const amount = (x, top = 1000) => x === undefined || (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= top);
+  const arms = (x) => x === undefined || (x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length <= 200
+    && Object.entries(x).every(([w, a]) => w.length > 0 && w.length <= 40 && armOk(a)));
   if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)
-    || !amount(plan.budget) || !amount(plan.expected)) return undefined;
+    || !amount(plan.budget) || !amount(plan.spent) || !amount(plan.expected) || !amount(plan.sentencePrice, 1) || !arms(plan.arms)) return undefined;
+  const optional = (key) => (plan[key] !== undefined ? { [key]: plan[key] } : {});
   return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates,
-    ...(plan.budget !== undefined ? { budget: plan.budget } : {}), ...(plan.expected !== undefined ? { expected: plan.expected } : {}) };
+    ...optional('budget'), ...optional('spent'), ...optional('expected'), ...optional('sentencePrice'),
+    ...(plan.arms && Object.keys(plan.arms).length ? { arms: plan.arms } : {}) };
 }
 
 // One gloss interaction for the host's log: which word was peeked (or flipped) when and for how long, and where every

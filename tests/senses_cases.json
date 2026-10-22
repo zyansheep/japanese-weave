@@ -1,0 +1,197 @@
+{
+  "about": [
+    "Test vectors for the sense-flag lookups, run by extension/test/senses.test.js (extension/src/senses.js) and tests/test_senses.py (scripts/senses.py). file is a small data/senses.tsv."
+  ],
+  "file": "# Japanese Weave sense flags, format 1: a test file.\n# Two comment lines.\nid\tja\tkana\tsafe\tdoubtful\n1\t犬\tいぬ\tdog\tspy\n2\t方\tかた\tperson\t\n3\t方\tほう\t\tperson;side\n4\tについて\tについて\tabout\t\n\t路\tろ\troad\t\n",
+  "flags": [
+    {
+      "entry": {
+        "ja": "犬",
+        "kana": "いぬ"
+      },
+      "gloss": "dog",
+      "flag": "s"
+    },
+    {
+      "entry": {
+        "ja": "犬"
+      },
+      "gloss": "dog",
+      "flag": "s"
+    },
+    {
+      "entry": {
+        "ja": "犬",
+        "kana": "イヌ"
+      },
+      "gloss": "dog",
+      "flag": "s"
+    },
+    {
+      "entry": {
+        "ja": "犬",
+        "kana": "いぬ"
+      },
+      "gloss": "spy",
+      "flag": "d"
+    },
+    {
+      "entry": {
+        "ja": "犬",
+        "kana": "いぬ"
+      },
+      "gloss": "cat",
+      "flag": null
+    },
+    {
+      "entry": {
+        "ja": "方",
+        "kana": "かた"
+      },
+      "gloss": "person",
+      "flag": "s"
+    },
+    {
+      "entry": {
+        "ja": "方",
+        "kana": "ホウ"
+      },
+      "gloss": "person",
+      "flag": "d"
+    },
+    {
+      "entry": {
+        "ja": "方"
+      },
+      "gloss": "person",
+      "flag": "d"
+    },
+    {
+      "entry": {
+        "ja": "方",
+        "kana": "がた"
+      },
+      "gloss": "person",
+      "flag": "d"
+    },
+    {
+      "entry": {
+        "ja": "について",
+        "kana": "について"
+      },
+      "gloss": "about",
+      "flag": "d"
+    },
+    {
+      "entry": {
+        "ja": "路",
+        "kana": "ろ"
+      },
+      "gloss": "road",
+      "flag": "s"
+    }
+  ],
+  "function": [
+    {
+      "gloss": "about",
+      "function": true
+    },
+    {
+      "gloss": "there is",
+      "function": true
+    },
+    {
+      "gloss": "there's",
+      "function": true
+    },
+    {
+      "gloss": "this one",
+      "function": true
+    },
+    {
+      "gloss": "i'm",
+      "function": true
+    },
+    {
+      "gloss": "I’ve",
+      "function": true
+    },
+    {
+      "gloss": "a lot",
+      "function": false
+    },
+    {
+      "gloss": "dog",
+      "function": false
+    },
+    {
+      "gloss": "",
+      "function": false
+    }
+  ],
+  "spans": [
+    {
+      "span": {
+        "function": false,
+        "options": [
+          {
+            "ja": "犬",
+            "kana": "いぬ"
+          },
+          {
+            "ja": "猫",
+            "kana": "ねこ"
+          }
+        ],
+        "glosses": [
+          "dog",
+          "cat"
+        ]
+      },
+      "safe": [
+        true,
+        false
+      ]
+    },
+    {
+      "span": {
+        "function": false,
+        "options": [
+          {
+            "ja": "方",
+            "kana": "かた"
+          },
+          {
+            "ja": "方",
+            "kana": "ほう"
+          }
+        ],
+        "glosses": [
+          "person",
+          "person"
+        ]
+      },
+      "safe": [
+        true,
+        false
+      ]
+    },
+    {
+      "span": {
+        "function": true,
+        "options": [
+          {
+            "ja": "について",
+            "kana": "について"
+          }
+        ],
+        "glosses": [
+          "about"
+        ]
+      },
+      "safe": [
+        false
+      ]
+    }
+  ]
+}

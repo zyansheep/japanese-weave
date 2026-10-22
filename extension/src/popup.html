@@ -49,12 +49,10 @@
         <option value="4">4</option>
       </select>
     </label>
-    <label class="row"><span>Japanese on pages</span><select id="density"></select></label>
     <div class="row"><span>For now</span><span><button id="lighter" title="Alt+Shift+Comma">Less</button>
       <span id="intensityInfo" class="small"></span>
       <button id="heavier" title="Alt+Shift+Period">More</button></span></div>
     <label class="row"><span>Challenge</span><select id="challenge"></select></label>
-    <div class="row"><span>Peeks lately</span><span id="rateInfo" class="small"></span></div>
     <div class="row"><span>Peeks collected</span><span id="peekCount" class="small"></span></div>
     <p class="small" id="collectedInfo"></p>
     <label class="row"><span>Model</span><select id="model"></select></label>
@@ -68,7 +66,7 @@
     <div class="row"><span>Model use total</span><span id="usageTotal" class="small"></span></div>
     <p class="small" id="usageNote">Estimated at list prices; free-tier Gemini keys are not charged.</p>
   </section>
-  <p class="small">Sites where it's on send readable page text to the chosen model (Google or Anthropic) with your key. Forms, links, code and editable text are skipped.</p>
+  <p class="small">Sites where it's on send readable page text to the chosen model (Google or Anthropic) with your key; without a key, nothing leaves the browser. Forms, links, code and editable text are skipped.</p>
   <div id="notice" class="small error" role="alert"></div>
   <script type="module" src="popup.js"></script>
 </body>

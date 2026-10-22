@@ -1,0 +1,177 @@
+{
+  "x2-signalling": {
+    "use": ["we=私たち"],
+    "ok": ["Our=私たち", "and#0=そして", "can=出来る", "shortly=そろそろ"],
+    "not": ["and#1=そして", "work=仕事", "working=仕事", "We're=私たち", "where=どこ", "as=まるで|やっぱり"]
+  },
+  "x2-underwriting": {
+    "use": ["This=これ", "one=一つ"],
+    "ok": [],
+    "not": ["This=この", "one=一"]
+  },
+  "x2-tolkien": {
+    "use": ["I=私|僕", "have#0=いる", "many=多く|多い", "people=人|人間", "know=知る", "also=また", "hate=嫌", "see=見る", "A LOT=沢山|多い|いっぱい|多く", "reading=読む", "books=本", "world=世界"],
+    "ok": ["me=私|僕", "my=私|僕", "and#1=そして", "and#2=そして", "more=もっと", "different=違う"],
+    "not": ["have#0=ある", "have#1=ある|いる", "who=誰", "come=来る", "and#0=そして", "and#3=そして", "as=まるで|やっぱり", "Power=力", "you're=あなた|君", "going=行く", "It's=それ", "so=つまり", "some=少し", "more=多く|多い", "kind=こう|こんな|どんな"]
+  },
+  "x2-hiking": {
+    "use": ["you=あなた|君", "go=行く", "Which=どの", "below=下"],
+    "ok": ["Just=さっき", "my=私|僕", "your=あなた|君", "can=出来る"],
+    "not": ["top=上", "before=前", "so=つまり", "and=そして", "Which=どれ|どちら"]
+  },
+  "x2-vault": {
+    "use": ["I=私|僕", "around=くらい", "Now=今", "there’s=ある", "where=どこ"],
+    "ok": ["time=時", "go=行く", "checked=調べる"],
+    "not": ["guys=奴|あいつ", "time=時間", "there’s=いる|そこ", "did=する|やる"]
+  },
+  "hn2-bolt": {
+    "use": ["People=人|人間", "always=いつも", "this=これ", "change=変える", "saying=言う", "we=私たち", "know=知る|分かる", "but=でも|だけど", "interesting=面白い", "he=彼"],
+    "ok": ["change=変更", "whatever=何でも", "It#0,1=それ", "usually=いつも", "his=彼", "like=まるで", "Yes=はい|ええ"],
+    "not": ["this=この", "Just=さっき", "just=さっき", "it’s=それ", "like=好き|こう", "that’s=それ|その", "way=方", "how=いかが"]
+  },
+  "hn2-nixos": {
+    "use": ["Yes=はい|ええ", "I=私|僕"],
+    "ok": ["It=それ"],
+    "not": ["one=一つ|一", "which=どちら|どれ|どの", "that=それ|その", "makes=する", "and=そして", "works=仕事", "so=つまり", "much=多く", "less=少し|小さい", "Windows=窓"]
+  },
+  "hn2-deepseek": {
+    "use": ["this#0=これ", "this#1=この", "really=本当に", "one=一つ"],
+    "ok": ["it=それ", "there is=ある", "and=そして", "differently=違う"],
+    "not": ["this#0=この", "this#1=これ", "there is=いる", "there=そこ", "no=いいえ", "all=全部|みんな", "can=出来る", "one=一", "thing=物", "anyone=誰", "that=それ|その"]
+  },
+  "hn2-spacex": {
+    "use": ["If=もし", "still=まだ"],
+    "ok": ["far=ずっと", "everyone=みんな", "this=この", "today=今日", "most=ほとんど"],
+    "not": ["Considering=考える", "how=いかが", "and=そして", "more=もっと|多く|多い", "this time=今回|今度", "plans=つもり", "most=多く|多い", "itself=自分"]
+  },
+  "hn2-civilisation": {
+    "use": ["I=私|僕", "think=思う|考える", "this=これ", "we=私たち", "thought=思う|考える", "problems=問題", "world=世界", "becoming=なる", "problem=問題", "everyone=みんな"],
+    "ok": ["and#1,2=そして", "all=みんな", "actually=実は"],
+    "not": ["this=この", "just=さっき", "one=一つ|一", "more=もっと|多く", "and#0=そして", "all=全部", "how=いかが", "that=それ|その", "stand=立つ", "differences=違う"]
+  },
+  "rd2-deadlock": {
+    "use": ["feel=感じる", "issue=問題", "talked=話す", "about=について", "I=私|僕", "like#0=好き"],
+    "ok": ["and=そして", "that#0=それ", "a ton=沢山|いっぱい", "her=彼女", "annoying=嫌"],
+    "not": ["most=多く|多い", "that#0=その", "that#1=それ|その", "why=なぜ|どうして", "it's=それ", "just=さっき", "move=動く", "which=どちら|どれ|どの", "has=ある|いる", "about=くらい", "like#1=好き|こう|まるで", "way=方", "very=あまり", "probably=きっと"]
+  },
+  "rd2-tray": {
+    "use": ["I=私|僕"],
+    "ok": ["It=それ", "looks=見える", "great=いい", "my=私|僕"],
+    "not": ["looks=見る", "here=ここ|こちら", "and=そして", "there=そこ"]
+  },
+  "rd2-yank": {
+    "use": ["You=あなた|君", "We=私たち"],
+    "ok": ["your=あなた|君", "get it=分かる", "it=それ"],
+    "not": ["need=いる", "so=つまり"],
+    "sentences": ["We get it"]
+  },
+  "rd2-doom": {
+    "use": ["as if=まるで", "fun=楽しい"],
+    "ok": ["and=そして", "a LOT=沢山|多い|いっぱい|多く", "look=見える", "too=また"],
+    "not": ["look=見る", "too=あまり", "as=やっぱり"]
+  },
+  "rd2-look": {
+    "use": ["I=私|僕", "think=思う|考える", "peoples=人|人間", "minds=心", "This=これ", "a lot=沢山|多い|いっぱい|多く", "people=人|人間", "but=でも|だけど", "also=また", "If=もし", "you=あなた|君", "good=いい", "yourself=自分", "there are=いる", "like=好き"],
+    "ok": ["male=男", "it#1=それ", "too=また", "look#0=見える", "look#1=見える", "feel=感じる", "what=どんな", "that=その", "undesirable=嫌"],
+    "not": ["it’s=それ", "younger=妹", "and=そして", "This=この", "back=帰る", "too=あまり", "look=見る", "look#2=見える", "there are=ある", "there=そこ", "who=誰", "how=いかが", "what=どれ", "that=それ"]
+  },
+  "yt2-novelkeys": {
+    "use": ["This#0=これ", "This#1=この", "really=本当に", "I=私|僕", "bought=買う", "now=今", "watching=見る"],
+    "ok": ["more=もっと"],
+    "not": ["This#0=この", "This#1=これ", "that=それ|その", "have=ある|いる", "more=多く|多い", "after=後", "enjoy=楽しい"]
+  },
+  "yt2-carpet": {
+    "use": ["you=あなた|君", "about=について", "I=私|僕", "him=彼", "we=私たち", "have=ある", "same=同じ"],
+    "ok": ["day=日", "my=私|僕", "got=買う", "stuff=物", "nasty=悪い"],
+    "not": ["one=一つ|一", "someone=誰", "about=くらい", "like=好き|こう|まるで", "what=どれ", "have=いる", "got=もらう", "Sis=妹"]
+  },
+  "yt2-roadside": {
+    "use": ["This=これ", "end=終わる", "now=今|今すぐ"],
+    "ok": ["our=私たち", "Disgusting=嫌"],
+    "not": ["side=方", "This=この", "end=終える", "needs=いる"]
+  },
+  "yt2-fan": {
+    "use": ["people=人|人間"],
+    "ok": ["These=これ"],
+    "not": ["that=それ|その"]
+  },
+  "yt2-speaker": {
+    "use": ["this=これ", "I=私|僕", "him=彼", "home=家"],
+    "ok": ["my=私|僕", "come=来る", "come home=帰る"],
+    "not": ["this=この", "speaker=話す"]
+  },
+  "news2-google": {
+    "use": [],
+    "ok": [],
+    "not": ["some=少し"]
+  },
+  "news2-russia": {
+    "use": ["Russia=ロシア", "said=言う"],
+    "ok": ["ending=終える"],
+    "not": ["talks=話す", "and=そして", "ending=終わる", "top=上", "has=ある|いる"]
+  },
+  "news2-aberfan": {
+    "use": ["children=子供|子"],
+    "ok": ["killed=殺す", "days=日"],
+    "not": ["has=ある|いる", "which=どちら|どれ|どの", "and=そして", "as=まるで", "most=多く|多い"]
+  },
+  "news2-hubbard": {
+    "use": ["says=言う", "he=彼"],
+    "ok": ["Russian=ロシア"],
+    "not": ["and=そして", "has=ある|いる", "request=頼む"]
+  },
+  "blog2-ipad": {
+    "use": ["about=について"],
+    "ok": ["my=私|僕", "usual=いつも"],
+    "not": ["about=くらい"]
+  },
+  "blog2-writing": {
+    "use": ["thesis=論文", "about=について", "word=単語", "this=この", "simple=簡単", "well=よく", "feel=感じる"],
+    "ok": ["My=私|僕", "more=もっと", "telling=話す", "It=それ", "easier=簡単"],
+    "not": ["about=くらい", "this=これ", "worked=仕事", "well=じゃ|まあ|元気", "more=多く|多い", "telling=言う", "makes=する", "style=風", "Readers=読む"]
+  },
+  "blog2-taste": {
+    "use": ["car=車", "cars=車", "about=について", "But=でも|だけど", "become=なる", "important=大切"],
+    "ok": ["more=もっと"],
+    "not": ["When=時|いつ", "care=気", "came=来る", "about=くらい", "now=今", "that=それ|その", "have=ある|いる", "and=そして", "more=多く|多い"]
+  },
+  "docs2-tor": {
+    "use": ["Friday=金曜日", "started=始める"],
+    "ok": ["much=多く", "possible=出来る"],
+    "not": ["started=始まる", "and=そして", "as=まるで"]
+  },
+  "docs2-emudhra": {
+    "use": ["many=多く|多い"],
+    "ok": [],
+    "not": ["have=ある|いる", "and=そして", "stores=店"]
+  },
+  "docs2-microg": {
+    "use": ["sometimes=時々", "you=あなた|君", "still=まだ"],
+    "ok": ["It=それ", "like=例えば", "more=もっと", "your=あなた|君", "actual=本当"],
+    "not": ["like=好き|こう|まるで", "as=まるで", "more=多く|多い", "and=そして", "while=間", "that=それ|その", "do=する|やる", "when=時|いつ", "powerful=力"]
+  },
+  "x2-ideas": {
+    "use": ["We=私たち", "talked=話す", "about=について", "But=でも|だけど", "there are=ある", "still=まだ"],
+    "ok": ["Yeah=ええ|はい", "that=それ", "better=いい", "way=ずっと"],
+    "not": ["that=その", "about=くらい", "there are=いる", "there=そこ", "can=出来る"],
+    "sentences": ["We talked about that."]
+  },
+  "hn2-flowchart": {
+    "use": ["also=また", "good=いい", "If=もし", "all=全部", "still=まだ", "exist=ある", "We=私たち", "have=ある", "But=でも|だけど", "considered=考える", "real=本当"],
+    "ok": ["It=それ", "and=そして", "today=今日", "that=それ", "reminded=思い出す"],
+    "not": ["can=出来る", "very=あまり", "planning=つもり", "all=みんな", "then=じゃ|では|そして", "language=日本語", "as=まるで", "I'm=私|僕", "Does=する|やる", "exist=いる", "have=いる", "much=多く", "like=好き|こう|まるで", "kind=こう|こんな|どんな", "that=その"],
+    "sentences": ["Does it still exist?"]
+  },
+  "rd2-winters": {
+    "use": ["I=私|僕", "have=ある", "this=この", "same=同じ", "problem=問題", "cold=寒い", "bad=悪い", "winters=冬"],
+    "ok": ["worse=悪い", "out=外"],
+    "not": ["have=いる", "this=これ", "it’s=それ", "when=時|いつ", "cold=冷たい", "After=後", "and=そして", "things=物", "Has=ある|いる"],
+    "sentences": ["I have this same problem."]
+  },
+  "yt2-snyder": {
+    "use": ["I=私|僕", "love=大好き", "this=この", "movie=映画", "he=彼"],
+    "ok": ["big=大きい|大きな"],
+    "not": ["this=これ"],
+    "sentences": ["I love this movie!"]
+  }
+}

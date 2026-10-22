@@ -14,9 +14,9 @@ export function buildRequest({ system, user, schema, thinkingLevel = THINKING_LE
   };
 }
 
-// Returns { byId: Map<id, swaps[]>, usage: { input, output } } (tokens; thinking counts as output). Throws on HTTP
-// error, timeout, or unparseable output.
-export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, body, timeoutMs = 20000 }) {
+// Returns { byId (parse's answer: verify.js parseCheckResponse), usage: { input, output } } (tokens; thinking counts as
+// output). Throws on HTTP error, timeout, or unparseable output.
+export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, body, timeoutMs = 20000, parse }) {
   const res = await fetchImpl(`${API_BASE}${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
@@ -40,23 +40,15 @@ export async function callGemini({ fetchImpl = globalThis.fetch, apiKey, model, 
     ...(meta.cachedContentTokenCount ? { cached: meta.cachedContentTokenCount } : {}) };
   const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
   try {
-    return { byId: parseSwapsResponse(text), usage };
+    return { byId: parse(text), usage };
   } catch (e) {
     e.usage = usage; // an unusable answer is still billed
     throw e;
   }
 }
 
-// The engine's provider call: system is the prompt in parts (sent joined), user the passages.
-export function askGemini({ fetchImpl, apiKey, model, system, user, schema, timeoutMs }) {
-  return callGemini({ fetchImpl, apiKey, model, timeoutMs, body: buildRequest({ system: [].concat(system).join(''), user, schema }) });
-}
-
-export function parseSwapsResponse(text) {
-  const data = JSON.parse(text);
-  const out = new Map();
-  for (const t of data?.passages || data?.tweets || []) {
-    if (t && typeof t.id === 'string') out.set(t.id, Array.isArray(t.swaps) ? t.swaps : []);
-  }
-  return out;
+// The provider call verify.js requestChecks makes: system is the prompt, whole or in parts (sent joined), user the
+// passages.
+export function askGemini({ fetchImpl, apiKey, model, system, user, schema, timeoutMs, parse }) {
+  return callGemini({ fetchImpl, apiKey, model, timeoutMs, parse, body: buildRequest({ system: [].concat(system).join(''), user, schema }) });
 }
