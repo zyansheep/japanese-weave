@@ -2,12 +2,14 @@ import { test, expect } from 'bun:test';
 import { hashKey } from '../src/hash.js';
 import { ICONS, WAIT_FRAMES } from '../src/toolbar.js';
 import { checkAnswer, modelReply, userOf } from './checkmodel.js';
+import { trackTimers } from './timers.js';
 
 // The worker at the ends of the intensity scale, and the toolbar button it draws per tab. Full: the same answer as every
 // level, every candidate shown. Off: no swaps, no model call (not even one already queued), nothing logged, every tab
 // grey with "off"; a lighter press there keeps it off for 3 more hours, a heavier one brings Japanese back.
 test('background: full and off, and the toolbar per tab (waiting, reasons, navigation, close)', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
+  const stopTimers = trackTimers(); // the worker's flush timer must not outlive this test
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
   const listeners = [];
   const tabEvents = { activated: [], updated: [], removed: [] };
@@ -216,6 +218,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     await settle();
     expect(shown(1)).toMatchObject({ icon: ICONS.off, text: '', title: 'Japanese Weave: turned off on this site' });
   } finally {
+    stopTimers();
     Object.assign(globalThis, saved);
   }
 }, 30000);

@@ -3,11 +3,13 @@ import { Window } from 'happy-dom';
 import { hashKey } from '../src/hash.js';
 import { DAILY_MODEL_CALLS } from '../src/quota.js';
 import { checkAnswer, modelReply, userOf } from './checkmodel.js';
+import { trackTimers } from './timers.js';
 
 // The real worker and content modules together on a plain article page, with a fake native host and Gemini.
 test('runtime: key privacy, native host sync and events, site controls, setup default, stale replies, retries', async () => {
   const win = new Window({ url: 'https://example.com/article' });
   const originalGlobals = Object.fromEntries(['chrome', 'fetch', 'document', 'window', 'location', 'MutationObserver', 'IntersectionObserver', 'setInterval'].map((k) => [k, globalThis[k]]));
+  const stopTimers = trackTimers(); // the worker's flush timer must not outlive this test
   const local = { settings: { apiKey: 'synthetic-gemini', enabled: true, levelOverride: 1 } }; // 0.1 kept the key in settings
   const messageListeners = [], contentListeners = [];
   const toPages = [];
@@ -331,6 +333,7 @@ test('runtime: key privacy, native host sync and events, site controls, setup de
     expect(pageReplies.some((r) => r.includes('"hasKey":true'))).toBe(true);
     expect(local.modelCalls.count).toBe(modelCalls); // every Gemini request counts toward the daily cap
   } finally {
+    stopTimers();
     if (release) release();
     await win.happyDOM.close();
     Object.assign(globalThis, originalGlobals);

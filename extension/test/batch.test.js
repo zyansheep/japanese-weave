@@ -3,6 +3,7 @@ import { hashKey } from '../src/hash.js';
 import { costUsd } from '../src/usage.js';
 import { buildCheckSystem } from '../src/verify.js';
 import { passagesOf, checkAnswer, modelReply, userOf } from './checkmodel.js';
+import { trackTimers } from './timers.js';
 
 // The worker on its own, with the web pipeline: the swaps code is sure of come at once and the model's check after;
 // passages that arrive while a call runs share the next call, a passage in a call isn't asked for again, and Claude
@@ -10,6 +11,7 @@ import { passagesOf, checkAnswer, modelReply, userOf } from './checkmodel.js';
 // serves every level; answers are cached by what was asked, so a new word list asks again only where it changed.
 test('background: sure swaps at once, then the check; shared calls; Haiku with the host key; one answer for every level', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
+  const stopTimers = trackTimers(); // the worker's flush timer must not outlive this test
   const local = { settings: { enabled: true, levelOverride: 2 }, apiKey: 'synthetic-gemini' };
   const listeners = [];
   const calls = []; // { url, body, ids, user }
@@ -204,6 +206,7 @@ test('background: sure swaps at once, then the check; shared calls; Haiku with t
     expect(offered(bare, 300)).toBe(1);
     expect(calls.length).toBe(none);
   } finally {
+    stopTimers();
     Object.assign(globalThis, saved);
   }
 }, 30000);

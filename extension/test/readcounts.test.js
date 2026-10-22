@@ -2,12 +2,14 @@ import { test, expect } from 'bun:test';
 import { hashKey } from '../src/hash.js';
 import { localDay } from '../src/hostsource.js';
 import { checkAnswer, modelReply, userOf } from './checkmodel.js';
+import { trackTimers } from './timers.js';
 
 // The web's reading counts in the worker: the reading index comes from the host once per version; a passage the page
 // says was read is counted once a day, its safe matches and the model's confirmed picks, from the cached answer or the
 // call under way, and only counts go to the host, with the log.
 test('background: reading counts, from the host\'s index and the model\'s check, counts only to the host', async () => {
   const saved = Object.fromEntries(['chrome', 'fetch'].map((k) => [k, globalThis[k]]));
+  const stopTimers = trackTimers(); // the worker's flush timer must not outlive this test
   const local = { settings: { enabled: true, levelOverride: 2, model: 'claude-haiku-5-5' }, anthropicKey: 'synthetic-anthropic' };
   const listeners = [];
   const natives = [];
@@ -99,6 +101,7 @@ test('background: reading counts, from the host\'s index and the model\'s check,
     expect(local.pendingReading).toEqual([{ d: `web:${hashKey(other)}`, day: localDay(), entries: { 1214000: 1, 1166340: 1 } }]);
     expect(calls).toBe(1);
   } finally {
+    stopTimers();
     Object.assign(globalThis, saved);
   }
 }, 30000);
