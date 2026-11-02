@@ -91,7 +91,12 @@ level from [blocks/](blocks/level-01.md).
   normal, heavier, much heavier, full (+3). Off puts every woven page back in English at once, sends nothing to the
   model and logs nothing, until a heavier press or the popup's **Turn back on**. Full shows every candidate: each of
   your words, learning or known, wherever the passage says it in that sense, and every sentence your words and simple
-  grammar can say whole, still checked word by word; every level picks from that same set, with no new call. The
+  grammar can say whole, still checked word by word; every level picks from that same set, with no new call. Heavier
+  and much heavier also keep every known word, give whole sentences a bigger share and the first choice, ask for a
+  sentence's last clause where it can be said whole (a new call only for a passage with such a clause) and add
+  dictionary words you don't have yet, ranked by how near they are to what you are ready to learn and within the
+  level's lookup budget: only senses flagged safe, no loanwords, nothing medical, legal or financial, and never a word
+  the delayed-start experiment is holding back. Normal and the lighter levels don't change. The
   toolbar badge shows the level (`−2`, `+1`, `off`, `full`) and `···` while the model works on that tab's page; the
   icon turns grey where a page gets no Japanese, and
   its tooltip says why: paused, off until a time, the site turned off, a private site, no access to the site yet, or a
