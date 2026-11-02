@@ -23,7 +23,7 @@ const host = (reply) => async () => reply;
 describe('parseState', () => {
   it('reads the host reply shape', () => {
     const s = parseState(REPLY);
-    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, reading: '',
+    expect(s).toEqual({ version: 'abc123', stage: 1, paused: false, sites: 'all', challenge: 0, budget: 0, sentencePrice: 0, reading: '', dictionary: '',
       recency: null, intensity: null, words: REPLY.words });
     const intensity = { level: -1, until: 1800000000000, at: 1799999000000 };
     expect(parseState({ ...REPLY, prefs: { intensity_browser: { ...intensity, source: 'shortcut' } } }).intensity).toEqual(intensity);

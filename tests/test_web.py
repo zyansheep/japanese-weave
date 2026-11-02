@@ -17,6 +17,7 @@ os.environ['JAPANESE_WEAVE_NO_REFRESH'] = '1'
 
 import collector  # noqa: E402
 import dictionary  # noqa: E402
+import feedback  # noqa: E402
 import fw_host  # noqa: E402
 import fwlib  # noqa: E402
 import hub  # noqa: E402
@@ -104,6 +105,94 @@ class ReadingIndex(Home):
         copy.write_text(senses.PATH.read_text(encoding='utf-8'), encoding='utf-8')
         with mock.patch.object(senses, 'PATH', copy):
             self.assertNotEqual(webdata.reading_version(), before)
+
+
+class DictionaryWords(Home):
+    """The dictionary words +1 and +2 may add. Words here come from the dictionary itself, as the fitted prior prices
+    any entry; the test only needs the prior's shape."""
+    PRIOR = {'none': {'new': 1.5, 'learning': 1.5, 'known': 2.5}, 'sd': {'none': 0.9, 'card': 0.7}, 'card': {}, 'interval': 0.5}
+
+    def setUp(self):
+        super().setUp()
+        fwlib.save_state(fwlib.load_state())
+        self.know = {'prior': self.PRIOR}
+        self.state = fwlib.load_state()
+        self.state['words'] = []
+        self.d = dictionary.load()
+        self.rows = webdata.dictionary_words(self.state, self.know)['entries']
+        self.first = next(e for e in self.d if e['ja'] == self.rows[0][1])
+
+    def state_word(self, entry, status, **extra):
+        return dict(fwlib.blank({'ja': entry['ja'], 'en': entry['en'], 'hint': '', 'kana': entry['kana']}), status=status, **extra)
+
+    def hold(self, entry):
+        return self.state_word(entry, 'active', added=fwlib.today(), arm={'arm': 'held', 'draw': 0.1, 'day': fwlib.today(), 'probe': 'x'})
+
+    def test_only_safe_senses_and_no_loanwords_numbers_or_sensitive_fields(self):
+        self.assertTrue(0 < len(self.rows) <= webdata.DICTIONARY_WORDS)
+        flags = senses.load(senses.PATH)
+        by_id = {e['id']: e for e in self.d}
+        for row in self.rows:
+            e = by_id[row[0]]
+            self.assertTrue(e['swap'])
+            self.assertFalse(e['loan'])
+            self.assertFalse(webdata.SENSITIVE.intersection(e['field']))
+            self.assertFalse(all('\u30a0' <= c <= '\u30ff' for c in e['ja']))
+            for gloss in row[4].split(';'):
+                self.assertEqual(senses.sense_flag(flags, {'ja': e['ja'], 'kana': e['kana']}, gloss), 's')
+        self.assertLess(len(json.dumps(self.rows, ensure_ascii=False).encode()), 300_000)  # one native message, small
+
+    def test_a_word_in_use_is_left_out(self):
+        self.state['words'] = [self.state_word(self.first, 'known')]
+        self.assertNotIn(self.first['id'], {r[0] for r in webdata.dictionary_words(self.state, self.know)['entries']})
+
+    def test_a_word_held_back_never_comes_in_though_public_state_leaves_it_out(self):
+        held = self.hold(self.first)
+        self.state['words'] = [held]
+        self.assertTrue(fwlib.hidden(held))
+        self.assertEqual(fwlib.public_state(self.state)['words'], [])  # what chat's pool checks against
+        rows = webdata.dictionary_words(self.state, self.know)['entries']
+        self.assertNotIn(self.first['id'], {r[0] for r in rows})
+        self.assertNotIn(self.first['ja'], {r[1] for r in rows})
+
+    def test_a_held_word_under_another_spelling_or_its_reading_never_comes_in(self):
+        other = next(e for e in self.d if e['forms'] and e['id'] in {r[0] for r in self.rows})
+        held = dict(self.hold(other), ja=other['forms'][0], kana=other['kana'])
+        self.state['words'] = [held]
+        self.assertNotIn(other['id'], {r[0] for r in webdata.dictionary_words(self.state, self.know)['entries']})
+
+    def test_a_word_waiting_in_the_queue_and_hidden_by_nothing_may_come_in(self):
+        self.state['words'] = [self.state_word(self.first, 'queue')]
+        self.assertIn(self.first['id'], {r[0] for r in webdata.dictionary_words(self.state, self.know)['entries']})
+
+    def test_the_version_changes_when_a_word_is_held_back_so_the_extension_drops_its_old_list(self):
+        before = webdata.dictionary_version(self.state, self.know)
+        self.assertEqual(webdata.dictionary_words(self.state, self.know)['version'], before)
+        self.state['words'] = [self.hold(self.first)]
+        self.assertNotEqual(webdata.dictionary_version(self.state, self.know), before)
+        self.assertNotEqual(webdata.dictionary_version({'words': []}, {'prior': dict(self.PRIOR, interval=0.6)}), before)
+
+    def test_without_a_fit_there_are_none(self):
+        self.assertEqual(webdata.dictionary_words(self.state, {})['entries'], [])
+
+    def test_the_state_reply_names_the_version_and_the_host_answers_the_message(self):
+        reply = fw_host.handle({'type': 'state'})
+        self.assertRegex(reply['dictionary']['version'], '^[0-9a-f]{12}$')
+        answer = fw_host.handle({'type': 'dictionaryWords'})
+        self.assertTrue(answer['ok'])
+        self.assertEqual(answer['version'], reply['dictionary']['version'])
+        self.assertNotIn('anthropicKey', answer)
+        self.assertNotIn('geminiKey', answer)
+
+
+class PlanRecords(Home):
+    def test_a_plan_says_which_painting_it_is_and_how_many_dictionary_words_it_kept(self):
+        plan = {'level': 2, 'intensity': 1.8, 'jitter': 1, 'limit': 2, 'candidates': 3, 'budget': 0.3, 'spent': 0.1}
+        num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+        for good in ({}, {'paint': 'sure'}, {'paint': 'final', 'dictionary': 2}):
+            self.assertTrue(feedback._plan_ok(dict(plan, **good), num))
+        for bad in ({'paint': 'first'}, {'dictionary': -1}, {'dictionary': 1.5}, {'other': 1}):
+            self.assertFalse(feedback._plan_ok(dict(plan, **bad), num))
 
 
 class Counts(Home):

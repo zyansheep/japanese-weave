@@ -268,7 +268,8 @@ Two effects the model can't check on its own get randomized tests.
 - **Thinning tests what free words cost** (row F). Each passage keeps a random share of its free words, from 0.2 to 1.
   Today's range of 0.5 to 1 leaves too small a contrast to read: 5.3% against 6.5% Japanese. Thinning no longer scales
   the budget, so costly words are untouched and the comparison isolates free words. The outcome is reading time per
-  word, and lookups.
+  word, and lookups. Only normal thins since extension 0.11: `knowledge.py` calibrate reads normal's passages alone, so
+  +1 and +2 keep every free word (docs/swap-prompt.md, "Heavier than normal").
 - **Delayed start tests whether exposure teaches** (row E).
   - A random half of new words is held back, appearing nowhere (chat topical words included) for 3 weeks. The other
     half is shown normally for 2 weeks, then paused for 1.

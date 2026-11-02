@@ -824,7 +824,8 @@ fallback to Flash with a Gemini key, the cooldowns and the daily cap. A failed c
 asks again after 5, 10 and 15 s, then keeps them. `planSwaps` picks each level's share from the one candidate set: the
 budget, the experiment's hidden words (never sent, so never matched; an answer cached before a word was held back
 loses its sentences with it at validation), due probes, the sentence share, current-chance costs and the spacing wait
-work as before; full shows every candidate that can be placed. Stepping between levels never calls the model.
+work as before; full shows every candidate that can be placed. Stepping between levels calls the model only for a
+passage with a sentence only +1 and +2 ask for ("Heavier than normal", below).
 
 **Two paintings at most, and nothing the reader saw moves.** The safe swaps cover few places (9 of fresh2's 184, 4.9%;
 at normal 10 of its 34 passages show one), and the model's answer takes 20 to 30 s, so most of a page's Japanese comes
@@ -932,3 +933,85 @@ the host stopped sending a rate with the daily controller.
   is updated. An older extension with this host ignores what it adds. The collector needs no update: the counts come
   as exposure ops it already takes.
 
+## Heavier than normal (extension 0.11, 2026-11-01)
+
++1 and +2 only raised a budget with nothing left to buy: the web spends about 15% of its lookups, 93% of its Japanese
+is free, and the log has 5 passages at +1 and 7 at +2 since 2026-10-21. Normal and the lighter levels produce what they
+did: `extension/test/heavier.test.js` compares every plan, swap, prompt and answer key at -2, -1 and 0 on the 150 lab
+passages with digests made by the code before the change. Full is unchanged too.
+
+**Why sentences were rare.** In order, each step taking from the one before:
+
+| Step | Measured | How |
+|---|---|---|
+| Code asks for a sentence only if every word of it is in a span or grammar | 6 of 231 real sentences (2.6%), on 124 real lab passages against the 406 words in use on 2026-11-01; 12 of the lab's other 62 sentences, written to be easy | `denseSentences`, by replay |
+| The model writes it, and validation keeps it | 3 of 5 and 9 of 12 in earlier labs, not measured again: no paid call for this change | above |
+| The planner keeps it | at normal 3.7 per 100 real passages of the 4.8 at full (77%), if all are written | `level-replay.mjs` |
+| The reader stays until the answer, 20 to 30 s | not measured: the log could not tell a sure painting from a final one, which `paint` now does | see below |
+| A sure word already seen overlaps the sentence and rules it out | not measured | `planSwaps` keep |
+| Old cached answers | no: the key includes the sentences asked for, so a sentence newly asked for asks again | `answerKey` |
+
+So the planner is not the main cause, and neither price nor share is: the log's 2 sentence marks in 2,573 passages at
+normal are far under even the replay's 3.7 per 100 written and kept. Live passages are short (a mean of 24 words) and,
+judging by the swaps (6.5 per 100 words against 1.5 sure and 21.9 with every doubtful span accepted), many plan records
+are of a sure painting, which has no sentences at all. Adding dictionary words barely helps: verbs aren't swappable and
+have nearly no safe senses, so on the same passages they complete 1 more sentence.
+
+**What +1 and +2 do now** (`planSwaps`, `heavierPlan`, `background.js plannerOf`):
+
+- No thinning. `knowledge.py` calibrate reads level 0 only, so the experiment is untouched.
+- Sentences may take 40% of the budget at +1 and 60% at +2 (`INTENSITY_SENTENCE_SHARE`; chat keeps 18%), and choose
+  before words, since a budgeted word in a sentence rules the sentence out.
+- More is asked for: a sentence's last clause, by the same test, where the whole sentence fails it (`denseSentences`
+  clauses). It gets the same prompt and validation; its Japanese full stop ends the English sentence. Not earlier
+  clauses, which would leave a comma after a full stop. With the 1 dictionary words complete, 25 sentences are asked of
+  the 150 passages, against 18.
+- The sure painting leaves a sentence asked for in English until the answer comes (`clearOfSentences`). If the answer
+  never comes, the passage goes without those sure words.
+- Dictionary words come after the reader's own words and sentences, by the same ranking, up to 20% of the budget at +1
+  and 90% at +2 (`INTENSITY_DICTIONARY_SHARE`), never past what is left of the passage's budget. The host's
+  `dictionaryWords` message gives the 2,500 most frequent that qualify, about 170 KB, once per version; a version the
+  state doesn't name isn't used. They have safe senses only, no loanwords, katakana words, numbers, counters or
+  sensitive fields, a lookup chance of at least `FREE_P`, and nothing in use or hidden, checked against the whole state
+  by entry id, every spelling and, for a hidden word, its reading (`webdata.dictionary_words`). A word waiting in the
+  queue may come in, as a topical word may in chat. Their spans are safe, so they need no call. A sentence may use only
+  the dictionary words its passage has spans for, and is validated word by word as before. Their peeks are logged, so
+  the fit sees what they cost.
+- A passage's prompt and answer are normal's unless it has a new sentence: 7 of 150 passages need one more call at +1
+  or +2, once, and it answers both.
+
+Every web plan now has `paint`: `sure` for the swaps code is sure of while the answer is on its way (and if it never
+comes), `final` otherwise. Plans that kept dictionary words have `dictionary`, their number.
+
+**The replay** (`tools/prompt-lab/level-replay.mjs`, 20 days, the 2026-11-01 word state; 150 lab passages, of which 124
+are real; no model call). Two bounds: sure, the first painting, with no answer; all, every doubtful span accepted and
+every sentence written, which overstates what a model would do. Budget share is what was spent of the budget.
+
+| 150 passages | Swaps per 100 words, sure | all | Sentences per 100 passages, all | Dictionary words per 100 words, all | Budget share, sure | all |
+|---|---|---|---|---|---|---|
+| normal, before and after | 2.06 | 22.98 | 6.6 | 0 | 9.0% | 26.8% |
+| +1, before | 2.06 | 22.97 | 8.4 | 0 | 5.8% | 20.0% |
+| +1, after | 2.46 | 28.06 | 11.2 | 0.31 | 11.0% | 26.1% |
+| +2, before | 2.06 | 22.90 | 9.2 | 0 | 3.9% | 13.7% |
+| +2, after | 3.38 | 28.19 | 15.5 | 1.19 | 18.4% | 29.9% |
+| full, before and after | 2.71 | 30.97 | 12.0 | 0 | | |
+
+The 124 real passages: normal 1.52 and 21.86 swaps, 3.7 sentences; +1 2.13 and 26.98, 6.5; +2 3.10 and 27.86, 7.3; full
+1.97 and 30.27, 4.8; budget share 11.7% and 22.2% at +1, 19.6% and 27.2% at +2. A sentence replaces several words, so
+words gone from English say more than swaps at the upper bound: 23.4 per 100 words at normal, 29.4 at +1, 30.5 at +2.
+
+**What this leaves.**
+- +1 and +2 differ clearly on what is sure (3.38 swaps against 2.46, about 4 dictionary words for every one) and little
+  at the upper bound, where free words swamp the rest. Sentences are still bounded by what the word list can say.
+- Most of the budget is still unspent: at most about 30% at +2. Dictionary words offered a passage run out: 0.37 a
+  passage. Spending it needs more candidates, not more budget.
+- A stop candidate gets in by chance as before, so a few plans go over (66 of 3,000 at +2, against 287 at normal); on
+  average the budget holds. Dictionary words alone never pass it.
+- Full is unchanged, so at the sure bound +2 shows more than full, and on real passages more sentences (a last clause
+  or a dictionary word), though at full every candidate still means more swaps overall.
+- Not measured: Haiku on last clauses, and so whether they read well. `tools/prompt-lab/check-lab.mjs` can score them
+  with a key.
+- Host before extension: `feedback.py _plan_ok` refuses a plan with a field it doesn't know, so a collector not yet
+  updated rejects 0.11's shown records. Update the collector first.
+- `scripts/chatweave.py` `pool` still checks chat's dictionary words against `public_state`, so at full in chat a held
+  word can come through. Not changed here.

@@ -17,7 +17,9 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 not known at a glance (none at full), expected: lookups predicted if it is read; plans with
                 sentencePrice, the lookups a whole sentence was priced at, are later still: their jitter is the share
                 of free swaps kept and leaves the budget alone (before, it thinned every swap and scaled the budget),
-                and candidates counts those the passage can place}); seq orders changes for export. A sentence's
+                and candidates counts those the passage can place; since extension 0.11 paint: 'sure' if this is the
+                painting of code's sure swaps, the model's answer not in, else 'final', and dictionary: dictionary
+                words kept, at +1 and +2, when any}); seq orders changes for export. A sentence's
                 closing mark (。) among the glossed words stands for its translation (in the browser since then too)
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
@@ -228,17 +230,19 @@ def _plan_ok(plan, num):
     optional, as plans from before levels meant a lookup budget have none of them (and full's has no budget), plans
     from before whole sentences were priced have no sentencePrice (their thinning also scaled the budget), and plans
     from before extension 0.10 no spent (what the swaps within the budget cost) or arms (the delayed-start arm of each
-    word shown that has one: {word: 'shown' | 'held:probe' | 'shown:probe'})."""
+    word shown that has one: {word: 'shown' | 'held:probe' | 'shown:probe'}), and plans from before 0.11 no paint ('sure':
+    the swaps code is sure of, the model's answer not in; 'final') or dictionary (dictionary words kept, +1 and +2)."""
     integer = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key, top=1000: key not in plan or (num(plan[key]) and 0 <= plan[key] <= top)
     arms = plan.get('arms', {}) if isinstance(plan, dict) else None
     return (isinstance(plan, dict)
             and set(plan) <= {'level', 'intensity', 'jitter', 'limit', 'candidates', 'budget', 'spent', 'expected',
-                              'sentencePrice', 'arms'}
+                              'sentencePrice', 'arms', 'paint', 'dictionary'}
             and plan.get('level') in intensity.LEVELS and num(plan.get('intensity')) and 0 < plan['intensity'] <= 5
             and num(plan.get('jitter')) and 0 < plan['jitter'] <= 1 and integer(plan.get('limit'), 1000)
             and integer(plan.get('candidates'), 1000) and amount('budget') and amount('spent') and amount('expected')
-            and amount('sentencePrice', 1)
+            and amount('sentencePrice', 1) and plan.get('paint', 'final') in ('sure', 'final')
+            and ('dictionary' not in plan or integer(plan['dictionary'], 1000))
             and isinstance(arms, dict) and len(arms) <= 200
             and all(isinstance(w, str) and 0 < len(w) <= 40 and isinstance(a, str) and 0 < len(a) <= 20
                     for w, a in arms.items()))

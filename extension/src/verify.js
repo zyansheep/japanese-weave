@@ -47,14 +47,26 @@ export const DENSE_MAX_WORDS = 14;
 
 // The sentences code asks to have written whole: 3 to maxWords words, at least one span, and every word inside a span
 // (a listed word could say it) or English the grammar says (GRAMMAR_ENGLISH). Numbered from 1: { n, start, end, text }.
-export function denseSentences(text, spans, { maxWords = DENSE_MAX_WORDS } = {}) {
+// clauses (the levels above normal: levels.js heavier): also the last clause of a sentence that isn't dense as a whole,
+// after its last comma, colon, semicolon or dash ("It was late, so we went back outside."), by the same test. Only the
+// last, as its Japanese full stop then ends the English sentence; one earlier would leave a Japanese full stop before a comma.
+const CLAUSE_BREAK = /[,;:—–]\s+/g;
+export function denseSentences(text, spans, { maxWords = DENSE_MAX_WORDS, clauses = false } = {}) {
   const out = [];
-  for (const r of sentenceRanges(text)) {
+  const dense = (r) => {
     const tokens = [...String(text).slice(r.start, r.end).matchAll(TOKEN)].map((m) => ({ word: bare(m[0]), start: r.start + m.index, end: r.start + m.index + m[0].length }));
-    if (tokens.length < 3 || tokens.length > maxWords) continue;
+    if (tokens.length < 3 || tokens.length > maxWords) return false;
     const inside = spans.filter((s) => s.start >= r.start && s.end <= r.end);
     const covered = (t) => inside.some((s) => s.start <= t.start && t.end <= s.end) || GRAMMAR_ENGLISH.has(t.word);
-    if (inside.length && tokens.every(covered)) out.push({ n: out.length + 1, ...r, text: String(text).slice(r.start, r.end) });
+    return inside.length > 0 && tokens.every(covered);
+  };
+  const add = (r) => out.push({ n: out.length + 1, ...r, text: String(text).slice(r.start, r.end) });
+  for (const r of sentenceRanges(text)) {
+    if (dense(r)) { add(r); continue; }
+    if (!clauses) continue;
+    const last = [...String(text).slice(r.start, r.end).matchAll(CLAUSE_BREAK)].at(-1);
+    const clause = last && { start: r.start + last.index + last[0].length, end: r.end };
+    if (clause && dense(clause)) add(clause);
   }
   return out;
 }
@@ -63,8 +75,8 @@ export function denseSentences(text, spans, { maxWords = DENSE_MAX_WORDS } = {})
 // itself (safe: flagged safe in senses.js, never in closed-class English) or, where none is safe, all of them for the
 // model to choose from (doubtful); and its dense sentences. A span with a safe option drops its doubtful ones. A
 // passage on a zero-Japanese topic (levels.js isZeroJapanese) gets nothing, as the extension never sends one.
-// sentences: false asks for none.
-export function planPassage(text, spans, flags, { sentences = true, maxWords = DENSE_MAX_WORDS } = {}) {
+// sentences: false asks for none. clauses: as denseSentences.
+export function planPassage(text, spans, flags, { sentences = true, maxWords = DENSE_MAX_WORDS, clauses = false } = {}) {
   if (isZeroJapanese(text)) return { text, spans: [], sentences: [], zero: true };
   return {
     text,
@@ -73,7 +85,7 @@ export function planPassage(text, spans, flags, { sentences = true, maxWords = D
       const sure = span.options.filter((_, k) => safe[k]);
       return { n: i + 1, span, safe: sure, doubtful: sure.length ? [] : span.options };
     }),
-    sentences: sentences ? denseSentences(text, spans, { maxWords }) : [],
+    sentences: sentences ? denseSentences(text, spans, { maxWords, clauses }) : [],
   };
 }
 

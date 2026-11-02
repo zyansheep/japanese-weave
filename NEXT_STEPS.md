@@ -177,6 +177,11 @@ lab's judged passages (lab, fresh, fresh2).
 
 ## After deployment
 
+**Extension 0.11** (docs/swap-prompt.md, "Heavier than normal"): update the host and the collector before the extension,
+since a host that doesn't know a plan's `paint` rejects its shown record. Then read `paint` in the log: the share of web
+plans that are sure paintings says how much short views depress every density figure, and sentence marks at +1 and +2
+say what Haiku makes of last clauses, which nothing has measured.
+
 **Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
 entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
 

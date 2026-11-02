@@ -11,6 +11,7 @@ export const LOG_KEY = 'pendingLog';
 export const READING_KEY = 'pendingReading'; // passages read, counted, waiting for the host
 export const READ_SENT_KEY = 'readingSent'; // passages counted today
 export const INDEX_KEY = 'readingIndex'; // the host's reading index: { version, entries }
+export const DICTIONARY_KEY = 'dictionaryWords'; // the host's dictionary words for +1 and +2: { version, entries }
 const LOG_MAX = 500;
 const READING_MAX = 500;
 const READ_SENT_MAX = 3000;
@@ -26,11 +27,13 @@ const ANNOTATIONS_MAX = 200;
 // 'shown:probe'): plans record it, and a due probe is shown first (levels.js planSwaps). The host never sends the words
 // the experiment hides. For the web pipeline (pipeline.js) each word comes with its glosses as the matcher indexes them,
 // those of them code may swap alone (safe: data/senses.tsv), and its dictionary entry id (the reading counts' key), and
-// the reply says which version of the reading index (readingIndex) goes with it.
+// the reply says which version of the reading index (readingIndex) and of the dictionary words (dictionaryWords) goes
+// with it.
 const READS_MAX = 50;
 const GLOSSES_MAX = 60;
 const gloss = (x) => typeof x === 'string' && x.length > 0 && x.length <= 200;
 const armOk = (x) => typeof x === 'string' && /^[a-z:]{1,20}$/.test(x);
+const versionOf = (x) => (typeof x?.version === 'string' && /^[\w.-]{1,64}$/.test(x.version) ? x.version : '');
 export function parseState(data) {
   const num = (x) => typeof x === 'number' && Number.isFinite(x);
   const reads = (r) => (Array.isArray(r) ? r.filter((x) => Array.isArray(x) && x.length === 2 && num(x[0]) && num(x[1])
@@ -64,7 +67,8 @@ export function parseState(data) {
     sentencePrice: num(data?.sentencePrice) && data.sentencePrice > 0 && data.sentencePrice <= 1 ? data.sentencePrice : 0,
     recency: num(data?.recency?.floor) && num(data?.recency?.days) && data.recency.days > 0
       ? { floor: data.recency.floor, days: data.recency.days } : null,
-    reading: typeof data?.reading?.version === 'string' && /^[\w.-]{1,64}$/.test(data.reading.version) ? data.reading.version : '',
+    reading: versionOf(data?.reading),
+    dictionary: versionOf(data?.dictionary),
     words,
   };
 }
@@ -118,6 +122,33 @@ export async function refreshReadingIndex({ storage, send, version }) {
   } catch (e) {
     return { changed: false, error: String(e?.message || e) };
   }
+}
+
+// The dictionary words +1 and +2 may add (fw_host dictionaryWords: [[entry id, ja, kana, romaji, "gloss;gloss", k, sd]]),
+// asked for once per version the state names and kept here. A version that doesn't match the state's isn't used
+// (dictionaryOf), so a word the experiment has just held back can't come in with an old list. Never throws: without a
+// host, or with an older one, no dictionary words.
+export async function refreshDictionary({ storage, send, version }) {
+  if (!version) return { changed: false };
+  const stored = (await storage.get([DICTIONARY_KEY]))[DICTIONARY_KEY];
+  if (stored?.version === version) return { changed: false };
+  try {
+    const reply = await send({ type: 'dictionaryWords' });
+    if (!reply?.ok || !Array.isArray(reply.entries)) throw new Error(reply?.error || 'no dictionary words from the host');
+    const num = (x) => typeof x === 'number' && Number.isFinite(x);
+    const text = (x) => typeof x === 'string' && x.length > 0 && x.length <= 300;
+    const entries = reply.entries.filter((e) => Array.isArray(e) && e.length === 7 && Number.isInteger(e[0]) && e[0] > 0 && text(e[1])
+      && typeof e[2] === 'string' && typeof e[3] === 'string' && text(e[4]) && num(e[5]) && num(e[6]));
+    await storage.set({ [DICTIONARY_KEY]: { version: typeof reply.version === 'string' ? reply.version : version, entries } });
+    return { changed: true, count: entries.length };
+  } catch (e) {
+    return { changed: false, error: String(e?.message || e) };
+  }
+}
+// The stored dictionary words, if they are the version the word state names; else none.
+export async function dictionaryOf(storage, state) {
+  const stored = (await storage.get([DICTIONARY_KEY]))[DICTIONARY_KEY];
+  return state?.dictionary && stored?.version === state.dictionary && Array.isArray(stored.entries) ? stored : null;
 }
 
 // A passage read on the web, counted (pipeline.js readingCounts): { d: 'web:' and its text's hash, day, entries: {entry
@@ -211,8 +242,9 @@ export async function flushEvents({ storage, send }) {
 // predicted if it is read), sentencePrice (the lookups a whole sentence was priced at, 0 to 1) and arms (the
 // delayed-start arm of each word shown that has one) are optional, as plans from before levels meant a lookup budget
 // have none of them, plans from before whole sentences were priced (and their thinning took the budget down with it)
-// have no sentencePrice, and plans before extension 0.10 no spent or arms; the host checks the same (feedback.py
-// _plan_ok).
+// have no sentencePrice, and plans before extension 0.10 no spent or arms; since 0.11 paint says which painting the
+// plan is ('sure': the swaps code is sure of, the model's answer not in; 'final') and dictionary how many dictionary
+// words it kept; the host checks the same (feedback.py _plan_ok).
 function cleanPlan(plan) {
   if (plan == null) return null;
   const num = (x, top) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= top;
@@ -221,10 +253,11 @@ function cleanPlan(plan) {
   const arms = (x) => x === undefined || (x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length <= 200
     && Object.entries(x).every(([w, a]) => w.length > 0 && w.length <= 40 && armOk(a)));
   if (!INTENSITY_LEVELS.includes(plan.level) || !num(plan.intensity, 5) || !num(plan.jitter, 1) || !count(plan.limit) || !count(plan.candidates)
-    || !amount(plan.budget) || !amount(plan.spent) || !amount(plan.expected) || !amount(plan.sentencePrice, 1) || !arms(plan.arms)) return undefined;
+    || !amount(plan.budget) || !amount(plan.spent) || !amount(plan.expected) || !amount(plan.sentencePrice, 1) || !arms(plan.arms)
+    || ![undefined, 'sure', 'final'].includes(plan.paint) || !(plan.dictionary === undefined || count(plan.dictionary))) return undefined;
   const optional = (key) => (plan[key] !== undefined ? { [key]: plan[key] } : {});
   return { level: plan.level, intensity: plan.intensity, jitter: plan.jitter, limit: plan.limit, candidates: plan.candidates,
-    ...optional('budget'), ...optional('spent'), ...optional('expected'), ...optional('sentencePrice'),
+    ...optional('budget'), ...optional('spent'), ...optional('expected'), ...optional('sentencePrice'), ...optional('paint'), ...optional('dictionary'),
     ...(plan.arms && Object.keys(plan.arms).length ? { arms: plan.arms } : {}) };
 }
 

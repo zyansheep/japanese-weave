@@ -8,11 +8,15 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             fwlib.public_state; glosses, safe and id: webdata.add_word_data),
                                             "prefs": {"extension_sites"?: "all" | "ask"} (absent means "all"),
                                             "reading": {"version"} (of readingIndex's answer),
+                                            "dictionary": {"version"} (of dictionaryWords' answer),
                                             "geminiKey"?, "anthropicKey"?: keys stored in ~/.japanese-weave
                                             (gemini_key by setup, anthropic_key by hand)}
   {"type": "readingIndex"}              -> {"ok": true, "version", "entries": [[id, pos, "gloss;gloss"]]}: the safe
                                             glosses of every swappable dictionary entry (webdata.reading_index), for
                                             counting what the browser reads; asked for when "reading" changes
+  {"type": "dictionaryWords"}           -> {"ok": true, "version", "entries": [[id, ja, kana, romaji, "gloss;gloss", k, sd]]}:
+                                            the dictionary words +1 and +2 may add on the web (webdata.dictionary_words:
+                                            safe senses, nothing in use or hidden); asked for when "dictionary" changes
   {"type": "reading", "passages": [{"d", "day", "entries": {entry id: times}}]} -> {"ok": true, "taken": n,
                                             "queued"?: true}: the dictionary entries passages read on the web showed
                                             (counts only, never text), into the same daily store as chat's: an
@@ -84,7 +88,8 @@ def handle(message):
     if kind == 'state':
         state, _ = hub.current(STATE_MAX_AGE, wait=False)  # here: applies today's promotion; else the cache
         reply = dict(fwlib.public_state(state), ok=True, prefs=state.get('prefs') or {},
-                     reading={'version': webdata.reading_version()})
+                     reading={'version': webdata.reading_version()},
+                     dictionary={'version': webdata.dictionary_version(state, knowledge.load())})
         webdata.add_word_data(reply['words'], state)
         for name, field in (('gemini_key', 'geminiKey'), ('anthropic_key', 'anthropicKey')):
             key = fwlib.home() / name
@@ -94,6 +99,9 @@ def handle(message):
     if kind == 'readingIndex':
         index = webdata.reading_index()
         return dict(index, ok=True) if index else {'ok': False, 'error': 'no dictionary or sense flags here'}
+    if kind == 'dictionaryWords':
+        state, _ = hub.current(STATE_MAX_AGE, wait=False)
+        return dict(webdata.dictionary_words(state, knowledge.load()), ok=True)
     if kind == 'reading':
         passages = message.get('passages')
         if not isinstance(passages, list):
