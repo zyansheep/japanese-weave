@@ -24,6 +24,8 @@ Stored in <state dir>/interactions.sqlite (schema 5):
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
+                (the phone app, T3: pins only, a view "phone-<run>-<word hash>" per word whose context lists that word
+                alone and has no word count or stays: an episode that claims nothing about any other word or depth)
   reading       one row per reading signal in a passage (browser) or message (T3) with glossed words, positions
                 relative to it, and a client id (uid); blank browser passages have visible rows only:
                   click    x, y; detail {"target": "text" | "link" (a link or control)}
