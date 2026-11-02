@@ -299,8 +299,9 @@ flat start is 14% for every one):
 The order is right (frequent words of known kanji lowest, rare words of unknown kanji highest; 日本語 ranks 19,561
 because BCCWJ counts it as 日本 and 語), but the spread is far too narrow: 斡旋 or 追徴 would be looked up most times,
 not one in five. Until dictionary words are shown, the coefficients only know the lexicon's range, and the data says
-little even there; the simulated reader above shows the same, less so. The monthly probe (NEXT_STEPS step 7), known
-or not for words sampled across ranks, is the evidence to pin the rank slope down before dictionary words are offered.
+little even there; the simulated reader above shows the same, less so. The probe (NEXT_STEPS step 7; now its cards in
+the review stream), known or not for words sampled across ranks, is the evidence to pin the rank slope down before
+dictionary words are offered.
 
 ### The probe's answers in the fit
 
@@ -344,6 +345,54 @@ recognise and of the made-up ones), over 3 seeds of 28 days:
 
 Over-claiming is taken from the made-up words, 6 a probe, so a reader who claims 10% shows 0 of 6 more often than
 not (two seeds here): the fit then reads every "yes" at face value, as the probe's own estimate does.
+
+These were the probes of old, taken once a month with a command. Since the review wedge (2026-11) the probe lives in
+the review stream (next section) and the command is gone; the old records still feed the fit as above.
+
+### Review cards in the fit
+
+The review wedge (scripts/review.py) turns a T3 Code gloss into a card: one word alone, its reading and meaning
+revealed on request. A card's outcome is the time from its appearing to the reveal, or that the reader moved on
+without one; times over a minute (distraction) and cards left within 150 ms (not looked at) are dropped, and every
+card of a real word is a read for the recency clock either way (it shows the word, and a reveal its meaning). About 7
+cards in 10 are learning words, 2 probe words and 1 a made-up word (data/fakes.tsv), in random order.
+
+The outcome is a mixture (knowledge.Components). Known at recall: log time N(mu_K, s_K), and no reveal with chance
+a_K. Not known: N(mu_U, s_U) and a_U. These six are shared by every word; each component is held by a prior worth 10
+cards (about 1.2 s, sd 0.5, a_K 0.3; about 3 s, sd 0.7, a_U 0.1), so a handful of cards can't swing them. A real word's
+card has likelihood z A + (1 - z) B, with z = sigmoid(k - review), k the word's long-term knowledge and review an offset
+of its own, held toward 0 with an sd of 1 like the probe's; A and B are the outcome's likelihood under each component.
+A made-up word's card is B alone: the made-up words pin the "not known" component. The fit alternates Newton steps on
+the words and the shared offsets with EM steps on the components (the words held), each of which lowers the same
+objective; a card's information on its word is the expected one, z^2 (1 - z)^2 times the sum over outcomes of (A -
+B)^2 / (z A + (1 - z) B), tabled over z: z (1 - z), a yes/no answer's, when the outcome tells known from not for sure,
+and 0 when the components are alike.
+
+What could go wrong, and how it shows. A reader who doesn't know a word may give up and press up at once, which looks
+like a quick known reveal. The made-up words measure exactly this: their reveal times are the give-up distribution. If
+it overlaps the known one, the mixture says so by a weak separation: every card's likelihood ratio nears 1, so the
+cards move no word much, and the report (`fw.py knowledge`; knowledge.json "review" "model") gives the components'
+median reveal times, their chances of no reveal, auc (the chance a known word is revealed sooner than one not known)
+and worth (a card's information at even odds over a yes/no answer's; under 0.2, about auc 0.78, is called weak). On
+simulated reveals (tests/test_review.py) two clear components (0.9 s and 3.5 s) come back within about 15%, with worth
+about 0.5 to 0.6; a reader who gives up on unknown words as fast as they reveal known ones shows a weak separation, and the
+cards then barely move the words. `fw.py evaluate --models noreview,fit` compares the fit without the cards (still reads
+for the clock); the cards are not scored, since nothing predicted them before.
+
+### The probe in the review stream
+
+The probe cards are drawn by band (probe.py: bands of equal frequency weight), a band in proportion to its weight and a
+word of it at random among those not asked in 90 days. probe.rolling estimates the goal from the cards of the last 30
+days without the model's k: the same mixture, with each band's share known a mixture weight of its own (weighted by the
+words' weights, as the ratio estimator of the probes of old), the learning cards with a share of their own that is
+never reported, and the made-up cards of "not known" alone; then the bands weighted by their shares. This is the
+correction for guessing done card by card. The variance per band is the probes of old's, times the finite population
+correction plus a term for cards whose outcome can't tell known from not (n / e - 1, e the effective number of cards
+from the observed information), plus what the components' own uncertainty adds (the delta method on the outer product
+of the cards' scores); the 90% interval is Wilson's at the effective sample size. On 20 simulated readers of about 120
+probe cards and 60 made-up ones in 30 days (20 cards a day), the error was +0.024 on average with a root mean square of
+0.070 and a standard error of about 0.08; the interval covered the truth 17 times in 20. `fw.py status` shows it with
+the number of cards it rests on.
 
 ### Recency: the long-term chance and the current one
 
