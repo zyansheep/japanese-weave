@@ -11,11 +11,15 @@ private network such as Tailscale. Python 3.9+, standard library only.
   POST /v1/ops            {"machine", "ops": [...]}: changes to the word state, applied in order (hub.py)
                           -> {"ok": true, "results": [...], "rev"}
   POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
-                          -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py)
+                          -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py; T3 also
+                          sends review items, what happened to a review card)
+  POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids]}: the next review card (review.py)
+                          -> {"ok": true, "card": {"id", "ja", "kana", "gloss"}} or {"ok": true, "card": null}
   GET  /v1/stats?since=MS how much has been collected, in all and since MS (default: the start of today here)
                           -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
                               "blankPassages", "readingMs", "last"}
-  GET  /v1/export?after=ID&seq=SEQ&limit=N   new interactions and changed contexts, for a mirror (feedback.py)
+  GET  /v1/export?after=ID&seq=SEQ&card=SEQ&limit=N   new interactions, changed contexts and (with card) changed
+                          review cards, for a mirror (feedback.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
   GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
@@ -47,6 +51,7 @@ import feedback  # noqa: E402
 import fwlib  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
+import review  # noqa: E402
 import threads  # noqa: E402
 
 MAX_BODY = 1024 * 1024
@@ -96,9 +101,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/v1/export':
             try:
                 after, seq, limit = number('after', 0), number('seq', 0), max(1, min(feedback.EXPORT_PAGE, number('limit', 1000)))
+                card = number('card', 0) if 'card' in query else None
             except ValueError:
-                return self.reply(400, {'ok': False, 'error': 'after, seq and limit must be numbers'})
-            return self.reply(200, dict(feedback.export(after, seq, limit, self.db), ok=True))
+                return self.reply(400, {'ok': False, 'error': 'after, seq, card and limit must be numbers'})
+            return self.reply(200, dict(feedback.export(after, seq, limit, self.db, card), ok=True))
         if url.path == '/v1/state':
             return self.reply(*hub.snapshot(query.get('rev', [''])[0]))
         if url.path == '/v1/health':
@@ -131,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_allowed():
             return
         path = urlsplit(self.path).path
-        if path not in ('/v1/interactions', '/v1/ops', '/v1/intensity'):
+        if path not in ('/v1/interactions', '/v1/ops', '/v1/intensity', '/v1/review/next'):
             return self.reply(404, {'ok': False, 'error': 'not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
             return self.reply(415, {'ok': False, 'error': 'send application/json'})
@@ -147,6 +153,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {'ok': False, 'error': 'body is not JSON'})
         if path == '/v1/ops':
             return self.reply(*hub.receive(body, self.db))
+        if path == '/v1/review/next':
+            error = review.request_error(body)
+            if error:
+                return self.reply(400, {'ok': False, 'error': error})
+            if not (fwlib.home() / 'state.json').exists():
+                return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
+            try:
+                card = review.next_card(body['source'], body.get('exclude') or (), self.db)
+            except Exception as error:  # a broken card must not take the server down; the client tries again later
+                print(f'review card failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
+                return self.reply(500, {'ok': False, 'error': 'no card: the collector failed to choose one'})
+            return self.reply(200, {'ok': True, 'card': card})
         if path == '/v1/intensity':
             source = body.get('source', 'unknown') if isinstance(body, dict) else None
             if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \

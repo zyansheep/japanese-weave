@@ -322,9 +322,8 @@ class Collector(Home):
         super().tearDown()
 
     def test_the_probe_goes_to_the_collector_and_its_history_comes_back(self):
-        listed = self.fw('probe', '--list', '--seed', '4')
-        self.assertIn(' 66  ', listed)
-        out = self.fw('probe', '--answers', '1-20')
+        out = self.fw('probe', '--seed', '4', stdin='y\n' * 20 + 'n\n' * 46)
+        self.assertIn(' 66/66  ', out)
         self.assertIn('You would read', out)
         self.assertNotIn('Kept here', out)
         with fwlib.using_home(self.server_home):
@@ -342,12 +341,12 @@ class Collector(Home):
 
     def test_a_probe_made_while_the_collector_is_away_shows_at_once_and_goes_with_the_next_sync(self):
         url = fwlib.collector_url()
-        self.fw('probe', '--list', '--seed', '5')  # fetches the first copy of the state
+        self.fw('probe', '--history')  # fetches the first copy of the state
         (fwlib.home() / 'collector').write_text('http://127.0.0.1:9\n')  # nothing listens there
-        out = self.fw('probe', '--answers', 'none')
+        out = self.fw('probe', '--seed', '5', stdin='n\n' * 66)
         self.assertIn('Kept here', out)
         self.assertEqual(len(fwlib.load_state()['probes']), 1)  # in the cache at once
-        self.assertIn('last probe', self.fw('status'))
+        self.assertIn(f'{fwlib.today()}  known ', self.fw('probe', '--history'))
         (fwlib.home() / 'collector').write_text(url + '\n')
         self.assertEqual(hub.sync(), (True, None))
         with fwlib.using_home(self.server_home):
@@ -356,47 +355,30 @@ class Collector(Home):
 
 
 class Command(Home):
-    def test_list_then_answers_then_history_and_status(self):
+    def test_a_terminal_probe_then_history_and_status(self):
         fwlib.save_state(fwlib.new_state('2026-10-01', known_top=150))
-        self.assertIn('probe due: none yet', self.fw('status'))
-        listed = self.fw('probe', '--list')
-        again = self.fw('probe', '--list')
-        self.assertEqual(listed, again)  # the same list until answered
-        words = re.findall(r'^\s*(\d+)  (\S+)$', listed, re.M)
-        self.assertEqual(len(words), 66)
-        pending = json.loads((fwlib.home() / probe.PENDING).read_text())
-        fakes = {q['ja'] for q in pending['questions'] if q.get('fake')}
+        self.assertIn('probe: no probe cards reviewed', self.fw('status'))  # the review stream's, none yet
+        p = probe.sample(fwlib.load_state(), rng=random.Random(9))
+        fakes = sorted(q['ja'] for q in p['questions'] if q.get('fake'))
         state = fwlib.load_state()
         known = {dictionary.load().find(w['ja'], w['kana'], w['en'])['ja'] for w in state['words']
                  if w['status'] == 'known'}
-        yes = [n for n, ja in words if ja in known or ja == sorted(fakes)[0]]  # one made-up word claimed
-        out = self.fw('probe', '--answers', ' '.join(yes))
-        self.assertIn(f'Made-up words you marked known: 1 of 6 ({sorted(fakes)[0]})', out)
+        answers = ''.join('y\n' if q['ja'] in known or q['ja'] == fakes[0] else 'n\n' for q in p['questions'])
+        out = self.fw('probe', '--seed', '9', stdin=answers)  # one made-up word claimed
+        self.assertIn(f'Made-up words you marked known: 1 of 6 ({fakes[0]})', out)
         self.assertIn('Corrected for guessing', out)
         self.assertIn('Your word list marks', out)
         self.assertIn('Lookup habit: none of the words', out)  # no gloss log here
         self.assertIn('Made up: ', out)
-        self.assertFalse((fwlib.home() / probe.PENDING).exists())
         kept = fwlib.load_state()['probes'][-1]
-        self.assertEqual(kept['via'], 'chat')
-        self.assertEqual(sum(w[4] for w in kept['words']), len(yes) - 1)
-        self.assertIn('last probe ' + fwlib.today(), self.fw('status'))
+        self.assertEqual(kept['via'], 'terminal')
+        self.assertEqual(sum(w[4] for w in kept['words']), answers.count('y') - 1)
         history = self.fw('probe', '--history')
         self.assertIn(f'{fwlib.today()}  known ', history)
         self.assertIn('made up 1/6', history)
+        self.assertIn('Now: probe: no probe cards reviewed', history)
         with self.assertRaises(SystemExit):
-            self.fw('probe', '--answers', '1 2')  # nothing waits any more
-
-    def test_answers_are_numbers_ranges_or_all_but(self):
-        self.assertEqual(probe.parse_answers('1 4 7-9', 10), {1, 4, 7, 8, 9})
-        self.assertEqual(probe.parse_answers('1,2, 3', 10), {1, 2, 3})
-        self.assertEqual(probe.parse_answers('none', 5), set())
-        self.assertEqual(probe.parse_answers('all', 3), {1, 2, 3})
-        self.assertEqual(probe.parse_answers('All but 2', 3), {1, 3})
-        self.assertEqual(probe.parse_answers('all except 1-2', 3), {3})
-        for bad in ('0', '11', '3-1', 'x', 'all 3', '5-12'):
-            with self.assertRaises(ValueError):
-                probe.parse_answers(bad, 10)
+            self.fw('probe', '--answers', '1 2')  # the chat's list and answers are gone with its command
 
     def test_one_word_at_a_time_in_a_terminal(self):
         fwlib.save_state(fwlib.new_state('2026-10-01', known_top=40))
@@ -411,13 +393,6 @@ class Command(Home):
         out = self.fw('probe', '--seed', '6', stdin='y\nq\n')
         self.assertIn('Stopped: nothing kept.', out)
         self.assertEqual(len(fwlib.load_state()['probes']), 1)
-
-    def test_due_after_30_days(self):
-        state = {'probes': [{'day': '2026-09-01', 'estimate': {'known': 0.42}}]}
-        self.assertIn('next due 2026-10-01', probe.status_line(state, '2026-09-20'))
-        self.assertIn('probe due: the last was 30 days ago (2026-09-01, 42% known)',
-                      probe.status_line(state, '2026-10-01'))
-
 
 class Evidence(Home):
     """The probe's answers are observations in the fit (knowledge.probe_answers), of their own kind with their own

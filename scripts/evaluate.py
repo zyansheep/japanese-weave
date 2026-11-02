@@ -23,7 +23,9 @@ The interface. A model is an object with
 A Log has events (each a Command or a Group), intervals (Anki intervals by word), words (the word state's entries:
 ja, kana, status, added, changed), entries (each word's dictionary entry, found when first asked for), probes (the
 monthly probes' records, state["probes"]: the fit takes the answers of those before `until`, knowledge.probe_answers),
-pace and top (the fixed reading model), and origin. knowledge.refresh fits the
+reviews (the reviewed review cards, feedback.reviews: the fit takes the outcomes of those before `until`,
+knowledge.review_answers, and every one is a read for the recency clock), pace and top (the fixed reading model), and
+origin. knowledge.refresh fits the
 same Log of the whole log.
 
   Command      at, word (its entry), kind: 'known' or 'learn'
@@ -45,7 +47,8 @@ The models: "fit", the one fitter with its recency term (knowledge.Fit, NEXT_STE
 everything before each day, each observation at its clock (knowledge.read_clocks: the log up to its showing); "step4",
 the same fit without recency, every observation at the word's long-term chance; "flat", the fit with the prior by
 origin and Anki interval alone, without the word features (NEXT_STEPS step 13); "noprobe", the fit without the
-monthly probes' answers (knowledge.probe_answers); "speed" and "nospeed", the fit with and without the passages' and
+monthly probes' answers (knowledge.probe_answers); "noreview", the fit without the review cards' outcomes
+(knowledge.review_answers; still reads for the clock); "speed" and "nospeed", the fit with and without the passages' and
 paragraphs' reading times as evidence (knowledge.SPEED, NEXT_STEPS step 19; "fit" has them when knowledge.SPEED is
 set); "today", the online updates the fit replaced (knowledge.Online, fed the log in replay's order); and "constant",
 one chance per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
@@ -110,10 +113,10 @@ class Log:
     """The events of a log in replay's order, with what a model may use besides (module docstring)."""
 
     def __init__(self, events, intervals, words, pace=knowledge.PACE_MS, top=knowledge.READ_MAX, origin=None,
-                 probes=()):
+                 probes=(), reviews=()):
         self.events, self.intervals, self.words, self.pace, self.top = events, intervals, words, pace, top
         self.origin = origin if origin is not None else self
-        self.probes = probes
+        self.probes, self.reviews = probes, reviews
         self._ats = [e.at for e in events]
         self._entries = None
 
@@ -128,12 +131,13 @@ class Log:
     @entries.setter
     def entries(self, value):
         self.origin._entries = value
-        self.origin.__dict__.pop('_probed', None)  # the probe answers' words are found through the entries
+        for found in ('_probed', '_reviewed', '_showings'):  # the probe answers' and review cards' words are found
+            self.origin.__dict__.pop(found, None)          # through the entries
 
     def before(self, until):
-        """The same log with only its events before `until` (ms); the fit takes the probes before it."""
+        """The same log with only its events before `until` (ms); the fit takes the probes and reviews before it."""
         return Log(self.events[:bisect.bisect_left(self._ats, until)], self.intervals, self.words, self.pace,
-                   self.top, self.origin, self.probes)
+                   self.top, self.origin, self.probes, self.reviews)
 
     def between(self, start, end):
         return self.events[bisect.bisect_left(self._ats, start):bisect.bisect_left(self._ats, end)]
@@ -161,10 +165,11 @@ def is_form(written, entry, word=None):
 
 
 def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.PACE_MS, top=knowledge.READ_MAX,
-            probes=()):
+            probes=(), reviews=()):
     """The Log of a gloss log (feedback.load) as knowledge.replay reads it. words: the word state's entries (every
     lexicon word is listed, as in refresh); intervals, commands: as replay takes them; probes: the monthly probes'
-    records (state["probes"]), whose answers the fit reads (knowledge.probe_answers)."""
+    records (state["probes"]), whose answers the fit reads (knowledge.probe_answers); reviews: the reviewed review
+    cards (feedback.reviews; knowledge.review_answers), those before now_ms."""
     match = inflection.lexicon(words).entry
     by_ja = {w['ja']: w for w in words}
     events, seen = [], {}
@@ -199,7 +204,8 @@ def extract(rows, contexts, words, intervals, commands, now_ms, pace=knowledge.P
         for o in group.obs:
             seen[o.word] = o.seen + 1
         events.append(group)
-    return Log(events, intervals, words, pace, top, probes=[p for p in probes or () if isinstance(p, dict)])
+    return Log(events, intervals, words, pace, top, probes=[p for p in probes or () if isinstance(p, dict)],
+               reviews=[r for r in reviews or () if isinstance(r, dict) and (r.get('at') or 0) < now_ms])
 
 
 def load(home=None, now_ms=None, pace=None, top=None):
@@ -210,6 +216,7 @@ def load(home=None, now_ms=None, pace=None, top=None):
         raise fwlib.NoState(f'no gloss log in {home}')
     with fwlib.using_home(home):
         rows, contexts = feedback.load(feedback.default_path())
+        reviews = feedback.reviews(feedback.default_path())
         state = fwlib.load_state(create=False, lock=False)
         intervals, commands = knowledge.anki_intervals(), knowledge.read_commands()
         reading = knowledge.load().get('reading') or {}
@@ -218,7 +225,7 @@ def load(home=None, now_ms=None, pace=None, top=None):
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     return extract(rows, contexts, state['words'], intervals, commands, now_ms,
                    pace or reading.get('pace') or knowledge.PACE_MS, top or reading.get('top') or knowledge.READ_MAX,
-                   state.get('probes'))
+                   state.get('probes'), reviews)
 
 
 # ---- models ----
@@ -275,18 +282,18 @@ class Fitted:
     frozen: the shared parameters and prior widths held at their priors. plain: the prior without the word features
     (by origin and Anki interval alone), the flat start the word features are compared with."""
 
-    def __init__(self, frozen=False, plain=False, recency=True, probes=True, speed=None):
+    def __init__(self, frozen=False, plain=False, recency=True, probes=True, speed=None, reviews=True):
         self.frozen, self.plain, self.recency, self.last, self.flags, self.origin = frozen, plain, recency, None, {}, None
-        self.probes, self.speed = probes, speed
+        self.probes, self.speed, self.reviews = probes, speed, reviews
         self.name = (('fit, priors held' if frozen else 'flat' if plain else 'fit') + ('' if recency else ', no recency')
-                     + ('' if probes else ', no probe'))
+                     + ('' if probes else ', no probe') + ('' if reviews else ', no review'))
 
     def fit(self, log, until):
         if log.origin is not self.origin:
             self.origin, self.last, self.flags = log.origin, None, {}
         start = self.last.state() if self.last and not self.recency else None  # with recency, from nothing each day
         self.last = knowledge.Fit(log, until, start=start, frozen=self.frozen, free=self.flags, plain=self.plain,
-                                  recency=self.recency, probes=self.probes, speed=self.speed)
+                                  recency=self.recency, probes=self.probes, speed=self.speed, reviews=self.reviews)
         self.flags = knowledge.free_flags(self.last, list(dict.fromkeys([w['ja'] for w in log.words] +
                                                                          self.last.words)), self.flags)
         self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
@@ -312,7 +319,7 @@ def named(model, name):
 
 
 MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale, 'flat': lambda: Fitted(plain=True),
-          'noprobe': lambda: Fitted(probes=False), 'speed': lambda: named(Fitted(speed=True), 'speed'),
+          'noprobe': lambda: Fitted(probes=False), 'noreview': lambda: Fitted(reviews=False), 'speed': lambda: named(Fitted(speed=True), 'speed'),
           'nospeed': lambda: named(Fitted(speed=False), 'nospeed')}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 

@@ -1,11 +1,13 @@
-"""The probe (PLAN.md section 1 and row R, NEXT_STEPS step 7): about 3 minutes, once a month, that measure the goal
-directly instead of through the model, whose own number moves when you get used to the glosses or it is refitted.
-Python 3.9+, standard library only.
+"""The probe (PLAN.md section 1 and row R, NEXT_STEPS step 7): a measure of the goal taken directly instead of through
+the model, whose own number moves when you get used to the glosses or it is refitted. Since the review wedge it lives
+in the review stream: about one review card in five shows a probe word and one in ten a made-up one (review.py), and
+the estimate here is computed from those cards over the last ROLLING_DAYS days (rolling), on every refresh. The
+monthly 3-minute probe and its chat command are gone; its records stay readable (--history), and a terminal can still
+take one (fw.py probe). Python 3.9+, standard library only.
 
-  fw.py probe                    the words one at a time in a terminal: y known, n not, s skip, b back, q quit
-  fw.py probe --list             a numbered list for a chat, kept until --answers
-  fw.py probe --answers "1 4 7"  the numbers of the listed words you would read without a lookup
-  fw.py probe --history          every probe so far
+  fw.py probe                    a one-off probe in a terminal, one word at a time: y known, n not, s skip, b back,
+                                 q quit
+  fw.py probe --history          every probe taken so far, then the review stream's rolling estimate
 
 The goal is the share of the words in what you read that you would read in Japanese without a lookup, each word
 weighted by how often it comes up in your reading.
@@ -18,7 +20,9 @@ written form has a numeral), which you read from their parts and which the weave
 are not swappable, so they are out already: an English reader sounds them out, so a "yes" would measure kana, not
 vocabulary. Words you marked known or learning with a command stay in: they are part of what you read, and the probe
 is the check on such labels. Entries spelled alike (方 ほう and 方 かた) are one item, since the probe shows only the
-spelling; its weight is theirs added.
+spelling; its weight is theirs added. The review stream also leaves out, while it lasts, any word the delayed-start
+experiment hides or is about to probe (review.py): a few dozen words of 6,394, most of them unknown, so the estimate
+is a little high by at most their weight.
 
 Weights. A word's share of your reading. Until the reading counts exist (NEXT_STEPS step 13) that is its general
 frequency, 1/score (Zipf's law on the dictionary's combined rank). population(counts=...) takes counts per entry id
@@ -26,60 +30,76 @@ instead; then every swappable entry counted at least once is in, at any rank.
 
 Bands. The population sorted by weight, cut into BANDS bands of equal weight (with Zipf weights, equal widths in log
 rank: ranks 15-50, 50-160, ... 5,500-18,000), so the words within a band are alike in frequency and, mostly, in how
-likely you are to know them. Each band gets words in proportion to its weight (10 of 60), but at most a 1/SHARE of
-its words, so three monthly probes in a row can be drawn without repeating a word (the first band, about 25 words,
-gets 6); the rest go to the other bands in proportion.
+likely you are to know them.
 
-Sampling. In each band, a simple random sample of the words not probed in the last REPEAT_DAYS days (when too few
-are left, the least recently probed fill in). Within a band every word is equally likely, so the words left after
-earlier probes are a random part of the band, and leaving recent ones out biases nothing. Then FAKES made-up words
-(data/fakes.tsv, tools/build_fakes.py) not used in FAKE_DAYS, and the order shuffled.
+Sampling in the review stream (review.py). Each probe card draws its band in proportion to the band's weight, then a
+word of the band at random among those not asked in the last REPEAT_DAYS days (by a probe card or a probe of old; when
+none is left, the least recently asked), so within a band every word is equally likely and leaving recent ones out
+biases nothing. Made-up words (data/fakes.tsv, tools/build_fakes.py) come from review.py too, never reused within its
+FAKE_REUSE_DAYS while any other is left.
 
-Estimate. In band h, the weighted share of the answered words known: t_h = sum(w y) / sum(w) (a ratio estimator,
-Cochran 1977, 6.2), with Tin's (1965) correction, which takes its bias from order 1/n to 1/n^2 (it matters in the
-first band, 6 words whose weights differ threefold: there the plain ratio was 3 points low for a reader who knows the
-commoner half); overall, t = sum(W_h t_h) with W_h the band's share of the weight. Skipped words are left out;
-a band with no answers leaves out its weight. Variance: sum(W_h^2 v_h), with v_h = (1 - n_h/N_h) * (sum(w^2) /
-sum(w)^2) * p_h (1 - p_h), p_h = t_h with half a word known and half not added (so a band answered all yes still has
-some variance). The design effect enters there: sum(w^2)/sum(w)^2 is 1/n_h times Kish's design effect for unequal
-weights (about 1.1 within a band), the first factor is the finite population correction, and stratification takes out
-the differences between bands. deff is the variance over p(1 - p)/n, a simple random sample's (p with half a word
-known and half not added, as in the bands); the 90% interval is
-Wilson's score interval at the effective sample size n/deff (Korn and Graubard 1998). tools/probe_sim.py checks the
-bias, standard error and coverage on simulated readers.
+Estimate from the review stream (rolling). A probe card's outcome is a reveal time, or no reveal (knowledge.Components:
+known at recall, a log time N(mu_K, s_K) and a chance a_K of no reveal; not known, N(mu_U, s_U) and a_U). Of the cards
+of the last ROLLING_DAYS days, each word's latest probe card counts, each made-up word's card is of the "not known"
+component alone, and the learning words' cards come in with a share known of their own (a nuisance parameter, never
+reported) so that every card shapes the components. Fitted together by EM, without the model's k: per band h, pi_h
+is the mixture weight on the known component of its cards (weighted by the words' weights, as the ratio estimator
+below weighs answers), and the components are held by the same priors as the model's (knowledge.REVIEW_PRIOR). This is
+the correction for guessing done card by card: with a yes/no outcome and a made-up word claimed with chance f, the
+mixture weight is (t - f) / (1 - f) below; here "claimed" is a reveal time or no reveal that looks known, and the
+made-up words show how often a word not known looks so. Overall known = sum(W_h pi_h), W_h the band's share of the
+weight. Variance: per band, (sum(w^2) / sum(w)^2) p_h (1 - p_h) times ((1 - n_h/N_h) + (n_h / e_h - 1)), p_h = pi_h
+with half a card known and half not added, and e_h = p_h (1 - p_h) I_h the effective number of cards, I_h the
+observed information on pi_h (sum of ((A - B) / (p A + (1 - p) B))^2 over its cards): a card whose outcome can't tell
+known from not counts for less, and with components that overlap every band's interval widens. Plus what the
+components' own uncertainty adds, which moves every band at once (as the uncertainty of the over-claiming rate does in
+the correction for guessing below): the delta method on the information of all the parameters together, from the
+outer product of each card's score and the priors' curvature, less the bands' own part. The 90% interval is Wilson's
+at the effective sample size, as below. Reported with it: the share that looks known at even odds before the
+correction (naive), the made-up cards' mean chance of looking known at even odds (overclaim, the f below), and how well
+the components separate (Components.separation): a weak separation, as when a reader gives up on unknown words as fast
+as they reveal known ones, shows as a wide interval and a low worth. tests/test_review.py checks it on simulated
+readers: on 20 of about 120 probe cards each, the error was +0.024 on average with a root mean square of 0.070, the
+standard error about 0.08, and the interval covered the truth 17 times.
 
-Made-up words. About 1 in 10 of the words shown. The share claimed known, f, is the over-claiming rate. The corrected
-estimate is the correction for guessing, (t - f) / (1 - f) (Anderson and Freebody 1983; Huibregtse, Admiraal and
-Meara 2002): if you say yes to a word you don't know with the chance you say yes to a made-up one, t = k + (1 - k) f,
-so k = (t - f) / (1 - f), on the same scale as the goal (detection measures such as d' measure telling words apart,
-not a share). f pools the made-up words of the probes of the last FAKE_DAYS days: over-claiming is a habit of the
-reader, and 6 a probe pin it down poorly. The interval adds f's uncertainty (binomial, half a claim added) by the
-delta method, so even 0 of 6 claimed widens it downward; its top is never above the estimate's own, since the share
-known is at most the share claimed.
+The probe of old (a probe op, still taken by fw.py probe in a terminal). About 60 words at once: each band gets words
+in proportion to its weight (10 of 60), but at most a 1/SHARE of its words; FAKES made-up words not used in FAKE_DAYS;
+the order shuffled. In band h, the weighted share of the answered words known: t_h = sum(w y) / sum(w) (a ratio
+estimator, Cochran 1977, 6.2), with Tin's (1965) correction, which takes its bias from order 1/n to 1/n^2 (it matters
+in the first band, 6 words whose weights differ threefold: there the plain ratio was 3 points low for a reader who
+knows the commoner half); overall, t = sum(W_h t_h). Skipped words are left out; a band with no answers leaves out its
+weight. Variance: sum(W_h^2 v_h), with v_h = (1 - n_h/N_h) * (sum(w^2) / sum(w)^2) * p_h (1 - p_h), p_h = t_h with
+half a word known and half not added (so a band answered all yes still has some variance). The design effect enters
+there: sum(w^2)/sum(w)^2 is 1/n_h times Kish's design effect for unequal weights (about 1.1 within a band), the first
+factor is the finite population correction, and stratification takes out the differences between bands. deff is the
+variance over p(1 - p)/n, a simple random sample's (p with half a word known and half not added, as in the bands); the
+90% interval is Wilson's score interval at the effective sample size n/deff (Korn and Graubard 1998).
+tools/probe_sim.py checks the bias, standard error and coverage on simulated readers.
 
-Lookup habit (row R). For the words answered not known, the share of their read showings in the gloss log that were
-looked up: their opens over their read chances, from the showings (knowledge.showings, knowledge.observations, with
-knowledge.reader's read chance) in the HABIT_DAYS before the probe. It is computed where the log lives (the
-collector, or this machine without one) when the probe op is applied, with a 90% interval that treats words as
-clusters. Few words a probe answers unknown have been shown, so it rests on few showings; --history pools probes.
+Made-up words in a probe of old. The share claimed known, f, is the over-claiming rate. The corrected estimate is the
+correction for guessing, (t - f) / (1 - f) (Anderson and Freebody 1983; Huibregtse, Admiraal and Meara 2002): if you
+say yes to a word you don't know with the chance you say yes to a made-up one, t = k + (1 - k) f, so k = (t - f) /
+(1 - f), on the same scale as the goal (detection measures such as d' measure telling words apart, not a share). f
+pools the made-up words of the probes of the last FAKE_DAYS days. The interval adds f's uncertainty (binomial, half a
+claim added) by the delta method; its top is never above the estimate's own.
 
-Records. A probe is a `probe` op (hub.py): its words with their entry id, band, weight and answer, its made-up words
-and answers, the bands, the estimate, how it was taken and how long it took. It is applied where the word state lives
-and kept in state["probes"] (the newest KEEP), so every machine's cache has the history the no-repeat rule and the
-due date read.
+Lookup habit (row R). For the words a probe of old answered not known, the share of their read showings in the gloss
+log that were looked up: their opens over their read chances, from the showings (knowledge.showings,
+knowledge.observations, with knowledge.reader's read chance) in the HABIT_DAYS before the probe. It is computed where
+the log lives (the collector, or this machine without one) when the probe op is applied, with a 90% interval that
+treats words as clusters.
 
-The model and the probe. Each answer is also evidence for the model (knowledge.probe_answers): an observation of its
-own kind, recognition out of context answered on purpose, with an offset of its own; a "yes" counts for less as the
-made-up words show over-claiming (the same f as the correction above), and the made-up words themselves are left
-out. The probe samples every rank band, which is what the starting values' rank slope lacks; on the simulated reader
-(tools/sim/run.py priors) one probe takes the error of rare words' starting values from about +0.7 to +0.6 on the
-log-odds scale (docs/adaptive-difficulty.md). But the probe stays the check on the model: its estimate here is
-computed from its answers alone, never from the model, and anything that sets the two side by side takes the model
-as it stood before the probe (the listed share above, from the labels when the probe was drawn; in the simulated
-reader, a fit made just before the probe, whose predictions of its answers are scored).
+Records. A probe of old is a `probe` op (hub.py): its words with their entry id, band, weight and answer, its made-up
+words and answers, the bands, the estimate, how it was taken and how long it took, kept in state["probes"] (the newest
+KEEP). The review stream's cards are rows of the cards table (feedback.py), and the rolling estimate is knowledge.json
+"review" "probe" (knowledge.review_report), so every machine's cache has it for fw.py status.
+
+The model and the probe. The answers of a probe of old are evidence for the model (knowledge.probe_answers), and so are
+the review cards (knowledge.review_answers, with an offset of their own and the same two components, but labelled by
+the model's k). But the probe stays the check on the model: its estimate here is computed from its cards alone, never
+from the model's k, and anything that sets the two side by side takes the model as it stood before.
 """
 import argparse
-import datetime as dt
 import functools
 import math
 from pathlib import Path
@@ -100,12 +120,10 @@ BANDS = 6
 SHARE = 4             # a band gives at most 1/SHARE of its words to one probe
 REPEAT_DAYS = 90      # a word probed this recently isn't drawn again
 FAKE_DAYS = 365       # nor a made-up word
-DUE_DAYS = 30
+ROLLING_DAYS = 30     # the review stream's estimate reads the cards of this many days (rolling)
 Z90 = 1.6449          # 90% intervals, as calibrate's
 HABIT_DAYS = 60       # the lookup habit is measured on showings this long before a probe
 KEEP = 100            # probes kept in the state
-PENDING = 'probe.json'  # a listed probe waiting for --answers (this machine only)
-PENDING_HOURS = 24    # --list shows the same list again while it is this fresh
 FAKES_PATH = Path(__file__).resolve().parent.parent / 'data' / 'fakes.tsv'
 DAY_MS = 86_400_000
 NUMERAL = re.compile('[〇一二三四五六七八九十百千万億兆0-9０-９]')
@@ -246,6 +264,12 @@ class Frame:
         self.weights, self.top = ('frequency', TOP) if counts is None else ('reading', 0)
 
 
+@functools.lru_cache(maxsize=None)
+def frequency_frame():
+    """The Frame by general frequency, built once (review.py draws its probe cards from it, rolling weighs them)."""
+    return Frame()
+
+
 def sample(state=None, d=None, counts=None, rng=None, today=None, frame=None, words=WORDS, fakes=FAKES):
     """A probe to ask: {at, day, weights, top, bands: [[share, size]], listed, questions: [{ja, id, band, weight} or
     {ja, kana, fake: true}]} in the order to ask them. frame: a Frame to reuse (else one from d and counts)."""
@@ -325,6 +349,160 @@ def corrected(found, claimed, shown, z=Z90):
     variance = found['se'] ** 2 / (1 - f) ** 2 + smooth * (1 - smooth) / shown * (1 - t) ** 2 / (1 - f) ** 4
     low, high = interval(k, variance, found['n'], z)
     return {'known': round(k, 4), 'low': round(min(low, k), 4), 'high': round(max(k, min(high, found['high'])), 4)}
+
+
+def rolling(reviews, now_ms, frame=None, days=ROLLING_DAYS, z=Z90):
+    """The goal from the review stream's cards of the `days` days before now_ms (feedback.reviews), without the model,
+    as the module docstring says: {known, se, low, high, deff, n (probe cards), fakes, learning (cards that shaped the
+    components), naive, overclaim, bands: [[share, size, cards, pi]], days, separation, components}, or None without a
+    probe card. frame: the Frame the cards' bands are of (default: frequency_frame())."""
+    import knowledge
+    frame = frame or frequency_frame()
+    bands = [(share, len(b)) for share, b in zip(frame.shares, frame.bands)]
+    since, latest, fakes, learning = now_ms - days * DAY_MS, {}, [], []
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    for r in sorted((r for r in reviews or () if isinstance(r, dict) and number(r.get('at'))), key=lambda r: r['at']):
+        if not since <= r['at'] < now_ms or not number(r.get('shown')) or r.get('reveal') is not None \
+                and not number(r['reveal']):
+            continue
+        x = knowledge.review_outcome(r.get('reveal'), r['shown'])
+        if x is False:
+            continue
+        if r.get('kind') == 'fake':
+            fakes.append(x)
+        elif r.get('kind') == 'learning':
+            learning.append(x)
+        elif r.get('kind') == 'probe' and isinstance(r.get('band'), int) and 0 <= r['band'] < len(bands) \
+                and number(r.get('weight')) and r['weight'] > 0:
+            latest[r.get('word')] = (r['band'], r['weight'], x)  # the word's latest card
+    cards = list(latest.values())
+    if not cards:
+        return None
+    parts = knowledge.Components()
+    pi, rest = [0.5] * len(bands), 0.5
+    clamp = lambda p: min(1 - 1e-9, max(1e-9, p))
+    for _ in range(2000):  # EM: the components, every band's mixture weight and the learning cards'
+        found = [(h, w, x, knowledge.sigmoid(knowledge.logit(clamp(pi[h])) + _ratio(parts, x))) for h, w, x in cards]
+        mine = [(x, knowledge.sigmoid(knowledge.logit(clamp(rest)) + _ratio(parts, x))) for x in learning]
+        moved = parts.update([(x, 1.0, r) for _h, _w, x, r in found] + [(x, 1.0, r) for x, r in mine],
+                             [(x, 1.0) for x in fakes])
+        for h in range(len(bands)):
+            sw = sum(w for b, w, _x, _r in found if b == h)
+            if sw:
+                new = sum(w * r for b, w, _x, r in found if b == h) / sw
+                moved, pi[h] = max(moved, abs(new - pi[h])), new
+        if mine:
+            new = sum(r for _x, r in mine) / len(mine)
+            moved, rest = max(moved, abs(new - rest)), new
+        if moved < 1e-7:
+            break
+    known = variance = missing = naive = 0.0
+    n, rows = 0, []
+    for h, (share, size) in enumerate(bands):
+        mine = [(w, x) for b, w, x in cards if b == h]
+        if not mine:
+            missing += share
+            rows.append([round(share, 6), size, 0, None])
+            continue
+        k, sw, sw2 = len(mine), sum(w for w, _x in mine), sum(w * w for w, _x in mine)
+        t = pi[h]
+        p = (t * k + 0.5) / (k + 1)
+        ratios = [math.exp(max(-30.0, min(30.0, _ratio(parts, x)))) for _w, x in mine]
+        information = sum(((r - 1) / (p * r + 1 - p)) ** 2 for r in ratios)
+        effective = min(float(k), max(1e-6, p * (1 - p) * information))
+        known += share * t
+        naive += share * sum(w * knowledge.sigmoid(_ratio(parts, x)) for w, x in mine) / sw
+        variance += share * share * sw2 / (sw * sw) * p * (1 - p) * (max(0.0, 1 - k / size) + k / effective - 1)
+        n += k
+        rows.append([round(share, 6), size, k, round(t, 4)])
+    known, naive, variance = known / (1 - missing), naive / (1 - missing), variance / (1 - missing) ** 2
+    looks = [knowledge.sigmoid(_ratio(parts, x)) for x in fakes]
+    f = sum(looks) / len(looks) if looks else _even_odds_f(parts)
+    variance += _components_variance(parts, cards, pi, learning, rest, fakes,
+                                     {h: share / (1 - missing) for h, (share, _size) in enumerate(bands)})
+    plain = (known * n + 0.5) / (n + 1)
+    low, high = interval(known, variance, n, z)
+    return {'known': round(known, 4), 'se': round(math.sqrt(variance), 4), 'low': round(low, 4),
+            'high': round(high, 4), 'deff': round(variance / (plain * (1 - plain) / n), 3), 'n': n,
+            'fakes': len(fakes), 'learning': len(learning), 'naive': round(naive, 4), 'overclaim': round(f, 4),
+            'bands': rows, 'days': days, 'separation': parts.separation(), 'components': parts.summary()}
+
+
+def _components_variance(parts, cards, pi, learning, rest, fakes, shares):
+    """What the components' own uncertainty adds to the variance of sum(shares_h pi_h): the delta method on the
+    information of every parameter at once (each band's logit pi, the learning cards', and each component's mu, log s
+    and logit a), estimated by the outer product of each card's score (BHHH) plus the priors' curvature, less what the
+    bands' information alone gives (the per-band variance has that already). The made-up words' cards inform the "not
+    known" component only. 0 when the components are well pinned down."""
+    import knowledge
+    used = sorted({h for h, _w, _x in cards})
+    index = {h: j for j, h in enumerate(used)}
+    m = len(used) + (1 if learning else 0)
+    size = m + 6
+    info = [[0.0] * size for _ in range(size)]
+    clamp = lambda p: min(1 - 1e-3, max(1e-3, p))
+
+    def scores(x, c):  # d log density / d (mu, log s, logit a) of component c
+        if x is None:
+            return [0.0, 0.0, 1 - parts.a[c]]
+        u = (x - parts.mu[c]) / parts.s[c]
+        return [u / parts.s[c], u * u - 1, -parts.a[c]]
+
+    def add(score, v):
+        for a, sa in enumerate(score):
+            if sa:
+                row = info[a]
+                for b, sb in enumerate(score):
+                    row[b] += v * sa * sb
+
+    mean = {h: sum(w for b, w, _x in cards if b == h) / sum(1 for b, _w, _x in cards if b == h) for h in used}
+    for j, group in ((None, [(h, w / mean[h], x) for h, w, x in cards]), (m - 1, [(None, 1.0, x) for x in learning])):
+        for h, v, x in group:
+            p = clamp(pi[h] if h is not None else rest)
+            r = knowledge.sigmoid(knowledge.logit(p) + _ratio(parts, x))
+            score = [0.0] * size
+            score[index[h] if h is not None else j] = r - p
+            score[m:m + 3] = [r * a for a in scores(x, 0)]
+            score[m + 3:] = [(1 - r) * a for a in scores(x, 1)]
+            add(score, v)
+    for x in fakes:
+        add([0.0] * (m + 3) + scores(x, 1), 1.0)
+    n0 = knowledge.REVIEW_CARDS
+    for c, name in enumerate(knowledge.Components.NAMES):
+        mu0, s0, _a0 = knowledge.REVIEW_PRIOR[name]
+        s2, a = parts.s[c] ** 2, parts.a[c]
+        for j, curve in enumerate((n0 / s2, 2 * n0 * ((parts.mu[c] - mu0) ** 2 + s0 * s0) / s2, n0 * a * (1 - a))):
+            info[m + 3 * c + j][m + 3 * c + j] += curve
+    for j in range(size):
+        info[j][j] += 1e-9
+    g = [0.0] * size
+    for h in used:
+        p = clamp(pi[h])
+        g[index[h]] = shares[h] * p * (1 - p)
+    full = sum(a * b for a, b in zip(g, knowledge._solve(info, g)))
+    alone = sum(g[j] ** 2 / info[j][j] for j in range(len(used)))
+    return max(0.0, full - alone)
+
+
+def _ratio(parts, x):
+    """log A - log B: how much more likely an outcome is from a word known at recall than from one not."""
+    la, lb = parts.logs(x)
+    return la - lb
+
+
+def _even_odds_f(parts, steps=200):
+    """Without made-up cards: the chance a word not known looks known at even odds, by the components alone (no reveal,
+    then the reveal times on a grid)."""
+    import knowledge
+    a_u = parts.a[1]
+    total = a_u * knowledge.sigmoid(_ratio(parts, None))
+    low, high = parts.mu[1] - 6 * parts.s[1], parts.mu[1] + 6 * parts.s[1]
+    dx = (high - low) / steps
+    for j in range(steps + 1):
+        x = low + j * dx
+        density = math.exp(parts.logs(x)[1])  # (1 - a_U) times the not known component's density
+        total += (0.5 if j in (0, steps) else 1.0) * dx * density * knowledge.sigmoid(_ratio(parts, x))
+    return total
 
 
 def claims(probes, today, days=FAKE_DAYS):
@@ -433,25 +611,36 @@ def habit_summary(habits, z=Z90):
             'words': m, 'read': round(read, 1)}
 
 
-# ---- due, and what to print ----
+# ---- what to print ----
 
 def latest(state):
     probes = (state or {}).get('probes') or []
     return probes[-1] if probes else None
 
 
-def status_line(state, today=None):
-    """fw.py status: when the next probe is due, or that one is."""
-    today, last = today or fwlib.today(), latest(state)
-    if last is None:
-        return '  probe due: none yet; fw.py probe (or /japanese-weave:probe) takes about 3 minutes'
-    est = last.get('estimate') or {}
-    found = f'{percent(est.get("known"))} known' if est.get('known') is not None else 'no estimate'
-    days = fwlib.days_between(last['day'], today)
-    if days >= DUE_DAYS:
-        return f'  probe due: the last was {days} days ago ({last["day"]}, {found}); fw.py probe takes about 3 minutes'
-    due = dt.date.fromisoformat(last['day']) + dt.timedelta(days=DUE_DAYS)
-    return f'  last probe {last["day"]}: {found}; next due {due.isoformat()}'
+def rolling_text(know):
+    """The review stream's estimate (knowledge.json "review", knowledge.review_report) in a line or two, for fw.py
+    status and --history."""
+    review = (know or {}).get('review') if isinstance((know or {}).get('review'), dict) else None
+    est = (review or {}).get('probe') if isinstance((review or {}).get('probe'), dict) else None
+    if est is None or est.get('known') is None:
+        return (f'probe: no probe cards reviewed in the last {ROLLING_DAYS} days yet (the wedge on a gloss in T3 Code '
+                'starts the review cards; about one in five is a probe word)')
+    sep = est.get('separation') or {}
+    rests = (f'{est["n"]} probe card{"s" if est["n"] != 1 else ""} and {est.get("fakes", 0)} made-up '
+             f'one{"s" if est.get("fakes", 0) != 1 else ""}')
+    line = (f'probe (review cards, last {est.get("days", ROLLING_DAYS)} days): you would read {percent(est["known"])} '
+            f'of your reading without a lookup (90% interval {span(est["low"], est["high"])}), from {rests}')
+    if sep.get('worth') is not None:
+        line += (f'; known and not known reveals separate {"weakly" if sep.get("weak") else "well"} (a card is worth '
+                 f'{sep["worth"]:.2f} of a yes/no answer; a known word revealed sooner {100 * sep["auc"]:.0f}% of the '
+                 'time)')
+    return line
+
+
+def status_line(know):
+    """fw.py status: the review stream's rolling estimate and how many cards it rests on."""
+    return '  ' + rolling_text(know)
 
 
 def percent(x):
@@ -511,10 +700,12 @@ def habit_text(habit):
             f'days before.{rough}')
 
 
-def history_text(state):
+def history_text(state, know=None):
+    """Every probe of old, then the review stream's rolling estimate (rolling_text)."""
     probes = (state or {}).get('probes') or []
+    stream = 'Now: ' + rolling_text(know) + '.'
     if not probes:
-        return 'No probes yet: fw.py probe (or /japanese-weave:probe) takes about 3 minutes.'
+        return 'No probes of old (fw.py probe takes one in a terminal).\n' + stream
     lines = ['Probes (90% intervals): the share of your reading you would read without a lookup; made-up words '
              'marked known; that share corrected for guessing; what your word list marks known; the lookup habit.']
     for p in probes:
@@ -538,40 +729,11 @@ def history_text(state):
     if pooled and len(probes) > 1:
         lines.append(f'Lookup habit over all probes: {percent(pooled["c"])} ({span(pooled["low"], pooled["high"])}), '
                      f'from {pooled["showings"]} showings of {pooled["words"]} words.')
+    lines.append(stream)
     return '\n'.join(lines)
 
 
 # ---- fw.py probe ----
-
-def parse_answers(text, n):
-    """The question numbers (1-based) known, from "1 4 7-9", "all", "none" or "all but 3 5"; ValueError when the
-    text isn't that."""
-    words = re.split(r'[\s,]+', text.strip().lower())
-    words = [w for w in words if w]
-    if words in (['none'], []):
-        return set()
-    invert = bool(words) and words[0] == 'all'
-    if invert:
-        words = words[1:]
-        if words and words[0] in ('but', 'except'):
-            words = words[1:]
-        elif words:
-            raise ValueError('after "all" put "but" or "except", then the numbers you would not read')
-    chosen = set()
-    for w in words:
-        found = re.fullmatch(r'(\d+)(?:-(\d+))?', w)
-        if not found:
-            raise ValueError(f'{w!r} is not a number or a range like 7-9')
-        low, high = int(found.group(1)), int(found.group(2) or found.group(1))
-        if not 1 <= low <= high <= n:
-            raise ValueError(f'{w} is outside 1-{n}')
-        chosen.update(range(low, high + 1))
-    return set(range(1, n + 1)) - chosen if invert else chosen
-
-
-def pending_path():
-    return fwlib.home() / PENDING
-
 
 def finish(probe, answers, via, seconds):
     """Keeps a probe's answers where the state lives (a probe op) and prints what it found."""
@@ -586,7 +748,7 @@ def finish(probe, answers, via, seconds):
     print(report(op, habit, fakes))
     if result.get('queued'):
         print(f'(Kept here: {fwlib.collector_url()} did not answer, so the next sync sends it.)')
-    print(f'Next probe due in {DUE_DAYS} days; fw.py probe --history lists them all.')
+    print('fw.py probe --history lists every probe, and the review stream\'s rolling estimate.')
 
 
 def keys():
@@ -652,60 +814,25 @@ def ask(probe, pressed=None, out=None):
     return answers
 
 
-def list_text(probe):
-    scripts = Path(__file__).resolve().parent
-    lines = [f'Probe: {len(probe["questions"])} words. Which would you read without a lookup, met in an English '
-             'sentence?']
-    lines += [f'{i:3d}  {q["ja"]}' for i, q in enumerate(probe['questions'], 1)]
-    lines.append('Answer with the numbers of those you would read ("none", "all" and "all but 3 5" work too):')
-    lines.append(f'  sh {scripts / "run"} {scripts / "fw.py"} probe --answers "1 4 7-9"')
-    return '\n'.join(lines)
-
-
 def add_arguments(p):
-    mode = p.add_mutually_exclusive_group()
-    mode.add_argument('--list', action='store_true', help='print a numbered list and keep it for --answers (a chat)')
-    mode.add_argument('--answers', metavar='NUMBERS',
-                      help='the numbers from --list you would read without a lookup: "1 4 7-9", "none", "all", '
-                           '"all but 3 5"')
-    mode.add_argument('--history', action='store_true', help='every probe so far')
+    p.add_argument('--history', action='store_true',
+                   help='every probe so far, then the review stream\'s rolling estimate')
     p.add_argument('--seed', type=int, help=argparse.SUPPRESS)  # a repeatable sample, for tests and trials
 
 
 def run(args):
     import hub
+    import knowledge
     if args.history:
         state, error = hub.current()
         if error:
             print(f'({fwlib.collector_url()} did not answer: {error}. Showing the copy here from the last sync.)')
-        print(history_text(state))
-        return
-    path = pending_path()
-    if args.answers is not None:
-        probe = fwlib.read_json(path)
-        if not isinstance(probe, dict) or not probe.get('questions'):
-            sys.exit('No probe list is waiting: fw.py probe --list makes one.')
-        try:
-            known = parse_answers(args.answers, len(probe['questions']))
-        except ValueError as error:
-            sys.exit(f'Answers: {error}.')
-        answers = [1 if i in known else 0 for i in range(1, len(probe['questions']) + 1)]
-        finish(probe, answers, 'chat', (time.time() * 1000 - probe['at']) / 1000)
-        path.unlink(missing_ok=True)
+        print(history_text(state, knowledge.load()))
         return
     state, _error = hub.current()
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
-    if args.list:
-        probe = fwlib.read_json(path)
-        fresh = isinstance(probe, dict) and probe.get('questions') and \
-            time.time() * 1000 - probe.get('at', 0) < PENDING_HOURS * 3_600_000 and args.seed is None
-        if not fresh:
-            probe = sample(state, rng=rng)
-            fwlib.write_json(path, probe)
-        print(list_text(probe))
-        return
     if not sys.stdin.isatty():
-        print('(Not a terminal: one answer a line. In a chat, use fw.py probe --list, then --answers.)')
+        print('(Not a terminal: one answer a line.)')
     probe = sample(state, rng=rng)
     started = time.time()
     try:

@@ -21,7 +21,8 @@
                                                      list; mature cards (interval >= N days, default 21)
                                                      become known unless --no-known
   fw.py status                                       stage, labels (from the model), learning words, new words
-                                                     today and whether the budget goes unspent
+                                                     today, whether the budget goes unspent, and the probe's
+                                                     estimate from the review cards of the last 30 days
   fw.py log [N]                                      the latest N gloss peeks and flips (default 20), with how
                                                      long each stayed open and the glossed words around it
                                                      (from the collector when one is set)
@@ -59,11 +60,12 @@
                                                      score models of lookup chances on the gloss log, each day
                                                      predicted from the days before (scripts/evaluate.py; a
                                                      simulated reader's state dir from tools/sim works too)
-  fw.py probe [--list | --answers "1 4 7-9" | --history]
-                                                     a 3-minute check of how much of your reading you would read
-                                                     without a lookup: about 60 words sampled by frequency and 6
-                                                     made-up ones, one at a time in a terminal, y or n (--list and
-                                                     --answers: the same in a chat); monthly (scripts/probe.py)
+  fw.py probe [--history]                            how much of your reading you would read without a lookup:
+                                                     --history lists every probe taken and the estimate from the
+                                                     review cards (the probe now lives in their stream: about one
+                                                     card in five is a probe word, one in ten made up); without
+                                                     it, a one-off probe of about 60 words and 6 made-up ones,
+                                                     one at a time in a terminal, y or n (scripts/probe.py)
   fw.py relabel [--dry-run] [--home DIR] [--examples N]
                                                      the words whose labels the fitted model would change from
                                                      the day-count rules', grouped and explained; writes nothing
@@ -587,7 +589,7 @@ def status(_args):
     nxt = next((n for n, s in sorted(fwlib.STAGES) if fwlib.stage_for(state) < s), None)
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
-    print(probe.status_line(state))
+    print(probe.status_line(know))
 
 
 def intake_line(state, know, today):
@@ -685,6 +687,9 @@ def collected(totals):
                         (('trace',), 'mouse path')):
         total, today = kind(*names)
         parts.append(f'{plural(total, noun)} ({today} today)')
+    total, today = kind('review')
+    if total:  # review cards (T3 Code), once there are any
+        parts.append(f'{plural(total, "review card")} ({today} today)')
     shown = totals.get('shownWords') or [0, 0]
     blank = totals.get('blankPassages') or [0, 0]  # an older collector doesn't count them
     reading = [round(ms / 60000) for ms in totals.get('readingMs') or [0, 0]]
@@ -814,6 +819,14 @@ def knowledge_cmd(args):
           + (f', form offset {fit["shared"]["form"]}' if 'shared' in fit else '')
           + (f'; reading {knowledge.reading_text(reading["pace"], reading["top"])}'
              if reading.get('pace') is not None and reading.get('top') is not None else ''))
+    model = (know.get('review') or {}).get('model') if isinstance(know.get('review'), dict) else None
+    if isinstance(model, dict):
+        known, unknown = model.get('known') or {}, model.get('unknown') or {}
+        print(f'  review cards: {model.get("cards", 0)} of real words and {model.get("fakes", 0)} made up; a word known '
+              f'at recall revealed in about {known.get("ms")} ms (no reveal {known.get("skip")}), one not known in about '
+              f'{unknown.get("ms")} ms (no reveal {unknown.get("skip")}); separation '
+              f'{"weak" if model.get("weak") else "good"}: worth {model.get("worth")} of a yes/no answer, auc '
+              f'{model.get("auc")}; offset {model.get("offset")}')
     status = {w['ja']: w['status'] for w in state['words']}
     held = {w['ja'] for w in state['words'] if fwlib.hidden(w)}
     ranked = sorted(((ja, e) for ja, e in words.items() if ja not in held), key=lambda kv: -kv[1].get('n', 0))
