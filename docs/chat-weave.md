@@ -18,7 +18,8 @@ How chat replies in T3 Code get their Japanese since 2026-10-22, and the experim
    the 18% sentence share, divided by the price of a sentence. At full (level 3) there is no budget, and every
    dictionary entry with a sense flagged safe joins the pool, priced by its fitted prior.
 3. Claude rewrites the output. It keeps the swaps whose sense fits, and in sentences that stay English it keeps only
-   nouns and adjectives right before a noun. It turns the sentences that carry the content into Japanese or mixed
+   nouns and adjectives right before a noun. A learning word that fits is kept even when it isn't one of those: its
+   sentence goes Japanese or mixed instead (the rewrite kept 37% of learning words before this rule). It turns the sentences that carry the content into Japanese or mixed
    sentences, each with its translation on the closing mark. The rules and the list of known sense traps are
    `weave.DRAFT_RULES`.
 4. Claude passes the reply to `fw.py check-reply`, fixes what it lists and sends it.

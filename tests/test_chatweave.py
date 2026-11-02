@@ -56,6 +56,8 @@ class Weave(unittest.TestCase):
         self.assertIn('<abbr title="もんだい · problem">問題</abbr>', rest)  # safe: placed outright
         self.assertIn('{{now→<abbr title="いま · now">今</abbr>}}', rest)  # no safe sense: marked for the writer
         self.assertIn('情報', rest)  # a learning word, from the budget
+        self.assertIn('情報: keep each whose sense fits', head)  # and the writer is told to keep it
+        self.assertIn('Learning words. The weave\'s first line names them', weave.DRAFT_RULES)
         self.assertIn('problem = now()  # code stays as it is', rest)  # code fences untouched
         self.assertIn('`fix problem`', rest)  # inline code too
 

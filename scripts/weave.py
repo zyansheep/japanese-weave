@@ -648,6 +648,9 @@ Don't open a sentence with そして as "And...": use また or それに, or jo
    - Sentences that stay English keep only the swaps that are nouns, and adjectives right before an English noun. \
 Undo every other swap in them (verbs, adverbs, connectives like もし, そして and でも, and pronouns) by putting the \
 English back. Those words go only inside Japanese or mixed sentences.
+   - Learning words. The weave's first line names them, and they are what the reply teaches: keep each one whose \
+sense fits. When one isn't a noun or an adjective before a noun, make its sentence Japanese or mixed instead of \
+undoing it, and count that sentence toward the number the first line asks for.
    - Senses. Each {{English→Japanese}}: keep the Japanese only if it means exactly what the English means there; \
 otherwise put the English back. Undo any other swap whose sense doesn't fit. Known traps: いつも is "always", never \
 "usually"; 穏やか is "calm" or "mild", never "quiet" or "uncrowded"; 高い is "pricey" or "tall", never "costly to \

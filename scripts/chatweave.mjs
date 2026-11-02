@@ -89,7 +89,8 @@ const result = lines.map((l) => {
 const learning = swaps.filter((s) => !s.free);
 const sentences = Math.max(1, Math.round((budgetPer100 * wordCount(whole) / 100) * SENTENCE_SHARE / price));
 console.log(`jw-weave: ${swaps.length - learning.length} known-word swaps and ${learning.length} learning-word swaps ` +
-  `(${learning.map((s) => s.ja).join(', ') || 'none'}). ${swaps.filter((s) => s.unsure).length} swaps are marked ` +
+  `(${learning.map((s) => s.ja).join(', ') || 'none'}${learning.length ? ': keep each whose sense fits' : ''}). ` +
+  `${swaps.filter((s) => s.unsure).length} swaps are marked ` +
   '{{English→Japanese}}: the code wasn\'t sure of the sense. ' + (full
   ? 'No limit on Japanese or mixed sentences: make every sentence the user could follow Japanese or mixed.'
   : `Make about ${sentences} sentence${sentences === 1 ? '' : 's'} Japanese or mixed, each with a translation.`));
