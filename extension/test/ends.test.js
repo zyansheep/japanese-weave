@@ -125,7 +125,7 @@ test('background: full and off, and the toolbar per tab (waiting, reasons, navig
     const [swaps] = Object.values(full.results);
     // no budget at full, so the sentence is free, and big and day inside it are left out; expected: the lookups
     // predicted, 3 known words without estimates at 0.076, the dog twice at 0.269 and the sentence's translation at 0.08
-    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 4, candidates: 6, expected: 0.845,
+    expect(Object.values(full.plans)[0]).toEqual({ level: 3, intensity: 5, jitter: 1, limit: 4, candidates: 6, paint: 'final', expected: 0.845,
       sentencePrice: 0.08 });
     expect(swaps.map((s) => s.f)).toEqual(['でも', '犬', '犬', '大きい日でした。']); // code's words, then the model's sentence
     // Heavier at full stays full, for 3 hours from this press.

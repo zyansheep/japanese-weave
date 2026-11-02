@@ -7,8 +7,10 @@
 // doubtful spans changed, and the dictionary entries a passage read shows (reading counts). Pure.
 import { buildIndex, matchText } from './matcher.js';
 import { toHiragana } from './senses.js';
-import { planPassage, contextFor, CHECK_VERSION } from './verify.js';
+import { planPassage, denseSentences, contextFor, CHECK_VERSION } from './verify.js';
 import { validateSwaps } from './levels.js';
+import { safeOptions } from './senses.js';
+import { locate } from './text.js';
 import { hashKey } from './hash.js';
 
 // The matcher's entries and the sense flags for a word list (the host's words, or the bundled lists): each word
@@ -33,6 +35,53 @@ export function pipelineFor(words) {
 // A passage's plan (verify.js planPassage): its spans, numbered, each safe (code takes it) or doubtful (the model is
 // asked), and its dense sentences.
 export const planText = (pipe, text) => planPassage(text, matchText(pipe.index, text), pipe.flags);
+
+// The host's dictionary words (fw_host dictionaryWords: [[entry id, ja, kana, romaji, "gloss;gloss", k, sd]], every gloss
+// flagged safe) as words of the list, each marked dictionary and never free, so it always spends the budget (levels.js
+// planSwaps), and left out if the list has it by now. mine: the words in use.
+export function dictionaryWordsOf(rows, mine = []) {
+  const have = new Set(mine.map((w) => w.ja));
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!Array.isArray(row) || row.length !== 7) continue;
+    const [id, ja, kana, hint, glosses, k, sd] = row;
+    if (have.has(ja)) continue;
+    const list = String(glosses).split(';').filter(Boolean);
+    if (list.length) out.push({ ja, en: list.slice(0, 2).join(' / '), hint, kana, status: 'active', glosses: list, safe: list, id, k, sd, free: false, dictionary: true });
+  }
+  return out;
+}
+
+// A passage's plan above normal (levels.js isHeavier). The plan of the words in use keeps its spans, flags and picks, so
+// its answer fits; added to it are the spans only dictionary words say (extra: pipelineFor(dictionaryWordsOf(...))), where
+// nothing of the words in use overlaps them and a safe option stands, and the last clauses of sentences (verify.js
+// denseSentences clauses). What is new needs no model unless a sentence is: ask is the plan to ask the model about, this
+// one where it has sentences the plain plan hasn't, else the plain plan itself, with the same prompt and answer as at
+// normal, so stepping up costs no call. added: the dictionary words the spans can use, as the words a passage's
+// candidates are checked against, so a sentence can't bring in a dictionary word no span of its passage offers.
+export function heavierPlan(pipe, extra, text) {
+  const plain = planText(pipe, text);
+  if (plain.zero) return { ...plain, ask: plain, added: [] };
+  const taken = plain.spans.map((m) => m.span);
+  const clear = (s) => !taken.some((t) => s.start < t.end && t.start < s.end);
+  const found = extra ? matchText(extra.index, text).filter((s) => clear(s) && safeOptions(extra.flags, s).some(Boolean)) : [];
+  const spans = [...plain.spans, ...found.map((span) => ({ span, safe: span.options.filter((_, k) => safeOptions(extra.flags, span)[k]), doubtful: [] }))]
+    .sort((a, b) => a.span.start - b.span.start).map((m, i) => ({ ...m, n: i + 1 }));
+  const plan = { text, spans, sentences: denseSentences(text, spans.map((m) => m.span), { clauses: true }) };
+  const names = new Set(found.flatMap((s) => s.options.map((o) => o.ja)));
+  const added = extra ? extra.words.filter((w) => names.has(w.ja)) : [];
+  return { ...plan, ask: plan.sentences.length > plain.sentences.length ? plan : plain, added };
+}
+
+// The candidates outside the dense sentences of a plan: the first painting of a passage above normal, whose model
+// answer is on its way. A swap the page shows stays (content.js), and would then rule its sentence out by overlap.
+export function clearOfSentences(plan, candidates) {
+  const carrier = { text: String(plan.text) };
+  return candidates.filter((c) => {
+    const place = locate(carrier, c.o, c.ctx);
+    return !place || !plan.sentences.some((x) => place.start < x.end && x.start < place.end);
+  });
+}
 
 const label = (o) => o.label ?? o.en;
 // The cache key of a passage's answer: the check prompt's version, the text, each doubtful span with its options as the

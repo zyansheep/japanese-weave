@@ -5,14 +5,15 @@
 // Keys stay here; pages only get a config without them.
 import { createCache, chromeStorage } from './cache.js';
 import { requestChecks, needsCall, candidatesOf, CHECK_VERSION } from './verify.js';
-import { pipelineFor, planText, answerKey, storeAnswer, loadAnswer, readingIndexOf, readingCounts } from './pipeline.js';
+import { pipelineFor, planText, answerKey, storeAnswer, loadAnswer, readingIndexOf, readingCounts, dictionaryWordsOf, heavierPlan,
+  clearOfSentences } from './pipeline.js';
 import { candidatesFor, MAX_BATCH, BATCH, PARALLEL } from './models.js';
 import { cleanSettings, newSitesDefault, offReason, globalOffReason } from './settings.js';
 import { resolveLevel, exactJa, isZeroJapanese, wordCount, planSwaps, jitterFor, intensityBudget, isSentenceMark, wordsForLevel,
-  INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
+  isHeavier, INTENSITY_OFF, INTENSITY_FULL } from './levels.js';
 import { hashKey } from './hash.js';
 import { HOST, refresh, readCached, queueEvents, flushEvents, shownToday, cleanInteraction, queueLog, queuedLog, flushLog, localDay,
-  cleanIntensity, refreshReadingIndex, queueReading, readToday, flushReading, INDEX_KEY } from './hostsource.js';
+  cleanIntensity, refreshReadingIndex, queueReading, readToday, flushReading, INDEX_KEY, refreshDictionary, dictionaryOf } from './hostsource.js';
 import { DAILY_MODEL_CALLS, callsToday, countCall } from './quota.js';
 import { recordUsage, readUsage } from './usage.js';
 import { createToolbar } from './toolbar.js';
@@ -64,7 +65,7 @@ function intensityOf(data, now = Date.now()) {
 // What pages get. The revision changes whenever anything that affects swaps does, so stale replies are dropped and pages
 // repaint. The answers cache is keyed by what each passage asked (pipeline.js answerKey), not by the revision: a new
 // word list, level, intensity or budget only changes which candidates planSwaps picks, and asks the model again only
-// for passages whose doubtful spans changed. Off (-3) changes the revision too, so pages go back to English at once
+// for passages whose doubtful spans changed, or at +1 and +2 that have a sentence only they ask for (plannerOf). Off (-3) changes the revision too, so pages go back to English at once
 // (settings.js offReason). hasKey: the chosen model or its fallback has a key; without one, pages get the swaps code
 // is sure of alone.
 async function context() {
@@ -144,38 +145,70 @@ async function pipelineOf(ctx) {
   return piped;
 }
 
+// The matcher's index and flags of the host's dictionary words, built once per version a worker sees; null without any
+// (a version the word state doesn't name, an older host, the bundled lists).
+let extra = null;
+async function dictionaryPipe(words) {
+  const { wordState } = await store.get(['wordState']);
+  const stored = words ? await dictionaryOf(chromeStorage, wordState) : null;
+  if (!stored) return null;
+  const key = `${stored.version}:${wordState.version}`;
+  if (extra?.key !== key) extra = { key, pipe: pipelineFor(dictionaryWordsOf(stored.entries, words)) };
+  return extra.pipe;
+}
+
+// Each level's plan of a passage: { plan, ask (the plan the model is asked about), words (what its candidates are
+// checked against) }. At normal and below, the plain plan. Above normal, heavierPlan, whose words are the list and the
+// dictionary words its spans can use. Full stays plain too: it shows every candidate of the one set.
+async function plannerOf(ctx) {
+  const { pipe, words } = await pipelineOf(ctx);
+  if (!isHeavier(ctx.intensity.level)) return (text) => { const plan = planText(pipe, text); return { plan, ask: plan, words }; };
+  const dictionary = await dictionaryPipe(words);
+  return (text) => {
+    const plan = heavierPlan(pipe, dictionary, text);
+    return { plan, ask: plan.ask, words: words && [...words, ...plan.added] };
+  };
+}
+
 // A page's passages: each one's plan (pipeline.js), its candidates (verify.js candidatesOf) and the level's pick of them
 // (planSwaps). Code's candidates need no model: the safe options, and with the model's cached answer its picks,
 // sentences and phrases too. A passage that needs the model (needsCall) and has no cached answer gets its safe swaps
 // at once, listed in `waiting`, and its call starts now; the page asks again with wait: true for what the answer adds,
 // and that reply waits for the call. An item's keep (the swaps the page already shows) also gets `appended`: the plan
 // redone around them, for a passage the reader has had on screen (content.js). Without a key no call is made: the safe
-// swaps are all. A failed call leaves the safe swaps, with the error.
+// swaps are all. A failed call leaves the safe swaps, with the error. Each plan says which painting it is (paint: 'sure'
+// while the answer is on its way, which stays so if the answer never comes; 'final'), as short views end on the first
+// and it has fewer swaps. Above normal the sure painting leaves a sentence asked for in English, or its sure words
+// would rule the sentence out once the reader has seen them.
 async function swaps(msg, sender) {
   const ctx = await context();
   if (msg.revision !== ctx.revision || !activeOn(ctx, sender.url)) return { results: {}, stale: true };
   if (!Array.isArray(msg.items) || msg.items.length > MAX_BATCH) throw new Error('Invalid text batch');
   const items = msg.items.filter((i) => i && typeof i.text === 'string' && i.text.length <= 2000 &&
     wordCount(i.text) >= 6 && !isZeroJapanese(i.text) && i.key === `${ctx.revision}:${hashKey(i.text)}`);
-  const { pipe, words } = await pipelineOf(ctx);
+  const planOf = await plannerOf(ctx);
   const planned = items.map((i) => {
-    const plan = planText(pipe, i.text);
+    const { plan, ask, words } = planOf(i.text);
     const keep = Array.isArray(i.keep) ? i.keep.filter((x) => x && typeof x === 'object').slice(0, 100) : [];
-    return { key: i.key, text: i.text, plan, keep, id: ctx.hasKey && needsCall(plan) ? answerId(ctx, plan) : null };
+    return { key: i.key, text: i.text, plan, ask, words, keep, id: ctx.hasKey && needsCall(ask) ? answerId(ctx, ask) : null };
   });
   const asked = planned.filter((p) => p.id);
   const stored = await cache.getMany(asked.map((p) => p.id));
   const choose = await chooser(ctx);
   const out = { results: {}, plans: {} };
   const pick = (p, answer) => {
-    const candidates = candidatesOf(p.plan, answer, words, ctx.level);
-    ({ swaps: out.results[p.key], plan: out.plans[p.key] } = choose(p.text, candidates));
-    if (p.keep.length) (out.appended ||= {})[p.key] = choose(p.text, candidates, p.keep);
+    const sure = !!p.id && !answer;
+    const all = candidatesOf(p.plan, answer, p.words, ctx.level);
+    const candidates = sure && isHeavier(ctx.intensity.level) ? clearOfSentences(p.plan, all) : all;
+    const paint = sure ? 'sure' : 'final';
+    const chosen = (keep) => { const { swaps: kept, plan } = choose(p.text, candidates, keep, p.words); return { swaps: kept, plan: { ...plan, paint } }; };
+    ({ swaps: out.results[p.key], plan: out.plans[p.key] } = chosen());
+    if (p.keep.length) (out.appended ||= {})[p.key] = chosen(p.keep);
   };
   const misses = asked.filter((p) => !(p.id in stored));
   for (const p of planned) if (!misses.includes(p)) pick(p, p.id ? loadAnswer(p.plan, stored[p.id]) : null);
   if (!misses.length) return out;
-  const batch = misses.map((p) => ({ id: p.id, plan: p.plan }));
+  const batch = misses.map((p) => ({ id: p.id, plan: p.ask }));
   if (!msg.wait) {
     for (const p of misses) pick(p, null);
     out.waiting = misses.map((p) => p.key);
@@ -280,15 +313,16 @@ async function callModel(ctx, batch) {
 // Picks each passage's swaps from its candidates (planSwaps): the level's lookup budget (normal's from the host: the
 // challenge when set, else intensity.py's), the host's per-word estimates and price of a whole sentence (else
 // levels.js SENTENCE_PRICE), the intensity and the passage's random thinning of free words, seeded by the passage and
-// the day so a passage repaints the same way; keep: swaps the page already shows. Returns { swaps, plan }.
+// the day so a passage repaints the same way; keep: swaps the page already shows; listed: the words its candidates were
+// checked against, if not the list (plannerOf). Returns { swaps, plan }.
 async function chooser(ctx) {
   const { wordState } = await store.get(['wordState']);
   const day = localDay();
   const shown = await shownToday(chromeStorage, day);
   const budgetPer100 = intensityBudget(ctx.intensity.level, wordState?.budget);
-  return (text, swaps, keep = []) => {
+  return (text, swaps, keep = [], listed = wordState?.words) => {
     const seed = parseInt(hashKey(`${day}:${text}`).slice(-8), 16);
-    return planSwaps(ctx.level, swaps, text, wordState?.words, { budgetPer100, sentencePrice: wordState?.sentencePrice,
+    return planSwaps(ctx.level, swaps, text, listed, { budgetPer100, sentencePrice: wordState?.sentencePrice,
       shownToday: shown, seed, intensity: ctx.intensity.level, jitter: jitterFor(seed), now: Date.now(), recency: wordState?.recency, keep });
   };
 }
@@ -318,10 +352,11 @@ async function read(msg, sender) {
   const d = `web:${hashKey(text)}`;
   if (await readToday(chromeStorage, d, day)) return { ok: true, counted: false };
   const { pipe, words } = await pipelineOf(ctx);
-  const plan = planText(pipe, text);
+  const { ask } = (await plannerOf(ctx))(text); // what was asked, by place: its answer fits the plain plan too
+  const plan = isHeavier(ctx.intensity.level) ? planText(pipe, text) : ask;
   let answer = null;
-  if (ctx.hasKey && needsCall(plan)) {
-    const id = answerId(ctx, plan);
+  if (ctx.hasKey && needsCall(ask)) {
+    const id = answerId(ctx, ask);
     const stored = (await cache.getMany([id]))[id] ?? (pending.has(id) ? await pending.get(id).promise.catch(() => null) : null);
     answer = loadAnswer(plan, stored);
   }
@@ -360,12 +395,18 @@ async function record(msg, sender) {
   return { ok: true };
 }
 
-// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state and a
-// sentence's closing mark (its translation opened).
+// Gloss interactions for the host's log (see cleanInteraction), only for words in the plugin's word state, the host's
+// dictionary words (+1 and +2 show them, and their lookups are what they cost) and a sentence's closing mark (its
+// translation opened).
 async function logInteraction(msg, sender) {
   const ctx = await context();
   const item = activeOn(ctx, sender.url) ? cleanInteraction(msg) : null;
-  const listed = (ja) => readCached(chromeStorage).then((s) => !!s?.words.some((w) => exactJa(w.ja) === exactJa(ja)));
+  const listed = async (ja) => {
+    const state = await readCached(chromeStorage);
+    if (state?.words.some((w) => exactJa(w.ja) === exactJa(ja))) return true;
+    const stored = await dictionaryOf(chromeStorage, state);
+    return !!stored?.entries.some((e) => exactJa(e[1]) === exactJa(ja));
+  };
   if (!item || (item.word !== undefined && !isSentenceMark(item.word) && !(await listed(item.word)))) return { ok: false };
   const queued = await locked(() => queueLog(chromeStorage, [item]));
   if (queued >= FLUSH_AT) void flush();
@@ -378,6 +419,7 @@ async function logInteraction(msg, sender) {
 async function syncWords() {
   await flush();
   const res = await refresh({ storage: chromeStorage, send });
+  if (res.state?.dictionary) await refreshDictionary({ storage: chromeStorage, send, version: res.state.dictionary });
   await broadcast();
   if (res.state?.reading) await refreshReadingIndex({ storage: chromeStorage, send, version: res.state.reading });
   return { ok: !res.error, error: res.error, count: res.state?.words?.length || 0, stage: res.state?.stage || 0 };

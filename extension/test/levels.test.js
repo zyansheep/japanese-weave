@@ -333,7 +333,8 @@ describe('the lookup budget', () => {
       expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(withDay[2]))).toBe(true);
       expect(picks.every((s) => s.includes(withDay[0]) !== s.includes(big))).toBe(true); // big shows where the sentence doesn't
       expect(picks.some((s) => s.includes(withDay[0]))).toBe(true);
-      expect(picks.some((s) => s.includes(withDay[2]))).toBe(true);
+      // above normal the sentence chooses first (heavier.test.js): the word shows only where the sentence doesn't fit
+      if (intensity === 0) expect(picks.some((s) => s.includes(withDay[2]))).toBe(true);
     }
   });
   test('whole sentences spend up to SENTENCE_SHARE of the budget, words the rest; what one cannot use goes to the other', () => {

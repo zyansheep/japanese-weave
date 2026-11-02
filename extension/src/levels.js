@@ -611,6 +611,19 @@ export const SENTENCE_PRICE = 0.08;
 // once code finds enough candidates. 0.18 keeps chat at the one sentence in five (about 1.1 per 100 words) its brief
 // asked for at Stage 3 before sentences were priced: 0.18 * 0.5 / 0.08 = 1.1 at normal.
 export const SENTENCE_SHARE = 0.18;
+// The same share above normal, on the web only (chat's replies have no sentence candidates of code's: chatweave.mjs
+// keeps SENTENCE_SHARE). Only about 1 lookup in 7 of the budget was spent, so raising a budget bought nothing: sentences
+// and dictionary words are what +1 and +2 buy, and these and INTENSITY_DICTIONARY_SHARE are what sets them apart. A
+// passage of the log's mean 24 words has 0.19 lookups at +1 and 0.29 at +2, and a sentence costs at least its price
+// (about 0.11 in the fit): 0.4 pays for one in seven such passages of ten at +1, 0.6 for one in each at +2.
+export const INTENSITY_SENTENCE_SHARE = { 1: 0.4, 2: 0.6 };
+// The most of a passage's budget dictionary words may take above normal, after the reader's own words and the
+// sentences, which they never take from: the host's dictionary words, not on the word list yet (hostsource.js
+// refreshDictionary). They never spend past the budget left, and a cost over their share gets in with the chance share /
+// cost, so a short passage still gets one now and then.
+export const INTENSITY_DICTIONARY_SHARE = { 1: 0.2, 2: 0.9 };
+// +1 and +2: what's above normal and has a budget (off and full are the ends; the levels below normal never change).
+export const isHeavier = (level) => level > 0 && level < INTENSITY_FULL;
 // Lookups per 100 words a level allows for words not known at a glance: 0 at off, null (no limit) at full. normal:
 // normal's budget (the host's word state budget), which scales every level.
 export function intensityBudget(level, normal) {
@@ -689,8 +702,9 @@ function costOf(s, words, price, now, recency) {
     expected: sum(listed.map((x) => x.p)) + translation };
 }
 
-// A passage's swaps, picked from its validated candidates (verify.js candidatesOf: one set for every level), so new
-// estimates, a new budget or another intensity never cost a model call. Returns { swaps, plan }: plan says
+// A passage's swaps, picked from its validated candidates (verify.js candidatesOf: one set for every level up to normal
+// and at full, with what heavierPlan adds at +1 and +2), so new estimates, a new budget or another intensity cost no
+// model call beyond a sentence only +1 and +2 ask for. Returns { swaps, plan }: plan says
 // how the amount was chosen ({ level, intensity: its factor, jitter: the share of free swaps kept, limit: swaps kept,
 // candidates: distinct ones the passage can place, budget: lookups the passage may spend if read, spent: what the
 // swaps kept within the budget cost, expected: lookups predicted if it is read, sentencePrice: what a whole sentence
@@ -720,6 +734,11 @@ function costOf(s, words, price, now, recency) {
 // stay as they are: they are taken first, in the budget as they were planned, and the rest is planned around them.
 // Full is the same with no budget: everything is free, so every candidate is kept, bigger swaps first, with no
 // per-sentence cap or thinning, and a Japanese word again where the passage says its English again.
+// +1 and +2 (isHeavier) differ from normal in four ways: no thinning (the experiment only reads normal: knowledge.py
+// calibrate); sentences get INTENSITY_SENTENCE_SHARE and choose first, since a budgeted word in a sentence would rule
+// the sentence out; and dictionary words (the host marks them dictionary: true; none reach the levels at or below
+// normal) come last, by the same ranking, up to INTENSITY_DICTIONARY_SHARE of the budget and never past what is left of it.
+// plan.dictionary: how many of those were kept.
 export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed = 0, shownToday = [], intensity = 0, jitter = 1,
   sentencePrice, now = Date.now(), recency = null, keep = [] } = {}) {
   const words = new Map((sharedWords || []).map((w) => [w.ja, w]));
@@ -735,16 +754,19 @@ export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed 
     const cost = place && costOf(s, words, price, now, recency);
     if (cost && (!words.size || cost.listed.every((x) => x.w))) items.push({ ...cost, place, sentence: sentenceAt(place.start, starts) });
   }
-  const share = full ? 1 : jitter;
+  const heavier = isHeavier(intensity);
+  const share = full || heavier ? 1 : jitter;
   const budget = full ? Infinity : intensity <= INTENSITY_OFF ? 0
     : ((Number.isFinite(budgetPer100) ? Math.max(0, budgetPer100) : intensityBudget(intensity)) * wordCount(text)) / 100;
   const kept = [];
   let spent = 0; // what the swaps kept within the budget cost
+  const fromDictionary = (c) => c.s.kind !== 'sentence' && c.listed.some((x) => x.w?.dictionary === true);
   const armsOf = () => Object.fromEntries(kept.flatMap((c) => c.listed).filter((x) => typeof x.w?.arm === 'string').map((x) => [x.ja, x.w.arm]));
   const planOf = () => ({ swaps: items.filter((c) => kept.includes(c)).map((c) => c.s), plan: { level: intensity,
     intensity: full ? FULL_PLAN_FACTOR : intensityFactor(intensity), jitter: share, limit: kept.length, candidates: items.length,
     ...(full ? {} : { budget: round3(budget), spent: round3(spent) }), expected: round3(sum(kept.map((c) => c.expected))),
-    sentencePrice: price, ...(Object.keys(armsOf()).length ? { arms: armsOf() } : {}) } });
+    sentencePrice: price, ...(Object.keys(armsOf()).length ? { arms: armsOf() } : {}),
+    ...(kept.some(fromDictionary) ? { dictionary: kept.filter(fromDictionary).length } : {}) } });
   if (intensity <= INTENSITY_OFF) return planOf();
   const most = full ? Infinity : perSentence(intensity);
   const random = seededRandom(seed);
@@ -778,7 +800,8 @@ export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed 
   // today, costly or free (thinning mustn't drop it), waiting or not (held or paused, it can't have been read lately).
   const due = (c) => c.listed.some((x) => isProbe(x.w) && !shown.has(x.ja.normalize('NFKC').toLowerCase()));
   // The budget's two parts: what is left of each, and stop, the place in the ranking of the first that didn't fit it
-  const parts = [{ left: budget * (1 - SENTENCE_SHARE) }, { left: budget * SENTENCE_SHARE }];
+  const sentenceShare = heavier ? INTENSITY_SENTENCE_SHARE[intensity] : SENTENCE_SHARE;
+  const parts = [{ left: budget * (1 - sentenceShare) }, { left: budget * sentenceShare }];
   const partOf = (c) => parts[whole(c) ? 1 : 0];
   const fits = (c) => !kept.includes(c) && unused(c) && room(c) && clear(c);
   // Swaps already on the page first, as they were planned: one with a word whose probe is due was the passage's probe,
@@ -800,10 +823,11 @@ export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed 
     for (let i = from; i < ranked.length; i++) {
       const c = ranked[i];
       const part = partOf(c);
-      if ((only && part !== only) || part.stop !== undefined || !fits(c)) continue;
+      if ((only && part !== only) || part.stop !== undefined || !fits(c) || fromDictionary(c)) continue;
       if (c.cost <= part.left) { spend(c); part.left -= c.cost; } else part.stop = i;
     }
   };
+  if (heavier) go(0, parts[1]); // sentences first
   go(0);
   for (const [done, other] of [parts, [...parts].reverse()]) { // a part whose candidates ran out hands on its rest
     if (done.stop !== undefined || other.stop === undefined || !(done.left > 0)) continue;
@@ -816,6 +840,16 @@ export function planSwaps(level, swaps, text, sharedWords, { budgetPer100, seed 
   for (const part of parts) {
     const c = ranked[part.stop];
     if (c && fits(c) && random() < part.left / c.cost) spend(c);
+  }
+  if (heavier) {
+    let credit = budget * INTENSITY_DICTIONARY_SHARE[intensity] - sum(kept.filter(fromDictionary).map((c) => c.cost));
+    for (const c of ranked) {
+      if (!(credit > 0)) break;
+      if (!fromDictionary(c) || !fits(c) || spent + c.cost > budget) continue;
+      if (c.cost <= credit) { spend(c); credit -= c.cost; continue; }
+      if (random() < credit / c.cost) spend(c);
+      break;
+    }
   }
   // Free swaps, bigger first, else in their order; one thinned out uses its words too, so thinning keeps a word
   // with chance jitter.

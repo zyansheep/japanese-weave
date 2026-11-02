@@ -1,6 +1,7 @@
 """Prints the word state as the extension receives it from the native host (no keys): each word with its glosses, safe
-glosses and entry id, and the estimates and budget. check-lab.mjs and matcher-lab.mjs take it as WORDS, as they take a
-copy of state.json; worker-lab.mjs takes it as the host's reply.
+glosses and entry id, and the estimates and budget, with the dictionary words +1 and +2 may add as dictionaryWords.
+check-lab.mjs and matcher-lab.mjs take it as WORDS, as they take a copy of state.json; worker-lab.mjs takes it as the
+host's reply; level-replay.mjs takes it, with dictionaryWords, as its WORDS.
 
   python tools/prompt-lab/words.py > words.json              # from your state, as the native host answers
   python tools/prompt-lab/words.py state.json > words.json   # from a copy of a state, which stays as it is (no day's
@@ -23,6 +24,8 @@ if len(sys.argv) > 1:
     reply.update(fw_host.adaptive(state, reply['words']))
 else:
     reply = fw_host.handle({'type': 'state'})
+    state = fw_host.hub.current(fw_host.STATE_MAX_AGE, wait=False)[0]
+reply['dictionaryWords'] = webdata.dictionary_words(state, fw_host.knowledge.load())['entries']
 for key in ('geminiKey', 'anthropicKey'):
     reply.pop(key, None)
 print(json.dumps(reply, ensure_ascii=False))
