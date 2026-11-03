@@ -21,7 +21,7 @@ lab's judged passages (lab, fresh, fresh2).
 | 4 One fitter | Done: a penalized fit of the whole log | Partly: the convergence check passes and known and new words are within 15% in the sim; learning words were 2.1 times over until step 10 (1.5 now); on the snapshot it ties the old model (5 days can't separate them) |
 | 5 Fewer controls | Done: no daily controller; sentences take up to 18% of the budget at their price on both surfaces; thinning keeps 20% to 100% of free words only | Met |
 | 6 Delayed-start experiment | Built; starts with the first refresh after deployment | Met in the sim (no hidden word shown in 2,482 hidden word-days; the planted effect read back at p = 0.001); power at 80 words a side is 33% to 91%, lower than planned |
-| 7 Probe | Done: `fw.py probe`, `/japanese-weave:probe` | Met: standard error 4 to 5 points at 60 words; interval coverage 89% to 94% in simulation |
+| 7 Probe | Done: `fw.py probe`; since 2026-11 in the review stream (T3 Code's review cards, a rolling 30-day estimate in `fw.py status`), the command gone | Met: standard error 4 to 5 points at 60 words; interval coverage 89% to 94% in simulation. The review stream's: standard error about 8 points at 120 probe cards, coverage 17 of 20 simulated readers |
 | 8 Status from the model | Built; the switch happens at the first refresh after deployment (`fw.py relabel --dry-run` lists the 73 words it changes; `--restore` undoes it for 30 days) | Met |
 | 9 Live check | Waiting: needs 2 to 4 weeks of data after deployment | Not yet |
 | 10 Shared recency | Done, self-disabling: it stays off until the reader's own log shows short-term forgetting | Partly: the sim recovers the decay within a factor of 2 and learning words improve from 2.1 to 1.5 times (not within 20%); on the snapshot the fitted floor sits above every word, so the term is off |
@@ -93,7 +93,9 @@ lab's judged passages (lab, fresh, fresh2).
    offered.
 7. **The baseline probe** [R]. `fw.py probe`: about 60 words sampled by frequency (by your reading's frequency once step
    13 counts it), each marked known or not, plus 6 made-up words. Run it now, before the big changes, then monthly.
-   Done when it prints the goal estimate with its interval, and the share of made-up words claimed.
+   Done when it prints the goal estimate with its interval, and the share of made-up words claimed. Since 2026-11 the
+   probe lives in the review stream instead (scripts/review.py, probe.rolling): no command, an estimate from the last
+   30 days of review cards.
 8. **Status from the model; intake from the budget.** Labels come from the fitted model: known means free. Up to 5 new
    words a day come in while the budget goes unspent, in lexicon order until step 13 ranks them by your reading. Delete
    the 20 slots, the day-count rules, the evidence moves, the rule that shows a new word first outside the budget, and
@@ -182,6 +184,11 @@ since a host that doesn't know a plan's `paint` rejects its shown record. Then r
 plans that are sure paintings says how much short views depress every density figure, and sentence marks at +1 and +2
 say what Haiku makes of last clauses, which nothing has measured.
 
+**The review wedge** (scripts/review.py): update the collector before the T3 Code builds with the wedge, since an older
+collector has no `/v1/review/next` and rejects review items. Its first refresh refits from nothing under the new model
+version (fit 6). Then watch `fw.py knowledge` for the separation of the reveal times and `fw.py status` for the probe's
+rolling estimate.
+
 **Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
 entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
 
@@ -210,6 +217,8 @@ then revert the merge on `main` and reload the previous extension.
   the fit against step 4's, word features against a flat start, and recency, each by day. Decide then whether to turn
   on the per-surface reading model (`SURFACE_TUNING`) and reading speed as evidence: each switch says in
   docs/adaptive-difficulty.md what result should turn it on.
-- **Day 30:** the first probe (`fw.py probe`), and every 30 days after.
+- **Day 30:** the first probe (`fw.py probe`), and every 30 days after. Since 2026-11: the probe's rolling estimate
+  in `fw.py status`, once the review cards have run a few weeks; and `fw.py knowledge` for how well the reveal times
+  separate known from not known (a weak separation means the cards say little, the made-up words included).
 - **About week 8, step 15:** `fw.py experiment` reads out the delayed-start experiment.
 - **Day 60 or later, step 16:** a memory strength per word, if the experiment shows that exposure teaches.

@@ -27,7 +27,10 @@ kanji known at a glance, script, part of speech, length, rarity and source langu
 much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
 counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset,
 corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
-computed from its answers alone, so it remains the check on the model. Each word's uncertainty is the fit's curvature
+computed from its answers alone, so it remains the check on the model; the review cards (review.py: a word alone, its
+reading and meaning revealed on request) are observations of their own kind too, the time to the reveal or its absence a
+mixture of known at recall and not (Components, review_answers), whose made-up words pin the "not known" side, and they
+are reads for the recency clock. Each word's uncertainty is the fit's curvature
 (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
 Each passage's or paragraph's time on screen can be evidence too (SPEED, off until the replay shows a gain: Fit's
 speed, speed_units). The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online
@@ -782,11 +785,14 @@ FIT_ITERATIONS = 60
 # The monthly probe's (probe): its answers are observations of their own kind (probe_answers), recognition out of
 # context, answered on purpose, so they get their own offset on the web's scale, centred on none and free to move by
 # about the lookup habit (PLAN.md row R: a word not recognised in reading is looked up only some of the time).
+# The review cards' (review): P(known at recall) = sigmoid(k - review) (Fit._review_terms), recall of the word alone,
+# its own offset on the web's scale, centred on none.
 # Then a word's prior mean, a regression on its features (features): with an Anki card, an intercept by origin
 # (origin_at; the names say new, learning and known) plus a slope on ln(1 + interval), centred on the old prior
 # 0.5 + 0.8 ln(1 + interval); without one, an intercept by origin, centred on the old neutral prior (1.0) and, for words
 # marked known, the planner's fwlib.KNOWN_PRIOR_K; for a word not marked known, plus its word features.
 SHARED = {'t3': (0.0, 0.5), 'form': (0.0, 1.0), 'floor': (1.0, 1.5), 'context': (0.0, 0.5), 'probe': (0.0, 1.0),
+          'review': (0.0, 1.0),
           'card new': (0.5, 0.5), 'card learning': (0.5, 0.5), 'card known': (0.5, 0.5), 'interval': (0.8, 0.25),
           'new': (1.0, 1.0), 'learning': (1.0, 1.0), 'known': (fwlib.KNOWN_PRIOR_K, 1.0)}
 # And the word's own features (word_features), each coefficient held toward 0, no effect, by WORD_SD: on their scales
@@ -799,8 +805,9 @@ WORD_FEATURES = ('rank', 'kanji known', 'all kanji known', 'kana', 'katakana', '
 WORD_SD = 0.5
 SHARED.update({name: (0.0, WORD_SD) for name in WORD_FEATURES})
 SHARED_NAMES = tuple(SHARED)
-T3, FORM, FLOOR, CONTEXT, PROBE = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context', 'probe'))
-JOINED = (T3, FORM, FLOOR, CONTEXT, PROBE)  # the shared parameters an observation's chance depends on
+T3, FORM, FLOOR, CONTEXT, PROBE, REVIEW = (SHARED_NAMES.index(name) for name in ('t3', 'form', 'floor', 'context',
+                                                                                  'probe', 'review'))
+JOINED = (T3, FORM, FLOOR, CONTEXT, PROBE, REVIEW)  # the shared parameters an observation's chance depends on
 ORIGINS = fwlib.ORIGINS  # the prior's intercepts: how a word came into use (origin_at)
 WIDTHS = {'card': 1.0, 'none': 1.5}  # the prior sd of k around its mean, by kind: fitted, and held toward these
 WIDTH_WEIGHT = 5                     # with this many words' worth of weight
@@ -914,8 +921,9 @@ def read_weight(o, episode, pace, top, same=True):
 
 def showings_of(log, pace, top):
     """{word: [(shown, read chance, (surface, view), observation)]} over the whole log (log.origin), oldest first: every
-    showing and episode a word was observed in, with its read chance at `pace` and `top` (read_weight); kept with the
-    log."""
+    showing and episode a word was observed in, with its read chance at `pace` and `top` (read_weight), and every review
+    card of a real word (review_log's shown), a read for certain with no observation (None): it shows the word alone,
+    and its reveal the meaning; kept with the log."""
     origin = log.origin
     cache = origin.__dict__.setdefault('_showings', {})
     key = tuple(tuple(sorted(v.items())) if isinstance(v, dict) else v for v in (pace, top))
@@ -929,6 +937,8 @@ def showings_of(log, pace, top):
             for o in event.obs:
                 out.setdefault(o.word, []).append((shown, read_weight(o, event.episode, pace, top, same), event.key[:2],
                                                    o))
+        for at, ja in review_log(origin)[3]:
+            out.setdefault(ja, []).append((at, 1.0, ('review', ''), None))
         for items in out.values():
             items.sort(key=lambda h: h[0])
         cache[key] = out
@@ -940,11 +950,14 @@ def read_clocks(log, pace, top, chance):
     context, from the word's showings before it in the log. Each counts by the chance it was read given what happened
     there: 1 when opened, else r (1 - q) / (1 - r q), r its read chance (read_weight) and q = chance(observation, u, s)
     its P(lookup | read) at its own clock, so a showing of a word the reader didn't know, left unopened, was most likely
-    skipped and doesn't reset the clock."""
+    skipped and doesn't reset the clock. A review card (no observation) is a read."""
     found = {}
     for items in showings_of(log, pace, top).values():
         history = []
         for shown, r, where, o in items:
+            if o is None:
+                history.append((shown, r, where))
+                continue
             u, s = since_read(*last_reads(history, shown, where), shown)
             found[id(o)] = u, s
             if o.y <= 0:
@@ -964,7 +977,7 @@ def word_reads(log, fit, now):
         for shown, r, where, o in items:
             if shown >= now:
                 break
-            if o.y <= 0:
+            if o is not None and o.y <= 0:
                 u, s = since_read(*last_reads(history, shown, where), shown)
                 q = chance(o, u, s)
                 r = r * (1 - q) / (1 - r * q)
@@ -1120,7 +1133,7 @@ def word_entries(words, ids=None):
 
 
 def evidenced(log, until):
-    """The words with evidence in a log before `until`: an observation, a command or a probe answer."""
+    """The words with evidence in a log before `until`: an observation, a command, a probe answer or a review card."""
     out = set()
     for event in log.events:
         if event.at >= until:
@@ -1130,6 +1143,7 @@ def evidenced(log, until):
         else:
             out.add(event.word)
     out.update(ja for at, ja, _y in probe_log(log)[0] if at < until)
+    out.update(ja for at, ja, _x in review_log(log)[0] if at < until)
     return out
 
 
@@ -1198,6 +1212,201 @@ def overclaiming(fakes, until, days=OVERCLAIM_DAYS):
     return claimed / answered if answered else 0.0
 
 
+# ---- review cards (review.py serves them; feedback.py keeps what happened: the cards table) ----
+# A review card shows one word alone; the reader reveals its reading and meaning, or moves on without. What is measured
+# is the time from the card appearing to the reveal, or that there was none. Two kinds of outcome, a mixture over
+# whether the reader knew the word at recall (Components): known, a log reveal time N(mu_K, s_K) and a chance a_K of
+# moving on without a reveal; not known, N(mu_U, s_U) and a_U. The made-up words (data/fakes.tsv) are never known, so
+# their outcomes are the "not known" component's alone and pin it, give-ups included: a reader who presses up at once
+# on a word they don't know shows it on the made-up words too, and if that looks like a known reveal the two components
+# overlap, every card's evidence shrinks with them (its likelihood ratio nears 1), and the separation (auc, worth) says
+# so. Each component is held by a prior worth REVIEW_CARDS cards, so a handful of cards can't swing it.
+REVIEW_MAX_MS = 60_000     # a card on screen longer than this before its reveal, or before it was left, is distraction:
+                           # the outcome is dropped (the showing still counts as a read, read_clocks)
+REVIEW_MIN_MS = 150        # a reveal sooner is taken as this soon (a key already down); a card left sooner wasn't
+                           # looked at, and is dropped
+REVIEW_CARDS = 10          # each component's prior weighs as much as this many cards
+# (log ms mean, its sd, the chance of moving on without a reveal) a priori: a word known at recall revealed in about
+# 1.2 s, one not known in about 3 s, and a known word more often left without a reveal (nothing to check)
+REVIEW_PRIOR = {'known': (math.log(1200), 0.5, 0.3), 'unknown': (math.log(3000), 0.7, 0.1)}
+REVIEW_TOLERANCE = 1e-4    # the components' EM stops once no parameter moves more than this
+REVIEW_WEAK = 0.2          # a card worth less than this of a yes/no answer at even odds (auc about 0.78): weak
+REVIEW_GRID = 50           # the expected information is tabled at this many steps of P(known)
+
+
+def review_outcome(reveal, shown):
+    """A reviewed card's outcome as the mixture reads it: its log reveal time (ms, floored at REVIEW_MIN_MS), None when
+    left without a reveal, or False when dropped (over REVIEW_MAX_MS, or left within REVIEW_MIN_MS)."""
+    if reveal is None:
+        return None if REVIEW_MIN_MS <= (shown or 0) <= REVIEW_MAX_MS else False
+    return math.log(max(REVIEW_MIN_MS, reveal)) if reveal <= REVIEW_MAX_MS else False
+
+
+def softplus(x):
+    return x + math.log1p(math.exp(-x)) if x > 0 else math.log1p(math.exp(x))
+
+
+class Components:
+    """The two components of a review outcome (the comment above REVIEW_MAX_MS): mu, s (log ms) and a (the chance of no
+    reveal) for known and not known, fitted by EM with their priors (update), and what they make of an outcome: log
+    densities (logs), the expected information a card gives on its word's log odds of being known (info), and how well
+    they separate (separation)."""
+    NAMES = ('known', 'unknown')
+
+    def __init__(self, values=None):
+        values = values if isinstance(values, dict) else {}
+        self.mu, self.s, self.a = [], [], []
+        for name in self.NAMES:
+            mu, s, a = REVIEW_PRIOR[name]
+            given = values.get(name) if isinstance(values.get(name), dict) else {}
+            number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+            self.mu.append(given['mu'] if number(given.get('mu')) else mu)
+            self.s.append(given['s'] if number(given.get('s')) and given['s'] > 0 else s)
+            self.a.append(given['a'] if number(given.get('a')) and 0 < given['a'] < 1 else a)
+        self._table = None
+
+    def values(self):
+        return {name: {'mu': round(self.mu[c], 5), 's': round(self.s[c], 5), 'a': round(self.a[c], 5)}
+                for c, name in enumerate(self.NAMES)}
+
+    def logs(self, x):
+        """(log A, log B): the outcome's log likelihood if known, and if not (x: review_outcome's)."""
+        if x is None:
+            return math.log(self.a[0]), math.log(self.a[1])
+        return tuple(math.log(1 - self.a[c]) - math.log(self.s[c]) - 0.5 * math.log(2 * math.pi)
+                     - 0.5 * ((x - self.mu[c]) / self.s[c]) ** 2 for c in (0, 1))
+
+    def penalty(self):
+        """The priors' part of the objective: per component, REVIEW_CARDS cards' worth of N(mu0, s^2 / REVIEW_CARDS) on
+        mu, of an inverse gamma on s^2 around s0^2, and of Beta(n a0, n (1 - a0)) on a (update maximizes with it)."""
+        n, total = REVIEW_CARDS, 0.0
+        for c, name in enumerate(self.NAMES):
+            mu0, s0, a0 = REVIEW_PRIOR[name]
+            total += n * ((self.mu[c] - mu0) ** 2 + s0 * s0) / (2 * self.s[c] ** 2) + n * math.log(self.s[c])
+            total -= n * (a0 * math.log(self.a[c]) + (1 - a0) * math.log(1 - self.a[c]))
+        return total
+
+    def update(self, real, fakes=()):
+        """One M step: real, [(x, weight, P(known))] the cards of real words; fakes, [(x, weight)] the made-up words',
+        never known. Returns how far the parameters moved."""
+        n, before = REVIEW_CARDS, self.mu + self.s + self.a
+        for c, name in enumerate(self.NAMES):
+            mu0, s0, a0 = REVIEW_PRIOR[name]
+            cards = [(x, v * (r if c == 0 else 1 - r)) for x, v, r in real] + ([(x, v) for x, v in fakes] if c else [])
+            total = sum(v for _x, v in cards)
+            timed = [(x, v) for x, v in cards if x is not None]
+            weight = sum(v for _x, v in timed)
+            self.a[c] = min(0.995, max(0.005, ((total - weight) + n * a0) / (total + n)))
+            self.mu[c] = (sum(v * x for x, v in timed) + n * mu0) / (weight + n)
+            spread = sum(v * (x - self.mu[c]) ** 2 for x, v in timed) + n * (self.mu[c] - mu0) ** 2 + n * s0 * s0
+            self.s[c] = max(0.05, math.sqrt(spread / (weight + n)))
+        self._table = None
+        return max(abs(a - b) for a, b in zip(self.mu + self.s + self.a, before))
+
+    def _j(self, z):
+        """sum over outcomes of (A - B)^2 / (z A + (1 - z) B): no reveal, then the reveal times on a grid."""
+        a, b = self.a
+        total = (a - b) ** 2 / (z * a + (1 - z) * b)
+        low = min(m - 6 * s for m, s in zip(self.mu, self.s))
+        high = max(m + 6 * s for m, s in zip(self.mu, self.s))
+        steps = 240
+        dx = (high - low) / steps
+        for j in range(steps + 1):
+            x = low + j * dx
+            fa, fb = (math.exp(v) for v in self.logs(x))
+            mix = z * fa + (1 - z) * fb
+            if mix > 0:
+                total += (0.5 if j in (0, steps) else 1.0) * dx * (fa - fb) ** 2 / mix
+        return total
+
+    def info(self, z):
+        """The expected information one card gives on its word's log odds of being known at recall, at P(known) z:
+        z^2 (1 - z)^2 sum (A - B)^2 / (z A + (1 - z) B), z (1 - z) when the outcome tells known from not for sure, 0
+        when the components are alike (tabled over z)."""
+        if self._table is None:
+            self._table = [(lambda z: z * z * (1 - z) * (1 - z) * self._j(z))((j + 0.5) / REVIEW_GRID)
+                           for j in range(REVIEW_GRID)]
+        t = min(REVIEW_GRID - 1.0, max(0.0, z * REVIEW_GRID - 0.5))
+        j = min(REVIEW_GRID - 2, int(t))
+        value = self._table[j] + (t - j) * (self._table[j + 1] - self._table[j])
+        return max(0.0, min(value, z * (1 - z)))
+
+    def separation(self):
+        """How well the components tell a word known at recall from one not: auc, the chance a known word's reveal is
+        sooner than a not known word's (by the reveal times alone, 0.5: none); worth, the information a card gives at
+        even odds as a share of a yes/no answer's (no reveal included; 1: as good as asking, 0: worthless); weak, worth
+        under REVIEW_WEAK."""
+        spread = math.sqrt(self.s[0] ** 2 + self.s[1] ** 2)
+        auc = 0.5 * math.erfc(-(self.mu[1] - self.mu[0]) / spread / math.sqrt(2))
+        worth = self.info(0.5) / 0.25
+        return {'auc': round(auc, 3), 'worth': round(worth, 3), 'weak': worth < REVIEW_WEAK}
+
+    def summary(self):
+        """For knowledge.json and reports: each component's median reveal (ms), its spread (log sd) and chance of no
+        reveal, and the separation."""
+        out = {name: {'ms': round(math.exp(self.mu[c])), 'sd': round(self.s[c], 3), 'skip': round(self.a[c], 3)}
+               for c, name in enumerate(self.NAMES)}
+        return dict(out, **self.separation())
+
+
+def review_answers(reviews, entries, d=None):
+    """The reviewed cards (feedback.reviews) as the fit reads them: (answers, fakes, extra, shown). answers: [(at, ja,
+    x)] per card of a real word (learning or probe) with an outcome (review_outcome: x a log time, or None for no
+    reveal); fakes: [(at, x)] per made-up word's card with one; shown: [(at, ja)] every real word's card, dropped
+    outcomes too (each is a read, for the recency clock). ja is the word state's word for the card's entry (entries:
+    {ja: its dictionary entry}, by id, else by spelling), else the entry's own spelling, with that entry in extra (for
+    the word features), as probe_answers finds a probe's words."""
+    by_id, by_key = {}, {}
+    for ja, e in (entries or {}).items():
+        if e is not None:
+            by_id.setdefault(e['id'], ja)
+        by_key.setdefault(fwlib.key(ja), ja)
+    answers, fakes, extra, shown = [], [], {}, []
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    for r in reviews or ():
+        if not isinstance(r, dict) or not number(r.get('at')) or not isinstance(r.get('word'), str):
+            continue
+        reveal, seen = r.get('reveal'), r.get('shown')
+        if reveal is not None and not number(reveal) or not number(seen):
+            continue
+        x = review_outcome(reveal, seen)
+        if r.get('kind') == 'fake':
+            if x is not False:
+                fakes.append((r['at'], x))
+            continue
+        if r.get('kind') not in ('learning', 'probe'):
+            continue
+        entry_id = r.get('entry') if isinstance(r.get('entry'), int) else None
+        ja = (by_id.get(entry_id) if entry_id is not None else None) or by_key.get(fwlib.key(r['word']))
+        if ja is None:
+            if entry_id is None:
+                continue
+            if d is None:
+                import dictionary  # here: only a card of a word outside the state needs it
+                d = dictionary.load() if dictionary.PATH.exists() else False
+            entry = d.get(entry_id) if d else None
+            if entry is None:
+                continue
+            ja = entry['ja']
+            extra[ja] = entry
+        shown.append((r['at'], ja))
+        if x is not False:
+            answers.append((r['at'], ja, x))
+    return answers, fakes, extra, shown
+
+
+def review_log(log):
+    """review_answers of a log's reviewed cards (log.reviews; none for a log without them), found once per log and its
+    word state's entries."""
+    origin = getattr(log, 'origin', log)
+    found = origin.__dict__.get('_reviewed')
+    if found is None:
+        reviews = getattr(origin, 'reviews', None) or ()
+        found = review_answers(reviews, getattr(log, 'entries', None) or {}) if reviews else ((), (), {}, ())
+        origin.__dict__['_reviewed'] = found
+    return found
+
+
 def _solve(a, b):
     """x with a x = b, for a small positive definite a (Gaussian elimination with pivoting)."""
     n = len(b)
@@ -1229,12 +1438,16 @@ class Fit:
 
     The monthly probes' answers before `until` (probe_log, without them when probes is False) are observations too,
     each at the word's long-term chance with an offset of its own (_probe_terms); a probed word outside the word state
-    takes its features from its dictionary entry.
+    takes its features from its dictionary entry. So are the review cards' outcomes before `until` (review_log, without
+    them when reviews is False; _review_terms): a mixture, known at recall with chance sigmoid(k - review), whose two
+    components (Components: reveal time and no reveal, known and not; the made-up words' cards are of the second alone)
+    are fitted with the words by EM, each held by its prior (REVIEW_PRIOR), with k held at each step.
 
     Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
     regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
     times (COMMAND_K - k)^2 / 2 while k is below a known command's or above a learn command's; and each shared
-    parameter's prior (SHARED). By Newton's method with the expected information, positive definite, whose shape (a
+    parameter's prior (SHARED); and the review components' priors (Components.penalty). By Newton's method with the
+    expected information, positive definite, whose shape (a
     diagonal for the words, joined only through the shared parameters) the Schur complement solves in time linear in
     the words; the widths by EM toward WIDTHS. Each word's sd is its k's from the inverse of the information (Laplace),
     the shared parameters' uncertainty included. frozen: the shared parameters and widths stay at their priors, as for
@@ -1257,9 +1470,9 @@ class Fit:
     words move with their reading times, but the time term's own parameters never move with the words."""
 
     def __init__(self, log, until, pace=None, top=None, start=None, frozen=False, free=None, plain=False,
-                 recency=True, probes=True, speed=None):
+                 recency=True, probes=True, speed=None, reviews=True):
         self.until, self.day, self.frozen, self.plain = until, day_of(until - 1), frozen, plain
-        self.recency, self.probes = recency, probes
+        self.recency, self.probes, self.reviews = recency, probes, reviews
         self.speed = SPEED if speed is None else speed
         self.names = SHARED_NAMES + (SPEED_NAMES if self.speed else ())
         self.priors = dict(SHARED, **SPEED_SHARED) if self.speed else SHARED
@@ -1271,11 +1484,14 @@ class Fit:
         self.entries = {} if plain else getattr(log, 'entries', None) or {}
         if probes and not plain and probe_log(log)[2]:  # the entries of probed words outside the word state
             self.entries = dict(self.entries, **probe_log(log)[2])
+        if reviews and not plain and review_log(log)[2]:  # and of review cards' words outside it
+            self.entries = dict(self.entries, **review_log(log)[2])
         self.own = {ja for ja in evidenced(log, until) if (free or {}).get(ja)} if self.entries else set()
         self.known, self._features = kanji_counts(self.own), {}
         self.words, self.index, self.x, self.kind, self.n = [], {}, [], [], []
         started = time.time()
         start = start or {}
+        self._review_start = None if frozen else start.get('review')
         shared = {} if frozen else start.get('shared') or {}
         if self.speed and not frozen and (start.get('cut') or {}).get('shared'):  # the fit without the term first
             shared = dict(shared, **start['cut']['shared'])
@@ -1301,6 +1517,7 @@ class Fit:
         speed, then the term's two stages (_speed_alone), the second from timed ({ja: k} of the last fit with it)."""
         self.theta, self.widths, self.k, self.var = list(theta), dict(widths), [], []
         self.group_sd, self._timed, self._temper = self._group_start, False, None
+        self.review_parts = Components(self._review_start)
         self._terms(log, read_clocks(log, self.pace, self.top, self._chance(before)) if self.recency else {})
         self.k = [before.get(ja, self._mean(i, self.theta)) for i, ja in enumerate(self.words)]
         self.iterations = self._run()
@@ -1455,6 +1672,7 @@ class Fit:
         keys = list(pooled)
         self.terms = tuple(tuple(key[j] for key in keys) for j in range(7)) + (tuple(pooled[key] for key in keys),)
         self._probe_terms(log)
+        self._review_terms(log)
         before = dict(zip(self.groups, self.alpha))  # each group's own pace starts where the last pass left it
         self.units, self.groups = units, groups
         self.alpha = [before.get(key, 0.0) for key in groups]
@@ -1482,6 +1700,50 @@ class Fit:
             self.n[i] += v * (1.0 if y else self.probe_read)
         keys = list(pooled)
         self.probe_terms = (tuple(i for i, _y in keys), tuple(y for _i, y in keys), tuple(pooled[k] for k in keys))
+
+    def _review_terms(self, log):
+        """The review cards' outcomes before until (review_log): review_terms (word, x, weight) for real words' cards
+        and review_fakes (x, weight) for made-up words', x review_outcome's, each weighted like evidence. A real word's
+        card has likelihood z A + (1 - z) B, z = sigmoid(k - review) the chance the word is known at recall and A, B
+        the outcome's under the known and not known components; a made-up word's, B. A card adds its weight to its
+        word's evidence (n)."""
+        answers, fakes, _extra, _shown = review_log(log) if self.reviews else ((), (), {}, ())
+        terms, made_up = [], []
+        for at, ja, x in answers:
+            if at >= self.until:
+                continue
+            i, v = self._word(ja), 0.5 ** ((self.until - at) / DAY_MS / EVIDENCE_DAYS)
+            terms.append((i, x, v))
+            self.n[i] += v
+        for at, x in fakes:
+            if at < self.until:
+                made_up.append((x, 0.5 ** ((self.until - at) / DAY_MS / EVIDENCE_DAYS)))
+        self.review_terms, self.review_fakes = terms, made_up
+        self._review_ready()
+
+    def _review_ready(self):
+        """Each card's log likelihoods under the components as they stand: (log A, log B) per real word's card, log B
+        per made-up word's."""
+        parts = self.review_parts
+        self._review_logs = [parts.logs(x) for _i, x, _v in self.review_terms]
+        self._fake_logs = [parts.logs(x)[1] for x, _v in self.review_fakes]
+
+    def _review_em(self, k, theta):
+        """The components by EM with every word held at k and the offset at theta's (each step lowers the objective:
+        coordinate descent with the Newton steps on k and theta). Returns how far they moved."""
+        if self.frozen or not (self.review_terms or self.review_fakes):
+            return 0.0
+        moved, c = 0.0, theta[REVIEW]
+        for _ in range(50):
+            real = []
+            for (i, x, v), (la, lb) in zip(self.review_terms, self._review_logs):
+                real.append((x, v, sigmoid(max(-30.0, min(30.0, k[i])) - c + la - lb)))
+            step = self.review_parts.update(real, self.review_fakes)
+            self._review_ready()
+            moved = max(moved, step)
+            if step < REVIEW_TOLERANCE:
+                break
+        return moved
 
     def _mean(self, i, theta):
         return sum(theta[f] * value for f, value in self.x[i].items())
@@ -1584,6 +1846,21 @@ class Fit:
             hpp += v * i
         g[PROBE] += gp
         h[PROBE][PROBE] += hpp
+        recall, jreview, gr, hrr, parts = theta[REVIEW], joins[REVIEW], 0.0, 0.0, self.review_parts
+        for (w, _x, v), (la, lb) in zip(self.review_terms, self._review_logs):  # eta = k - review
+            kw = k[w]
+            eta = (-30.0 if kw < -30.0 else 30.0 if kw > 30.0 else kw) - recall
+            z, p = sigmoid(eta), sigmoid(eta + la - lb)  # known a priori, and given the outcome
+            total -= v * (lb + softplus(eta + la - lb) - softplus(eta))
+            d, i = z - p, v * parts.info(z)  # d(-log likelihood) / d k, and the expected information
+            grad[w] += v * d
+            info[w] += i
+            jreview[w] -= i
+            gr -= v * d
+            hrr += i
+        total -= sum(v * lb for (_x, v), lb in zip(self.review_fakes, self._fake_logs))
+        g[REVIEW] += gr
+        h[REVIEW][REVIEW] += hrr
         for (a, b), value in (((T3, T3), htt), ((T3, FORM), htf), ((T3, FLOOR), htl), ((T3, CONTEXT), htc),
                               ((FORM, FORM), hff), ((FORM, FLOOR), hfl), ((FORM, CONTEXT), hfc),
                               ((FLOOR, FLOOR), hll), ((FLOOR, CONTEXT), hlc), ((CONTEXT, CONTEXT), hcc)):
@@ -1751,6 +2028,8 @@ class Fit:
                 total += 0.5 * u * gap * gap
                 grad[i] += -u * gap if kind == 'known' else u * gap
                 info[i] += u
+        if self.review_terms or self.review_fakes:
+            total += self.review_parts.penalty()
         for j, name in enumerate(SHARED_NAMES):
             mean, sd = SHARED[name]
             total += 0.5 * ((theta[j] - mean) / sd) ** 2
@@ -1826,7 +2105,10 @@ class Fit:
                     self.widths[kind] = max(0.1, self.widths[kind] + step)
                 if widened:  # only the priors' terms change
                     (total, grad, info, joined, g, h), data = self._objective(k, theta, data)
-            if moved < FIT_TOLERANCE and widened < WIDTH_TOLERANCE:
+            mixed = self._review_em(k, theta)
+            if mixed:  # the data's terms change
+                (total, grad, info, joined, g, h), data = self._objective(k, theta)
+            if moved < FIT_TOLERANCE and widened < WIDTH_TOLERANCE and mixed < REVIEW_TOLERANCE:
                 break
         self.k, self.theta, self.objective = k, theta, total
         _dk, _dt, joins, schur = self._step(k, grad, info, joined, g, h)
@@ -1870,6 +2152,15 @@ class Fit:
     def shared(self):
         return {name: round(v, 4) for name, v in zip(self.names, self.theta)}
 
+    def review_summary(self):
+        """The review cards as fitted: how many (real words' and made-up words' cards with an outcome, before until),
+        the components (Components.summary: each one's median reveal, spread and chance of no reveal, and their
+        separation) and the offset with its sd; None without any card."""
+        if not (self.review_terms or self.review_fakes):
+            return None
+        return dict(self.review_parts.summary(), cards=len(self.review_terms), fakes=len(self.review_fakes),
+                    offset=round(self.theta[REVIEW], 4), offsetSd=round(self.theta_sd[REVIEW], 4))
+
     def speed_summary(self):
         """The speed term as fitted (None without it): its shared parameters with their sd, the groups' sd, how many
         passages and paragraphs (units) and groups it read, and how much of the words' information came from it: the
@@ -1887,6 +2178,8 @@ class Fit:
         """What a later fit may start from."""
         found = {'shared': dict(zip(self.names, self.theta)), 'widths': dict(self.widths),
                  'k': dict(zip(self.words, self.k))}
+        if self.review_terms or self.review_fakes:
+            found['review'] = self.review_parts.values()
         return dict(found, group=self.group_sd, cut=dict(getattr(self, 'cut', {}))) if self.speed else found
 
 
@@ -2044,10 +2337,11 @@ def fitted_records(rows, contexts, match, log, since, now_ms, pace, top, sentenc
 
 def day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers=None):
     """{day: key} for the days from `since` to yesterday: what their records depend on (the model, the reading model,
-    the challenge, and how much of the log, its interactions, intensity changes and topical offers (offers: Offers)
-    came before the day's end), so a day's sums are reused while its key holds (refresh, knowledge.json "daily")."""
+    the challenge, and how much of the log, its interactions, intensity changes, topical offers (offers: Offers) and
+    review cards came before the day's end), so a day's sums are reused while its key holds (refresh, knowledge.json
+    "daily")."""
     import bisect
-    ats, row_ats = [e.at for e in log.events], sorted(r['at'] for r in rows)
+    ats, row_ats, reviewed = [e.at for e in log.events], sorted(r['at'] for r in rows), review_log(log)[3]
     counts, total = [], 0
     for e in log.events:
         total += len(getattr(e, 'obs', ()))
@@ -2059,6 +2353,7 @@ def day_keys(log, rows, changes, since, now_ms, pace, top, challenge, offers=Non
         n = bisect.bisect_left(ats, end)
         out[day] = (f'{model_name()} {pace} {top} {challenge} {n} {counts[n - 1] if n else 0} '
                     f'{bisect.bisect_left(row_ats, end)} {sum(1 for c in changes if c["at"] < end)}'
+                    + (f' r{sum(1 for at, _ja in reviewed if at < end)}' if reviewed else '')
                     + (f' {bisect.bisect_left(offers.times, end)}' if offers is not None and offers.times else ''))
         day = day_of(end)
     return out
@@ -2549,9 +2844,9 @@ def model_name():
     return MODEL + (' speed' if SPEED else '')
 
 
-MODEL = 'fit 5'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
+MODEL = 'fit 6'  # the reading model is chosen again, and the daily sums redone, when this changes (fit 3: the recency
                  # term, with the prior by origin and word features; fit 4: the monthly probes' answers; fit 5: a
-                 # reading model per surface)
+                 # reading model per surface; fit 6: the review cards)
 
 
 def word_stats(log, now_ms):
@@ -2602,14 +2897,15 @@ def refresh(now=None):
     flag: free_flag), n (evidence weight), obs, opened, recent (opens in the last RECENT_DAYS days), last and history,
     read (when it was last read: [shown, chance] per showing of the last LONG_DAYS, word_reads; a consumer gets its
     current chance from it, current_chance), and id (the JMdict id of its dictionary entry, word_entries, which the next
-    refresh reuses); also each word a monthly probe answered that the word state doesn't have (probed, with its entry's
-    id: reading.starting_k takes its k for that entry); offset (the web's 0, chat's fitted); recency (the floor, the
-    context offset, LONG_DAYS, SOFT_MIN and SPACING_P); fit (the shared parameters with their sd, the prior widths,
+    refresh reuses); also each word a probe answered or a review card showed that the word state doesn't have (probed,
+    with its entry's id: reading.starting_k takes its k for that entry); offset (the web's 0, chat's fitted); recency
+    (the floor, the context offset, LONG_DAYS, SOFT_MIN and SPACING_P); fit (the shared parameters with their sd, the prior widths,
     and whether it started from nothing, as the day's first does); prior (prior_table); sentencePrice per surface (sentence_prices; sentences has their counts);
     reading (tune, once a day); calibration, with daily, its sums for each day before today (day_totals), reused while
     the day's key holds (day_keys), and dailyFree, the free flags at the start of the last of those days, which today's
     records carry on from; unlisted; spend (spending: the budget's use that sets intake); moves (the label changes
-    made, the last 200)."""
+    made, the last 200); review (review_report: the review cards' components as fitted, with their separation, and
+    the probe's rolling estimate of the goal from them); per word also reviews, its review cards."""
     if fwlib.collector_url():
         import hub
         ok, error = hub.sync(scan=False)
@@ -2621,6 +2917,7 @@ def refresh(now=None):
         if not got:
             return None
         rows, contexts = feedback.load(feedback.default_path())
+        reviews = feedback.reviews(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
         match = inflection.lexicon(state['words']).entry  # every lexicon word, queue words too
@@ -2629,7 +2926,7 @@ def refresh(now=None):
         fresh = isinstance(reading, dict) and reading.get('day') == today and reading.get('model') == model_name()
         pace, top = (reading['pace'], reading['top']) if fresh else (PACE_MS, READ_MAX)
         log = evaluate.extract(rows, contexts, state['words'], intervals, commands, now_ms, pace, top,
-                               state.get('probes'))
+                               state.get('probes'), reviews)
         known = previous.get('words') if isinstance(previous.get('words'), dict) else {}
         before = {ja: e['free'] for ja, e in known.items() if isinstance(e, dict) and isinstance(e.get('free'), bool)}
         log.entries = word_entries(state['words'], {ja: e['id'] for ja, e in known.items() if isinstance(e, dict)
@@ -2682,7 +2979,11 @@ def refresh(now=None):
                     if chance >= 0.001]
             if read:  # when it was last read, for its current chance (current_chance)
                 words[ja]['read'] = read
-        for ja, entry in probe_log(log)[2].items():  # a probed word outside the word state, by its entry's id
+        for _at, ja in review_log(log)[3]:
+            if ja in words:
+                words[ja]['reviews'] = words[ja].get('reviews', 0) + 1
+        outside = dict(review_log(log)[2], **probe_log(log)[2])
+        for ja, entry in outside.items():  # a probed or reviewed word outside the word state, by its entry's id
             i = fit.index.get(ja)
             if ja not in words and i is not None:
                 k, sd = fit.estimate(ja)
@@ -2727,10 +3028,26 @@ def refresh(now=None):
             'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
             'daily': daily, 'dailyFree': daily_free,
             'unlisted': unlisted(rows, match, now_ms),
+            'review': review_report(fit, log.reviews, now_ms),
             'words': words,
         }
         fwlib.write_json(path(), knowledge)
         return knowledge
+
+
+def review_report(fit, reviews, now_ms):
+    """knowledge.json "review": the review cards as the fit has them (model: Fit.review_summary, or None), and the
+    probe's estimate of the goal from the probe and made-up words' cards of the last probe.ROLLING_DAYS (probe: probe.
+    rolling, computed without the fit); None without any reviewed card."""
+    if not reviews:
+        return None
+    out = {'model': fit.review_summary(), 'probe': None}
+    try:
+        import probe  # here: the hook needn't load the dictionary
+        out['probe'] = probe.rolling(reviews, now_ms)
+    except Exception as error:  # the estimate is a report: the refresh stands without it
+        print(f'Japanese Weave: no rolling probe estimate ({error.__class__.__name__}: {error})', file=sys.stderr)
+    return out
 
 
 def start_refresh():

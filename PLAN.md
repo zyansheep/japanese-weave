@@ -40,9 +40,11 @@ without a lookup, each word weighted by how often it comes up in your reading.
 It is measured two ways:
 - **From the model**, continuously. This number is circular: if you simply get used to the glosses and look up less,
   or the model is refitted, it moves without any learning.
-- **By a probe**, monthly: about 60 words sampled by how often your reading uses them, each marked known or not, plus
-  1 in 10 made-up words to catch over-claiming. It takes about 3 minutes and has a standard error of about 6 points.
-  It is the check on the model's number, and it also measures how often you look up a word you don't know (row R).
+- **By a probe**: words sampled by how often your reading uses them, each marked known or not, plus 1 in 10 made-up
+  words to catch over-claiming. It is the check on the model's number. It was a monthly 3-minute list (standard error
+  about 6 points), which also measured how often you look up a word you don't know (row R); since 2026-11 it lives in
+  the review stream (T3 Code's review cards: 1 in 5 a probe word, 1 in 10 made up), estimated over the last 30 days
+  from the time to each card's reveal, without the model.
 
 Two things multiply into the goal:
 
@@ -97,8 +99,9 @@ grammar patterns.
   - for new and learning words, the word itself: frequency rank, the share of its kanji in words you know (from the
     previous refresh's free words that have their own evidence, never the word's own), script, word type, length,
     and whether it is rare or a loanword, with coefficients held toward 0;
-  - probe answers enter the fit as observations of their own kind, with their own offset, so the monthly probe also
-    teaches the prior about rare words. In simulation they cut the starting error at ranks past 3,000 from about
+  - probe answers enter the fit as observations of their own kind, with their own offset, so the probe also
+    teaches the prior about rare words; review cards too (the time to a card's reveal, a mixture of known and not
+    known at recall whose "not known" side the made-up words pin). In simulation they cut the starting error at ranks past 3,000 from about
     0.7 to 0.6 in log-odds; most of the gap remains.
 - **Chance you read it** comes from time on screen against reading pace (300 ms a word). It is certain above anything
   you looked up further down. The pace and cap are refitted from chat and web rows, but kept at their defaults when
@@ -325,7 +328,7 @@ state and whether each "done when" is met):
   topical words found by code;
 - the dictionary, the matcher, sense flags, and the checked web pipeline in the extension: safe swaps show within a
   second and the model's check adds the rest;
-- the monthly probe.
+- the probe, now in the review stream (T3 Code's review cards).
 
 Left: the live check (2 to 4 weeks of data), the experiment's readout (about 8 weeks), a memory strength per word
 (after 60 days and a positive readout), and the deferred single planner and chat replay lab. Reading speed as
@@ -360,7 +363,7 @@ evidence is built and off: it found no gain in simulation or on the snapshot, an
 - **Prompts:** the web labs, each variant over 3 or more seeds; stop when the gain is smaller than the spread between
   seeds. A chat replay lab is deferred: it would spend your Claude limits.
 - **Randomized experiments:** section 7.
-- **The goal:** the monthly probe (section 1).
+- **The goal:** the probe in the review stream (section 1).
 
 ## 11. The numbers behind this
 

@@ -121,7 +121,6 @@ way round.
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
-| `/japanese-weave:probe` | Once a month, about 3 minutes: how much of your reading you would read without a lookup |
 
 From a terminal: `sh ~/.japanese-weave/app/scripts/run ~/.japanese-weave/app/scripts/fw.py <command>`.
 
@@ -249,6 +248,9 @@ you could have been reading: the page visible and its window focused, no sound o
 or idle, so a page left open or a video doesn't look like reading. `fw.py log` shows totals and the latest entries, and
 the extension's popup shows how many peeks have been collected.
 
+Review cards (T3 Code) are kept there too: each card served (the word, whether it was a learning, probe or made-up word)
+and, once shown, how long until the reveal and how long it stayed on screen.
+
 By default it goes to `interactions.sqlite` in the state folder.
 
 ## Several machines
@@ -274,7 +276,8 @@ says which files to copy over (state.json and its neighbours) to move that list 
 one keeps this machine's old list in `before-collector/` in the state folder.
 
 T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL` set to the collector's
-`/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches.
+`/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches. Its review cards come from the
+same collector (`/v1/review/next`), and what happened to each goes with the popover events.
 
 ## Adaptive difficulty
 
@@ -339,16 +342,35 @@ model on your log day by day, each day predicted from the days before, against t
 constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
 
-**Once a month: the probe.** `/japanese-weave:probe`, or `fw.py probe` in a terminal (one word at a time: y, n, s to
-skip, b back, q quit), asks which of about 60 words you would read without a lookup, plus 6 made-up ones, in about 3
-minutes. It measures the goal directly: the share of the words in your reading you would read in Japanese without a
-lookup, each word weighted by how often it comes up (by general frequency, among the 10,000 most frequent words, until
-your reading is counted), with a 90% interval of about plus or minus 8 points. It also shows how many made-up words you
-claimed and the share corrected for that guessing, what your word list marks known of the same words, and, for the
-words you didn't know, how often you looked them up when they were shown. Its answers never feed the model: it is the
-check on the model, whose own number moves when you get used to the glosses. A word isn't asked again within 90 days.
-`fw.py status` says when the next is due; `fw.py probe --history` lists them all. The design is in
-`scripts/probe.py`; `tools/probe_sim.py` checks it on simulated readers.
+**Review cards (T3 Code).** In a T3 Code build with the review wedge, every gloss popover has a small wedge on its
+right edge. Click it (or press the right arrow while hovering a gloss) and the popover becomes a card: one Japanese word
+alone. The up arrow reveals its reading and meaning; the right arrow goes to the next card. On the phone it is a
+full-screen card: swipe up to reveal, left for the next. The only thing measured is the time from the card appearing to
+the reveal, or that you moved on without one. The cards come from the collector (`POST /v1/review/next`), in an order
+you can't predict: about 7 in 10 are words you are learning (first those behind on showings in their first two weeks,
+then the ones the model is least sure of), 2 in 10 probe words (below) and 1 in 10 made-up words, whose meaning says
+so. Never a word the delayed-start experiment is holding back, nor one you had in the last 4 hours. A review counts as
+a showing of its word: right after it the word's lookup chance is near the floor, like any read.
+
+The fit reads a reveal time as one of two kinds: a word known at recall (quick) or not (slow, or a give-up), each with
+its own spread of times and its own chance of moving on without a reveal, shared by all words and held by a prior so a
+handful of cards can't swing them. The chance a word is known at recall comes from its knowledge with an offset of its
+own. Made-up words are never known, so their times are what "not known" looks like, give-ups included. If you give up
+on words you don't know as fast as you reveal words you do, the two kinds overlap and every card counts for little;
+`fw.py knowledge` says how well they separate (how much of a yes/no answer one card is worth), and so does
+`fw.py status` for the probe.
+
+**The probe, in the review stream.** The probe and made-up cards of the last 30 days measure the goal directly: the
+share of the words in your reading you would read in Japanese without a lookup, each word weighted by how often it
+comes up (by general frequency, among the 10,000 most frequent words, until your reading is counted). The probe words
+are drawn by frequency band, a word not asked again within 90 days; per band, the share known is the weight of the
+"known" kind in its cards' reveal times, fitted without the model's estimates, so it stays the check on the model, whose
+own number moves when you get used to the glosses. The made-up words correct for words that only look known, and the
+90% interval widens when the two kinds overlap. `fw.py status` shows the estimate and how many cards it rests on;
+`fw.py probe --history` lists the probes taken before the review stream and the estimate now. The monthly 3-minute
+probe and its command are gone; `fw.py probe` in a terminal still takes one (one word at a time: y, n, s to skip, b
+back, q quit). The design is in `scripts/probe.py` and `scripts/review.py`; `tests/test_review.py` checks the estimate on
+simulated readers.
 
 ## Privacy
 

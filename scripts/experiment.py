@@ -138,15 +138,19 @@ def analysis(found):
 def exposure(found, log):
     """From the gloss log: (showings a day of shown-arm words in their shown days, read-weighted showings a day, leaks:
     {arm: showings while hidden}). A word's days start when it was taken in (its arm's at; else its day's start: it may
-    have been shown before, as a word not introduced yet), and the shown days end now for a word still in them."""
+    have been shown before, as a word not introduced yet), and the shown days end now for a word still in them. A
+    review card of the word (knowledge.review_log's shown) is a showing, read for certain; review.py never serves a
+    hidden word, so one while hidden is a leak like any other."""
     windows, leaks = {}, {arm: 0 for arm in fwlib.ARMS}
     for a in found:
         start = a['at'] if isinstance(a.get('at'), int) else _ms(a['day'])
         shown_end = _ms(fwlib.add_days(a['day'], fwlib.SHOW_DAYS))
         hidden = (start, _ms(a['probe'])) if a['arm'] == 'held' else (shown_end, _ms(a['probe']))
         windows[a['ja']] = (a['arm'], start, shown_end, hidden)
+    import knowledge  # here, as in run()
     shown, read, days = 0, 0.0, 0.0
-    now = max((e.at for e in log.events), default=0)
+    reviewed = knowledge.review_log(log)[3]
+    now = max([e.at for e in log.events] + [at for at, _ja in reviewed], default=0)
     for ja, (arm, start, end, _h) in windows.items():
         if arm == 'shown' and start <= now:
             days += max(0.0, min(end, now) - start) / 86_400_000
@@ -163,6 +167,16 @@ def exposure(found, log):
                 read += max(o.read, o.weight if o.y > 0 else 0.0)
             if h0 <= event.at < h1:
                 leaks[arm] += 1
+    for at, ja in reviewed:
+        window = windows.get(ja)
+        if window is None:
+            continue
+        arm, start, end, (h0, h1) = window
+        if arm == 'shown' and start <= at < end:
+            shown += 1
+            read += 1.0
+        if h0 <= at < h1:
+            leaks[arm] += 1
     return (shown / days if days else None), (read / days if days else None), leaks
 
 
@@ -288,9 +302,11 @@ def run(args):
         log = None
         if (home / feedback.DB_NAME).exists():
             rows, contexts = feedback.load(feedback.default_path())
-            if rows or contexts:
+            reviews = feedback.reviews(feedback.default_path())
+            if rows or contexts or reviews:
                 reading = knowledge.load().get('reading') or {}
                 log = evaluate.extract(rows, contexts, state['words'], knowledge.anki_intervals(),
                                        knowledge.read_commands(), int(now * 1000),
-                                       reading.get('pace') or knowledge.PACE_MS, reading.get('top') or knowledge.READ_MAX)
+                                       reading.get('pace') or knowledge.PACE_MS, reading.get('top') or knowledge.READ_MAX,
+                                       reviews=reviews)
     print(report(state, log, day, args.power))

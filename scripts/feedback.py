@@ -41,10 +41,20 @@ Stored in <state dir>/interactions.sqlite (schema 5):
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
                 and the op as JSON; also records that change nothing, such as what each chat reply was offered (kind
                 "brief", read back by chat_briefs)
+  cards         one row per review card the collector served (review.py, POST /v1/review/next): its opaque id, when
+                (served_at) and for which client (source: desktop or mobile), the word shown, its kind (learning: a
+                word in use; probe: a word sampled for the probe of the goal, with its dictionary entry id, band and
+                weight, probe.py; fake: a made-up word, data/fakes.tsv; the client is never told), the word's entry id
+                when known; then what happened, from its review item (below): when it was shown (at), ms from shown to
+                the reveal of its reading and meaning (reveal_ms, NULL when it was left without one), ms on screen in
+                all (shown_ms), the client (via) and its uid; seq orders changes for export, as for contexts
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
-the peek rate). With a collector configured (setup --collector), the native host forwards items to it instead (see
-collector.py), and knowledge.py runs there.
+the peek rate), or (T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its
+id, "word": the word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" |
+"mobile", "uid"?}. A review is stored on its card's row, once: it must name a card served here with that word, and a
+second review of a card (a resend, with or without the same uid) is a duplicate. With a collector configured (setup
+--collector), the native host forwards items to it instead (see collector.py), and knowledge.py runs there.
 """
 import gzip
 import http.client
@@ -61,11 +71,15 @@ import intensity
 
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SURFACES = ('browser', 't3')
 KINDS = ('peek', 'pin', 'flip')  # the gloss was opened, or the word turned back to English
 READING = ('click', 'select', 'visible', 'trace')  # where the reader was; knowledge.py reads the visible stays
 SHOWN = 'shown'
+REVIEW = 'review'  # what happened to a review card (cards table; review.py serves them)
+REVIEW_SOURCES = ('desktop', 'mobile')
+CARD_KINDS = ('learning', 'probe', 'fake')
+MAX_REVIEW_MS = 86_400_000  # the longest a card may have been on screen (knowledge.py drops those over a minute)
 BLANK = '[]'  # the annotations of a passage shown without Japanese
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
@@ -123,6 +137,24 @@ CREATE TABLE IF NOT EXISTS reading (
   uid TEXT
 );
 """
+CARDS_TABLE = """
+CREATE TABLE IF NOT EXISTS cards (
+  id TEXT PRIMARY KEY,
+  served_at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  word TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  entry INTEGER,
+  band INTEGER,
+  weight REAL,
+  at INTEGER,
+  reveal_ms INTEGER,
+  shown_ms INTEGER,
+  via TEXT,
+  uid TEXT,
+  seq INTEGER NOT NULL DEFAULT 0
+);
+"""
 INDEXES = """
 CREATE INDEX IF NOT EXISTS interactions_word ON interactions (word, at);
 CREATE INDEX IF NOT EXISTS interactions_context ON interactions (surface, view, context);
@@ -130,6 +162,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS interactions_uid ON interactions (uid);
 CREATE INDEX IF NOT EXISTS contexts_seq ON contexts (seq);
 CREATE INDEX IF NOT EXISTS reading_context ON reading (surface, view, context);
 CREATE UNIQUE INDEX IF NOT EXISTS reading_uid ON reading (uid);
+CREATE UNIQUE INDEX IF NOT EXISTS cards_uid ON cards (uid);
+CREATE INDEX IF NOT EXISTS cards_seq ON cards (seq);
+CREATE INDEX IF NOT EXISTS cards_served ON cards (served_at);
 """
 
 
@@ -147,6 +182,7 @@ def connect(path=None, timeout=10):
     if version == 3:  # its reading table needs x and y and has no ms column
         _migrate_reading(con)
     con.executescript(READING_TABLE)
+    con.executescript(CARDS_TABLE)
     if version < SCHEMA_VERSION:
         _migrate(con)
     con.executescript(INDEXES)
@@ -156,7 +192,8 @@ def connect(path=None, timeout=10):
 
 def _migrate(con):
     """Schema 1 -> 2: word counts, shown times and a change sequence on contexts; client ids on interactions.
-    Schemas 3 and 4 only added the reading table, which READING_TABLE creates. Schema 5: the plan of a shown passage."""
+    Schemas 3 and 4 only added the reading table, which READING_TABLE creates. Schema 5: the plan of a shown passage.
+    Schema 6 only added the cards table, which CARDS_TABLE creates."""
     columns = lambda table: {row[1] for row in con.execute(f'PRAGMA table_info({table})')}
     with con:
         have = columns('contexts')
@@ -191,6 +228,8 @@ def _clean(item, now):
     num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     word = lambda x: isinstance(x, str) and 0 < len(x) <= 40
     ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
+    if isinstance(item, dict) and item.get('kind') == REVIEW:
+        return _clean_review(item, now, num, word, ident)
     if not isinstance(item, dict) or item.get('kind') not in KINDS + READING + (SHOWN,):
         return None
     if not ident(item.get('view')) or not ident(item.get('context')):
@@ -248,6 +287,25 @@ def _plan_ok(plan, num):
             and isinstance(arms, dict) and len(arms) <= 200
             and all(isinstance(w, str) and 0 < len(w) <= 40 and isinstance(a, str) and 0 < len(a) <= 20
                     for w, a in arms.items()))
+
+
+def _clean_review(item, now, num, word, ident):
+    """A review item as stored (cards table), or None when anything is malformed: at within the window, the card's
+    id, the word it showed, revealMs null or 0..shownMs, shownMs 0..MAX_REVIEW_MS, the client and an optional uid."""
+    at, reveal, shown, uid = item.get('at'), item.get('revealMs'), item.get('shownMs'), item.get('uid')
+    if not num(at) or not now - WINDOW_MS <= at <= now + 60_000:
+        return None
+    if not ident(item.get('card')) or not word(item.get('word')) or item.get('source') not in REVIEW_SOURCES:
+        return None
+    if not num(shown) or not 0 <= shown <= MAX_REVIEW_MS:
+        return None
+    if reveal is not None and (not num(reveal) or not 0 <= reveal <= shown):
+        return None
+    if uid is not None and not ident(uid):
+        return None
+    return {'kind': REVIEW, 'at': int(at), 'card': item['card'], 'word': item['word'],
+            'revealMs': None if reveal is None else round(reveal), 'shownMs': round(shown), 'source': item['source'],
+            'uid': uid}
 
 
 MAX_TRACE_POINTS = 200
@@ -310,20 +368,40 @@ CONTEXT_UPSERT = (
     'plan = coalesce(contexts.plan, excluded.plan), seq = excluded.seq')
 
 
+CARD_REVIEW = ('UPDATE cards SET at = ?, reveal_ms = ?, shown_ms = ?, via = ?, uid = ?, '
+               'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) WHERE id = ? AND word = ? AND at IS NULL')
+
+
 def record(items, surface, path=None, now=None):
     """Stores well-formed items. Returns {stored, duplicates, rejected}: a resent interaction (same uid) is stored
-    once, and malformed or too old items are rejected (never worth resending)."""
+    once, and malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its
+    card (CARD_REVIEW): one naming no card served here with its word is rejected, and one for a card already reviewed
+    is a duplicate."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
     batch = items[:MAX_ITEMS]
-    cleaned = [c for c in (_clean(item, now) for item in batch) if c]
-    stored = duplicates = 0
+    cleaned = [c for c in (_clean(item, now) for item in batch) if c and (c['kind'] != REVIEW or surface == 't3')]
+    stored = duplicates = refused = 0
     if cleaned:
         con = connect(path)
         try:
             with con:
                 for c in cleaned:
+                    if c['kind'] == REVIEW:
+                        try:
+                            added = con.execute(CARD_REVIEW, (c['at'], c['revealMs'], c['shownMs'], c['source'],
+                                                              c['uid'], c['card'], c['word'])).rowcount
+                        except sqlite3.IntegrityError:  # its uid is stored already: a resend
+                            added = 0
+                        if added:
+                            stored += 1
+                        elif con.execute('SELECT 1 FROM cards WHERE id = ? AND word = ?',
+                                         (c['card'], c['word'])).fetchone():
+                            duplicates += 1
+                        else:
+                            refused += 1
+                        continue
                     shown = c['kind'] == SHOWN
                     plan = c.get('plan') if shown else None
                     con.execute(CONTEXT_UPSERT, (surface, c['view'], c['context'], *c['box'],
@@ -351,7 +429,54 @@ def record(items, surface, path=None, now=None):
                     duplicates += 1 - added
         finally:
             con.close()
-    return {'stored': stored, 'duplicates': duplicates, 'rejected': len(batch) - len(cleaned)}
+    return {'stored': stored, 'duplicates': duplicates, 'rejected': len(batch) - len(cleaned) + refused}
+
+
+CARD_COLUMNS = ('id', 'served_at', 'source', 'word', 'kind', 'entry', 'band', 'weight', 'at', 'reveal_ms', 'shown_ms',
+                'via', 'uid', 'seq')
+
+
+def serve_card(card, path=None, con=None):
+    """Keeps a served review card (review.py): {id, served_at, source, word, kind, entry?, band?, weight?}."""
+    own = con is None
+    con = con or connect(path)
+    try:
+        with con:
+            con.execute('INSERT INTO cards (id, served_at, source, word, kind, entry, band, weight, seq) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM cards))',
+                        (card['id'], card['served_at'], card['source'], card['word'], card['kind'], card.get('entry'),
+                         card.get('band'), card.get('weight')))
+    finally:
+        if own:
+            con.close()
+
+
+def cards(path=None, since=0, con=None):
+    """Every review card served at or after `since` (ms), oldest first, reviewed or not: {id, served_at, source,
+    word, kind, entry, band, weight, at, reveal_ms, shown_ms, via, uid, seq} (at None: no review yet)."""
+    own = con is None
+    con = con or connect(path)
+    try:
+        rows = con.execute(f'SELECT {", ".join(CARD_COLUMNS)} FROM cards WHERE served_at >= ? ORDER BY served_at, id',
+                           (since,)).fetchall()
+    finally:
+        if own:
+            con.close()
+    return [dict(zip(CARD_COLUMNS, r)) for r in rows]
+
+
+def reviews(path=None):
+    """Every reviewed card, oldest review first, as knowledge.py and probe.py read them: {card, at (when it was shown),
+    served (when it was served), word, kind, entry, band, weight, reveal (ms, None: left without a reveal), shown (ms
+    on screen), source}."""
+    con = connect(path)
+    try:
+        rows = con.execute('SELECT id, at, served_at, word, kind, entry, band, weight, reveal_ms, shown_ms, via '
+                           'FROM cards WHERE at IS NOT NULL ORDER BY at, id').fetchall()
+    finally:
+        con.close()
+    names = ('card', 'at', 'served', 'word', 'kind', 'entry', 'band', 'weight', 'reveal', 'shown', 'source')
+    return [dict(zip(names, r)) for r in rows]
 
 
 def recent(limit=20, path=None):
@@ -375,9 +500,9 @@ def recent(limit=20, path=None):
 
 def stats(since=0, path=None):
     """What has been collected, for the extension's popup and `fw.py log`: per "surface:kind", [all, since `since`
-    (ms)] for gloss opens and reading signals; the same for browser words shown and for on-screen reading time (the
-    ms of visible rows), both in passages with Japanese, and for blank passages shown (a count); and the newest
-    item's time."""
+    (ms)] for gloss opens and reading signals (and "t3:review" for review cards reviewed, once there are any); the
+    same for browser words shown and for on-screen reading time (the ms of visible rows), both in passages with
+    Japanese, and for blank passages shown (a count); and the newest item's time."""
     con = connect(path)
     try:
         counts, last = {}, 0
@@ -387,6 +512,11 @@ def stats(since=0, path=None):
                     'GROUP BY surface, kind', (since,)):
                 counts[f'{surface}:{kind}'] = [total, recent_]
                 last = max(last, newest)
+        reviewed, recent_, newest = con.execute('SELECT count(*), coalesce(sum(at >= ?), 0), max(at) FROM cards '
+                                                'WHERE at IS NOT NULL', (since,)).fetchone()
+        if reviewed:
+            counts['t3:review'] = [reviewed, recent_]
+            last = max(last, newest)
         shown = con.execute('SELECT coalesce(sum(words), 0), coalesce(sum(CASE WHEN shown_at >= ? THEN words END), 0) '
                             'FROM contexts WHERE shown_at IS NOT NULL AND annotations != ?', (since, BLANK)).fetchone()
         blank = con.execute('SELECT count(*), coalesce(sum(shown_at >= ?), 0) FROM contexts '
@@ -413,20 +543,28 @@ CONTEXT_COLUMNS = ('surface', 'view', 'context', 'left', 'top', 'width', 'height
                    'seq', 'plan')
 
 
-def export(after_id=0, after_seq=0, limit=EXPORT_PAGE, path=None):
-    """Interactions with id > after_id and contexts changed after seq after_seq, oldest first, for a mirror."""
+def export(after_id=0, after_seq=0, limit=EXPORT_PAGE, path=None, after_card=None):
+    """Interactions with id > after_id and contexts changed after seq after_seq, oldest first, for a mirror; with
+    after_card, also the review cards changed after that seq (a mirror from before cards asks for none, so its "more"
+    never waits on them)."""
     con = connect(path)
     try:
         rows = con.execute(f'SELECT {", ".join(INTERACTION_COLUMNS)} FROM interactions WHERE id > ? ORDER BY id LIMIT ?',
                            (after_id, limit)).fetchall()
         contexts = con.execute(f'SELECT {", ".join(CONTEXT_COLUMNS)} FROM contexts WHERE seq > ? ORDER BY seq LIMIT ?',
                                (after_seq, limit)).fetchall()
+        changed = [] if after_card is None else con.execute(
+            f'SELECT {", ".join(CARD_COLUMNS)} FROM cards WHERE seq > ? ORDER BY seq LIMIT ?',
+            (after_card, limit)).fetchall()
         max_id = con.execute('SELECT coalesce(max(id), 0) FROM interactions').fetchone()[0]
     finally:
         con.close()
-    return {'interactions': [dict(zip(INTERACTION_COLUMNS, r)) for r in rows],
-            'contexts': [dict(zip(CONTEXT_COLUMNS, r)) for r in contexts],
-            'more': len(rows) == limit or len(contexts) == limit, 'maxId': max_id}
+    out = {'interactions': [dict(zip(INTERACTION_COLUMNS, r)) for r in rows],
+           'contexts': [dict(zip(CONTEXT_COLUMNS, r)) for r in contexts],
+           'more': len(rows) == limit or len(contexts) == limit or len(changed) == limit, 'maxId': max_id}
+    if after_card is not None:
+        out['cards'] = [dict(zip(CARD_COLUMNS, r)) for r in changed]
+    return out
 
 
 def sync_mirror(collector, path, timeout=4, pages=20):
@@ -437,14 +575,16 @@ def sync_mirror(collector, path, timeout=4, pages=20):
         for _ in range(pages):
             after_id = con.execute('SELECT coalesce(max(id), 0) FROM interactions').fetchone()[0]
             after_seq = con.execute('SELECT coalesce(max(seq), 0) FROM contexts').fetchone()[0]
-            reply = request(f'{collector.rstrip("/")}/v1/export?after={after_id}&seq={after_seq}&limit={EXPORT_PAGE}',
-                             timeout=timeout)
+            after_card = con.execute('SELECT coalesce(max(seq), 0) FROM cards').fetchone()[0]
+            reply = request(f'{collector.rstrip("/")}/v1/export?after={after_id}&seq={after_seq}&card={after_card}'
+                            f'&limit={EXPORT_PAGE}', timeout=timeout)
             if not isinstance(reply, dict) or not reply.get('ok'):
                 return False, (reply or {}).get('error', 'collector did not answer')
             if reply.get('maxId', 0) < after_id:
                 with con:
                     con.execute('DELETE FROM interactions')
                     con.execute('DELETE FROM contexts')
+                    con.execute('DELETE FROM cards')
                 continue
             with con:
                 con.executemany(f'INSERT OR IGNORE INTO interactions ({", ".join(INTERACTION_COLUMNS)}) '
@@ -453,6 +593,9 @@ def sync_mirror(collector, path, timeout=4, pages=20):
                 con.executemany(f'INSERT OR REPLACE INTO contexts ({", ".join(CONTEXT_COLUMNS)}) '
                                 f'VALUES ({", ".join("?" * len(CONTEXT_COLUMNS))})',
                                 [tuple(r.get(c) for c in CONTEXT_COLUMNS) for r in reply.get('contexts', [])])
+                con.executemany(f'INSERT OR REPLACE INTO cards ({", ".join(CARD_COLUMNS)}) '
+                                f'VALUES ({", ".join("?" * len(CARD_COLUMNS))})',
+                                [tuple(r.get(c) for c in CARD_COLUMNS) for r in reply.get('cards', [])])
             if not reply.get('more'):
                 return True, None
         return True, None
