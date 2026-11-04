@@ -15,6 +15,11 @@
                                                      --collector URL|off: the word state and the gloss log
                                                      live on that collector (see `collector`) and this
                                                      machine keeps a cache of them; off: back to local
+  fw.py extension [--no-open]                        rebuild the extension copies and the .xpi from this checkout
+                                                     and open the .xpi in the running Firefox-family browser
+                                                     (Floorp first), which asks to add it: one click to update
+                                                     an unsigned install; Chrome: reload it in
+                                                     chrome://extensions
   fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--dry-run]
                                                      put the words on your Anki cards under review (learning
                                                      or review, not new or suspended) at the front of the
@@ -311,6 +316,30 @@ def install_extensions(root, home):
     with zipfile.ZipFile(home / XPI_NAME, 'w', zipfile.ZIP_DEFLATED) as xpi:
         for path in sorted(p for p in firefox.rglob('*') if p.is_file()):
             xpi.write(path, path.relative_to(firefox).as_posix())
+
+
+FIREFOXES = ('floorp', 'firefox', 'librewolf', 'firefox-developer-edition', 'firefox-nightly', 'zen')
+
+
+def extension(args):
+    """Rebuilds the extension copies and the .xpi from this checkout (as setup does) and opens the .xpi in the
+    Firefox-family browser that is running (else the first on PATH), which asks to add it. Firefox and Floorp only
+    keep an unsigned add-on where signatures aren't required (Floorp, Developer Edition, Nightly, ESR); release
+    Firefox needs tools/sign-firefox.sh. Chrome loads the unpacked copy, so there it is the reload button."""
+    root, home = fwlib.PLUGIN_ROOT, fwlib.home()
+    install_extensions(root, home)
+    version = fwlib.read_json(home / 'extension' / 'manifest.json').get('version')
+    xpi = home / XPI_NAME
+    print(f'Extension {version} copied to {home / "extension"} (Chrome) and {xpi} (Firefox).')
+    if args.no_open:
+        return
+    running = [b for b in FIREFOXES if subprocess.run(['pgrep', '-x', b], capture_output=True).returncode == 0]
+    browser = next(iter(running), None) or next((b for b in FIREFOXES if shutil.which(b)), None)
+    if not browser:
+        print('No Firefox-family browser found: open the .xpi from about:addons > gear > "Install Add-on From File".')
+        return
+    subprocess.Popen([browser, str(xpi)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    print(f'Opened it in {browser}: press "Add" there. Chrome: press reload on Japanese Weave in chrome://extensions.')
 
 
 def setup(args):
@@ -962,6 +991,9 @@ def main(argv=None):
     p.add_argument('--codex', action='store_true')
     p.add_argument('--dry-run', action='store_true')
     p.set_defaults(run=uninstall)
+    p = sub.add_parser('extension')
+    p.add_argument('--no-open', action='store_true', help='rebuild only')
+    p.set_defaults(run=extension)
     sub.add_parser('status').set_defaults(run=status)
     sub.add_parser('check').set_defaults(run=check)
     for name, kind in (('known', 'known'), ('learn', 'asked')):
