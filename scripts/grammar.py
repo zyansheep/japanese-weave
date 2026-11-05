@@ -656,14 +656,20 @@ def record_levels(text, day, lex=None, plans=None):
     it was shown at when sent (the plan's view), and d, the pattern ids of each twin check-reply dropped, when its plan
     is here (twins.plan_for). None when it has no Japanese sentence."""
     import twins
+    if not twins.well_formed(text):
+        return None  # markup check-reply didn't write (edited, cut short): what each level shows can't be trusted
     els, owners = twins.elements(text)
-    shown = twins.render(text, twins.FULL)
+    shown = twins.inert_code(twins.render(text, twins.FULL))
     found = sentences(shown)
     if not found:
         return None
     full = [j for j, o in enumerate(owners) if twins.visible(els, o, twins.FULL)]
+    texts = twins.annotation_texts(text)
+    for level in twins.SHOWING:
+        if twins.shown_texts(text, level) != [texts[j] for j, o in enumerate(owners) if twins.visible(els, o, level)]:
+            return None  # glossed words the elements don't account for (one in code a level reads): no join to trust
     if len(full) != len(annotation_texts(shown)):
-        return None  # glossed words the markup doesn't account for (an abbr in code): no join to trust
+        return None
     lex = lexicon() if lex is None else lex
     plan = twins.plan_for(text, plans) or {}
     ps = plan.get('s') if isinstance(plan.get('s'), list) and len(plan['s']) == len(found) else None

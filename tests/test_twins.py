@@ -431,7 +431,7 @@ class ReviewRound1(Home):
 
     def test_t1_sentence_ends_after_any_mark(self):
         for before in ('The rate rose 5%. ', 'He said “stop.” ', 'Wait... ', 'Done ✅ ', 'It is 30°. ',
-                       'Use ~~that~~. ', 'It is _fine_. ', 'It works in the U.S. '):
+                       'Use ~~that~~. ', 'It is _fine_. '):
             with self.subTest(before):
                 self.assertEqual(self.twins_of(f'{before}The {P} is small.{self.TWIN}'),
                                  [(f'The {P} is small.', None)])
@@ -565,6 +565,88 @@ class ReviewRound1(Home):
         self.assertEqual(feedback.record([shown], 't3', db, now=now)['stored'], 1)
         context = feedback.load(db)[1][('t3', 'v1', 'old1')]
         self.assertEqual((context['message'], context['level'], context['words']), ('old1', None, 30))
+
+
+class ReviewRound2(Home):
+    """Regression tests for the second adversarial review (scratchpad review-r2a, review-r2c)."""
+    FILLER = ReviewRound1.FILLER
+    TWIN = ReviewRound1.TWIN
+    AGAIN = '<abbr title="again / also">また</abbr>'
+
+    def test_1_each_use_of_a_word_and_gloss_keeps_its_own_english(self):
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True},
+                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True}]
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
+        text = f'Run the tests {self.AGAIN} and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
+        final = check_reply.finish(text, own, dict(TYPES, また={'n', 'adv'}), seed=1, remember=False).final
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'also'])
+
+    def test_2_a_twins_words_the_weave_did_not_offer(self):
+        words = [{'ja': '小さい', 'kana': 'ちいさい', 'status': 'active'}, {'ja': '問題', 'kana': 'もんだい',
+                                                                         'status': 'known'}]
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, SWAPS, 0.08, None, None, words)
+        text = f'The {P} is small.{self.TWIN}' + self.FILLER
+        checked = check_reply.finish(text, own, TYPES, seed=1, remember=False)
+        twin = next(e for e in checked.elements if e.kind == 's')
+        self.assertAlmostEqual(twin.cost_w, 1 / (1 + math.e))  # 小さい: a learning word at its prior, now priced
+        self.assertIsNone(twin.fixed)
+        new_word = '<abbr title="あたらしい · new">新しい</abbr>'  # not in the word list: full only
+        text = f'The {P} is new.<ja>{P}は{new_word}です。</ja>' + self.FILLER
+        checked = check_reply.finish(text, own, TYPES, seed=1, remember=False)
+        self.assertEqual([on for e, on in zip(checked.elements, checked.on) if e.kind == 's'], [twins.FULL])
+        also = '<abbr title="also">も</abbr>'  # grammar costs nothing and limits nothing
+        text = f'The {P} is small too.<ja>{P}{also}{SMALL}です。</ja>' + self.FILLER
+        checked = check_reply.finish(text, own, TYPES, seed=1, remember=False)
+        twin = next(e for e in checked.elements if e.kind == 's')
+        self.assertAlmostEqual(twin.cost_w, 1 / (1 + math.e))
+        self.assertIsNone(twin.fixed)
+
+    def test_4_a_single_letter_and_a_period_ends_no_sentence(self):
+        for text in (f'Use the U.S. version, the {P} is small.{self.TWIN}', f'Meet at 9 a.m. tomorrow, the {P} is '
+                     f'small.{self.TWIN}', f'It works in the U.S. The {P} is small.{self.TWIN}'):
+            lines, _problems, _notes = twins.parse_authored(text)
+            found = [seg for _n, segs in lines for seg in segs if seg[0] == 'twin']
+            self.assertEqual((found[0][1], found[0][3]), (text.split('<ja>')[0], None))
+
+    def test_5_the_clients_rule_for_malformed_markup(self):
+        ja = f'<span data-jw="ja" data-on="1">{P}は{SMALL}です<abbr title="The problem is small.">。</abbr></span>'
+        en = '<span data-jw="en" data-on="1">The problem is small.</span>'
+        shown = lambda text, level: twins.shown_texts(text, level)
+        self.assertEqual(shown(ja + ' \n' + en, 0), [])  # whitespace between: still a pair
+        self.assertEqual(shown(ja + ' \n' + en, 1), ['問題', '小さい', '。'])
+        self.assertEqual(shown(en.replace('The problem', P), 3), ['問題'])  # a lone English twin always shows
+        self.assertEqual(twins.render(ja, 0), 'The problem is small.')  # a lone Japanese one: its translation below
+        self.assertEqual(shown(ja, 1), ['問題', '小さい', '。'])
+        unclosed = ja + en[:-len('</span>')]
+        self.assertEqual(shown(unclosed, 3), [])  # broken (an English twin left open): every pair English
+        self.assertIn('The problem is small.', twins.render(unclosed, 3))
+        nested = (f'<span data-jw="ja" data-on="1">x {ja.replace("on=\"1\"", "on=\"2\"")}'
+                  f'{en.replace("on=\"1\"", "on=\"2\"")}</span><span data-jw="en" data-on="1">outer</span>')
+        self.assertEqual(shown(nested, 3), [])
+        for bad in ('4', '+1', '1.0', ' 1', '', '-0', '-3'):  # not exactly -2..3: as written
+            word = f'The <abbr title="もんだい · problem" data-en="problem" data-on="{bad}">問題</abbr> is small.'
+            self.assertEqual(shown(word, -2), ['問題'], bad)
+        for quoted in ("data-on='1'", 'data-on=1', 'DATA-ON="1"'):
+            word = f'The <abbr title="もんだい · problem" data-en="problem" {quoted}>問題</abbr> is small.'
+            self.assertEqual((shown(word, -2), shown(word, 1)), ([], ['問題']), quoted)
+        empty = 'The <abbr title="もんだい · problem / issue" data-en="" data-on="1">問題</abbr> is small.'
+        self.assertEqual(twins.render(empty, 0), 'The problem is small.')  # data-en "": the first meaning
+        self.assertEqual(shown(f'Use `{P}` and {P} here <abbr data-on="1">今</abbr>.'.replace('here', 'here'), 1),
+                         ['問題'])  # glosses in code and without a title are none
+        self.assertEqual(shown('    ' + ja + en + '\n\nAfter.', 1), [])  # an indented code block
+        self.assertFalse(twins.well_formed(ja))
+        self.assertIsNone(grammar.record(ja + ' ' + en.replace('on="1"', 'on="2"'), DAY))  # malformed: no record
+
+    def test_6_items_at_minus_3_have_reasons(self):
+        db = self.home / 'log.sqlite'
+        now = intensity.now_ms()
+        base = {'view': 'v1', 'context': 'm1', 'box': [0, 0, 1, 1], 'annotations': [], 'level': -3}
+        result = feedback.record([dict(base, kind='shown', at=now - 3000, words=20),
+                                  dict(base, kind='visible', at=now - 2000, y=0, height=24, ms=4000, wall=4000, away=0,
+                                       media=0, idle=0)], 't3', db, now=now)
+        self.assertEqual((result['stored'], result['rejected']), (1, 1))
+        self.assertEqual([r['item'] for r in result['reasons']], [1])
+        self.assertIn('no Japanese on screen', result['reasons'][0]['error'])
 
 
 if __name__ == '__main__':

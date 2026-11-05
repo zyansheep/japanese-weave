@@ -225,17 +225,19 @@ class Plan:
     """What the sentence scorer and the levels need: the reader's pattern statuses (grammar.statuses), the sentence
     model (knowledge.json "grammar", or None), the chat level with normal's budget (the challenge, or None), and for
     the levels (finish): knowledge.json (know, for a word the weave didn't offer), the weave's swaps (twins.swaps_for),
-    the price of a sentence, this week's learning pattern (its id, or None) and the level the reply is read at (view:
-    the chat level, also while English only is on, since the reply shows its Japanese once that is off)."""
+    the price of a sentence, this week's learning pattern (its id, or None), the level the reply is read at (view:
+    the chat level, also while English only is on, since the reply shows its Japanese once that is off) and the word
+    list (words; None: the twins' words the weave didn't offer go unpriced)."""
 
     def __init__(self, statuses, model=None, level=0, normal=None, know=None, swaps=(), price=None, learning=None,
-                 view=None):
+                 view=None, words=None):
         self.statuses, self.model, self.level, self.normal = statuses, model, level, normal
         self.ready = bool(model and model.get('ready'))
         self.limit = sentence_model.max_chars(model)
         self.know, self.swaps, self.learning = know or {}, list(swaps or ()), learning
         self.price = price if price is not None else intensity.sentence_price(know)
         self.view = level if view is None else view
+        self.words = words  # the word list ([{ja, kana, status}]), for the twins' words the weave didn't offer
 
     @classmethod
     def load(cls, level=None, session=None):
@@ -249,7 +251,8 @@ class Plan:
         model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
         learning = grammar.learning(state)[0]
         return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None, know,
-                   twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level)
+                   twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level,
+                   state.get('words') or [])
 
 
 def score(text, plan):
@@ -376,15 +379,16 @@ def _walk(parts, line=1):
                 yield line, q, p
 
 
-def _word_info(w, plan, now_ms):
+def _word_info(w, plan, now_ms, nth=0):
     """A word's English original, lookup chance, whether it is known at a glance and whether it is a dictionary word
-    the reader doesn't have: from the weave's swap (by word and title, else by word), else knowledge.json, else the
-    neutral prior."""
+    the reader doesn't have: from the weave's swap, the nth use of a word and gloss taking the nth swap of them in the
+    weave's order (a word offered for two senses, "again" and "also", keeps each sense's English; the last when there
+    are more uses than swaps), else by word alone; else knowledge.json, else the neutral prior."""
     import fwlib
     import knowledge
     import twins
-    found = next((s for s in plan.swaps if s.get('ja') == w['ja'] and s.get('title') == w['title']), None) or \
-        next((s for s in plan.swaps if s.get('ja') == w['ja']), None)
+    same = [s for s in plan.swaps if s.get('ja') == w['ja'] and s.get('title') == w['title']]
+    found = same[min(nth, len(same) - 1)] if same else next((s for s in plan.swaps if s.get('ja') == w['ja']), None)
     en = w.get('en') or (found or {}).get('en') or twins.meaning(w['title'])
     if found and isinstance(found.get('p'), (int, float)):
         return en, float(found['p']), bool(found.get('free')), bool(found.get('dictionary'))
@@ -392,6 +396,44 @@ def _word_info(w, plan, now_ms):
     if estimate:
         return en, estimate[0], estimate[0] < fwlib.FREE_P, False
     return en, twins.PRIOR_P, False, False
+
+
+GRAMMAR_WORDS = set(grammar.WHOLE) | set(grammar.BARE_WORDS) | set(grammar.KOSOADO) | set(grammar.CONJUNCTIONS)
+CONTENT = re.compile('[㐀-鿿々ァ-ヺ]')  # kanji or katakana: a content word, not grammar
+
+
+def _unoffered(marked, plan, now_ms):
+    """The content words of a twin's Japanese the weave didn't offer: (priced, outside). priced: [(ja, chance)] of the
+    reader's words among them that aren't known at a glance (the word list's entry, a conjugated form too, at its
+    knowledge.json chance, else its status's prior); outside: whether one isn't in the word list (a dictionary word,
+    or none): such a twin shows only at full, as a dictionary word does. Grammar (kana only, every piece a grammar unit
+    or a listed grammar word) costs nothing. Without the word list (plan.words None), nothing is priced."""
+    import fwlib
+    import inflection
+    import knowledge
+    if plan.words is None:
+        return [], False
+    offered = inflection.Lexicon([{'ja': s['ja'], 'kana': s.get('kana') or ''} for s in plan.swaps if s.get('ja')])
+    listed = inflection.lexicon([{'ja': w['ja'], 'kana': w.get('kana') or ''} for w in plan.words])
+    status = {w['ja']: w.get('status') for w in plan.words}
+    priced, outside = [], False
+    for m in ABBR.finditer(marked):
+        word = m.group(2).strip()
+        if word in MARKS or offered.entry(word) is not None:
+            continue
+        if not CONTENT.search(word) and (word in GRAMMAR_WORDS or
+                                         all(x in grammar.UNITS for x in grammar._split(word, glossed=True))):
+            continue
+        ja = listed.entry(word)
+        if ja is None:
+            outside = True
+            continue
+        estimate = knowledge.word_estimate(plan.know, ja, 't3', now_ms)
+        chance = estimate[0] if estimate else knowledge.sigmoid(
+            -(fwlib.KNOWN_PRIOR_K if status.get(ja) == 'known' else knowledge.prior(None)))
+        if chance >= fwlib.FREE_P:
+            priced.append((ja, chance))
+    return priced, outside
 
 
 def _english_view(parts, keep):
@@ -475,8 +517,11 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
                    'same line, keep other Japanese in glosses (or quoted in backticks), then run check-reply again.')
         return Checked('\n'.join(out))
     fixed = [f'- line {n}: {what}' for n, what in notes]
-    for w in words:
-        w['en'], w['p'], w['free'], w['dictionary'] = _word_info(w, plan, now_ms)
+    uses = {}
+    for w in words:  # in document order: the nth use of a word and gloss is the weave's nth swap of them
+        key = (w['ja'], w['title'])
+        w['en'], w['p'], w['free'], w['dictionary'] = _word_info(w, plan, now_ms, uses.get(key, 0))
+        uses[key] = uses.get(key, 0) + 1
     # English sentences: swaps that can't stay go back to English
     keep = [id(w) for w in words]
     reverted = {}
@@ -563,14 +608,16 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             continue
         if id(p) in kept_ids:
             ps = [sentence_model.predict(plan.model, chars, ids, plan.statuses) for chars, ids in p['sentences']]
-            held = _twin_words(p['marked'], costly)
+            priced, outside = _unoffered(p['marked'], plan, now_ms)
+            held = _twin_words(p['marked'], costly) + priced
             inside = [x for _ja, x in held]
             ids_all = {i for _c, ids in p['sentences'] for i in ids}
             p['p'] = ps
             twin = len(els)
             owner[id(p)] = twin
-            # a dictionary word, or a learning word already used before it, shows only at full: so does its twin
-            late = any(ja in dictionary or ja in seen_costly for ja, _x in held)
+            # a dictionary word, a word not in the word list, or a learning word already used before it, shows only
+            # at full: so does its twin
+            late = outside or any(ja in dictionary or ja in seen_costly for ja, _x in held)
             els.append(twins.Element('s', cost_s=sum(max(x, plan.price) for x in ps), cost_w=sum(inside),
                                      opens=sum(ps) + sum(inside),
                                      value=twins.SENTENCE_VALUE + sum(twins.learning_value(x) for x in inside)
@@ -604,7 +651,8 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         shown = twins.render(final, level)
         if 'data-on' in shown or 'data-jw' in shown or '<ja>' in shown:
             error = f'level {level} does not render clean'
-        if grammar.annotation_texts(shown) != [texts[j] for j, o in enumerate(owners) if twins.visible(back, o, level)]:
+        if twins.shown_texts(final, level) != [texts[j] for j, o in enumerate(owners)
+                                               if twins.visible(back, o, level)]:
             error = f'level {level} shows other glossed words than its thresholds say'
     if error:
         return Checked(f'jw-check: something went wrong in code ({error}). Send the English reply as you wrote it, '

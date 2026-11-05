@@ -82,10 +82,13 @@ KEEP_MS = 3 * 86_400_000
 MARKS = ('。', '？')
 END_MARKS = MARKS + ('！',)
 
-ABBR = re.compile(r'<abbr\b([^>]*)>(.*?)</abbr>', re.S | re.I)
-ATTR = re.compile(r'([\w-]+)\s*=\s*"([^"]*)"')
-PAIR = re.compile(r'<span\s+data-jw="ja"\s+data-on="(-?\d+)"\s*>(.*?)</span>'
-                  r'<span\s+data-jw="en"\s+data-on="(-?\d+)"\s*>(.*?)</span>', re.S)
+TAG_BODY = r'((?:[^>"\']|"[^"]*"|\'[^\']*\')*)'  # a tag's attributes, a > inside quotes included
+ABBR = re.compile(r'<abbr\b' + TAG_BODY + r'>(.*?)</abbr>', re.S | re.I)
+ATTR = re.compile(r'([\w-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))')  # as HTML reads them
+TWIN_OPEN = re.compile(r'<span\b' + TAG_BODY + r'>', re.I)
+SPAN_CLOSE = re.compile(r'</span\s*>', re.I)
+BLANK_LINE = re.compile(r'\n[ \t]*\n')
+THRESHOLD = re.compile(r'-2|-1|0|1|2|3')  # the thresholds the contract allows: any other data-on renders as written
 UNSURE = re.compile(r'\{\{([^{}]*?)→\s*(<abbr\b[^>]*>.*?</abbr>)\s*\}\}', re.S)
 JA_TAG = re.compile(r'<(/?)ja>', re.I)
 CODE_SPAN = re.compile(r'``.+?``|`[^`\n]+`')
@@ -111,14 +114,18 @@ def esc(text):
 
 
 def attrs(raw):
-    """{name: value} of a tag's attributes, entities decoded."""
-    return {k.lower(): html.unescape(v) for k, v in ATTR.findall(raw or '')}
+    """{name: value} of a tag's attributes, entities decoded; the first of a name counts, as in HTML."""
+    out = {}
+    for k, *values in ATTR.findall(raw or ''):
+        out.setdefault(k.lower(), html.unescape(next((v for v in values if v), '')))
+    return out
 
 
 def meaning(title):
-    """The meaning part of a gloss title ('reading · meaning', or just the meaning for a kana word)."""
+    """The meaning of a gloss title ('reading · meaning / alternative', or just the meaning for a kana word): after
+    the reading, before the alternatives, as the clients take it."""
     _reading, dot, rest = str(title or '').partition('·')
-    return (rest if dot else _reading).strip()
+    return (rest if dot else _reading).split(' / ')[0].strip()
 
 
 def plain(text):
@@ -136,72 +143,202 @@ def plain(text):
 
 # ---- the final markup: reading it back and rendering it ----
 
+LIST_ITEM = re.compile(r'^\s*(?:[-*+]|\d+[.)])\s')
+INDENTED = re.compile(r'^(?: {4}|\t)')
+
+
+def _indented(text):
+    """[(is_code, piece)] of text outside fences: an indented code block (lines indented four spaces or a tab, at the
+    start or after a blank line, not under a list item, where markdown reads them as a list's continuation) is code."""
+    lines = text.split('\n')
+    out, code, previous, blank = [], [], None, True
+    for i, line in enumerate(lines):
+        piece = line + ('\n' if i < len(lines) - 1 else '')
+        if code and (INDENTED.match(line) or not line.strip()):
+            code.append(piece)
+            continue
+        if code:
+            out.append((True, ''.join(code)))
+            code = []
+        if INDENTED.match(line) and line.strip() and blank and not (previous and LIST_ITEM.match(previous)):
+            code.append(piece)
+            continue
+        out.append((False, piece))
+        if line.strip():
+            previous = line if not INDENTED.match(line) else previous
+        blank = not line.strip()
+    if code:
+        out.append((True, ''.join(code)))
+    merged = []
+    for is_code, piece in out:
+        if merged and merged[-1][0] == is_code:
+            merged[-1] = (is_code, merged[-1][1] + piece)
+        else:
+            merged.append((is_code, piece))
+    return merged
+
+
 def _chunks(text):
-    """[(is_code, piece)]: fenced code blocks apart, as grammar.strip_code (T3 shows no markup in them)."""
+    """[(is_code, piece)]: fenced code blocks and indented ones apart, as markdown reads them (T3 shows no markup in
+    them)."""
     out, at = [], 0
     for m in grammar.FENCE.finditer(text):
         if m.start() > at:
-            out.append((False, text[at:m.start()]))
+            out += _indented(text[at:m.start()])
         out.append((True, m.group()))
         at = m.end()
     if at < len(text):
-        out.append((False, text[at:]))
+        out += _indented(text[at:])
     return out
 
 
+def _code_out(piece):
+    """(the piece with each inline code span one private-use character, the spans): markup in code is text."""
+    saved = []
+    return CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), piece), saved
+
+
+class Span:
+    """A twin span as the clients read it: kind 'ja' or 'en', its threshold as written (on: the number when it is one
+    of -2..3, else None: rendered as written), where its opening tag starts and ends, where its first </span> after
+    it starts and ends (None when it never closes), and its content."""
+    __slots__ = ('kind', 'on', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
+
+
+def _spans(p):
+    """The twin spans in p (code out), each matched to its </span> as HTML nests spans, and whether the message is
+    broken as the clients judge it: a twin span that never closes, holds a blank line before the first </span> after
+    it, or sits inside another twin span."""
+    found, stack = [], []
+    for m in re.finditer(TWIN_OPEN.pattern + '|' + SPAN_CLOSE.pattern, p, re.I):
+        if m.group().startswith('</'):
+            if stack:
+                sp = stack.pop()
+                if sp is not None:
+                    sp.close, sp.close_end = m.start(), m.end()
+            continue
+        a = attrs(m.group(1))
+        if a.get('data-jw') not in ('ja', 'en'):
+            stack.append(None)
+            continue
+        sp = Span()
+        sp.kind, sp.start, sp.open_end, sp.close, sp.close_end = a['data-jw'], m.start(), m.end(), None, None
+        sp.on = int(a['data-on']) if THRESHOLD.fullmatch(a.get('data-on', '') or '') else None
+        sp.nested = any(x is not None and x.on is not None for x in stack)
+        stack.append(sp)
+        found.append(sp)
+    for sp in found:
+        sp.content = p[sp.open_end:sp.close if sp.close is not None else len(p)]
+        first = SPAN_CLOSE.search(p, sp.open_end)
+        sp.split = bool(first and BLANK_LINE.search(p[sp.open_end:first.start()]))
+    valid = [sp for sp in found if sp.on is not None]
+    broken = any(sp.close is None or sp.split or sp.nested for sp in valid)
+    return valid, broken
+
+
+def _pairs(p, valid):
+    """{id of a ja span: its en span}: a Japanese span pairs with an English one right after it (only whitespace
+    between) with the same threshold."""
+    out = {}
+    for a in valid:
+        b = next((x for x in valid if a.close is not None and x.start >= a.close_end), None)
+        if a.kind == 'ja' and b is not None and b.kind == 'en' and a.on == b.on and not p[a.close_end:b.start].strip():
+            out[id(a)] = b
+    return out
+
+
+def _last_translation(content):
+    """The translation of a Japanese twin's last sentence mark, or ''."""
+    found = ''
+    for m in ABBR.finditer(content):
+        if grammar.clean(m.group(2)).strip() in END_MARKS and attrs(m.group(1)).get('title', '').strip():
+            found = attrs(m.group(1))['title'].strip()
+    return found
+
+
 def tokens(text):
-    """The final markup in document order: ('raw', text), ('pair', N, japanese, english) and ('abbr', {attributes},
-    inner). Fenced code is raw."""
+    """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
+    written); ('pair', N, japanese, english, between) for a Japanese twin with an English one right after it (only
+    whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
+    a broken message (_spans) ('hidden', N, japanese, paired) for each Japanese twin (with what an unclosed one took in,
+    up to the next English twin of its threshold), its English twins unwrapped and every </span> dropped. A twin span
+    whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is raw; inline
+    code is text (no markup)."""
     out = []
     for code, piece in _chunks(str(text)):
         if code:
             out.append(('raw', piece))
             continue
-        saved = []  # inline code apart, so a </span> or an abbr in it is text
-        piece = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), piece)
+        p, saved = _code_out(piece)
         back = lambda t: _restore(t, saved)
+        valid, broken = _spans(p)
+        pairs = _pairs(p, valid)
+        taken = {id(b) for b in pairs.values()}
+        plain_ = (lambda t: SPAN_CLOSE.sub('', t)) if broken else (lambda t: t)
         at = 0
-        for m in PAIR.finditer(piece):
-            out += _abbrs(back(piece[at:m.start()]))
-            out.append(('pair', int(m.group(1)), back(m.group(2)), back(m.group(4))))
-            at = m.end()
-        out += _abbrs(back(piece[at:]))
+        for i, sp in enumerate(valid):
+            if sp.start < at:
+                continue  # inside a span already taken
+            out += _abbrs(plain_(p[at:sp.start]), back)
+            if broken:
+                if sp.kind == 'ja':
+                    nxt = next((b for b in valid[i + 1:] if b.kind == 'en' and b.on == sp.on), None)
+                    end = sp.close_end if sp.close is not None else (nxt.start if nxt else len(p))
+                    out.append(('hidden', sp.on, back(p[sp.open_end:end]), id(sp) in pairs))
+                    at = end
+                else:
+                    at = sp.open_end  # an English twin unwrapped: its content comes as the text after it
+                continue
+            if id(sp) in taken:
+                continue
+            if id(sp) in pairs:
+                en = pairs[id(sp)]
+                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start])))
+                at = en.close_end
+            else:
+                out.append((sp.kind, sp.on, back(sp.content)))
+                at = sp.close_end
+        out += _abbrs(plain_(p[at:]), back)
     return out
 
 
-def _abbrs(text):
+def _abbrs(text, back=lambda t: t):
     out, at = [], 0
     for m in ABBR.finditer(text):
         if m.start() > at:
-            out.append(('raw', text[at:m.start()]))
-        out.append(('abbr', attrs(m.group(1)), m.group(2)))
+            out.append(('raw', back(text[at:m.start()])))
+        out.append(('abbr', attrs(m.group(1)), back(m.group(2)), back(m.group())))
         at = m.end()
     if at < len(text):
-        out.append(('raw', text[at:]))
+        out.append(('raw', back(text[at:])))
     return out
 
 
 def has_levels(text):
-    """Whether a reply carries render-time levels (any data-on or data-jw)."""
-    return 'data-on=' in str(text) or 'data-jw=' in str(text)
+    """Whether a reply carries render-time levels (any data-on or data-jw, in any case, as HTML reads names)."""
+    low = str(text).lower()
+    return 'data-on' in low or 'data-jw' in low
 
 
-def _level(value, default=FULL):
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(-2, min(FULL, n))
+def _threshold(a):
+    """An abbr's threshold: its data-on when it is exactly -2..3, else None (rendered as written)."""
+    value = a.get('data-on')
+    return int(value) if value is not None and THRESHOLD.fullmatch(value) else None
 
 
-def _word(a, inner, level):
-    """One glossed word at a level: an abbr with data-on shows from that level (else its data-en, else its meaning);
-    one without shows above off, and at off its meaning (a closing mark: nothing), as English only shows older
-    messages."""
-    if 'data-on' in a:
-        if level >= _level(a['data-on']):
+def _word(t, level):
+    """One glossed word at a level: one with a threshold shows from it (else its data-en, else its meaning, else as
+    written); one with a data-on that isn't one, or with none, as written above off, and at off its meaning (a
+    closing mark: nothing), as English only shows older messages."""
+    a, inner, raw = t[1], t[2], t[3]
+    on = _threshold(a)
+    if on is not None:
+        if level >= on:
             return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
-        return esc_text(a.get('data-en') or meaning(a.get('title')))
+        english = a.get('data-en') or meaning(a.get('title'))
+        return esc_text(english) if english else raw
+    if 'data-on' in a and level > OFF:
+        return raw
     if level <= OFF:
         return '' if grammar.clean(inner).strip() in END_MARKS else esc_text(meaning(a.get('title')))
     return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
@@ -212,49 +349,87 @@ def esc_text(text):
     return str(text).replace('<', '&lt;').replace('>', '&gt;')
 
 
+def _inside(content, level, japanese):
+    """A twin's content at a level: the Japanese one's glosses plain, the English one's words by their thresholds."""
+    if japanese:
+        return ''.join(x[1] if x[0] == 'raw' else f'<abbr title="{esc(x[1].get("title", ""))}">{x[2]}</abbr>'
+                       for x in _abbrs(content))
+    return ''.join(x[1] if x[0] == 'raw' else _word(x, level) for x in _abbrs(content))
+
+
 def render(text, level):
-    """The reply as the reader sees it at a level (-3..3), in the markup from before levels: each element shown or
-    hidden by its threshold, the shown words as plain glossed abbrs. A reply without levels is unchanged above off;
-    at off its glossed words become their meanings and its sentence marks go (English only)."""
+    """The reply as the reader sees it at a level (-3..3), in the markup from before levels, by the rule the clients
+    share: a pair (a Japanese twin right before an English one of the same threshold, only whitespace between) shows
+    its Japanese from its threshold and its English below; an English twin with no pair always shows; a Japanese one
+    with no pair shows from its threshold and below it is its last sentence mark's translation, or nothing; in a
+    broken message (_spans) every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in
+    inline code is text. A reply without levels is unchanged above off; at off its glossed words become their meanings
+    and its sentence marks go (English only)."""
     text = str(text)
     if not has_levels(text) and level > OFF:
         return text
     out = []
     for t in tokens(text):
-        if t[0] == 'raw':
+        kind = t[0]
+        if kind == 'raw':
             out.append(t[1])
-        elif t[0] == 'abbr':
-            out.append(_word(t[1], t[2], level))
-        elif level > OFF and level >= t[1]:
-            out.append(''.join(x[1] if x[0] == 'raw' else
-                               f'<abbr title="{esc(x[1].get("title", ""))}">{x[2]}</abbr>' for x in _abbrs(t[2])))
-        else:
-            out.append(''.join(x[1] if x[0] == 'raw' else _word(x[1], x[2], level) for x in _abbrs(t[3])))
+        elif kind == 'abbr':
+            out.append(_word(t, level))
+        elif kind == 'pair':
+            out.append(_inside(t[2], level, True) + t[4] if level > OFF and level >= t[1] else
+                       t[4] + _inside(t[3], level, False))
+        elif kind == 'en':
+            out.append(_inside(t[2], level, False))
+        elif kind == 'ja':
+            out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
+                       esc_text(_last_translation(t[2])))
+        elif kind == 'hidden':  # a broken message: a pair's Japanese never, a lone one's as a lone one's
+            if not t[3]:
+                out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
+                           esc_text(_last_translation(t[2])))
     return ''.join(out)
 
 
+def well_formed(text):
+    """Whether every twin span is a pair with a threshold, in a message that isn't broken, and every swapped word's
+    data-on is a threshold: what check-reply writes, and the only markup a sentence record is made for."""
+    for code, piece in _chunks(str(text)):
+        if code:
+            continue
+        p, _saved = _code_out(piece)
+        valid, broken = _spans(p)
+        jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in ('ja', 'en'))
+        if broken or jw != len(valid) or 2 * len(_pairs(p, valid)) != len(valid):
+            return False
+        if any(('data-on' in attrs(m.group(1)) and _threshold(attrs(m.group(1))) is None)
+               or not attrs(m.group(1)).get('title', '').strip() for m in ABBR.finditer(p)):
+            return False
+    return True
+
+
 def elements(text):
-    """(elements, owners) of the final markup. elements in document order: {kind: 's' (a twin) or 'w' (a swapped word
-    with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English holds the word, or
-    None}; owners: per glossed word of the reply in order (the Japanese of a twin before its English), the index of
-    the element it belongs to, or -1 (a word without data-on, shown at every level above off). An abbr without data-on
-    inside a twin's English shows while the English does: an element with threshold -2."""
+    """(elements, owners) of well-formed final markup (well_formed). elements in document order: {kind: 's' (a twin)
+    or 'w' (a swapped word with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English
+    holds the word, or None}; owners: per glossed word of the reply in order (the Japanese of a twin before its
+    English), the index of the element it belongs to, or -1 (a word without data-on, shown at every level above off).
+    An abbr without data-on inside a twin's English shows while the English does: an element with threshold -2."""
     els, owners = [], []
     for t in tokens(text):
         if t[0] == 'abbr':
-            if 'data-on' in t[1]:
+            on = _threshold(t[1])
+            if on is not None:
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': _level(t[1]['data-on']), 'parent': None})
+                els.append({'kind': 'w', 'on': on, 'parent': None})
             else:
                 owners.append(-1)
         elif t[0] == 'pair':
             twin = len(els)
-            els.append({'kind': 's', 'on': _level(t[1]), 'parent': None})
+            els.append({'kind': 's', 'on': t[1], 'parent': None})
             owners += [twin] * sum(1 for _ in ABBR.finditer(t[2]))
             for m in ABBR.finditer(t[3]):
-                a = attrs(m.group(1))
+                on = _threshold(attrs(m.group(1)))
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': _level(a.get('data-on'), -2), 'parent': twin})
+                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin})
     return els, owners
 
 
@@ -273,7 +448,7 @@ def visible(els, i, level):
 
 def annotation_texts(text):
     """The inner texts of a reply's glossed words in order, every element's included, as the fingerprint takes them
-    (grammar.annotation_texts of the markup with every span opened)."""
+    (what shown_texts would give with every span open); glosses in code are text."""
     out = []
     for t in tokens(text):
         if t[0] == 'abbr':
@@ -284,10 +459,27 @@ def annotation_texts(text):
     return out
 
 
+def inert_code(text):
+    """The text with markup inside code (inline, fenced or indented) made inert ('<' as an entity), as a client shows
+    it: code, no gloss."""
+    out = []
+    for code, piece in _chunks(str(text)):
+        out.append(piece.replace('<', '&lt;') if code else CODE_SPAN.sub(lambda m: m.group().replace('<', '&lt;'),
+                                                                          piece))
+    return ''.join(out)
+
+
+def shown_texts(text, level):
+    """The glossed words a client shows at a level, in order: the abbrs with a title of render's output, code inert
+    (an abbr with no title is no gloss)."""
+    return [inner for kind, _s, _e, inner, title in grammar.pieces(inert_code(render(text, level)))[1]
+            if kind == 'w' and (title or '').strip()]
+
+
 def fingerprints(text):
-    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (grammar.fingerprint of
-    grammar.annotation_texts(render(text, level)), what T3 reports from its screen)."""
-    return {level: grammar.fingerprint(grammar.annotation_texts(render(text, level))) for level in SHOWING}
+    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (shown_texts), what T3
+    reports from its screen."""
+    return {level: grammar.fingerprint(shown_texts(text, level)) for level in SHOWING}
 
 
 # ---- what Claude writes: English with <ja> twins ----
@@ -311,15 +503,28 @@ def _restore(text, saved):
     return text
 
 
+SINGLE = re.compile(r'(?:^|[\s.(])[A-Za-z]\.$')  # U.S., a.m., e.g.: a single letter and a period ends no sentence
+
+
+def boundaries(s, start=0, end=None):
+    """The sentence ends (BOUNDARY matches) in s[start:end], but for the abbreviations in ABBREVIATIONS and a period
+    after a single letter (U.S., a.m.)."""
+    end = len(s) if end is None else end
+    for m in BOUNDARY.finditer(s, start, end):
+        before = s[start:m.start() + 1]
+        low = before.lower()
+        if low.endswith(ABBREVIATIONS) and re.search(r'(^|\s)(' + '|'.join(map(re.escape, ABBREVIATIONS)) + r')$', low):
+            continue
+        if m.group().startswith('.') and SINGLE.search(before):
+            continue
+        yield m
+
+
 def _sentence_start(s, start, end):
     """Where the English sentence ending at `end` begins, searching s[start:end]: after the last sentence end there
-    (BOUNDARY, ABBREVIATIONS aside), else at start; leading spaces skipped."""
+    (boundaries), else at start; leading spaces skipped."""
     begin = start
-    for m in BOUNDARY.finditer(s, start, end):
-        before = s[start:m.start() + 1].lower()
-        if before.endswith(ABBREVIATIONS) and re.search(r'(^|\s)(' + '|'.join(map(re.escape, ABBREVIATIONS)) + r')$',
-                                                         before):
-            continue
+    for m in boundaries(s, start, end):
         begin = m.end()
     while begin < end and s[begin].isspace():
         begin += 1
@@ -344,7 +549,9 @@ def twin_trouble(s, begin, english, japanese):
     link, leaves
     markdown open (bold, italic, a link, code) or starts inside markdown the line left open before it, or its Japanese
     leaves markdown open. Such a twin would cut through the reader's markdown, or hide a sentence with its own."""
-    if len(SENTENCE_END.findall(english + ' ')) > 1:
+    ends = [m for m in SENTENCE_END.finditer(english + ' ')
+            if not (m.group().startswith('.') and SINGLE.search(english[:m.start() + 1]))]
+    if len(ends) > 1:
         return 'its English holds more than one sentence'
     if s.lstrip().startswith('|'):
         return 'it is in a table'
@@ -427,7 +634,7 @@ def _english(text, number, sid, parent):
     s = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), text)
     found = list(ABBR.finditer(s))
     flat = ABBR.sub('\ue000', s)  # each gloss one placeholder: where the sentence ends fall, gloss by gloss
-    shift, ends, starts = 0, [m.end() for m in BOUNDARY.finditer(flat)], []
+    shift, ends, starts = 0, [m.end() for m in boundaries(flat)], []
     for m in found:
         starts.append(m.start() - shift)
         shift += len(m.group()) - 1

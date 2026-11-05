@@ -30,7 +30,8 @@ every level at once, so the reader's level is applied when it is shown (below).
    each sentence that fits, on the same line, its twin in `<ja>...</ja>`: one Japanese or mixed sentence, or two short
    ones for a long English sentence, glossed as before, each ending with a bare 。 or ？. The twin's English is the text
    back to the end of the sentence before it (a `.`, `!`, `?`, `:` or `;` after anything but a space, with any
-   closing quotes, brackets or emphasis marks, then a space, abbreviations like "e.g." aside; or an emoji and a space),
+   closing quotes, brackets or emphasis marks, then a space, abbreviations like "e.g." and a single letter's period
+   (U.S., a.m.) aside; or an emoji and a space),
    the end of an earlier `</ja>` on the line, or the line's start after a list, heading or quote marker. Code puts the
    English sentence on each closing mark as its translation, so it is written once. A twin that would cut through the
    reader's markdown keeps its sentence English (`twins.twin_trouble`): its English holds more than one sentence, sits
@@ -48,7 +49,11 @@ every level at once, so the reader's level is applied when it is shown (below).
      carry meaning, する on an English word and the rest): its sentence stays English;
    - puts back in English a swap that breaks the stays-English rules (only nouns, and adjectives right before a noun),
      and a content word's fifth gloss;
-   - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave),
+   - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave;
+     the nth use of a word and gloss takes the weave's nth swap of them, so a word offered for two senses keeps each
+     sense's English). A twin's words the weave didn't offer are priced too: a word of the reader's list at its
+     estimate, while a content word not on the list (a dictionary word, or none), like a dictionary word or a learning
+     word's later use, makes the twin show only at full; glossed grammar costs nothing. It then
      decides what each level shows (thresholds and propensities, below), writes the final markup, checks that it reads
      back to the same elements and thresholds and that every level renders clean, and keeps the plan in
      `reply-plans.json` for the hook's sentence record;
@@ -74,8 +79,15 @@ title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr
 up and as its English below; a twinned sentence is `<span data-jw="ja" data-on="N">...</span><span data-jw="en"
 data-on="N">...</span>`, the Japanese from N up and the English below. N is in -2..3 (3: full only); at -3 (off, and
 English only) nothing is Japanese. Anything without `data-on` or `data-jw` renders as before, so older messages are
-unchanged. Each report item T3 sends carries the level the message was rendered at, and the annotations and words it
-reports come from the screen, so a hidden word is never reported as shown.
+unchanged. Malformed markup renders by one rule on both clients, which `twins.render` mirrors so the fingerprints agree:
+a Japanese span pairs with an English one right after it (whitespace between allowed) of the same threshold; a lone
+English span always shows; a lone Japanese one shows from its threshold and below it is its last sentence mark's
+translation; in a broken message (a twin span left open, split by a blank line, or inside another) every pair shows its
+English; a `data-on` that isn't exactly -2..3 renders as written; an empty `data-en` is the gloss's first meaning;
+markup in code (inline, fenced or indented) is text. On the review's corpus of malformed and edge cases the Python
+rendering's glosses match the clients' in all 442 renderings where the two clients agree. A sentence record is made only
+for well-formed markup. Each report item T3 sends carries the level the message was rendered at, and the annotations and
+words it reports come from the screen, so a hidden word is never reported as shown.
 
 **Thresholds.** One order per reply and kind, cut at each budgeted level's lookup budget (`intensity.budget` per 100 of
 the reply's English words). Twins spend the sentences' share of it (`SENTENCE_SHARE`), each Japanese sentence at its
