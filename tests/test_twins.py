@@ -719,6 +719,26 @@ class ReviewRound3(Home):
                                      seed=1, remember=False)
         self.assertEqual([on for e, on in zip(checked.elements, checked.on) if e.kind == 's'], [twins.FULL])
 
+    def test_4_broken_tags_as_the_clients_read_them(self):
+        word = '<abbr title="もんだい · problem" data-en="problem" data-on="1">問題'
+        pair = (f'<span data-jw="ja" data-on="1">{P}です<abbr title="It is a problem.">。</abbr></span>'
+                '<span data-jw="en" data-on="1">It is a problem.</span>')
+        render = lambda text: [twins.render(text, level) for level in (-3, 0, 1, 3)]
+        for text in (f'The {word} is small. {pair}', f'The {word} is small.\n\nNext {pair}'):
+            shown = render(text)
+            self.assertTrue(all(x.startswith('The problem is small.') for x in shown), shown)  # never its Japanese
+            self.assertIn('It is a problem.', shown[1])
+            self.assertIn('です', shown[2])  # the rest of the block as it is
+        self_closing = '<abbr title="a · b" data-en="b" data-on="1"/>after ' + pair
+        self.assertEqual(render(self_closing)[0], 'after It is a problem.')
+        self.assertEqual(twins.shown_texts(self_closing, 1), ['問題', '。'])  # the tag dropped, not a gloss
+        lone = '<span data-jw="ja" data-on="1"/><span data-jw="en" data-on="1">It rains.</span> after.'
+        self.assertEqual(render(lone), ['It rains. after.'] * 4)
+        unclosed = 'Intro. <span data-jw="ja" data-on="1">今日は雨です。<span data-jw="en" data-on="1">It rains.</span> Out.'
+        self.assertEqual(render(unclosed), ['Intro. It rains. Out.'] * 4)  # a Japanese twin left open: English
+        for text in (f'The {word} is small. {pair}', self_closing, lone, unclosed):
+            self.assertFalse(twins.well_formed(text))
+
 
 if __name__ == '__main__':
     unittest.main()

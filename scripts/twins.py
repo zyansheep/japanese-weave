@@ -256,12 +256,44 @@ def _last_translation(content):
     return found
 
 
+SELF_CLOSING = re.compile(r'<(abbr|span)\b' + TAG_BODY + r'/>', re.I)
+ABBR_OPEN = re.compile(r'<abbr\b' + TAG_BODY + r'>', re.I)
+ABBR_CLOSE = re.compile(r'</abbr\s*>', re.I)
+
+
+def _repair(p):
+    """p (code out) as the clients read a finished message's broken tags: a self-closing <abbr/> or level <span/> is
+    dropped; an abbr with a threshold whose </abbr> doesn't come before the next abbr or the end of its block is its
+    English (data-en, else its gloss's meaning) in place of its tag and the word after it, at every level, and the rest
+    of the block is read as it is."""
+    def drop(m):
+        a = attrs(m.group(2))
+        return '' if m.group(1).lower() == 'abbr' or 'data-jw' in a or 'data-on' in a else m.group()
+    p = SELF_CLOSING.sub(drop, p)
+    out, at = [], 0
+    for m in ABBR_OPEN.finditer(p):
+        if m.start() < at:
+            continue
+        a = attrs(m.group(1))
+        close, after = ABBR_CLOSE.search(p, m.end()), ABBR_OPEN.search(p, m.end())
+        block = BLANK_LINE.search(p, m.end())
+        limit = min(x.start() for x in (after, block) if x) if (after or block) else len(p)
+        if _threshold(a) is None or (close and close.start() < limit):
+            continue
+        word = re.match(r'[^\s<]*', p[m.end():])
+        english = a.get('data-en') or meaning(a.get('title'))
+        out.append(p[at:m.start()] + esc_text(english))
+        at = m.end() + word.end()
+    return ''.join(out) + p[at:]
+
+
 def tokens(text):
     """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
     written); ('pair', N, japanese, english, between) for a Japanese twin with an English one right after it (only
     whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
-    a broken message (_spans) ('hidden', N, japanese, paired) for each Japanese twin (with what an unclosed one took in,
-    up to the next English twin of its threshold), its English twins unwrapped and every </span> dropped. A twin span
+    a broken message (_spans) ('hidden', N, japanese, never) for each Japanese twin (with what an unclosed one took in,
+    up to the next English twin of its threshold; never: it is paired, or left open, so it never shows), its English
+    twins unwrapped and every </span> dropped; broken tags as _repair reads them. A twin span
     whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is raw; inline
     code is text (no markup)."""
     out = []
@@ -270,6 +302,7 @@ def tokens(text):
             out.append(('raw', piece))
             continue
         p, saved = _code_out(piece)
+        p = _repair(p)
         back = lambda t: _restore(t, saved)
         valid, broken = _spans(p)
         pairs = _pairs(p, valid)
@@ -284,7 +317,7 @@ def tokens(text):
                 if sp.kind == 'ja':
                     nxt = next((b for b in valid[i + 1:] if b.kind == 'en' and b.on == sp.on), None)
                     end = sp.close_end if sp.close is not None else (nxt.start if nxt else len(p))
-                    out.append(('hidden', sp.on, back(p[sp.open_end:end]), id(sp) in pairs))
+                    out.append(('hidden', sp.on, back(p[sp.open_end:end]), id(sp) in pairs or sp.close is None))
                     at = end
                 else:
                     at = sp.open_end  # an English twin unwrapped: its content comes as the text after it
@@ -383,7 +416,7 @@ def render(text, level):
         elif kind == 'ja':
             out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
                        esc_text(_last_translation(t[2])))
-        elif kind == 'hidden':  # a broken message: a pair's Japanese never, a lone one's as a lone one's
+        elif kind == 'hidden':  # a broken message: a pair's or an open one's Japanese never, a lone one's as such
             if not t[3]:
                 out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
                            esc_text(_last_translation(t[2])))
@@ -397,6 +430,8 @@ def well_formed(text):
         if code:
             continue
         p, _saved = _code_out(piece)
+        if _repair(p) != p:
+            return False
         valid, broken = _spans(p)
         jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in ('ja', 'en'))
         if broken or jw != len(valid) or 2 * len(_pairs(p, valid)) != len(valid):

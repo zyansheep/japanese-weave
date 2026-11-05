@@ -87,8 +87,10 @@ unchanged. Malformed markup renders by one rule on both clients, which `twins.re
 a Japanese span pairs with an English one right after it (whitespace between allowed) of the same threshold; a lone
 English span always shows; a lone Japanese one shows from its threshold and below it is its last sentence mark's
 translation; in a broken message (a twin span left open, split by a blank line, or inside another) every pair shows its
-English; a `data-on` that isn't exactly -2..3 renders as written; an empty `data-en` is the gloss's first meaning;
-markup in code (inline, fenced or indented) is text. On the review's corpus of malformed and edge cases the Python
+English, and a Japanese twin left open never shows; a `data-on` that isn't exactly -2..3 renders as written; an empty
+`data-en` is the gloss's first meaning; a self-closing `<abbr/>` or level `<span/>` is dropped; a level abbr whose
+`</abbr>` doesn't come before the next abbr or the end of its block is its English at every level, in place of its tag
+and the word after it, the rest of the block as it is; markup in code (inline, fenced or indented) is text. On the review's corpus of malformed and edge cases the Python
 rendering's glosses match the clients' in all 442 renderings where the two clients agree. A sentence record is made only
 for well-formed markup. Each report item T3 sends carries the level the message was rendered at, and the annotations and
 words it reports come from the screen, so a hidden word is never reported as shown.
