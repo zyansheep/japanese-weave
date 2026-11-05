@@ -13,10 +13,20 @@ line. It finds the errors blind judges kept finding in woven replies that code c
   - "an" before a Japanese word, or any English article inside a sentence half Japanese or more;
   - そして opening a sentence, the learner's "And...";
   - one content word (with kanji) glossed REPEAT or more times in a reply.
-Code (fenced and inline) is skipped. Python 3.9+ standard library only."""
+Code (fenced and inline) is skipped.
+
+With a plan (Plan: the reader's grammar statuses, the sentence model and the level), it also scores each Japanese or
+mixed sentence (score): its Japanese characters, its grammar patterns (grammar.py), the patterns not allowed (new ones,
+or a second learning one) and its predicted open chance (sentence_model.predict); it flags one longer than the weave's
+limit, using patterns not allowed, or more likely to be opened than sentence_model.TARGET, and ends with the reply's
+expected sentence opens against the level's budget for sentences. Python 3.9+ standard library only."""
 import functools
 import re
 from pathlib import Path
+
+import grammar
+import intensity
+import sentence_model
 
 DICTIONARY = Path(__file__).resolve().parent.parent / 'data' / 'dictionary.tsv'
 ABBR = re.compile(r'<abbr title="([^"]*)">([^<]*)</abbr>')
@@ -199,11 +209,119 @@ def problems(text, types=None):
     return found
 
 
-def report(text, types=None):
-    """What fw.py check-reply prints."""
+class Plan:
+    """What the sentence scorer needs: the reader's pattern statuses (grammar.statuses), the sentence model
+    (knowledge.json "grammar", or None) and the chat level with normal's budget (the challenge, or None)."""
+
+    def __init__(self, statuses, model=None, level=0, normal=None):
+        self.statuses, self.model, self.level, self.normal = statuses, model, level, normal
+        self.ready = bool(model and model.get('ready'))
+        self.limit = sentence_model.max_chars(model)
+
+    @classmethod
+    def load(cls, level=None):
+        """From this machine's state and knowledge.json (the cache, with a collector), at the chat level in effect
+        unless one is given."""
+        import fwlib
+        import knowledge
+        state, know = fwlib.load_state(), knowledge.load()
+        level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
+        model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
+        return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None)
+
+
+def score(text, plan):
+    """[{line, text, chars, ids, new, learning, p, flags}] for each Japanese or mixed sentence of a reply: one whose
+    closing mark is glossed, or half Japanese or more. flags: what to fix, [] when nothing."""
+    out, fence = [], False
+    for number, raw in enumerate(text.split('\n'), 1):
+        if re.match(r'\s*(```|~~~)', raw):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        line = re.sub(r'`[^`]*`', ' CODE ', raw)
+        for sent in sentences(line):
+            words = [t for t in sent if t[0] == 'w']
+            bare = ''.join(t[1] for t in sent if t[0] == 't')
+            japanese = len(words) + sum(1 for t in sent if t[0] == 't' and JAPANESE.search(t[1]))
+            marked = any(t[0] == 'm' for t in sent)
+            if not marked and not (japanese >= 3 and japanese >= len(LATIN_WORD.findall(bare))):
+                continue
+            segments = [(t[0], t[1]) for t in sent if t[0] in 'wt']
+            body = ''.join(t[1] for t in segments)
+            chars = len(grammar.JAPANESE.findall(body))
+            ids = grammar.scan_ids(segments)
+            new, learning = sentence_model.allowed(ids, plan.statuses)
+            p = sentence_model.predict(plan.model, chars, ids, plan.statuses)
+            flags = []
+            if chars > plan.limit:
+                flags.append(f'too long: {chars} Japanese characters, the limit is {plan.limit}')
+            if new:
+                flags.append('grammar not on the list: ' + ', '.join(grammar.BY_ID[i].name for i in new))
+            if len(learning) > 1:
+                flags.append('more than one learning pattern: ' + ', '.join(grammar.BY_ID[i].name for i in learning))
+            if plan.ready and p > sentence_model.TARGET:
+                flags.append(f'likely to be opened: {p:.0%}, over the {sentence_model.TARGET:.0%} aimed at')
+            show = re.sub(r'\s+', ' ', ''.join(t[1] for t in sent)).strip()
+            out.append({'line': number, 'text': show[:90], 'chars': chars, 'ids': ids, 'new': new,
+                        'learning': learning, 'p': p, 'flags': flags})
+    return out
+
+
+def words_of(text):
+    """About how many words the reply's English draft had: its English words and its glossed words (sentence marks
+    left out), code left out."""
+    prose = re.sub(r'```.*?```', ' ', text, flags=re.S)
+    prose = re.sub(r'`[^`]*`', ' ', prose)
+    glossed = sum(1 for m in ABBR.finditer(prose) if m.group(2) not in MARKS)
+    return len(LATIN_WORD.findall(ABBR.sub(' ', prose))) + glossed
+
+
+def sentence_budget(text, plan):
+    """The lookups the level lets the reply's sentences spend: its budget per 100 words times the reply's words, times
+    intensity.SENTENCE_SHARE; None at full (no budget)."""
+    budget = intensity.budget(plan.level, plan.normal)
+    if budget is None:
+        return None
+    return budget * words_of(text) / 100 * intensity.SENTENCE_SHARE
+
+
+def sentence_lines(text, plan):
+    """The scorer's part of the report: one line per sentence, and the expected opens against the budget."""
+    scored = score(text, plan)
+    if not scored:
+        return [], 0
+    names = lambda ids: ', '.join(grammar.BY_ID[i].name for i in ids) or 'no patterns'
+    lines = [f'Japanese and mixed sentences (Japanese characters, the limit {plan.limit}; grammar; chance the user '
+             f'opens the translation{"" if plan.ready else ", from the prior until the model is ready"}):']
+    flagged = 0
+    for s in scored:
+        head = f'- line {s["line"]}: "{s["text"]}" {s["chars"]} characters; {names(s["ids"])}; {s["p"]:.1%}'
+        if s['flags']:
+            flagged += 1
+            head += ('. FIX (split it, simplify it, or leave it English): ' + '; '.join(s['flags']))
+        lines.append(head)
+    expected = sum(s['p'] for s in scored)
+    budget = sentence_budget(text, plan)
+    level = intensity.NAMES.get(plan.level, 'normal')
+    if budget is None:
+        lines.append(f'Expected sentence opens: {expected:.2f} for {len(scored)} sentences (no budget at {level}).')
+    else:
+        verdict = ('over the budget: fewer or easier Japanese sentences' if expected > budget * 1.25 else
+                   'under the budget' if expected < budget * 0.5 else 'about the budget')
+        lines.append(f'Expected sentence opens: {expected:.2f} for {len(scored)} sentences, against a budget of '
+                     f'{budget:.2f} at {level}: {verdict}.')
+    return lines, flagged
+
+
+def report(text, types=None, plan=None):
+    """What fw.py check-reply prints: the problems, then with a plan the sentences scored (sentence_lines)."""
     found = problems(text, types)
-    if not found:
-        return 'jw-check: no problems found.'
-    lines = [f'jw-check: {len(found)} things to fix (fix each, or keep it only where the check is plainly wrong):']
+    extra, flagged = sentence_lines(text, plan) if plan is not None else ([], 0)
+    if not found and not flagged:
+        return '\n'.join(['jw-check: no problems found.'] + extra)
+    lines = [f'jw-check: {len(found) + flagged} things to fix (fix each, or keep it only where the check is plainly '
+             'wrong):']
     lines += [f'- line {number}: {what}. In: "{where}"' if number else f'- {what}.' for number, what, where in found]
-    return '\n'.join(lines)
+    return '\n'.join(lines + extra)

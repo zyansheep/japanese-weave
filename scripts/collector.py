@@ -23,10 +23,17 @@ private network such as Tailscale. Python 3.9+, standard library only.
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
   GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
-                          &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null
-  POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of the heavier/lighter shortcut (T3 Code,
-                          fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level, until, at}};
-                          level -3 (off) .. 3 (full), a press past either end stays there (intensity.py)
+                          &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null;
+                          surface=chat adds English only: "english": {on, until (ms, 0 when off), at (ms of the last
+                          change, 0 if never)}
+  POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of heavier or lighter (the arrows of T3
+                          Code's panel, fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level,
+                          until, at}}; level -3 (off) .. 3 (full), a press past either end stays there (intensity.py)
+  POST /v1/english        {"on": true|false, "source", "contexts": [{"view", "context"}, ...]}: English only in chat
+                          turned on for an hour (a press while on starts the hour again) or off, by T3 Code's shortcut;
+                          contexts: the messages on screen (at most 30, ids as in /v1/interactions; may be empty),
+                          recorded with the press as an english op -> {"ok": true, "english": {on, until, at}}, or
+                          {"ok": false, "error"} with a 4xx status
 
 Every few minutes it also applies the day's promotion rules and refreshes the knowledge estimates (hub.maintain).
 
@@ -122,6 +129,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {'ok': False, 'error': 'surface is chat or browser'})
             state = fwlib.load_state() if (fwlib.home() / 'state.json').exists() else {}
             body = {'ok': True, 'intensity': intensity.current(state.get('prefs'), surface)}
+            if surface == 'chat':
+                body['english'] = intensity.english_current(state.get('prefs'))
             if 'session' in query:  # the hook asks for its chat's switch in the same request
                 body['thread'] = threads.entry(state, query['session'][0])
             return self.reply(200, body)
@@ -137,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_allowed():
             return
         path = urlsplit(self.path).path
-        if path not in ('/v1/interactions', '/v1/ops', '/v1/intensity', '/v1/review/next'):
+        if path not in ('/v1/interactions', '/v1/ops', '/v1/intensity', '/v1/review/next', '/v1/english'):
             return self.reply(404, {'ok': False, 'error': 'not found'})
         if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
             return self.reply(415, {'ok': False, 'error': 'send application/json'})
@@ -178,12 +187,48 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as error:
                     return self.reply(400, {'ok': False, 'error': str(error)})
             return self.reply(200, {'ok': True, 'intensity': value})
+        if path == '/v1/english':
+            error = english_error(body)
+            if error:
+                return self.reply(400, {'ok': False, 'error': error})
+            if not (fwlib.home() / 'state.json').exists():
+                return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
+            with PRESSES:
+                try:
+                    value = hub.change_english_here(body['on'], body.get('source', 'unknown'), body.get('contexts') or [],
+                                                    self.db)
+                except ValueError as error:
+                    return self.reply(400, {'ok': False, 'error': str(error)})
+            return self.reply(200, {'ok': True, 'english': value})
         if not isinstance(body, dict) or body.get('surface') not in feedback.SURFACES or not isinstance(body.get('items'), list):
             return self.reply(400, {'ok': False, 'error': 'need {"surface": "browser"|"t3", "items": [...]}'})
-        self.reply(200, dict(feedback.record(body['items'], body['surface'], self.db), ok=True))
+        hide = None  # a T3 message shown while English only is on: dropped (feedback.record)
+        if body['surface'] == 't3' and any(isinstance(i, dict) and i.get('kind') == feedback.SHOWN for i in body['items']) \
+                and (fwlib.home() / 'state.json').exists():
+            english = intensity.english_current(fwlib.load_state().get('prefs'))
+            hide = (english['at'], english['until']) if english['on'] else None
+        self.reply(200, dict(feedback.record(body['items'], body['surface'], self.db, hide=hide), ok=True))
 
     def log_message(self, fmt, *args):  # one line per request on stderr, for journalctl
         sys.stderr.write(f'{self.address_string()} {fmt % args}\n')
+
+
+def english_error(body):
+    """What is wrong with a POST /v1/english body, or None."""
+    ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
+    if not isinstance(body, dict) or not isinstance(body.get('on'), bool):
+        return 'need {"on": true|false, "source", "contexts": [...]}'
+    source, contexts = body.get('source', 'unknown'), body.get('contexts', [])
+    if not isinstance(source, str) or not 0 < len(source) <= 20:
+        return 'source is a short name, like "t3"'
+    if contexts is None:
+        contexts = []
+    if not isinstance(contexts, list) or len(contexts) > hub.MAX_CONTEXTS:
+        return f'contexts is a list of at most {hub.MAX_CONTEXTS} messages'
+    if not all(isinstance(c, dict) and set(c) == {'view', 'context'} and ident(c['view']) and ident(c['context'])
+               for c in contexts):
+        return 'each context is {"view", "context"}, ids as in /v1/interactions'
+    return None
 
 
 def maintain_forever():

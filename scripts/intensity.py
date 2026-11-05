@@ -1,12 +1,20 @@
 """Intensity: the reader turns the Japanese heavier or lighter for a while, separately in chat replies ('chat') and on
-web pages ('browser'), with a keyboard shortcut (T3 Code, the extension), the popup or `fw.py intensity`. Python 3.9+,
+web pages ('browser'): in chat with the arrows of T3 Code's Japanese Weave panel, on the web with the extension's
+shortcut (Alt+Shift+Period and Alt+Shift+Comma) or its popup, and anywhere with `fw.py intensity`. Python 3.9+,
 standard library only.
 
 A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 are lookup budgets;
 the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow: the
 same choices with no budget). Each change is a `set` op on the pref intensity_chat or
 intensity_browser ({level, until, at, source}), so the collector's ops table keeps every press: how often and when the
-reader turns it down or up is the evidence for whether the default amount is right (knowledge.py calibration)."""
+reader turns it down or up is the evidence for whether the default amount is right (knowledge.py calibration).
+
+English only (chat): T3 Code's keyboard shortcut toggles it. While it is on, every chat message on screen shows English
+(words as their meanings, Japanese and mixed sentences as their translations) and the hook has new replies written
+in plain English, as at off; it lasts ENGLISH_MS unless turned off sooner. Each press is an `english` op ({on, until,
+source, contexts: the messages on screen}, hub.py) and its value the pref english_chat ({on, until, at, source}). A
+press turning it on counts as a lighter press in calibration, and the Japanese sentences of the messages it names as
+weak evidence of an open (sentence_model.py)."""
 import time
 
 SURFACES = ('chat', 'browser')
@@ -37,6 +45,11 @@ SENTENCE_PRICE = 0.08
 SENTENCE_SHARE = 0.18
 DURATION_MS = 3 * 3600 * 1000
 NORMAL = {'level': 0, 'until': 0, 'at': 0}
+
+
+ENGLISH = 'english_chat'
+ENGLISH_MS = 3600 * 1000
+ENGLISH_OFF = {'on': False, 'until': 0, 'at': 0}
 
 
 def now_ms():
@@ -143,3 +156,49 @@ def describe(value):
         return 'normal'
     until = clock(value['until'])
     return f'off until {until}' if is_off(level) else f'{NAMES[level]} ({level:+d}) until {until}'
+
+
+# ---- English only (chat) ----
+
+def english_valid(value):
+    """A stored English-only switch: {on, until, at, source?}."""
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 10 ** 14
+    return (isinstance(value, dict) and set(value) <= {'on', 'until', 'at', 'source'} and isinstance(value.get('on'), bool)
+            and whole(value.get('until')) and whole(value.get('at'))
+            and (value.get('source') is None or (isinstance(value['source'], str) and 0 < len(value['source']) <= 20)))
+
+
+def is_english(value):
+    """An English-only switch as english_current returns it ({on, until, at}), e.g. from the collector."""
+    return isinstance(value, dict) and set(value) == {'on', 'until', 'at'} and english_valid(value)
+
+
+def english_current(prefs, now=None):
+    """{on, until, at} in effect now: on until `until`; off (until 0) once it ran out or was never set. at: the last
+    change, 0 if never."""
+    value = (prefs or {}).get(ENGLISH)
+    if not english_valid(value):
+        return dict(ENGLISH_OFF)
+    if value['on'] and value['until'] > (now if now is not None else now_ms()):
+        return {'on': True, 'until': value['until'], 'at': value['at']}
+    return dict(ENGLISH_OFF, at=value['at'])
+
+
+def english_at(on, source, now=None):
+    """The pref for a press now: on for ENGLISH_MS (a press while on starts the hour again), or off."""
+    now = now if now is not None else now_ms()
+    return {'on': bool(on), 'until': now + ENGLISH_MS if on else 0, 'at': now, 'source': str(source or 'unknown')[:20]}
+
+
+def english_windows(changes, now=None):
+    """[(start, end)] of the English-only spells, from english changes ({at, on, until}, oldest first): each lasts
+    until it ran out or the next change."""
+    now = now if now is not None else now_ms()
+    out = []
+    changes = sorted(changes, key=lambda c: c['at'])
+    for i, c in enumerate(changes):
+        if c.get('on'):
+            end = min(c.get('until') or 0, changes[i + 1]['at'] if i + 1 < len(changes) else now)
+            if end > c['at']:
+                out.append((c['at'], end))
+    return out

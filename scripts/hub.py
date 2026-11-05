@@ -22,6 +22,14 @@ Ops (each also carries uid, day, at and machine; see stamp):
   exported  {"target": "claude-ai"|"chatgpt", "log_day"?: bool}   log_day changes nothing now
   noticed   {}                                         the stale-export notice was shown
   thread    {"session", "off": bool, "source"}         Japanese off (or back on) in one chat (threads.py)
+  english   {"on": bool, "until", "source", "contexts": [{"view", "context"}]}   English only in chat turned on (for
+                                                       an hour: until) or off, with the messages on screen when it
+                                                       was pressed (intensity.py; POST /v1/english)
+  grammar   {"set": [[pattern id, "known"|"learning"|"new"]], "source"}   the reader's grammar patterns (grammar.py):
+                                                       intake's choice, or a command
+  sentences {"replies": [{"fp", "day", "v", "s": [[mark index, Japanese characters, English words, [pattern ids]]]}]}
+                                                       the Japanese sentences of chat replies scanned on some machine,
+                                                       never their text (grammar.record); a record only
   labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
@@ -74,8 +82,10 @@ REPLIES_PER_OP = 500
 MAX_OPS = 100              # ops per request the collector takes
 CACHED = ('state.json', 'knowledge.json', 'exposure.json')
 PROVISIONAL = ('events', 'mark', 'set', 'seed', 'chat_day', 'exported', 'noticed',  # applied to the cache while queued
-               'thread', 'probe')
-RECORDS = ('brief',)       # ops only kept in the ops table: they change nothing in the word state
+               'thread', 'probe', 'english', 'grammar')
+RECORDS = ('brief', 'sentences')  # ops only kept in the ops table: they change nothing in the word state
+SENTENCE_REPLIES = 500     # replies per sentences record
+MAX_CONTEXTS = 30          # messages an English-only press may name
 RECORD_TIMEOUT = 2         # seconds a record waits for the database here before it is dropped
 NO_STATE = 'no word state on the collector yet: set it up there first (fw.py setup on that machine)'
 MOVED = ('state.json', 'exposure.json', 'commands.jsonl', 'anki.csv', 'knowledge.json')  # a machine's own state
@@ -163,6 +173,25 @@ def validate(op):
         if not threads.valid_session(op.get('session')) or not isinstance(op.get('off'), bool) \
                 or not text(op.get('source'), 20):
             return 'thread: {"session", "off": true|false, "source"}'
+    elif kind == 'english':
+        ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
+        contexts = op.get('contexts', [])
+        if not set(op) <= {'uid', 'day', 'at', 'machine', 'kind', 'on', 'until', 'source', 'contexts'} \
+                or not isinstance(op.get('on'), bool) or not integer(op.get('until'), 0, 10 ** 14) \
+                or not text(op.get('source'), 20) or not isinstance(contexts, list) or len(contexts) > MAX_CONTEXTS \
+                or not all(isinstance(c, dict) and set(c) == {'view', 'context'} and ident(c['view'])
+                           and ident(c['context']) for c in contexts):
+            return (f'english: {{"on": true|false, "until", "source", "contexts": up to {MAX_CONTEXTS} '
+                    '{"view", "context"}}')
+    elif kind == 'grammar':
+        import grammar
+        return grammar.valid_change(op)
+    elif kind == 'sentences':
+        import grammar
+        replies = op.get('replies')
+        if set(op) - {'uid', 'day', 'at', 'machine', 'kind', 'replies'} or not isinstance(replies, list) \
+                or not 0 < len(replies) <= SENTENCE_REPLIES or not all(grammar.valid_record(r) for r in replies):
+            return 'sentences: {"replies": [{"fp", "day", "v", "s": [[index, chars, english words, [pattern ids]]]}]}'
     elif kind == 'labels':
         return labels_error(op)
     elif kind == 'brief':
@@ -322,6 +351,13 @@ def apply(state, op):
     if kind == 'noticed':
         state.setdefault('exported', {})['noticed'] = True
         return {}
+    if kind == 'english':  # the switch as it is now; the op keeps the contexts
+        state.setdefault('prefs', {})[intensity.ENGLISH] = {'on': op['on'], 'until': op['until'], 'at': op['at'],
+                                                           'source': op['source']}
+        return {}
+    if kind == 'grammar':
+        import grammar
+        return grammar.apply(state, op, day)
     if kind == 'thread':  # merged per chat: a later change from another machine is kept
         return {'off': threads.merge(state, op['session'], {'off': op['off'], 'at': op['at'], 'source': op['source']})}
     if kind == 'probe':
@@ -675,18 +711,73 @@ def change_thread(session, off, source, wait=True):
 
 
 def live_chat(session=None, state=None, timeout=LIVE_TIMEOUT):
-    """(chat intensity in effect, this chat's switch or None) for the hook: one brief question to the collector, as in
-    live_intensity, else the cache. A change made here that the collector doesn't have yet is the later one, so it
-    wins."""
+    """(chat intensity in effect, this chat's switch or None) for the hook (live_chat_all without English only)."""
+    return live_chat_all(session, state, timeout)[:2]
+
+
+def live_chat_all(session=None, state=None, timeout=LIVE_TIMEOUT):
+    """(chat intensity in effect, this chat's switch or None, English only {on, until, at}) for the hook: one brief
+    question to the collector, as in live_intensity, else the cache. A change made here that the collector doesn't
+    have yet is the later one, so it wins."""
     state = state if state is not None else fwlib.load_state()
     mine = threads.entry(state, session)
+    english = intensity.english_current(state.get('prefs'))
     url = fwlib.collector_url()
     if url:
         query = 'surface=chat' + (f'&session={quote(session)}' if threads.valid_session(session) else '')
         reply = feedback.request(f'{url.rstrip("/")}/v1/intensity?{query}', timeout=timeout)
         if isinstance(reply, dict) and reply.get('ok') and intensity.is_current(reply.get('intensity')):
-            return reply['intensity'], threads.later(mine, reply.get('thread'))
-    return intensity.current(state.get('prefs'), 'chat'), mine
+            theirs = reply.get('english')
+            if intensity.is_english(theirs) and theirs['at'] >= english['at']:
+                english = theirs
+            return reply['intensity'], threads.later(mine, reply.get('thread')), english
+    return intensity.current(state.get('prefs'), 'chat'), mine, english
+
+
+# ---- English only in chat (intensity.py) ----
+
+def change_english_here(on, source, contexts=(), db=None):
+    """One press where the state lives (this machine, or the collector for everyone): an english op with the
+    messages on screen. Returns {on, until, at}."""
+    value = intensity.english_at(on, source)
+    op = stamp({'kind': 'english', 'on': value['on'], 'until': value['until'], 'source': value['source'],
+                'contexts': [dict(c) for c in contexts], 'at': value['at']})
+    result = run(op, db)
+    if not result.get('ok'):
+        raise ValueError(result.get('error') or 'not saved')
+    return intensity.english_current({intensity.ENGLISH: value}, value['at'])
+
+
+def change_english(on, source, contexts=()):
+    """A press from this machine (fw.py english): on the collector when there is one, else here; queued when it is
+    out of reach. Returns ({on, until, at}, error or None)."""
+    url = fwlib.collector_url()
+    if not url:
+        return change_english_here(on, source, contexts), None
+    reply = feedback.request(url.rstrip('/') + '/v1/english', {'on': bool(on), 'source': source,
+                                                              'contexts': list(contexts)}, timeout=TIMEOUT)
+    if isinstance(reply, dict) and reply.get('ok') and intensity.is_english(reply.get('english')):
+        knowledge.start_refresh()
+        return reply['english'], None
+    value = intensity.english_at(on, source)
+    submit({'kind': 'english', 'on': value['on'], 'until': value['until'], 'source': value['source'],
+            'contexts': list(contexts), 'at': value['at']}, wait=False)
+    error = (reply or {}).get('error') if isinstance(reply, dict) else None
+    return intensity.english_current({intensity.ENGLISH: value}, value['at']), error or 'collector unreachable; queued'
+
+
+def send_sentences(found, url=None):
+    """Sentences records (grammar.record) to where the state lives, in batches: True when all were taken."""
+    url = url if url is not None else fwlib.collector_url()
+    for start in range(0, len(found), SENTENCE_REPLIES):
+        op = stamp({'kind': 'sentences', 'replies': found[start:start + SENTENCE_REPLIES]})
+        if url:
+            reply = post(url, [op])
+            if reply is None or not reply['results'][0].get('ok'):
+                return False
+        elif not run(op).get('ok'):
+            return False
+    return True
 
 
 # ---- the collector ----

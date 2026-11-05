@@ -877,14 +877,50 @@ def local_day(stamp):
         return str(stamp)[:10]
 
 
-def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, since=None):
+def transcripts(roots=None):
+    """The transcript files to scan (transcript_roots), subagents' left out."""
+    roots = [Path(r) for r in ([roots] if isinstance(roots, (str, Path)) else roots)] if roots else transcript_roots()
+    return [p for root in roots if root.exists() for p in root.rglob('*.jsonl') if 'subagents' not in p.parts]
+
+
+def sentence_records(text, day, records):
+    """Adds a reply's Japanese sentences (grammar.record: a fingerprint, counts and pattern ids, never text) to
+    records, when it has any. Never fails the scan."""
+    if '<abbr' not in text and '<ABBR' not in text:
+        return
+    try:
+        import grammar
+        found = grammar.record(text, day)
+    except Exception as error:
+        print(f'Japanese Weave: sentences not read ({error.__class__.__name__}: {error})', file=sys.stderr)
+        return
+    if found:
+        records.append(found)
+
+
+def read_sentences(roots=None, start='0000-00-00'):
+    """Every main-thread reply's Japanese sentences in the transcripts from `start` on, read from the beginning of
+    each file: the one-off backfill (refresh_exposure), so the sentence model starts from the replies the gloss log
+    already has."""
+    records = []
+    for path in transcripts(roots):
+        try:
+            for day, text in replies(Lines(path, 0)):
+                if day >= start and 'Japanese Weave' not in text:
+                    sentence_records(text, day, records)
+        except OSError:
+            continue
+    return records
+
+
+def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, since=None, sentences=None):
     """New transcript lines since offsets (path -> byte offset, mutated): [{d: digest, day, words: [ja]}] for the
     main-thread replies from `start` on that use any of the words. Code, links and replies about the plugin itself
     don't count. With a tally (reading.Tally), each reply from `since` on (default start) also carries the dictionary
     entries it shows, {entries: {id: times}}, and comes with them even when it uses none of the words (then from before
-    `start`, with words empty)."""
+    `start`, with words empty). sentences: a list that gets each new reply's Japanese sentences from `start` on
+    (sentence_records)."""
     since = start if since is None else since
-    roots = [Path(r) for r in ([roots] if isinstance(roots, (str, Path)) else roots)] if roots else transcript_roots()
     words = [w if isinstance(w, dict) else {'ja': w} for w in words]
     written = {w['ja']: forms(w['ja'], w.get('kana', '')) for w in words}
     compiled = {}
@@ -899,10 +935,10 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
     first = min(start, since) if tally is not None else start
     oldest = time.mktime(time.strptime(first, '%Y-%m-%d')) if first > '0000-00-00' else 0
     out = []
-    for path in (p for root in roots if root.exists() for p in root.rglob('*.jsonl')):
+    for path in transcripts(roots):
         name = str(path)
         try:
-            if 'subagents' in path.parts or path.stat().st_mtime < oldest:
+            if path.stat().st_mtime < oldest:
                 continue
             offset = offsets.get(name, 0)
             if path.stat().st_size < offset:
@@ -914,6 +950,8 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
             counted = tally is not None and day >= since
             if (day < start and not counted) or 'Japanese Weave' in text:
                 continue
+            if sentences is not None and day >= start:
+                sentence_records(text, day, sentences)
             prose = norm(CODE.sub(' ', text))
             used = [w['ja'] for w in words if uses(w, prose)]
             entries = tally.count(text, used) if counted else {}
@@ -1013,20 +1051,30 @@ def refresh_exposure():
             tally = None
         since = add_days(today(), 1 - READING_DAYS)
         if tally is not None and not cursor.get('reading'):  # again from the start: each reply counts once (fold)
-            cursor = {'offsets': {}, 'reading': 1}
+            cursor = dict(cursor, offsets={}, reading=1)
             start = max(start, add_days(today(), 1 - DEDUPE_DAYS))  # older replies' digests are gone
+        import grammar
+        records = []
+        backfill = cursor.get('sentences') != grammar.VERSION
         try:
-            found = read_replies(state['words'], cursor['offsets'], start=start, tally=tally, since=since)
+            found = read_replies(state['words'], cursor['offsets'], start=start, tally=tally, since=since,
+                                 sentences=None if backfill else records)
         except Exception as error:  # the entries can't be counted: the words still are, next time from here
             if tally is None:
                 raise
             print(f'Japanese Weave: reading not counted ({error.__class__.__name__}: {error})', file=sys.stderr)
             cursor = scan_cursor()
-            found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'))
+            found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'),
+                                 sentences=None if backfill else records)
         finally:
             if tally is not None:
                 tally.close()
+        if backfill:  # once per scanner version: every reply's sentences, the new ones included
+            records = read_sentences()
         import hub
+        if records and not hub.send_sentences(records):
+            return False  # the cursor stays, so the same replies go again next time
+        cursor['sentences'] = grammar.VERSION
         if collector_url():
             if found and not hub.send_exposure(found):
                 return False  # the cursor stays, so the same replies go again next time

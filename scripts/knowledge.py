@@ -41,7 +41,9 @@ with hysteresis), fits the price of a whole sentence per surface, and reports wh
 looks right and how the model's expected lookups per class compare with those seen, in lookups per 100 words read
 (calibration), and which opened words the lexicon doesn't have (unlisted). Then it labels every word from the model
 (known when free, learning once in use, else new), takes in the day's new words while the lookup budget goes unspent,
-each with its delayed-start arm, and records the probes' outcomes (decide).
+each with its delayed-start arm, and records the probes' outcomes (decide). It also fits the chat sentences' open
+chance by length and grammar pattern and takes in the next grammar pattern (sentence_model.py, docs/grammar.md), and
+leaves out T3 messages shown while English only was on.
 """
 import json
 import math
@@ -2431,7 +2433,8 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     the same for the passages planned before, when thinning scaled the budget too.
     presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
     heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
-    (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats).
+    (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats), and so does
+    each press turning English only on in chat (intensity.py, the "english" changes; englishOn: how many).
     classes: the model against what happened, from shown records (fitted_records; replay's for the model it replaced)
     and the day totals of days already summed (lookup_classes), in the one unit.
     """
@@ -2486,6 +2489,7 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     before = thinning([p for p in offered if not p['free']])
     presses = {}
     threads_off = len({c['session'] for c in changes if c['surface'] == 'thread' and c['off'] and c['at'] >= since})
+    english_on = sum(1 for c in changes if c['surface'] == 'english' and c['on'] and c['at'] >= since)
     for surface in ('chat', 'browser'):
         mine = [c for c in changes if c['surface'] == surface]
         recent = [c for c in mine if c['at'] >= since]
@@ -2497,13 +2501,14 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
                 time_at[c['level']] = time_at.get(c['level'], 0) + end - start
         decided = [(a, b) for at, a, b in decisions(mine) if at >= since]
         lighter, heavier = sum(1 for a, b in decided if b < a), sum(1 for a, b in decided if b > a)
-        lighter += threads_off if surface == 'chat' else 0
+        lighter += threads_off + english_on if surface == 'chat' else 0
         verdict = ('too heavy' if lighter >= 5 and lighter >= 3 * max(1, heavier) else
                    'too light' if heavier >= 5 and heavier >= 3 * max(1, lighter) else None)
         presses[surface] = {'lighter': lighter, 'heavier': heavier, 'hoursAt': {str(k): round(v / 3_600_000, 1)
                                                                                for k, v in sorted(time_at.items())},
                             'verdict': verdict}
     presses['chat']['threadsOff'] = threads_off
+    presses['chat']['englishOn'] = english_on
     return {'days': days, 'passages': len(passages), 'bins': bins, 'jitter': jitter, 'jitterBefore': before,
             'presses': presses,
             'classes': lookup_classes([r for r in shown or [] if r['at'] >= since], changes, challenge,
@@ -2612,8 +2617,9 @@ def calibration_text(report):
         at = lambda k: {str(intensity.OFF): 'off', str(intensity.FULL): 'at full'}.get(k, f'at {int(k):+d}')
         hours = ', '.join(f'{h} h {at(k)}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
         verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''
-        n = p.get('threadsOff')
+        n, on = p.get('threadsOff'), p.get('englishOn')
         chats = f', counting {n} chat{"s" if n != 1 else ""} with Japanese turned off' if n else ''
+        chats += (f'{" and" if n else ", counting"} {on} press{"es" if on != 1 else ""} of English only' if on else '')
         lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){chats}{verdict}.')
     return '\n'.join(lines)
 
@@ -2905,7 +2911,9 @@ def refresh(now=None):
     the day's key holds (day_keys), and dailyFree, the free flags at the start of the last of those days, which today's
     records carry on from; unlisted; spend (spending: the budget's use that sets intake); moves (the label changes
     made, the last 200); review (review_report: the review cards' components as fitted, with their separation, and
-    the probe's rolling estimate of the goal from them); per word also reviews, its review cards."""
+    the probe's rolling estimate of the goal from them); grammar (sentences_and_grammar: the sentence-open model, the
+    weave's limit, intake's recent rate and the pattern statuses after intake); per word also reviews, its review
+    cards. T3 messages shown during an English-only spell are left out (without_english)."""
     if fwlib.collector_url():
         import hub
         ok, error = hub.sync(scan=False)
@@ -2916,7 +2924,10 @@ def refresh(now=None):
     with fwlib.locked(LOCK, blocking=False) as got:
         if not got:
             return None
-        rows, contexts = feedback.load(feedback.default_path())
+        rows, everything = feedback.load(feedback.default_path())
+        changes = feedback.intensity_changes(feedback.default_path())
+        english = [c for c in changes if c['surface'] == 'english']
+        contexts = without_english(everything, english, now_ms)
         reviews = feedback.reviews(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
@@ -2944,7 +2955,7 @@ def refresh(now=None):
         flags = free_flags(fit, [w['ja'] for w in state['words']], before)
         sentences = sentence_events(rows, contexts, now_ms, pace, top)
         prices = sentence_prices(sentences, now_ms)
-        changes, challenge = feedback.intensity_changes(feedback.default_path()), challenge_of(state)
+        challenge = challenge_of(state)
         briefs = feedback.chat_briefs(feedback.default_path())
         offers = Offers(briefs)
         since = now_ms - CALIBRATION_DAYS * DAY_MS
@@ -3010,6 +3021,8 @@ def refresh(now=None):
             if not result.get('ok'):
                 print(f'Japanese Weave: labels not changed: {result.get("error")}', file=sys.stderr)
             applied = [{'day': today, 'word': ja, 'from': a, 'to': b} for ja, a, b in result.get('labels') or []]
+        grammar_report = sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pace, top, today,
+                                               previous.get('grammar'), apply=not shrank)
         history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
         knowledge = {
             'updated': now, 'rows': len(rows),
@@ -3029,10 +3042,51 @@ def refresh(now=None):
             'daily': daily, 'dailyFree': daily_free,
             'unlisted': unlisted(rows, match, now_ms),
             'review': review_report(fit, log.reviews, now_ms),
+            'grammar': grammar_report,
             'words': words,
         }
         fwlib.write_json(path(), knowledge)
         return knowledge
+
+
+def without_english(contexts, english, now_ms):
+    """The contexts with every T3 message shown during an English-only spell (intensity.english_windows) left out:
+    its Japanese wasn't on screen, so it says nothing about the words (nor its opens: they had no message)."""
+    windows = intensity.english_windows(english, now_ms)
+    if not windows:
+        return contexts
+    hidden = lambda c: c['surface'] == 't3' and c.get('shown_at') and any(a <= c['shown_at'] < b for a, b in windows)
+    return {key: c for key, c in contexts.items() if not hidden(c)}
+
+
+def sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pace, top, today, before, apply=True):
+    """knowledge.json "grammar" (sentence_model.summary): the sentence-open model fitted to the chat replies' sentences
+    (sentence records joined to the T3 messages shown; the Japanese sentences of the messages named by each press of
+    English only as weak opens), and with apply, the grammar op intake makes (hub.run), with the statuses it leaves
+    (statuses). A failure keeps the last report (before): the refresh stands without it."""
+    try:
+        import grammar
+        import sentence_model
+        records = feedback.sentence_records(feedback.default_path())
+        presses = [c for c in english if c['on']]
+        found = sentence_model.units(showings(rows, contexts, now_ms), sentence_model.records_by_fp(records), pace,
+                                     top, presses, everything)
+        statuses = grammar.statuses(state)
+        model = sentence_model.fit(found, statuses, now_ms)
+        counts = sentence_model.frequency(records, now_ms)
+        op = sentence_model.intake(state, model, found, counts, now_ms) if apply else None
+        if op:
+            import hub  # here: hub imports this module
+            result = hub.run(hub.stamp(dict(op, day=today, at=now_ms)))
+            if result.get('ok'):
+                grammar.apply(state, op, today)
+                statuses = grammar.statuses(state)
+            else:
+                print(f'Japanese Weave: grammar not changed: {result.get("error")}', file=sys.stderr)
+        return dict(sentence_model.summary(model, found, counts, now_ms, state), statuses=statuses)
+    except Exception as error:
+        print(f'Japanese Weave: no sentence model ({error.__class__.__name__}: {error})', file=sys.stderr)
+        return before if isinstance(before, dict) else None
 
 
 def review_report(fit, reviews, now_ms):

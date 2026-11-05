@@ -5,9 +5,12 @@
 // Words known at a glance go in line by line (each once a line, as planSwaps keeps one use of a word per passage);
 // learning words come from one budget for the whole reply, at most the level's number a sentence. Code fences, inline
 // code, link targets, URLs and tags are left alone. Reads one JSON object on stdin: { draft, words (the host's state
-// message's words), budgetPer100, intensity (levels.js: 3 is full, with no budget), sentencePrice, recency }. Prints
-// a first line with what it did and how many sentences to make Japanese, a line of -----, then the woven draft.
-// Runs under node or bun.
+// message's words), budgetPer100, intensity (levels.js: 3 is full, with no budget), sentencePrice, recency,
+// sentenceChance, maxChars, grammar: { known: [pattern names], learning: { name, explain, example } | null } }
+// (chatweave.py sentence_plan). Prints a first line with what it did, how many sentences to make Japanese (the
+// sentences' share of the budget over sentenceChance, the open chance of a typical allowed sentence, when the sentence
+// model is ready, else over the price), how long each may be and which grammar they may use, a line of -----, then
+// the woven draft. Runs under node or bun.
 import { readFileSync } from 'node:fs';
 
 const src = (name) => new URL(`../extension/src/${name}`, import.meta.url).href;
@@ -87,12 +90,22 @@ const result = lines.map((l) => {
 }).join('\n');
 
 const learning = swaps.filter((s) => !s.free);
-const sentences = Math.max(1, Math.round((budgetPer100 * wordCount(whole) / 100) * SENTENCE_SHARE / price));
+const chance = input.sentenceChance > 0 && input.sentenceChance <= 1 ? input.sentenceChance : price;
+const sentences = Math.max(1, Math.round((budgetPer100 * wordCount(whole) / 100) * SENTENCE_SHARE / chance));
+const maxChars = Number.isFinite(input.maxChars) && input.maxChars > 0 ? input.maxChars : 14;
+const g = input.grammar && Array.isArray(input.grammar.known) ? input.grammar : null;
+const l = g && g.learning;
+const grammarLine = g ? ` Each one at most ${maxChars} Japanese characters (split a longer one), using only these ` +
+  `grammar patterns: ${g.known.join(', ')}; plus at most one learning pattern in a sentence. ` +
+  (l ? `This week's learning pattern is ${l.name}: ${l.explain}, as in ${l.example}; use it on purpose once or twice. `
+    : 'No learning pattern this week. ') +
+  'Any other grammar stays out: rephrase that sentence with these, or keep it English.' : '';
 console.log(`jw-weave: ${swaps.length - learning.length} known-word swaps and ${learning.length} learning-word swaps ` +
   `(${learning.map((s) => s.ja).join(', ') || 'none'}${learning.length ? ': keep each whose sense fits' : ''}). ` +
   `${swaps.filter((s) => s.unsure).length} swaps are marked ` +
   '{{English→Japanese}}: the code wasn\'t sure of the sense. ' + (full
   ? 'No limit on Japanese or mixed sentences: make every sentence the user could follow Japanese or mixed.'
-  : `Make about ${sentences} sentence${sentences === 1 ? '' : 's'} Japanese or mixed, each with a translation.`));
+  : `Make about ${sentences} sentence${sentences === 1 ? '' : 's'} Japanese or mixed, each with a translation.`) +
+  grammarLine);
 console.log('-----');
 console.log(result);

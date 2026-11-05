@@ -182,7 +182,8 @@ class Brief(Home):
         note, codex = weave.off_note(until), weave.off_note(until, codex=True)
         self.assertFalse(JAPANESE.search(note) or JAPANESE.search(codex))
         self.assertIn(f'turned Japanese off in chat replies for now, until {intensity.clock(until)}', note)
-        self.assertIn('Alt+Shift+.', codex)
+        self.assertIn("the up arrow in T3 Code's Japanese Weave panel", codex)  # the shortcut is English only now
+        self.assertNotIn('Alt+Shift', note + codex)
         self.assertIn('/japanese-weave:intensity normal', note)
         self.assertNotIn('/japanese-weave', codex)  # Codex has no plugin commands
         self.assertEqual(note.count('\n'), 0)

@@ -40,7 +40,8 @@ Stored in <state dir>/interactions.sqlite (schema 5):
 
   ops           every change to the word state applied here, as sent (hub.py): uid, when, from which machine, kind
                 and the op as JSON; also records that change nothing, such as what each chat reply was offered (kind
-                "brief", read back by chat_briefs)
+                "brief", read back by chat_briefs) and the Japanese sentences of chat replies (kind "sentences": per
+                reply a fingerprint and per sentence counts and grammar pattern ids, never text; sentence_records)
   cards         one row per review card the collector served (review.py, POST /v1/review/next): its opaque id, when
                 (served_at) and for which client (source: desktop or mobile), the word shown, its kind (learning: a
                 word in use; probe: a word sampled for the probe of the goal, with its dictionary entry id, band and
@@ -372,16 +373,19 @@ CARD_REVIEW = ('UPDATE cards SET at = ?, reveal_ms = ?, shown_ms = ?, via = ?, u
                'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) WHERE id = ? AND word = ? AND at IS NULL')
 
 
-def record(items, surface, path=None, now=None):
+def record(items, surface, path=None, now=None, hide=None):
     """Stores well-formed items. Returns {stored, duplicates, rejected}: a resent interaction (same uid) is stored
     once, and malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its
     card (CARD_REVIEW): one naming no card served here with its word is rejected, and one for a card already reviewed
-    is a duplicate."""
+    is a duplicate. hide: (start, end) of an English-only spell in chat (intensity.py): a T3 message's shown record
+    from then is dropped (counted as rejected), since its Japanese wasn't on screen."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
     batch = items[:MAX_ITEMS]
     cleaned = [c for c in (_clean(item, now) for item in batch) if c and (c['kind'] != REVIEW or surface == 't3')]
+    if hide and surface == 't3':
+        cleaned = [c for c in cleaned if not (c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1])]
     stored = duplicates = refused = 0
     if cleaned:
         con = connect(path)
@@ -643,12 +647,13 @@ def load(path=None):
 
 def intensity_changes(path=None):
     """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface, level, until,
-    source}, from the ops applied here; and every chat turned off or back on (threads.py) as {at, machine, surface:
-    "thread", session, off, source}."""
+    source}, from the ops applied here; every chat turned off or back on (threads.py) as {at, machine, surface:
+    "thread", session, off, source}; and every press of English only in chat as {at, machine, surface: "english", on,
+    until, source, contexts: [{view, context}]}."""
     con = connect(path)
     try:
         ops = con.execute("SELECT at, machine, body FROM ops WHERE (kind = 'set' AND body LIKE '%intensity_%') "
-                          "OR kind = 'thread' ORDER BY at").fetchall()
+                          "OR kind IN ('thread', 'english') ORDER BY at").fetchall()
     finally:
         con.close()
     out = []
@@ -656,6 +661,11 @@ def intensity_changes(path=None):
         try:
             op = json.loads(body)
         except ValueError:
+            continue
+        if op.get('kind') == 'english':
+            out.append({'at': at, 'machine': machine, 'surface': 'english', 'on': op.get('on') is True,
+                        'until': op.get('until') or 0, 'source': op.get('source') or '',
+                        'contexts': [c for c in op.get('contexts') or [] if isinstance(c, dict)]})
             continue
         if op.get('kind') == 'thread':
             out.append({'at': at, 'machine': machine, 'surface': 'thread', 'session': op.get('session'),
@@ -667,6 +677,24 @@ def intensity_changes(path=None):
             if isinstance(value, dict) and value.get('level') in intensity.LEVELS:
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],
                             'until': value.get('until') or 0, 'source': value.get('source') or ''})
+    return out
+
+
+def sentence_records(path=None):
+    """The Japanese sentences of chat replies the hooks sent (sentences records, hub.py; grammar.record), oldest
+    first: [{fp, day, v, s}], a reply once per record that named it."""
+    con = connect(path)
+    try:
+        rows = con.execute("SELECT body FROM ops WHERE kind = 'sentences' ORDER BY at").fetchall()
+    finally:
+        con.close()
+    out = []
+    for (body,) in rows:
+        try:
+            replies = json.loads(body).get('replies')
+        except (ValueError, AttributeError):
+            continue
+        out += [r for r in replies or [] if isinstance(r, dict)]
     return out
 
 
