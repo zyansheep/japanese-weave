@@ -1,0 +1,681 @@
+"""Render-time levels in chat replies (docs/chat-weave.md, "Levels after the fact"): a reply carries its Japanese at
+every level at once, code decides for each element the lowest level at which it shows, and the client (T3 Code)
+renders the message at the reader's current level, so the panel's arrows and English only change every message on
+screen after the fact. Python 3.9+, standard library only.
+
+What Claude writes (the authoring syntax, read by fw.py check-reply: parse_authored): the reply in English, keeping
+the weave's word swaps whose sense fits as <abbr title="reading · meaning">語</abbr>, and right after an English
+sentence that can be Japanese within the weave's limits, on the same line, its Japanese twin in <ja>...</ja>: one or
+two Japanese or mixed sentences glossed as before, each ending with a bare 。 or ？. The twin's English sentence is the
+text right before the <ja>: back to the end of the sentence before it (a . ! ? : or ; followed by a space, the
+abbreviations in ABBREVIATIONS aside), the end of an earlier </ja> on the line, or the start of the line after any
+list, heading or quote marker. Code puts that English sentence on each bare closing mark as its translation, so it is
+written once, and adds a closing mark the twin lacks.
+
+What Claude sends (the final markup, written by code: markup; the contract with the T3 clients):
+  - a swapped word in English text: <abbr title="reading · meaning" data-en="original English" data-on="N">語</abbr>,
+    the gloss at levels >= N and the plain English of data-en below;
+  - a twinned sentence: <span data-jw="ja" data-on="N">JAPANESE</span><span data-jw="en" data-on="N">ENGLISH</span>,
+    the Japanese at levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on (it shows
+    or hides whole), the English keeps its own swaps, whose thresholds are at most N (a sentence turns English before
+    its words do as the level goes down);
+  - anything without data-on or data-jw renders as before, so older messages are unchanged.
+A threshold is in -2..3 (3: full only). At -3 (off, and English only) nothing is Japanese. render(text, level) is the
+reply as the reader sees it at a level, in the older markup every other reader of transcripts understands.
+
+Thresholds (assign). One priority order per reply and kind, cut at each budgeted level's lookup budget (-2..2, the
+level's intensity.budget per 100 of the reply's English words): twins spend the sentences' part, SENTENCE_SHARE of
+it, each Japanese sentence at its predicted open chance but never less than the price of a sentence (so no level asks
+for more Japanese sentences than the count before the sentence model did: the user's densities stay), and words the
+whole budget at their current lookup chance, as the weave's planner gives a chat reply's learning words (it has no
+sentence candidates there). Levels are filled from -2 up, each starting from the level below, so the sets are nested.
+At each level twins come first (a twin shown hides its English sentence's swaps, whose lookups it then charges to the
+words' part as the costly words in its Japanese), then words, at most intensity.per_sentence costly words in one
+English sentence and one use of each learning word below full; the element at the edge of a part gets in with the
+chance (what is left) / (its cost), so short replies still get some on average and a level's expected spend is its
+part (assign: systematic rounding, one draw per reply and part). Words known at a glance
+cost nothing and show from -2 (in an English twin, while it is English); dictionary words the reader doesn't have
+yet (the weave's pool) and a learning word's later uses show only at full, as before; whatever no budgeted level took
+shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit TARGET_P|) (1 at
+the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in its Japanese plus
+PATTERN_VALUE when it uses this week's learning pattern, over its sentences' part.
+
+Exploration. Each element's place in its order is, with chance EXPLORE, a uniform random place instead of its rank,
+drawn afresh for every reply (the element's x: 1 when explored). So every element has a known chance of showing at
+each level that is never 0 or 1 by the model's predictions alone, and the elements placed at random are a sample the
+model didn't choose: calibrate compares its expected opens with the seen ones there (sentence_model.exploration).
+
+Propensities (propensities). An element's propensity at a level is the chance it shows there under this
+randomization: the share of DRAWS independent runs of assign (each its own coin and place for every element, and its
+own rounding draws) in which it is visible at that level, seeded by the reply so a re-check repeats it. With 1,000
+draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose placement no draw can
+change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under the reply's
+fingerprint, and the hook's sentence record carries them (grammar.record): never text.
+"""
+import hashlib
+import html
+import math
+import random
+import re
+import time
+
+import fwlib
+import grammar
+import intensity
+
+OFF, FULL = intensity.OFF, intensity.FULL
+BUDGETED = (-2, -1, 0, 1, 2)          # the levels with a lookup budget, filled in this order
+SHOWING = BUDGETED + (FULL,)          # the levels with Japanese; an element's threshold is one of them
+EXPLORE = 0.2                         # the chance an element's place in its order is drawn at random
+DRAWS = 1000                          # runs of assign for the propensities
+MAX_SENTENCES = 2                     # Japanese sentences in one twin (a long English sentence split in two)
+SENTENCE_VALUE = 1.0                  # a twin's own value (reading practice), in learning words at their target
+PATTERN_VALUE = 1.0                   # and what this week's learning pattern adds
+TARGET_P = 0.25                       # a learning word's best lookup chance (knowledge.TARGET_P, levels.js TARGET_P)
+PRIOR_P = 1 / (1 + math.e)            # the lookup chance of a word with no estimate (k 1.0, levels.js PRIOR_K)
+SWAPS = 'weave-swaps.json'            # the weave's swaps per chat session, for check-reply (remember_swaps)
+PLANS = 'reply-plans.json'            # each checked reply's thresholds and propensities (remember_plan)
+SESSIONS_KEPT = 30
+PLANS_KEPT = 500
+KEEP_MS = 3 * 86_400_000
+MARKS = ('。', '？')
+END_MARKS = MARKS + ('！',)
+
+ABBR = re.compile(r'<abbr\b([^>]*)>(.*?)</abbr>', re.S | re.I)
+ATTR = re.compile(r'([\w-]+)\s*=\s*"([^"]*)"')
+PAIR = re.compile(r'<span\s+data-jw="ja"\s+data-on="(-?\d+)"\s*>(.*?)</span>'
+                  r'<span\s+data-jw="en"\s+data-on="(-?\d+)"\s*>(.*?)</span>', re.S)
+UNSURE = re.compile(r'\{\{([^{}]*?)→\s*(<abbr\b[^>]*>.*?</abbr>)\s*\}\}', re.S)
+JA_TAG = re.compile(r'<(/?)ja>', re.I)
+CODE_SPAN = re.compile(r'``.+?``|`[^`\n]+`')
+FENCE_LINE = re.compile(r'^\s*(```|~~~)')
+PLACEHOLDER = '\ue000-\uf8ff'
+PROTECTED = re.compile(f'[{PLACEHOLDER}]')
+# Where an English sentence ends inside a line: as grammar.BOUNDARY, a placeholder (code or a glossed word) counting
+# as a word before the mark.
+BOUNDARY = re.compile(rf'(?<=[A-Za-z0-9`)\]"\'*{PLACEHOLDER}])[.!?:;](?:\*\*)?(?=\s)|[:.](?=\*\*\s)')
+ABBREVIATIONS = ('e.g.', 'i.e.', 'etc.', 'vs.', 'cf.', 'approx.', 'mr.', 'mrs.', 'ms.', 'dr.', 'no.', 'fig.')
+PREFIX = re.compile(r'^\s*(?:(?:[-*+]|\d+[.)])\s+|#{1,6}\s+|>\s*)*')
+LETTER = re.compile(f'[A-Za-z{PLACEHOLDER}]')
+LINK = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+
+
+def esc(text):
+    """An attribute value: & " < > as entities."""
+    return html.escape(str(text), quote=True).replace('&#x27;', "'")
+
+
+def attrs(raw):
+    """{name: value} of a tag's attributes, entities decoded."""
+    return {k.lower(): html.unescape(v) for k, v in ATTR.findall(raw or '')}
+
+
+def meaning(title):
+    """The meaning part of a gloss title ('reading · meaning', or just the meaning for a kana word)."""
+    _reading, dot, rest = str(title or '').partition('·')
+    return (rest if dot else _reading).strip()
+
+
+def plain(text):
+    """English as a translation reads: tags gone (an abbr becomes its data-en, else its meaning), links their text,
+    markdown marks and extra spaces gone, entities decoded."""
+    def word(m):
+        a = attrs(m.group(1))
+        return a.get('data-en') or meaning(a.get('title'))
+    text = ABBR.sub(word, str(text))
+    text = LINK.sub(r'\1', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text).replace('**', '').replace('__', '').replace('`', '')
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+# ---- the final markup: reading it back and rendering it ----
+
+def _chunks(text):
+    """[(is_code, piece)]: fenced code blocks apart, as grammar.strip_code (T3 shows no markup in them)."""
+    out, at = [], 0
+    for m in grammar.FENCE.finditer(text):
+        if m.start() > at:
+            out.append((False, text[at:m.start()]))
+        out.append((True, m.group()))
+        at = m.end()
+    if at < len(text):
+        out.append((False, text[at:]))
+    return out
+
+
+def tokens(text):
+    """The final markup in document order: ('raw', text), ('pair', N, japanese, english) and ('abbr', {attributes},
+    inner). Fenced code is raw."""
+    out = []
+    for code, piece in _chunks(str(text)):
+        if code:
+            out.append(('raw', piece))
+            continue
+        at = 0
+        for m in PAIR.finditer(piece):
+            out += _abbrs(piece[at:m.start()])
+            out.append(('pair', int(m.group(1)), m.group(2), m.group(4)))
+            at = m.end()
+        out += _abbrs(piece[at:])
+    return out
+
+
+def _abbrs(text):
+    out, at = [], 0
+    for m in ABBR.finditer(text):
+        if m.start() > at:
+            out.append(('raw', text[at:m.start()]))
+        out.append(('abbr', attrs(m.group(1)), m.group(2)))
+        at = m.end()
+    if at < len(text):
+        out.append(('raw', text[at:]))
+    return out
+
+
+def has_levels(text):
+    """Whether a reply carries render-time levels (any data-on or data-jw)."""
+    return 'data-on=' in str(text) or 'data-jw=' in str(text)
+
+
+def _level(value, default=FULL):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(-2, min(FULL, n))
+
+
+def _word(a, inner, level):
+    """One glossed word at a level: an abbr with data-on shows from that level (else its data-en, else its meaning);
+    one without shows above off, and at off its meaning (a closing mark: nothing), as English only shows older
+    messages."""
+    if 'data-on' in a:
+        if level >= _level(a['data-on']):
+            return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
+        return esc_text(a.get('data-en') or meaning(a.get('title')))
+    if level <= OFF:
+        return '' if grammar.clean(inner).strip() in END_MARKS else esc_text(meaning(a.get('title')))
+    return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
+
+
+def esc_text(text):
+    """Plain English put back into markdown: angle brackets as entities, so it can't open a tag."""
+    return str(text).replace('<', '&lt;').replace('>', '&gt;')
+
+
+def render(text, level):
+    """The reply as the reader sees it at a level (-3..3), in the markup from before levels: each element shown or
+    hidden by its threshold, the shown words as plain glossed abbrs. A reply without levels is unchanged above off;
+    at off its glossed words become their meanings and its sentence marks go (English only)."""
+    text = str(text)
+    if not has_levels(text) and level > OFF:
+        return text
+    out = []
+    for t in tokens(text):
+        if t[0] == 'raw':
+            out.append(t[1])
+        elif t[0] == 'abbr':
+            out.append(_word(t[1], t[2], level))
+        elif level > OFF and level >= t[1]:
+            out.append(''.join(x[1] if x[0] == 'raw' else
+                               f'<abbr title="{esc(x[1].get("title", ""))}">{x[2]}</abbr>' for x in _abbrs(t[2])))
+        else:
+            out.append(''.join(x[1] if x[0] == 'raw' else _word(x[1], x[2], level) for x in _abbrs(t[3])))
+    return ''.join(out)
+
+
+def elements(text):
+    """(elements, owners) of the final markup. elements in document order: {kind: 's' (a twin) or 'w' (a swapped word
+    with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English holds the word, or
+    None}; owners: per glossed word of the reply in order (the Japanese of a twin before its English), the index of
+    the element it belongs to, or -1 (a word without data-on, shown at every level above off). An abbr without data-on
+    inside a twin's English shows while the English does: an element with threshold -2."""
+    els, owners = [], []
+    for t in tokens(text):
+        if t[0] == 'abbr':
+            if 'data-on' in t[1]:
+                owners.append(len(els))
+                els.append({'kind': 'w', 'on': _level(t[1]['data-on']), 'parent': None})
+            else:
+                owners.append(-1)
+        elif t[0] == 'pair':
+            twin = len(els)
+            els.append({'kind': 's', 'on': _level(t[1]), 'parent': None})
+            owners += [twin] * sum(1 for _ in ABBR.finditer(t[2]))
+            for m in ABBR.finditer(t[3]):
+                a = attrs(m.group(1))
+                owners.append(len(els))
+                els.append({'kind': 'w', 'on': _level(a.get('data-on'), -2), 'parent': twin})
+    return els, owners
+
+
+def visible(els, i, level):
+    """Whether element i shows at a level: a twin from its threshold; a word from its threshold, and in a twin's
+    English only below the twin's; i -1 (no element) above off."""
+    if level <= OFF:
+        return False
+    if i < 0:
+        return True
+    e = els[i]
+    if e['kind'] == 's':
+        return level >= e['on']
+    return level >= e['on'] and (e['parent'] is None or level < els[e['parent']]['on'])
+
+
+def annotation_texts(text):
+    """The inner texts of a reply's glossed words in order, every element's included, as the fingerprint takes them
+    (grammar.annotation_texts of the markup with every span opened)."""
+    out = []
+    for t in tokens(text):
+        if t[0] == 'abbr':
+            out.append(grammar.clean(t[2]).strip())
+        elif t[0] == 'pair':
+            out += [grammar.clean(m.group(2)).strip() for m in ABBR.finditer(t[2])]
+            out += [grammar.clean(m.group(2)).strip() for m in ABBR.finditer(t[3])]
+    return out
+
+
+def fingerprints(text):
+    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (grammar.fingerprint of
+    grammar.annotation_texts(render(text, level)), what T3 reports from its screen)."""
+    return {level: grammar.fingerprint(grammar.annotation_texts(render(text, level))) for level in SHOWING}
+
+
+# ---- what Claude writes: English with <ja> twins ----
+
+class Problem(Exception):
+    pass
+
+
+def _protect(line, saved):
+    """The line with inline code, then glossed words, each one private-use character (no letter, no mark), so neither
+    a <ja> in code nor a period in a gloss counts; restore puts them back."""
+    def keep(m):
+        saved.append(m.group())
+        return chr(0xE000 + len(saved) - 1)
+    return ABBR.sub(keep, CODE_SPAN.sub(keep, line))
+
+
+def _restore(text, saved):
+    while PROTECTED.search(text):
+        text = PROTECTED.sub(lambda m: saved[ord(m.group()) - 0xE000], text)
+    return text
+
+
+def _sentence_start(s, start, end):
+    """Where the English sentence ending at `end` begins, searching s[start:end]: after the last sentence end there
+    (BOUNDARY, ABBREVIATIONS aside), else at start; leading spaces skipped."""
+    begin = start
+    for m in BOUNDARY.finditer(s, start, end):
+        before = s[start:m.start() + 1].lower()
+        if before.endswith(ABBREVIATIONS) and re.search(r'(^|\s)(' + '|'.join(map(re.escape, ABBREVIATIONS)) + r')$',
+                                                         before):
+            continue
+        begin = m.end()
+    while begin < end and s[begin].isspace():
+        begin += 1
+    return begin
+
+
+def parse_authored(text):
+    """What Claude wrote, as lines of segments: [[('raw', text) | ('twin', english, japanese)]] with each line's
+    number, and what it found: (lines, problems, notes). problems stop the check (a <ja> without its </ja> or its
+    English sentence, a Japanese sentence outside <ja>); notes are what code fixed or kept ({{...}} marks the writer
+    left, put back in English). Fenced code is raw, as is inline code."""
+    out, problems, notes, fence = [], [], [], False
+    for number, line in enumerate(str(text).split('\n'), 1):
+        if FENCE_LINE.match(line):
+            fence = not fence
+            out.append((number, [('raw', line)]))
+            continue
+        if fence:
+            out.append((number, [('raw', line)]))
+            continue
+        saved = []
+        s = _protect(line, saved)
+        left = UNSURE.findall(_restore(s, saved))
+        if left:
+            line = UNSURE.sub(lambda m: m.group(1), _restore(s, saved))
+            notes.append((number, f'{len(left)} unsure swap{"s" if len(left) > 1 else ""} left as {{{{English→...}}}}: '
+                                  'put back in English'))
+            saved = []
+            s = _protect(line, saved)
+        segments, at, open_at, prefix = [], 0, None, PREFIX.match(s).end()
+        for m in JA_TAG.finditer(s):
+            if not m.group(1):  # <ja>
+                if open_at is not None:
+                    problems.append((number, 'a <ja> inside another <ja>'))
+                    break
+                open_at = m
+                continue
+            if open_at is None:
+                problems.append((number, 'a </ja> with no <ja> before it'))
+                break
+            end = open_at.start()
+            while end > at and s[end - 1].isspace():
+                end -= 1
+            begin = _sentence_start(s, max(at, prefix), end)
+            english = s[begin:end]
+            if not LETTER.search(english):
+                problems.append((number, 'a <ja> twin with no English sentence right before it on its line'))
+            else:
+                if begin > at:
+                    segments.append(('raw', _restore(s[at:begin], saved)))
+                segments.append(('twin', _restore(english, saved), _restore(s[open_at.end():m.start()], saved).strip()))
+            at, open_at = m.end(), None
+        if open_at is not None:
+            problems.append((number, 'a <ja> with no </ja> on the same line'))
+        if at < len(s):
+            segments.append(('raw', _restore(s[at:], saved)))
+        out.append((number, segments))
+    return out, problems, notes
+
+
+# ---- the reply's parts, from what Claude wrote ----
+
+def _english(text, number, sid, parent):
+    """English text (with the weave's swaps) as parts: ('raw', text) and words {k: 'w', title, ja, en?, line, sid,
+    twin}; sid counts the line's sentences (a list, shared along the line)."""
+    out, saved = [], []
+    s = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), text)
+    at = 0
+    for m in ABBR.finditer(s):
+        before = s[at:m.start()]
+        if before:
+            out.append(('raw', _restore(before, saved)))
+        sid[0] += len(BOUNDARY.findall(before))
+        a = attrs(m.group(1))
+        out.append({'k': 'w', 'title': a.get('title', ''), 'ja': m.group(2), 'en': a.get('data-en'), 'line': number,
+                    'sid': ('twin', parent) if parent is not None else (number, sid[0]), 'twin': parent})
+        at = m.end()
+    if at < len(s):
+        out.append(('raw', _restore(s[at:], saved)))
+    return out
+
+
+def _fence_lines(lines):
+    """The line numbers inside fenced code (their raw segments are code, not English)."""
+    inside, fence = set(), False
+    for number, segments in lines:
+        raw = segments[0][1] if len(segments) == 1 and segments[0][0] == 'raw' else None
+        if raw is not None and FENCE_LINE.match(raw):
+            fence = not fence
+            inside.add(number)
+        elif fence:
+            inside.add(number)
+    return inside
+
+
+def reply_parts(lines):
+    """The reply as parts in order: ('raw', text), ('code', a line of fenced code), words (_english) and twins {k: 't',
+    english: [parts], japanese, line, source: the English as written}; a newline is raw. A twin's words name it by its
+    place among the twins."""
+    code = _fence_lines(lines)
+    out, twins = [], 0
+    for k, (number, segments) in enumerate(lines):
+        if k:
+            out.append(('raw', '\n'))
+        if number in code:
+            out += [('code', s[1]) for s in segments]
+            continue
+        sid = [0]
+        for seg in segments:
+            if seg[0] == 'raw':
+                out += _english(seg[1], number, sid, None)
+            else:
+                out.append({'k': 't', 'english': _english(seg[1], number, [0], twins), 'japanese': seg[2],
+                            'line': number, 'source': seg[1]})
+                sid[0] += 1
+                twins += 1
+    return out
+
+
+def japanese_twin(japanese, english):
+    """A twin's Japanese with its closing marks glossed: each bare 。 or ？ takes the English sentence (plain) as its
+    title, a bare ！ becomes 。, and a twin that doesn't end with a mark gets one (？ when the English asks)."""
+    title = esc(english)
+    pieces, at = [], 0
+    for m in ABBR.finditer(japanese):
+        pieces.append(('t', japanese[at:m.start()]))
+        pieces.append(('w', m.group()))
+        at = m.end()
+    pieces.append(('t', japanese[at:]))
+    out = []
+    for kind, piece in pieces:
+        if kind == 'w':
+            out.append(piece)
+            continue
+        out.append(re.sub('[。？！]', lambda m: f'<abbr title="{title}">{"。" if m.group() == "！" else m.group()}</abbr>',
+                          piece))
+    text = ''.join(out).strip()
+    last = re.sub(r'\s+', '', re.sub(r'<[^>]+>', '', text))[-1:]
+    if last not in MARKS:
+        text += f'<abbr title="{title}">{"？" if english.rstrip(" *_").endswith("?") else "。"}</abbr>'
+    return text
+
+
+def word_markup(w, on):
+    return (f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}">{w["ja"]}</abbr>')
+
+
+# ---- thresholds and propensities ----
+
+class Element:
+    """One thing a level can show: kind 's' (a twin) or 'w' (a swapped word). cost_s: what it spends of the
+    sentences' part; cost_w: of the words' part (a word's lookup chance unless it is free; a twin's costly words);
+    opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
+    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free
+    words -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
+    __slots__ = ('kind', 'cost_s', 'cost_w', 'opens', 'value', 'parent', 'sid', 'fixed', 'children', 'ja')
+
+    def __init__(self, kind, cost_s=0.0, cost_w=0.0, opens=0.0, value=0.0, parent=None, sid=None, fixed=None,
+                 ja=None):
+        self.kind, self.cost_s, self.cost_w, self.opens, self.value = kind, cost_s, cost_w, opens, value
+        self.parent, self.sid, self.fixed, self.children, self.ja = parent, sid, fixed, [], ja
+
+    def density(self):
+        cost = self.cost_s if self.kind == 's' else self.cost_w
+        return self.value / cost if cost > 0 else math.inf
+
+
+def learning_value(p):
+    """A word's learning value on a positive scale: 1 at TARGET_P, e^-1 a unit of log odds away (knowledge.learning_
+    value, exponentiated)."""
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.exp(-abs(math.log(p / (1 - p)) - math.log(TARGET_P / (1 - TARGET_P))))
+
+
+def link(els):
+    """Each twin's children (the words its English holds)."""
+    for e in els:
+        e.children = []
+    for i, e in enumerate(els):
+        if e.kind == 'w' and e.parent is not None:
+            els[e.parent].children.append(i)
+    return els
+
+
+def _order(els, kind, on, rng, explore, explored):
+    """The elements of a kind still to place, best first: by density (ties in document order), each place drawn at
+    random instead with chance explore."""
+    idx = [i for i, e in enumerate(els) if e.kind == kind and on[i] is None]
+    ranked = sorted(idx, key=lambda i: (-els[i].density(), i))
+    key = {}
+    for r, i in enumerate(ranked):
+        if rng.random() < explore:
+            key[i] = rng.random()
+            explored[i] = True
+        else:
+            key[i] = (r + 0.5) / len(ranked)
+    return sorted(idx, key=lambda i: key[i])
+
+
+def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_sentence):
+    """(thresholds, explored) for the elements (Element, linked) under one draw of the randomization (module
+    docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. An element is
+    taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform draw
+    per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same draw
+    at every level keeps the sets nested, and a level's expected spend is its part (systematic rounding)."""
+    n = len(els)
+    on = [e.fixed for e in els]
+    explored = [False] * n
+    twins = _order(els, 's', on, rng, explore, explored)
+    words = _order(els, 'w', on, rng, explore, explored)
+    u_s, u_w = rng.random(), rng.random()
+    shown = lambda i, level: on[i] is not None and on[i] <= level and (
+        els[i].parent is None or on[els[i].parent] is None or level < on[els[i].parent])
+    for level in BUDGETED:
+        words_part, sentences_part = budgets[level]
+        spent_s = sum(e.cost_s for i, e in enumerate(els) if e.kind == 's' and on[i] is not None and on[i] <= level)
+        spent_w = sum(e.cost_w for i, e in enumerate(els) if shown(i, level))
+        for i in twins:
+            if on[i] is not None:
+                continue
+            e = els[i]
+            freed = sum(els[c].cost_w for c in e.children if shown(c, level))
+            if spent_s + u_s * e.cost_s <= sentences_part + 1e-12 and \
+                    (e.cost_w <= freed or spent_w + e.cost_w - freed <= words_part + 1e-12):
+                on[i] = level
+                spent_s += e.cost_s
+                spent_w += e.cost_w - freed
+        counts = {}
+        for i, e in enumerate(els):
+            if e.kind == 'w' and e.cost_w > 0 and shown(i, level):
+                counts[e.sid] = counts.get(e.sid, 0) + 1
+        most = per_sentence(level)
+        hidden = lambda i: els[i].parent is not None and on[els[i].parent] is not None and on[els[i].parent] <= level
+        for i in words:
+            if on[i] is not None or hidden(i) or counts.get(els[i].sid, 0) >= most:
+                continue
+            if spent_w + u_w * els[i].cost_w <= words_part + 1e-12:
+                on[i] = level
+                spent_w += els[i].cost_w
+                counts[els[i].sid] = counts.get(els[i].sid, 0) + 1
+    on = [FULL if x is None else x for x in on]
+    for i, e in enumerate(els):  # a word in a twin's English: never above the twin (it shows only below it)
+        if e.kind == 'w' and e.parent is not None:
+            on[i] = min(on[i], on[e.parent])
+    return on, explored
+
+
+def shown_at(els, on, i, level):
+    """Whether element i shows at a level under thresholds on."""
+    if level <= OFF:
+        return False
+    if on[i] > level:
+        return False
+    parent = els[i].parent
+    return parent is None or level < on[parent]
+
+
+def propensities(els, budgets, draws=DRAWS, seed=0, explore=EXPLORE):
+    """[[chance element i shows at each budgeted level]]: the share of `draws` runs of assign in which it does (module
+    docstring), seeded."""
+    rng = random.Random(seed)
+    counts = [[0] * len(BUDGETED) for _ in els]
+    for _ in range(draws):
+        on, _x = assign(els, budgets, rng, explore)
+        for i in range(len(els)):
+            for k, level in enumerate(BUDGETED):
+                if shown_at(els, on, i, level):
+                    counts[i][k] += 1
+    return [[round(c / draws, 3) for c in row] for row in counts]
+
+
+def budgets_for(words, normal=None):
+    """{level: (words' part, sentences' part)} in lookups for a reply of `words` English words: the level's budget per
+    100 words (intensity.budget, normal's the challenge when set) times words / 100, and SENTENCE_SHARE of it."""
+    out = {}
+    for level in BUDGETED:
+        b = intensity.budget(level, normal) * words / 100
+        out[level] = (b, intensity.SENTENCE_SHARE * b)
+    return out
+
+
+# ---- local memory: the weave's swaps, each checked reply's plan ----
+
+def session_key(session=None):
+    """The chat's session id (Claude Code puts it in CLAUDE_CODE_SESSION_ID for the commands Claude runs), or ''."""
+    import os
+    value = session if session is not None else os.environ.get('CLAUDE_CODE_SESSION_ID', '')
+    return str(value or '')[:100]
+
+
+def remember_swaps(swaps, level, session=None, now_ms=None):
+    """Keeps the weave's swaps for the check step ({ja, title, en, kana, p, free, dictionary}), per session, the last
+    SESSIONS_KEPT sessions of the last KEEP_MS."""
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    path = fwlib.home() / SWAPS
+    kept = fwlib.read_json(path, {})
+    kept = {k: v for k, v in (kept if isinstance(kept, dict) else {}).items()
+            if isinstance(v, dict) and now_ms - (v.get('at') or 0) < KEEP_MS}
+    kept[session_key(session)] = {'at': now_ms, 'level': level, 'swaps': swaps}
+    kept = dict(sorted(kept.items(), key=lambda kv: kv[1]['at'])[-SESSIONS_KEPT:])
+    try:
+        fwlib.write_json(path, kept)
+    except OSError:
+        pass
+
+
+def swaps_for(session=None):
+    """The weave's last swaps in this session (remember_swaps), else the latest of any session; [] when none."""
+    kept = fwlib.read_json(fwlib.home() / SWAPS, {})
+    if not isinstance(kept, dict) or not kept:
+        return []
+    found = kept.get(session_key(session))
+    if not isinstance(found, dict):
+        found = max((v for v in kept.values() if isinstance(v, dict)), key=lambda v: v.get('at') or 0, default={})
+    swaps = found.get('swaps')
+    return [s for s in swaps if isinstance(s, dict)] if isinstance(swaps, list) else []
+
+
+def remember_plan(fp, plan, now_ms=None):
+    """Keeps a checked reply's plan under its fingerprint (grammar.fingerprint of annotation_texts): {at, level (the
+    chat level it was checked at), view (the level shown when it was sent: -3 while English only is on), e: [[kind,
+    on, propensities, p, x]] per element in document order, d: [[pattern ids]] per dropped twin, s: [p] per Japanese
+    sentence}, the last PLANS_KEPT."""
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    path = fwlib.home() / PLANS
+    kept = fwlib.read_json(path, {})
+    kept = kept if isinstance(kept, dict) else {}
+    kept[fp] = dict(plan, at=now_ms)
+    kept = dict(sorted(kept.items(), key=lambda kv: (kv[1] or {}).get('at') or 0)[-PLANS_KEPT:])
+    try:
+        fwlib.write_json(path, kept)
+    except OSError:
+        pass
+
+
+def plan_for(text, plans=None):
+    """The plan check-reply kept for this reply (remember_plan), or None."""
+    plans = plans if plans is not None else fwlib.read_json(fwlib.home() / PLANS, {})
+    if not isinstance(plans, dict) or not has_levels(text):
+        return None
+    found = plans.get(grammar.fingerprint(annotation_texts(text)))
+    return found if isinstance(found, dict) else None
+
+
+def level_now(state=None):
+    """The level a reply is shown at now on this machine's state: -3 while English only is on, else the chat level."""
+    state = state if state is not None else fwlib.load_state()
+    prefs = (state or {}).get('prefs')
+    if intensity.english_current(prefs)['on']:
+        return OFF
+    return intensity.current(prefs, 'chat')['level']
+
+
+def view(text, level=None, plans=None):
+    """What a reader of the transcript counts as shown (fwlib.read_replies, the hook's last reply and topical words):
+    the reply rendered at the level it was shown at when sent (its plan's view), else at `level` (the level in force
+    now). A reply without levels is unchanged above off. Only rendered Japanese is an exposure."""
+    if not has_levels(text):
+        return text if level is None or level > OFF else render(text, level)
+    plan = plan_for(text, plans)
+    shown = plan.get('view') if plan and isinstance(plan.get('view'), int) else level
+    return render(text, 0 if shown is None else shown)
+
+
+def seed_of(text):
+    """A seed from a reply's text, so its propensities repeat."""
+    return int(hashlib.sha256(str(text).encode('utf-8')).hexdigest()[:8], 16)

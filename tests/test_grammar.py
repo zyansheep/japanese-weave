@@ -300,46 +300,43 @@ class Intake(unittest.TestCase):
         self.assertIsNone(hub.validate(hub.stamp(dict(op))))
 
 
-@unittest.skipUnless(chatweave.runtime(), 'no node or bun')
 class FirstLine(unittest.TestCase):
-    DRAFT = ('The problem is easy to fix now. Read the information below before you start, and check the log. ' * 8)
-
-    def run_mjs(self, **extra):
-        payload = dict({'draft': self.DRAFT, 'words': [], 'budgetPer100': 0.5, 'intensity': 0,
-                        'sentencePrice': 0.08}, **extra)
-        run = subprocess.run([chatweave.runtime(), str(chatweave.SCRIPT)], input=json.dumps(payload, ensure_ascii=False),
-                             capture_output=True, text=True, timeout=60)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        return run.stdout.split('\n', 1)[0]
-
-    def test_budget_limit_and_learning_pattern(self):
+    def test_limit_grammar_and_learning_pattern(self):
         teiru = grammar.BY_ID['teiru']
-        plan = {'sentenceChance': 0.02, 'maxChars': 11,
-                'grammar': {'known': ['は (topic)', 'です (is)'],
-                            'learning': {'name': teiru.name, 'explain': teiru.explain, 'example': teiru.example}}}
-        head = self.run_mjs(**dict(plan, sentenceChance=0.2))  # a model that pays for fewer than the price
-        words = len(re.findall(r"[A-Za-z']+", self.DRAFT))
-        self.assertIn(f'Make about {round(0.5 * words / 100 * intensity.SENTENCE_SHARE / 0.2)} sentence', head)
+        plan = {'maxChars': 11, 'grammar': {'known': ['は (topic)', 'です (is)'],
+                                            'learning': {'name': teiru.name, 'explain': teiru.explain,
+                                                         'example': teiru.example}}}
+        woven = {'swaps': [{'ja': '情報', 'free': False, 'dictionary': False, 'unsure': False},
+                           {'ja': '記録', 'free': False, 'dictionary': True, 'unsure': True}]}
+        head = chatweave.first_line(woven, plan, 9, 6.2)
+        self.assertIn('up to 9 twins (much heavier shows about 6', head)
         self.assertIn('at most 11 Japanese characters', head)
         self.assertIn('grammar patterns: は (topic), です (is); plus at most one learning pattern', head)
         self.assertIn(f"This week's learning pattern is {teiru.name}: {teiru.explain}, as in {teiru.example}", head)
         self.assertIn('Any other grammar stays out', head)
-        priced = self.run_mjs(**dict(plan, sentenceChance=None))  # not ready: the price
-        self.assertIn(f'Make about {round(0.5 * words / 100 * intensity.SENTENCE_SHARE / 0.08)} sentences', priced)
-        self.assertIn('No learning pattern this week', self.run_mjs(**dict(plan, grammar={'known': [], 'learning': None})))
+        self.assertIn('1 dictionary words that show only at full (記録)', head)
+        self.assertIn('No learning pattern this week', chatweave.first_line(
+            woven, dict(plan, grammar={'known': [], 'learning': None}), 3, 1))
 
     def test_the_count_never_exceeds_the_old_price_rule(self):
-        count = lambda head: int(head.split('Make about ')[1].split(' ')[0])
-        for budget in (0.15, 0.5, 1.2):
+        import twins
+        rng = random.Random(5)
+        for budget_words in (40, 150, 400):
             for price in (0.08, 0.11):
-                old = count(self.run_mjs(budgetPer100=budget, sentencePrice=price))  # the rule before the model
-                for chance in (0.005, 0.034, 0.08, 0.5):
-                    new = count(self.run_mjs(budgetPer100=budget, sentencePrice=price, sentenceChance=chance,
-                                             maxChars=9, grammar={'known': ['は (topic)'], 'learning': None}))
-                    self.assertLessEqual(new, old, (budget, price, chance))
-                    if chance >= price:
-                        self.assertEqual(new, max(1, round(budget * len(re.findall(r"[A-Za-z']+", self.DRAFT)) / 100
-                                                           * intensity.SENTENCE_SHARE / chance)))
+                pairs = [(rng.choice((0.005, 0.034, 0.08, 0.5)), rng.choice((1, 1, 2))) for _ in range(12)]
+                els = twins.link([twins.Element('s', cost_s=max(p, price) * n, opens=p * n, value=1.0 + rng.random())
+                                  for p, n in pairs])
+                sentences = [n for _p, n in pairs]
+                budgets = twins.budgets_for(budget_words)
+                props = twins.propensities(els, budgets, draws=400, seed=1)
+                for k, level in enumerate(twins.BUDGETED):
+                    paid = budgets[level][1] / price  # what the old rule's count was before rounding
+                    expected = sum(pr[k] * n for pr, n in zip(props, sentences))
+                    self.assertLessEqual(expected, paid + 0.15, (budget_words, price, level))
+                    for seed in range(20):  # and no draw shows more than one past it
+                        on, _x = twins.assign(els, budgets, random.Random(seed))
+                        shown = sum(n for e, n, t in zip(els, sentences, on) if t <= level)
+                        self.assertLessEqual(shown, math.floor(paid + 1e-9) + 2, (budget_words, price, level))
 
     def test_the_plan_from_the_state_and_the_fit(self):
         state = {'words': [], 'grammar': {'teiru': {'status': 'learning', 'since': '2026-11-01'}}}
@@ -513,13 +510,23 @@ class Collector(Home):
         self.assertFalse(JAPANESE.search(context))
         self.assertIn(f'until {intensity.clock(on["until"])}', context)
         self.assertIn('the English-only shortcut or the Japanese Weave panel in T3 Code', context)
-        with self.assertRaises(SystemExit) as stop:
-            self.fw('weave', '--level', '0')
-        self.assertIn('English only', str(stop.exception))
+        with mock.patch.object(chatweave, 'weave', return_value='jw-weave: woven'), \
+                mock.patch('sys.stdin', new=io.StringIO('The draft.')):
+            self.assertIn('jw-weave: woven', self.fw('weave', '--level', '0'))  # the weave runs: twins all the same
         self.assertIn('English only is off', self.fw('intensity', 'english', 'off'))
         self.assertIn('Japanese Weave (Stage', self.hook('Next.'))
         self.assertIn('English only until', self.fw('intensity', 'english', 'on'))  # from fw too
         self.assertTrue(self.hook('Next.').startswith('Japanese Weave: the user switched chat to English only'))
+
+    def test_in_draft_style_the_hook_keeps_the_twins_while_english_is_on(self):
+        hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
+        with mock.patch.object(weave, 't3_host', return_value=True), \
+                mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
+            self.assertIn('<ja>...</ja>', self.hook('What is a monad?'))
+            on = self.english({'on': True, 'source': 't3', 'contexts': []})['english']
+            context = self.hook('And a functor?')
+        self.assertIn('draft and weave', context)  # the brief, not the plain-English note
+        self.assertIn(f'English only is on until {intensity.clock(on["until"])}', context)
 
     def test_t3_messages_shown_while_english_is_on_are_dropped(self):
         shown = {'kind': 'shown', 'at': intensity.now_ms(), 'view': 'v1', 'context': 'c1', 'words': 40,

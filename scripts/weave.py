@@ -628,35 +628,40 @@ def digest(stage, level, markup, n, m):
 
 
 # Draft and weave, the default chat style where the chat shows <abbr> glosses (README "Chat replies"): Claude writes the
-# reply in English, fw.py weave swaps Japanese in by the word model and the level (chatweave.py), Claude rewrites that
-# into Japanese and mixed sentences, fw.py check-reply lists what code can see is wrong, and Claude sends the result.
-# Four rounds of blind-judged replies (docs/chat-weave.md) chose these steps and every rule in DRAFT_RULES.
+# reply in English, fw.py weave swaps in every Japanese word that could go there (chatweave.py), Claude writes a
+# Japanese twin after each sentence that fits the limits, fw.py check-reply checks it, decides what each level shows
+# and prints the final markup (twins.py), and Claude sends that. Four rounds of blind-judged replies
+# (docs/chat-weave.md) chose these steps and the rules in DRAFT_RULES; the twins came with render-time levels.
 STYLES = ('draft', 'classic')
+RULES = 'twins'  # what sessions.json says a chat had in full: a chat that had the steps before twins gets them again
 DRAFT_RULES = """\
-   - Japanese and mixed sentences. Make about as many sentences Japanese or mixed as the weave's first line says, \
-choosing the ones that carry the content: the advice, the explanation, the conclusion. Never add stock lines on top. \
-Rewrite each around its Japanese words in Japanese word order with particles and grammar (verb endings, です/ます, \
-これ/それ), dropping English words whose meaning the Japanese carries and keeping English nouns where no Japanese word \
-was swapped in. Only an English noun or noun phrase may take a particle; an English adjective, adverb or verb never \
-does ("early に" and "quieter な" are wrong). Keep each English stretch inside a Japanese sentence to about four words; \
-a sentence that needs a longer one, or an English relative clause, stays English. Use polite です/ます form throughout. \
-Prefer a verb to "noun + があります". Never put する on an English word ("arrive します", "use して", "build しない", \
-"lose されたら"): use a Japanese verb from the weave's output, or keep that clause English. English nouns inside a \
-Japanese sentence stay singular, and Japanese words in it take no spaces between them (spaces only around the \
-English). Drop English articles inside a Japanese or mixed sentence, and never write "an" before a Japanese word. \
-Don't open a sentence with そして as "And...": use また or それに, or join the clauses with the て-form.
-   - Grammar and length. The weave's first line says how many Japanese characters a Japanese or mixed sentence may \
-have and which grammar patterns it may use: the known ones, plus at most one learning pattern in a sentence. Split a \
-longer sentence into two short ones, or keep part of it English. Grammar the line doesn't list stays out (plain \
-forms like 〜た, 〜ない and だ, quoting with と思う or という, から and ので clauses, のは clefts, stacked particles like \
-には, and the rest): rephrase the sentence with listed patterns, or keep it English. Use this week's learning pattern \
-on purpose once or twice where it fits.
-   - Sentences that stay English keep only the swaps that are nouns, and adjectives right before an English noun. \
-Undo every other swap in them (verbs, adverbs, connectives like もし, そして and でも, and pronouns) by putting the \
-English back. Those words go only inside Japanese or mixed sentences.
+   - Twins. After an English sentence that carries the content (the advice, the explanation, the conclusion) and \
+that you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
+on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
+before it, so make it one whole sentence, with any bold or link closed inside it. Write twins up to the first line's \
+number; code chooses which twins each level shows, so never add stock lines to get more. A twin is one Japanese or \
+mixed sentence, or two short ones for a long English sentence, and ends with a bare 。 or ？: code puts the English \
+sentence on it as its translation. Write each twin around its Japanese words in Japanese word order with particles \
+and grammar (verb endings, です/ます, これ/それ), keeping English nouns where no Japanese word was swapped in. Only an \
+English noun or noun phrase may take a particle; an English adjective, adverb or verb never does ("early に" and \
+"quieter な" are wrong). Keep each English stretch inside a twin to about four words; a sentence that needs a longer \
+one, or an English relative clause, gets no twin. Use polite です/ます form throughout. Prefer a verb to "noun + \
+があります". Never put する on an English word ("arrive します", "use して", "build しない", "lose されたら"): use a Japanese verb \
+from the weave's output, or give that sentence no twin. English nouns inside a twin stay singular, and Japanese words \
+in it take no spaces between them (spaces only around the English). Drop English articles inside a twin, and never \
+write "an" before a Japanese word. Don't open a twin with そして as "And...": use また or それに, or join the clauses \
+with the て-form.
+   - Grammar and length. The weave's first line says how many Japanese characters a sentence of a twin may have and \
+which grammar patterns it may use: the known ones, plus at most one learning pattern in a sentence. Split a longer \
+twin into two short sentences, or give that sentence no twin. Grammar the line doesn't list stays out (plain forms \
+like 〜た, 〜ない and だ, quoting with と思う or という, から and ので clauses, のは clefts, stacked particles like には, and \
+the rest). Use this week's learning pattern on purpose in a twin or two. Code drops a twin that breaks a limit or a \
+rule here, and its sentence stays English.
+   - The English, every sentence of it, keeps only the swaps whose sense fits that are nouns, or adjectives right \
+before an English noun; code puts any other swap back in English (verbs, adverbs, connectives like もし, そして and \
+でも, and pronouns): those words go only in twins.
    - Learning words. The weave's first line names them, and they are what the reply teaches: keep each one whose \
-sense fits. When one isn't a noun or an adjective before a noun, make its sentence Japanese or mixed instead of \
-undoing it, and count that sentence toward the number the first line asks for.
+sense fits. When one isn't a noun or an adjective before a noun, use it in its sentence's twin.
    - Senses. Each {{English→Japanese}}: keep the Japanese only if it means exactly what the English means there; \
 otherwise put the English back. Undo any other swap whose sense doesn't fit. Known traps: いつも is "always", never \
 "usually"; 穏やか is "calm" or "mild", never "quiet" or "uncrowded"; 高い is "pricey" or "tall", never "costly to \
@@ -669,13 +674,12 @@ shift in the abstract; 素晴らしい is "wonderful", not "great for" or "well 
 change of plans or settings, not something changing by itself; 大切 is "precious" or "dear", so a technical \
 "important" stays English; 戦略 is a strategy, not a strategy game; 幾度 is literary, so leave it out. Don't translate \
 English idioms word for word: a project doesn't 死ぬ, ideas don't 来る, and "at the same time" isn't 同じ time.
-   - Grammar. もし only with a conditional ending (〜なら, 〜たら, 〜ば); otherwise keep "if" in English. Words that follow \
-their noun in Japanese (前 後 中 上 下 間 代わりに くらい まで) always follow it, as in "lock の前に". Japanese leaves out \
-"you" and "I": drop them rather than writing あなた or 私. 多い and 少ない come after their noun (人が少ない) or take の \
-(多くの); a な-adjective takes な before a noun.
+   - Grammar. もし only with a conditional ending (〜なら, 〜たら, 〜ば); otherwise no もし. Words that follow their noun \
+in Japanese (前 後 中 上 下 間 代わりに くらい まで) always follow it, as in "lock の前に". Japanese leaves out "you" and "I": \
+drop them rather than writing あなた or 私. 多い and 少ない come after their noun (人が少ない) or take の (多くの); a \
+な-adjective takes な before a noun.
    - Vary the words: no content word more than four times in a reply.
-   - Keep every sentence guessable from the English around it, the English left in it, and the words the user can \
-hover.
+   - Keep every twin guessable from its English, the English left in it, and the words the user can hover.
    - Use only Japanese words that appear in the weave's output (you may conjugate its verbs and adjectives), plus \
 particles and grammar. Add no other Japanese words and no katakana loanwords, and keep names whole.
    - Code, commands, paths, numbers and names stay exactly as they are, and no Japanese word sits right next to a \
@@ -685,9 +689,9 @@ conjugated verb or adjective whole, with the reading and the meaning of that for
 to do"). Grammar that carries meaning is glossed too: だけ, それから, のある, ことができる, and a nominalising の (〜のは, \
 〜のが) with the word before it. Only the structural particles (は が を に で の へ と ね よ) and です/ます stay outside \
 the tags; every particle or ending that carries meaning is glossed: か (or), や (and so on), も (also), から, まで, より, \
-なら, けど, ので, のに, が or ですが meaning "but", と meaning "when". Gloss 自分で whole ("by oneself"). End every sentence \
-that is half Japanese or more with its 。 or ？ wrapped in an <abbr> whose title is the English translation of the whole \
-sentence. No bold on Japanese words, and no footer."""
+なら, けど, ので, のに, が or ですが meaning "but", と meaning "when". Gloss 自分で whole ("by oneself"). Leave a twin's \
+closing 。 or ？ bare. All Japanese goes in twins or glosses, none bare in the English. No bold on Japanese words, and \
+no footer."""
 
 
 def chat_style(state, codex=False, markup=False, runtime=None):
@@ -712,49 +716,59 @@ def fw_command():
 def draft_rules(stage, level, command):
     """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
     return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the user is a native English speaker '
-            'learning Japanese by reading, so your chat reply mixes English and Japanese at the level the user chose. '
-            'Code picks the Japanese words and says how many sentences to make Japanese; you make them read well and '
-            'teach grammar. Skip these steps, and reply in plain English with no Japanese, for health, medication, '
-            'legal, money, safety, emergency, driving or urgent topics, and for a reply of a sentence or two. Japanese '
-            'goes only in your chat reply: never in files, code, configs, commit or PR text, messages to other agents, '
-            'subagent prompts, or drafts and documents meant to be shared.\n'
+            'learning Japanese by reading, so your chat reply carries Japanese for every level the user can choose, '
+            'and their app shows it at the level they set (they can change it after reading, or turn on English '
+            'only). Code picks the Japanese words and decides what each level shows; you write the Japanese twins and '
+            'make them read well and teach grammar. Skip these steps, and reply in plain English with no Japanese, '
+            'for health, medication, legal, money, safety, emergency, driving or urgent topics, and for a reply of a '
+            'sentence or two. Japanese goes only in your chat reply: never in files, code, configs, commit or PR '
+            'text, messages to other agents, subagent prompts, or drafts and documents meant to be shared.\n'
             '1. Write your whole reply in plain English, as you normally would, with no Japanese, and pass it to the '
             f'weave on stdin, in one Bash call:\n{command} weave --level {level} <<\'DRAFT\'\n(your English reply)\nDRAFT\n'
-            '   It swaps in Japanese words by the user\'s word model and level, each wrapped as <abbr title="reading · '
-            'meaning">Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. '
-            'Its first line says how many sentences to make Japanese or mixed.\n'
-            '2. Rewrite its output into your reply:\n' + DRAFT_RULES + '\n'
-            f'3. Check the reply in one Bash call:\n{command} check-reply --level {level} <<\'REPLY\'\n(your reply)\nREPLY\n'
-            '   It lists what code can see is wrong, and scores each Japanese or mixed sentence: its length, its grammar '
-            'patterns and its chance of sending the user to the translation, flagging one that is too long, uses '
-            'grammar not on the list (or two learning patterns) or is too likely to be opened. Fix each item, keeping '
-            'one only where the check is plainly wrong; fix a flagged sentence by splitting it, simplifying it or '
-            'leaving it English. Then check again, at most twice in all.\n'
-            '4. Send the reply as your final message. Leave out the weave\'s first line and the ----- under it. Don\'t '
-            'mention the draft, the commands or these steps: the user sees only your final message. If a command fails, '
-            'send the English reply as it is.')
+            '   It swaps in every Japanese word that could go there, each wrapped as <abbr title="reading · meaning">'
+            'Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. Its '
+            'first line says how many twins to write and within which limits.\n'
+            '2. Write the reply from its output: your English sentences with the swaps that fit, and a Japanese twin '
+            'after each sentence that fits:\n' + DRAFT_RULES + '\n'
+            f'3. Check it in one Bash call:\n{command} check-reply --level {level} <<\'REPLY\'\n(your reply)\nREPLY\n'
+            '   It drops a twin that breaks a limit or rule (its sentence stays English), puts back the swaps that '
+            'can\'t stay, chooses what each level shows, and prints the final markup under a line of =====. If it '
+            'lists things to fix before there is anything to send, fix them and run it again; if it dropped a twin you '
+            'can fix quickly, you may fix it and run it once more (at most twice in all).\n'
+            '4. Send everything below the ===== line exactly as it is, as your whole final message: nothing before or '
+            'after it and no change to it. Don\'t mention the draft, the commands or these steps: the user sees only '
+            'your final message. If a command fails, send your English reply as it is, with no twins.')
 
 
 def draft_digest(stage, level, command):
     """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
     return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the steps earlier in this chat still '
-            f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, rewrite '
-            f'its output as those steps say (sentence lengths and grammar as its first line says), pass that to '
-            f'`{command} check-reply --level {level}` and fix what it lists and flags (at most two checks), then send '
-            'it. '
+            f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, write '
+            'your English with the swaps that fit and a <ja> twin after each sentence that fits (limits and how many '
+            f'on its first line), pass that to `{command} check-reply --level {level}`, and send everything below its '
+            '===== line exactly as it is (at most two checks). '
             'Plain English with no Japanese for health, medication, legal, money, safety or urgent topics, and for a '
             'reply of a sentence or two.')
 
 
-def compose_draft(state, level, had=None, command=None, plan=None):
+def english_line(until):
+    """Added to the draft brief while English only is on: the reply carries its twins all the same."""
+    return (f'\nEnglish only is on until {intensity.clock(until)}, so the user sees English for now: write the reply '
+            'with its twins as usual, and its Japanese shows once English only is off.')
+
+
+def compose_draft(state, level, had=None, command=None, plan=None, english=None):
     """(brief, what the chat has after it, plan) in draft style, as compose returns them: the steps in full on a
-    chat's first turn (had None) or when the chat last had the classic brief, else the digest. plan: the classic
-    brief's plan (compose), recorded with mode draft, so the log says what the lists were."""
+    chat's first turn (had None) or when the chat last had another brief (the classic one, or the steps from before
+    twins), else the digest. plan: the classic brief's plan (compose), recorded with mode draft, so the log says what
+    the lists were. english: when English only is on, until when (english_line)."""
     command = command or fw_command()
     stage = fwlib.stage_for(state)
-    whole = had is None or had.get('rules') != 'draft'
+    whole = had is None or had.get('rules') != RULES
     text = draft_rules(stage, level, command) if whole else draft_digest(stage, level, command)
-    after = {'known': list(had.get('known') or []) if had else [], 'rules': 'draft'}
+    if english:
+        text += english_line(english)
+    after = {'known': list(had.get('known') or []) if had else [], 'rules': RULES}
     return text, after, dict(plan or {}, whole=whole, mode='draft')
 
 
@@ -1220,20 +1234,21 @@ def main(argv):
             live = dict(intensity.NORMAL)
         level = live['level']
     codex = 'turn_id' in data
-    # English only for now, Japanese off in this chat (at any level), or in all chats for now: one line instead of the
-    # brief and its extras
-    note = (english_note(english['until'], codex) if english.get('on') else
+    markup = hook and abbr_glosses(state)
+    try:
+        style = chat_style(state, codex, markup) if hook else 'classic'
+    except Exception:
+        style = 'classic'
+    # English only for now (unless the reply carries its levels: draft style writes the twins all the same), Japanese
+    # off in this chat (at any level), or in all chats for now: one line instead of the brief and its extras
+    english_on = bool(english.get('on'))
+    note = (english_note(english['until'], codex) if english_on and style != 'draft' else
             threads.note(codex=codex) if threads.is_off(thread) else
             off_note(live['until'], codex) if intensity.is_off(level) else None)
     if note:
         print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': note}},
                          ensure_ascii=False))
         return 0
-    markup = hook and abbr_glosses(state)
-    try:
-        style = chat_style(state, codex, markup) if hook else 'classic'
-    except Exception:
-        style = 'classic'
     (seen, days), know = exposure(), knowledge.load()
     reply = mark = lines = None
     if hook:
@@ -1257,7 +1272,8 @@ def main(argv):
                                 topical=topical)
     if style == 'draft':
         classic = build
-        build = lambda had: compose_draft(state, level, had, plan=classic(None)[2])
+        build = lambda had: compose_draft(state, level, had, plan=classic(None)[2],
+                                          english=english['until'] if english_on else None)
     try:
         if hook and session:
             text, plan = chat_turn(state, session, build, mark)
