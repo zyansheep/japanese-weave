@@ -191,6 +191,17 @@ collector has no `/v1/review/next` and rejects review items. Its first refresh r
 version (fit 6). Then watch `fw.py knowledge` for the separation of the reveal times and `fw.py status` for the probe's
 rolling estimate.
 
+**Review cards scheduled like Anki** (scripts/srs.py, scripts/review.py; docs/adaptive-difficulty.md, "Review cards on
+a schedule"): update the collector before the T3 Code and phone builds with the graded review panel, since an older
+collector drops a review item's grade without a word (the item is stored, the grade lost for good) and sends no
+queue, intervals or counts. Its database gains the grade columns on first open (ALTER TABLE). Nothing refits: on a
+log without grades the model is the same. Then watch `fw.py review`: the review cards' retention against the 90%
+aimed for (well above it says the reading outside the reviews is doing part of the work, the conservative side of
+feeding FSRS the reviews alone), and the graded reviews' count, until about 1,000 make FSRS's own parameters worth
+fitting (`fw.py review revlog` for the optimizer). Later: test whether a gloss opened in reading predicts an Again at
+the word's next review, the first candidate for feeding reading to the schedule; and read a probe card's grade in the
+probe's rolling estimate, which still reads reveal times alone.
+
 **Sentence calibration and English only** (docs/grammar.md): update the collector before the T3 Code builds with the
 English-only shortcut and the panel, since an older collector has no `/v1/english` and doesn't send `english` with the
 level. The first refresh on each machine with chats reads every transcript again for its sentence records (once, in
@@ -228,6 +239,7 @@ then revert the merge on `main` and reload the previous extension.
   docs/adaptive-difficulty.md what result should turn it on.
 - **Day 30:** the first probe (`fw.py probe`), and every 30 days after. Since 2026-11: the probe's rolling estimate
   in `fw.py status`, once the review cards have run a few weeks; and `fw.py knowledge` for how well the reveal times
-  separate known from not known (a weak separation means the cards say little, the made-up words included).
+  separate known from not known (a weak separation means the cards say little, the made-up words included). Since
+  the cards are graded: `fw.py review` for their retention against the 90% aimed for.
 - **About week 8, step 15:** `fw.py experiment` reads out the delayed-start experiment.
 - **Day 60 or later, step 16:** a memory strength per word, if the experiment shows that exposure teaches.
