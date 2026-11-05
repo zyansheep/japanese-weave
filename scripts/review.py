@@ -5,7 +5,8 @@ with Anki's four buttons (Again, Hard, Good, Easy), or leaves it. The client ask
 time to the reveal, the grade and the time to it. Python 3.9+, standard library only.
 
   POST /v1/review/next  {"source": "desktop"|"mobile", "exclude"?: [up to EXCLUDE_MAX card ids the client holds],
-                         "more"?: true to lift today's new-card limit for this request}
+                         "more"?: true to lift today's new-card limit for this request,
+                         "peek"?: true for the counts alone (a badge): card null, nothing served}
                         -> {"ok": true, "card": {"id", "ja", "kana", "gloss", "queue": "new"|"learning"|"review",
                             "intervals": {"again", "hard", "good", "easy"}} or null,
                             "counts": {"new", "learning", "review"}}
@@ -14,7 +15,10 @@ intervals: the seconds until the card would come back after each grade, what Ank
 intervals). counts: Anki's three numbers: new cards left today within the day's limit, learning cards due now or
 within the learn-ahead window (srs.LEARN_AHEAD_S, 20 minutes), review cards due today. card null with every count 0:
 done for today (the client offers "Review more", which asks again with more). card null with a count left happens only
-while the cards counted are held by the client or pending (below); the client asks again later.
+while the cards counted are held by the client or pending (below); the client asks again later. peek answers the
+counts alone, as the same request without it would have them, and serves nothing: no cards row is written, so no word
+is held back as pending and no made-up or probe word is used up (T3 Code's header badge and the phone's badge poll
+it).
 
 The deck: every word with a graded learning card (its schedule: the replay of its graded reviews in time order, srs.
 replay, cached per database until another graded card is stored: schedules), plus the new cards: the learning words
@@ -111,13 +115,14 @@ def request_error(body):
     """What is wrong with a POST /v1/review/next body, or None."""
     ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
     if not isinstance(body, dict) or body.get('source') not in SOURCES:
-        return 'need {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: true|false}'
+        return 'need {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: true|false, "peek"?: true|false}'
     exclude = body.get('exclude')
     if exclude is not None and (not isinstance(exclude, list) or len(exclude) > EXCLUDE_MAX
                                 or not all(ident(x) for x in exclude)):
         return f'exclude: a list of at most {EXCLUDE_MAX} card ids'
-    if body.get('more') is not None and not isinstance(body['more'], bool):
-        return 'more: true or false'
+    for name in ('more', 'peek'):
+        if body.get(name) is not None and not isinstance(body[name], bool):
+            return f'{name}: true or false'
     return None
 
 
@@ -189,13 +194,15 @@ def queues(state, know, served, decks, now_ms, rng, more=False, commands=()):
     return out
 
 
-def next_card(source, exclude=(), db=None, now_ms=None, rng=None, more=False):
+def next_card(source, exclude=(), db=None, now_ms=None, rng=None, more=False, peek=False):
     """The next card for a client, served and recorded here, and today's counts: ({id, ja, kana, gloss, queue,
-    intervals} or None, {new, learning, review}). The word state must exist (the collector answers 409 before
-    asking)."""
+    intervals} or None, {new, learning, review}). peek: (None, the counts), nothing served or written. The word state
+    must exist (the collector answers 409 before asking)."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     rng = rng or random.SystemRandom()
     since = now_ms - max(probe.REPEAT_DAYS, FAKE_REUSE_DAYS) * DAY_MS
+    if peek:
+        return None, counts_now(db, now_ms, more)
     with SERVING:
         state = fwlib.load_state(create=False)
         con = feedback.connect(db)
@@ -211,6 +218,23 @@ def next_card(source, exclude=(), db=None, now_ms=None, rng=None, more=False):
             con.close()
     return {k: card[v] for k, v in (('id', 'id'), ('ja', 'word'), ('kana', 'kana'), ('gloss', 'gloss'),
                                     ('queue', 'queue'), ('intervals', 'intervals'))}, counts
+
+
+def counts_now(db=None, now_ms=None, more=False):
+    """Today's counts as POST /v1/review/next would answer them (with more: past the day's new-card limit), reading
+    the cards table and writing nothing: peek's answer and fw.py review's."""
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    state = fwlib.load_state(create=False)
+    if not isinstance(state, dict) or state.get('paused'):
+        return dict(NO_COUNTS)
+    con = feedback.connect(db)
+    try:
+        decks = schedules(con, db)
+        served = feedback.cards(since=now_ms - max(probe.REPEAT_DAYS, FAKE_REUSE_DAYS) * DAY_MS, con=con)
+    finally:
+        con.close()
+    return queues(state, knowledge.load(), served, decks, now_ms, random.Random(0), more,
+                  knowledge.read_commands())['counts']
 
 
 def choose(state, know, served, decks, exclude=(), now_ms=None, rng=None, frame=None, d=None, more=False,
@@ -377,15 +401,13 @@ def summary(db=None, now_ms=None):
     review-queue cards' share not Again, [kept, of], in the last 30 days and all time, against desired
     (srs.DESIRED_RETENTION)."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    state = fwlib.load_state(create=False)
+    counts = counts_now(db, now_ms)
     con = feedback.connect(db)
     try:
         decks = schedules(con, db)
         served = feedback.cards(since=now_ms - max(probe.REPEAT_DAYS, FAKE_REUSE_DAYS) * DAY_MS, con=con)
     finally:
         con.close()
-    counts = NO_COUNTS if not isinstance(state, dict) or state.get('paused') else queues(
-        state, knowledge.load(), served, decks, now_ms, random.Random(0), commands=knowledge.read_commands())['counts']
     start, month = srs.day_start(srs.day_number(now_ms)), now_ms - 30 * DAY_MS
     graded = [c['at'] + (c['grade_ms'] or 0) for c in served if c.get('grade') is not None]
     log = [entry for _card, entries in decks.values() for entry in entries]

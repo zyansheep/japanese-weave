@@ -1,6 +1,6 @@
 """Offline tests for the review cards (scripts/review.py, scheduled as Anki with FSRS, scripts/srs.py): the collector's
-POST /v1/review/next (the card's shape with its queue, intervals and today's counts, exclude, more, words the
-delayed-start experiment hides never served, nothing to review) and GET /v1/review/stats and revlog, review items in
+POST /v1/review/next (the card's shape with its queue, intervals and today's counts, exclude, more, peek: the counts
+alone with nothing served or held back, words the delayed-start experiment hides never served, nothing to review) and GET /v1/review/stats and revlog, review items in
 POST /v1/interactions (stored once on their card with their grade, malformed ones rejected, an old database migrated,
 the mirror gets them), the queue (new cards through their learning steps, Anki's order, the day's new-card limit and
 Review more, the learn-ahead window, a word marked known leaving the deck while the model's known keeps its schedule,
@@ -161,11 +161,13 @@ class Endpoint(Home):
     def test_bad_requests_and_no_state(self):
         for body in ({}, {'source': 'web'}, {'source': 'desktop', 'exclude': 'x'},
                      {'source': 'desktop', 'exclude': ['a b']}, {'source': 'desktop', 'exclude': ['x'] * 21}, [],
-                     {'source': 'desktop', 'more': 'yes'}, {'source': 'desktop', 'more': 1}):
+                     {'source': 'desktop', 'more': 'yes'}, {'source': 'desktop', 'more': 1},
+                     {'source': 'desktop', 'peek': 'yes'}, {'source': 'desktop', 'peek': 0}):
             status, reply = self.post('/v1/review/next', body)
             self.assertEqual((status, reply['ok']), (400, False), body)
         self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'exclude': ['x'] * 20})[0], 200)
         self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'more': True})[0], 200)
+        self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'peek': False})[0], 200)
         (fwlib.home() / 'state.json').rename(fwlib.home() / 'elsewhere.json')
         status, reply = self.post('/v1/review/next', {'source': 'desktop'})
         self.assertEqual((status, reply['ok']), (409, False))
@@ -177,6 +179,18 @@ class Endpoint(Home):
         self.assertEqual(self.post('/v1/review/next', {'source': 'desktop'}),
                          (200, {'ok': True, 'card': None, 'counts': {'new': 0, 'learning': 0, 'review': 0}}))
         self.assertEqual(feedback.cards(self.db), [])
+        self.assertEqual(self.post('/v1/review/next', {'source': 'mobile', 'peek': True}),
+                         (200, {'ok': True, 'card': None, 'counts': {'new': 0, 'learning': 0, 'review': 0}}))
+
+    def test_a_peek_answers_the_counts_and_serves_nothing(self):
+        for _ in range(3):  # a badge polling
+            self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'peek': True}),
+                             (200, {'ok': True, 'card': None,
+                                    'counts': {'new': len(self.active), 'learning': 0, 'review': 0}}))
+        self.assertEqual(feedback.cards(self.db), [])  # no cards row: nothing pending, no probe or made-up word used
+        _status, body = self.post('/v1/review/next', {'source': 'desktop'})
+        self.assertIsNotNone(body['card'])
+        self.assertEqual(len(feedback.cards(self.db)), 1)
 
     def test_no_word_to_offer_means_nothing_to_review(self):
         state = fwlib.load_state()
@@ -763,6 +777,18 @@ class Queue(Deck):
             at += 30_000
         self.assertEqual(seen, self.words[:review.NEW_PER_DAY] + self.words[:2])
         self.assertEqual(self.next(at + review.LEFT_HOURS * HOUR)[0]['ja'], self.words[0])  # waited long enough
+
+    def test_a_peek_holds_no_word_back(self):
+        """A badge's peeks between cards: the counts the real request would give, and the same card after them."""
+        card, _ = self.next(self.T0)
+        self.grade(card, self.T0, srs.GOOD)
+        for i in range(5):
+            self.assertEqual(review.next_card('mobile', (), self.db, self.T0 + 1000 + i, peek=True),
+                             (None, {'new': 19, 'learning': 1, 'review': 0}))
+        self.assertEqual(len(feedback.cards(self.db)), 1)
+        card, counts = self.next(self.T0 + 2000)
+        self.assertEqual((card['ja'], counts), (self.words[1], {'new': 19, 'learning': 1, 'review': 0}))
+        self.assertEqual(review.next_card('mobile', (), self.db, self.T0 + 3000, peek=True, more=True)[1]['new'], 29)
 
     def test_pending_and_excluded_words_wait(self):
         w0, w1, w2 = self.words[:3]

@@ -378,7 +378,8 @@ from the collector (`POST /v1/review/next`) in Anki's order: words in their lear
 for review today (a day starts at 4am), then up to 20 new words a day, the words you are learning in today's order
 (first those behind on showings in their first two weeks, then those the model is least sure of), and last, when
 nothing else is due, a learning step up to 20 minutes early. The panel shows Anki's three counts (new left today,
-learning, review due); at 0, 0, 0 you are done for the day, and "Review more" brings in more new words. About 1 card
+learning, review due), and so do T3 Code's header badge and the phone's, which ask for the counts alone without taking
+a card; at 0, 0, 0 you are done for the day, and "Review more" brings in more new words. About 1 card
 in 10 is a probe word (below) and 1 in 20 a made-up word, whose meaning says so: they look like new cards, aren't
 counted, and grading them schedules nothing. A card you close without grading isn't scheduled; it comes back after the
 other cards due. Never a word the delayed-start experiment is holding back; a word you mark known (`fw.py known`)

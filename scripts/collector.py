@@ -13,8 +13,9 @@ private network such as Tailscale. Python 3.9+, standard library only.
   POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
                           -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py; T3 also
                           sends review items, what happened to a review card, with its grade when given)
-  POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool}: the next review card,
-                          in Anki's order (review.py; more: past today's new-card limit)
+  POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool, "peek"?: bool}: the
+                          next review card, in Anki's order (review.py; more: past today's new-card limit; peek: the
+                          counts alone, for a badge: card null, nothing served or recorded)
                           -> {"ok": true, "card": {"id", "ja", "kana", "gloss", "queue": "new"|"learning"|"review",
                               "intervals": {"again", "hard", "good", "easy"} (seconds)} or null,
                               "counts": {"new", "learning", "review"}}
@@ -188,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
             try:
                 card, counts = review.next_card(body['source'], body.get('exclude') or (), self.db,
-                                                more=body.get('more') is True)
+                                                more=body.get('more') is True, peek=body.get('peek') is True)
             except Exception as error:  # a broken card must not take the server down; the client tries again later
                 print(f'review card failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
                 return self.reply(500, {'ok': False, 'error': 'no card: the collector failed to choose one'})

@@ -387,7 +387,8 @@ between at random while there is a real card to serve, 10% and 5% of the cards s
 before grades: a day of Anki serves several times the 20 cards a day of then (each new word comes back through its
 steps and reviews), so the probe gets as many cards or more. They look like new cards and never get a schedule. A card
 left without a grade schedules nothing and waits behind the other cards for 4 hours, so a client that never grades
-(from before grades) still moves through the words.
+(from before grades) still moves through the words. A badge asks for the counts alone (peek): nothing is served or
+recorded, so polling it holds no word back.
 
 **What FSRS doesn't see.** FSRS assumes the reviews are the only memory events. This reader also meets their words in
 chat and on web pages, glossed, opened or not, so every meeting outside the reviews is practice the schedule ignores:
