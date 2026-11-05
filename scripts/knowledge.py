@@ -22,21 +22,22 @@ Fit: one penalized maximum-likelihood fit of the whole log on every refresh (NEX
 updates and their pull toward the prior. Each word's k is held toward its prior mean by a Gaussian prior whose width is
 fitted per kind (an Anki card or none); the prior mean is a regression on the word's features (an intercept by origin
 and card, the uncapped ln(1 + Anki interval), and for a word not marked known its dictionary entry's frequency rank,
-kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step
-13), so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as
-much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form
-counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset,
-corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
-computed from its answers alone, so it remains the check on the model; the review cards (review.py: a word alone, its
-reading and meaning revealed on request, then graded as in Anki) are observations of their own kind too: a graded card
-of a real word is an explicit answer (Again: not known at recall; Hard, Good, Easy: known), read as the probe's answers
-are, at the review offset; an ungraded one's time to the reveal or its absence is a mixture of known at recall and not
-(Components, review_answers), whose made-up words pin the "not known" side; and every one is a read for the recency
-clock. Each word's uncertainty is the fit's curvature
+kanji known at a glance, script, part of speech, length, rarity and source language: word_features, NEXT_STEPS step 13),
+so any dictionary entry has a starting value (prior_estimate; extension/src/prior.js); evidence weighs half as much
+every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observations; a lookup of a conjugated form counts
+FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset, corrected
+for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays computed
+from its answers alone, so it remains the check on the model; the review cards (review.py: a word alone, its reading and
+meaning revealed on request, then graded as in Anki) are observations of their own kind too: a graded card of a real
+word is an explicit answer (Again: not known at recall; Hard, Good, Easy: known), read as the probe's answers are, at
+the review offset, unless it was a learning step's (counted_grades), and one a word a day; an ungraded one of the reveal
+flow (the wedge, before a client grades) has its time to the reveal or its absence read as a mixture of known at recall
+and not (Components, review_answers), whose made-up words pin the "not known" side, while the graded flow's ungraded and
+made-up cards say nothing; and every one is a read for the recency clock. Each word's uncertainty is the fit's curvature
 (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
-Each passage's or paragraph's time on screen can be evidence too (SPEED, off until the replay shows a gain: Fit's
-speed, speed_units). The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online
-updates it replaced are the Online class, kept as evaluate.py's "today" for comparison.
+Each passage's or paragraph's time on screen can be evidence too (SPEED, off until the replay shows a gain: Fit's speed,
+speed_units). The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online updates
+it replaced are the Online class, kept as evaluate.py's "today" for comparison.
 
 refresh() fits the whole log, writes knowledge.json (per word: k, its sd, and whether it is free: known at a glance,
 with hysteresis), fits the price of a whole sentence per surface, and reports whether the default amount of Japanese
@@ -61,6 +62,7 @@ import feedback
 import fwlib
 import inflection
 import intensity
+import srs
 
 KNOWLEDGE = 'knowledge.json'
 COMMANDS = 'commands.jsonl'
@@ -1354,33 +1356,79 @@ class Components:
         return dict(out, **self.separation())
 
 
+def is_grade(g):
+    return g in (1, 2, 3, 4) and not isinstance(g, bool)
+
+
+def graded_flow(reviews):
+    """{client: when it first sent a grade}: from then on its cards are of the graded flow (review_answers)."""
+    out = {}
+    for r in reviews or ():
+        if isinstance(r, dict) and is_grade(r.get('grade')) and isinstance(r.get('at'), (int, float)):
+            out[r.get('source')] = min(out.get(r.get('source'), r['at']), r['at'])
+    return out
+
+
+def in_graded_flow(r, starts):
+    return r.get('source') in starts and r['at'] >= starts[r.get('source')]
+
+
+def counted_grades(reviews):
+    """The ids of the graded cards whose grade is an answer about long-term knowledge: a learning card's graded from the
+    new or the review state (its schedule's replay, srs, by feedback.deck_groups), or from a learning or relearning
+    step on a later Anki day than the review before (a step left overnight tests the next day's memory); not one on a
+    step the same day, minutes after the last, which says how the steps went, not what the reader knows; and every
+    probe card's."""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    rows = [dict(r, reviewed=r['at'] + (r.get('grade_ms') or 0)) for r in reviews or ()
+            if isinstance(r, dict) and is_grade(r.get('grade')) and number(r.get('at'))
+            and isinstance(r.get('word'), str) and r.get('kind') in ('learning', 'probe')]
+    out = {r.get('card') for r in rows if r['kind'] == 'probe'}
+    for key, group in feedback.deck_groups([r for r in rows if r['kind'] == 'learning']).items():
+        group = sorted(group, key=lambda r: r['reviewed'])
+        _card, log = srs.replay([(r['reviewed'], r['grade'], r.get('served')) for r in group], srs.card_id(key))
+        before = None
+        for r, (at, _g, state) in zip(group, log):
+            if state in (srs.NEW, srs.REVIEW) or srs.day_number(at) > srs.day_number(before):
+                out.add(r.get('card'))
+            before = at
+    return out
+
+
 def review_answers(reviews, entries, d=None):
-    """The reviewed cards (feedback.reviews) as the fit reads them: (answers, fakes, extra, shown, graded). answers:
-    [(at, ja, x)] per ungraded card of a real word (learning or probe) with an outcome (review_outcome: x a log time,
-    or None for no reveal); graded: [(at, ja, y)] per graded card of a real word, y 1 for Again (not known at recall,
-    the event the fit counts, as a probe answer of not known) and 0 for Hard, Good or Easy, its reveal time left out
-    of the mixture (the grade says more, and in the graded flow every card is revealed, which would bend the
-    components' chance of no reveal); fakes: [(at, x)] per made-up word's card with an outcome, graded or not (its grade
-    is given after the reveal says it is made up, so it claims nothing); shown: [(at, ja)] every real word's card,
-    dropped outcomes too (each is a read, for the recency clock). ja is the word state's word for the card's entry
-    (entries: {ja: its dictionary entry}, by id, else by spelling), else the entry's own spelling, with that entry in
-    extra (for the word features), as probe_answers finds a probe's words."""
+    """The reviewed cards (feedback.reviews) as the fit reads them: (answers, fakes, extra, shown, graded). Two flows:
+    a client's cards are of the graded flow from its first grade on (graded_flow; the review panel, where every card
+    graded is revealed first), the rest of the reveal flow (the wedge, which never graded). answers: [(at, ja, x)] per
+    card of a real word (learning or probe) of the reveal flow with an outcome (review_outcome: x a log time, or None
+    for no reveal); fakes: [(at, x)] per made-up word's card of the reveal flow with one, so the mixture's components
+    are fitted from one flow (in the graded flow a made-up card is always revealed, to be graded, and a card closed
+    unrevealed is not a reader who knew it: read as the reveal flow, either would bend the chances of no reveal);
+    graded: [(at, ja, y)] per graded card of a real word whose grade is an answer (counted_grades: not a learning or
+    relearning step's), at most one per word per Anki day (srs.day_number, the first), y 1 for Again (not known at
+    recall, the event the fit counts, as a probe answer of not known) and 0 for Hard, Good or Easy; a graded-flow card
+    left without a grade gives nothing. shown: [(at, ja)] every real word's card, dropped outcomes too (each is a read,
+    for the recency clock). ja is the word state's word for the card's entry (entries: {ja: its dictionary entry}, by
+    id, else by spelling), else the entry's own spelling, with that entry in extra (for the word features), as
+    probe_answers finds a probe's words."""
     by_id, by_key = {}, {}
     for ja, e in (entries or {}).items():
         if e is not None:
             by_id.setdefault(e['id'], ja)
         by_key.setdefault(fwlib.key(ja), ja)
     answers, fakes, extra, shown, graded = [], [], {}, [], []
+    starts, counted, days = graded_flow(reviews), counted_grades(reviews), set()
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
-    for r in reviews or ():
+    for r in sorted((r for r in reviews or () if isinstance(r, dict) and number(r.get('at'))),
+                    key=lambda r: r['at'] + (r.get('grade_ms') or 0)):
         if not isinstance(r, dict) or not number(r.get('at')) or not isinstance(r.get('word'), str):
             continue
         reveal, seen = r.get('reveal'), r.get('shown')
         if reveal is not None and not number(reveal) or not number(seen):
             continue
         x = review_outcome(reveal, seen)
+        flow = in_graded_flow(r, starts)
         if r.get('kind') == 'fake':
-            if x is not False:
+            if x is not False and not flow:
                 fakes.append((r['at'], x))
             continue
         if r.get('kind') not in ('learning', 'probe'):
@@ -1399,10 +1447,14 @@ def review_answers(reviews, entries, d=None):
             ja = entry['ja']
             extra[ja] = entry
         shown.append((r['at'], ja))
-        if r.get('grade') in (1, 2, 3, 4) and not isinstance(r['grade'], bool):
-            graded.append((r['at'], ja, 1 if r['grade'] == 1 else 0))
-        elif x is not False:
+        if is_grade(r.get('grade')):
+            day = (ja, srs.day_number(r['at'] + (r.get('grade_ms') or 0)))
+            if r.get('card') in counted and day not in days:
+                days.add(day)
+                graded.append((r['at'], ja, 1 if r['grade'] == 1 else 0))
+        elif x is not False and not flow:
             answers.append((r['at'], ja, x))
+    shown.sort()
     return answers, fakes, extra, shown, graded
 
 
