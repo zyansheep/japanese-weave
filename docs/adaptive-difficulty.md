@@ -1183,7 +1183,8 @@ The reader can turn the Japanese heavier or lighter for a while, separately in c
 (scripts/intensity.py): levels -3..3, for 3 hours after the last change. -2..2 are times 0.5, 0.7, 1, 1.4 or 1.8
 the usual amount; the ends are modes of their own, -3 off (no Japanese) and 3 full (all the reader can follow), and a
 press past either end stays there and restarts the clock. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma
-(lighter) in the browser and in T3 Code, the popup's Less/More buttons, or
+(lighter) in the browser, the arrows of T3 Code's Japanese Weave panel for chat (T3 Code's own shortcut toggles English
+only for an hour: docs/grammar.md), the popup's Less/More buttons, or
 `fw.py intensity [chat|browser] up|down|normal|off|full`. On both surfaces -2..2 are lookup budgets of 0.15, 0.3,
 0.5, 0.8 and 1.2 per 100 words (intensity.BUDGETS; scaled with normal's when a challenge is set), spent only on words
 not known at a glance and on whole sentences in Japanese, which may take up to 18% (SENTENCE_SHARE): known words are

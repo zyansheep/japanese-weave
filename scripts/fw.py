@@ -26,8 +26,9 @@
                                                      list; mature cards (interval >= N days, default 21)
                                                      become known unless --no-known
   fw.py status                                       stage, labels (from the model), learning words, new words
-                                                     today, whether the budget goes unspent, and the probe's
-                                                     estimate from the review cards of the last 30 days
+                                                     today, whether the budget goes unspent, the probe's
+                                                     estimate from the review cards of the last 30 days, and the
+                                                     grammar patterns known and being learned
   fw.py log [N]                                      the latest N gloss peeks and flips (default 20), with how
                                                      long each stayed open and the glossed words around it
                                                      (from the collector when one is set)
@@ -50,7 +51,13 @@
                                                      and checks it) or classic (Claude weaves as it writes)
   fw.py weave [--level N] [FILE]                     weave an English draft (FILE, else stdin) at chat level N
                                                      (-2 to 3, 3 full; default: the chat's level now)
-  fw.py check-reply [FILE]                           list what code can see is wrong in a woven reply
+  fw.py check-reply [--level N] [FILE]               list what code can see is wrong in a woven reply, and score
+                                                     its Japanese and mixed sentences: length, grammar patterns,
+                                                     chance of an open, expected opens against the level's budget
+  fw.py grammar [known|learning|new PATTERN]         the grammar patterns with your status and fitted difficulty
+                                                     (docs/grammar.md), or set one pattern's status
+  fw.py intensity english [on|off]                   chat replies in plain English for an hour (T3 Code's shortcut
+                                                     does the same), or back to Japanese
   fw.py intensity [chat|browser] [up|down|normal|off|full]
                                                      Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; off: none, full: every sentence
@@ -116,6 +123,8 @@ import relabel  # noqa: E402
 import threads  # noqa: E402
 import chatweave  # noqa: E402
 import check_reply  # noqa: E402
+import grammar  # noqa: E402
+import sentence_model  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -619,6 +628,31 @@ def status(_args):
     if nxt and not state.get('stage_pinned'):
         print(f'  next stage at {nxt} known words')
     print(probe.status_line(know))
+    print(grammar_line(state, know))
+
+
+def grammar_line(state, know):
+    """fw.py status: the grammar patterns known, the one being learned with its evidence, and sentence opens per read
+    sentence against the target intake waits on (sentence_model.intake)."""
+    statuses = grammar.statuses(state)
+    known = sum(1 for v in statuses.values() if v == 'known')
+    model = know.get('grammar') if isinstance(know.get('grammar'), dict) else {}
+    current, since = grammar.learning(state)
+    if current:
+        fitted = (model.get('patterns') or {}).get(current.id)
+        mine = model.get('learning') if isinstance(model.get('learning'), dict) else {}
+        read = mine.get('read', 0) if mine.get('id') == current.id and mine.get('since') == since else 0
+        evidence = (f': {read:g} of {sentence_model.KNOWN_EVIDENCE} read sentences with it since, difficulty '
+                    f'{fitted["d"]:+.2f} (90% {fitted["low"]:+.2f} to {fitted["high"]:+.2f}; known at '
+                    f'{sentence_model.KNOWN_D:+.1f} or less)' if fitted else ': no sentences with it read yet')
+        learning = f'learning {current.name} since {since}{evidence}'
+    else:
+        learning = 'no pattern being learned'
+    recent = model.get('recent') or {}
+    rate = (f'; sentence opens {recent["opens"] / recent["read"]:.1%} of read sentences over {recent["days"]} days '
+            f'(the next pattern comes in under {sentence_model.TARGET:.0%})' if recent.get('read') else '')
+    limit = f'; sentences up to {sentence_model.max_chars(model or None)} Japanese characters'
+    return f'  grammar: {known} of {len(grammar.IDS)} patterns known, {learning}{rate}{limit}'
 
 
 def intake_line(state, know, today):
@@ -772,9 +806,12 @@ def read_input(path):
 
 
 def weave_cmd(args):
-    level = args.level if args.level is not None else intensity.current(fwlib.load_state().get('prefs'), 'chat')['level']
+    prefs = fwlib.load_state().get('prefs')
+    level = args.level if args.level is not None else intensity.current(prefs, 'chat')['level']
     if intensity.is_off(level):
         sys.exit('Japanese is off in chat: send the draft as it is.')
+    if hub.live_chat_all()[2]['on']:
+        sys.exit('English only is on in chat: send the draft as it is, in plain English.')
     try:
         print(chatweave.weave(read_input(args.file), level))
     except Exception as error:
@@ -782,7 +819,13 @@ def weave_cmd(args):
 
 
 def check_reply_cmd(args):
-    print(check_reply.report(read_input(args.file)))
+    text = read_input(args.file)
+    try:
+        plan = check_reply.Plan.load(args.level)
+    except Exception as error:  # no state here: the problems alone
+        print(f'(No sentence scores: {error.__class__.__name__}.)', file=sys.stderr)
+        plan = None
+    print(check_reply.report(text, plan=plan))
 
 
 def glosses(args):
@@ -856,6 +899,8 @@ def knowledge_cmd(args):
               f'{unknown.get("ms")} ms (no reveal {unknown.get("skip")}); separation '
               f'{"weak" if model.get("weak") else "good"}: worth {model.get("worth")} of a yes/no answer, auc '
               f'{model.get("auc")}; offset {model.get("offset")}')
+    for line in sentence_model.text(know.get('grammar'), grammar.statuses(state)):
+        print(line)
     status = {w['ja']: w['status'] for w in state['words']}
     held = {w['ja'] for w in state['words'] if fwlib.hidden(w)}
     ranked = sorted(((ja, e) for ja, e in words.items() if ja not in held), key=lambda kv: -kv[1].get('n', 0))
@@ -914,6 +959,8 @@ def challenge_cmd(args):
 def intensity_cmd(args):
     if 'here' in args.words:
         return thread_cmd(args)
+    if 'english' in args.words:
+        return english_cmd(args)
     surfaces = [w for w in args.words if w in intensity.SURFACES]
     steps = [w for w in args.words if w in ('up', 'down', 'normal', 'off', 'full')]
     if len(surfaces) + len(steps) != len(args.words) or len(surfaces) > 1 or len(steps) > 1:
@@ -932,6 +979,37 @@ def intensity_cmd(args):
         print(f'Note: {error}.')
     print(f'{names[surface]}: {intensity.describe(value)}.'
           + (' The browser picks this up at its next sync (or use the shortcut there).' if surface == 'browser' else ''))
+
+
+def english_cmd(args):
+    """intensity english [on|off]: English only in chat for an hour, or back to Japanese (intensity.py); without on or
+    off, whether it is on."""
+    steps = [w for w in args.words if w in ('on', 'off')]
+    if len(steps) > 1 or any(w not in ('english', 'chat', 'on', 'off') for w in args.words):
+        sys.exit('Usage: fw.py intensity english [on|off]')
+    if steps:
+        value, error = hub.change_english(steps[0] == 'on', 'command')
+        if error:
+            print(f'Note: {error}.')
+    else:
+        value = hub.live_chat_all(timeout=hub.TIMEOUT)[2]
+    print(f'Chat replies: English only until {intensity.clock(value["until"])}.' if value['on'] else
+          'Chat replies: English only is off.')
+
+
+def grammar_cmd(args):
+    """grammar [known|learning|new PATTERN]: the inventory with the reader's statuses, or one pattern set."""
+    if args.status:
+        if args.pattern not in grammar.BY_ID:
+            sys.exit(f'No pattern {args.pattern!r}: one of {", ".join(grammar.IDS)}')
+        queued_note(hub.submit({'kind': 'grammar', 'set': [[args.pattern, args.status]], 'source': 'command'}))
+    state, know = fresh_knowledge() if not args.status else (hub.current()[0], knowledge.load())
+    statuses = grammar.statuses(state)
+    fitted = ((know.get('grammar') or {}).get('patterns') or {}) if isinstance(know.get('grammar'), dict) else {}
+    for p in grammar.PATTERNS:
+        d = fitted.get(p.id)
+        extra = f'  difficulty {d["d"]:+.2f} [{d["low"]:+.2f}, {d["high"]:+.2f}], {d["read"]:g} read' if d else ''
+        print(f'{statuses[p.id]:8} {p.id:13} {p.name}: {p.explain}. {p.example}{extra}')
 
 
 def thread_cmd(args):
@@ -1037,6 +1115,10 @@ def main(argv=None):
     p = sub.add_parser('log')
     p.add_argument('limit', nargs='?', type=int, default=20)
     p.set_defaults(run=log_cmd)
+    p = sub.add_parser('grammar')
+    p.add_argument('status', nargs='?', choices=grammar.STATUSES)
+    p.add_argument('pattern', nargs='?')
+    p.set_defaults(run=grammar_cmd)
     p = sub.add_parser('chat-style')
     p.add_argument('style', choices=['draft', 'classic'])
     p.set_defaults(run=chat_style)
@@ -1045,6 +1127,7 @@ def main(argv=None):
     p.add_argument('file', nargs='?')
     p.set_defaults(run=weave_cmd)
     p = sub.add_parser('check-reply')
+    p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
     p.add_argument('file', nargs='?')
     p.set_defaults(run=check_reply_cmd)
     p = sub.add_parser('glosses')

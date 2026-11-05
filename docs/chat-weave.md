@@ -2,7 +2,8 @@
 
 How chat replies in T3 Code get their Japanese since 2026-10-22, and the experiment that chose it. The code is
 `scripts/chatweave.py` and `scripts/chatweave.mjs` (the weave), `scripts/check_reply.py` (the check) and
-`weave.compose_draft` (the brief).
+`weave.compose_draft` (the brief). Since 2026-11 the Japanese sentences are also held to the grammar the reader knows
+and to a length the log supports ([grammar.md](grammar.md)).
 
 ## The steps
 
@@ -15,17 +16,27 @@ How chat replies in T3 Code get their Japanese since 2026-10-22, and the experim
    Words known at a glance go in line by line. Learning words come from one budget for the whole reply, at most the
    level's number a sentence. A span the web would ask its model about is taken at its first option and marked
    `{{English→Japanese}}`. The first line says how many sentences to make Japanese or mixed: the level's budget times
-   the 18% sentence share, divided by the price of a sentence. At full (level 3) there is no budget, and every
-   dictionary entry with a sense flagged safe joins the pool, priced by its fitted prior.
+   the 18% sentence share, divided by the open chance of a typical allowed sentence once the sentence model is ready,
+   but never more than divided by the price of a sentence gives (the count before the model): the smaller of the two. It also gives the most Japanese characters a sentence may have, the grammar
+   patterns it may use (the known ones, plus at most one learning pattern), and this week's learning pattern with its
+   explanation and example, to use on purpose once or twice (`chatweave.sentence_plan`). At full (level 3) there is no
+   budget, and every dictionary entry with a sense flagged safe joins the pool, priced by its fitted prior; the length
+   and grammar limits still hold.
 3. Claude rewrites the output. It keeps the swaps whose sense fits, and in sentences that stay English it keeps only
    nouns and adjectives right before a noun. A learning word that fits is kept even when it isn't one of those: its
    sentence goes Japanese or mixed instead (the rewrite kept 37% of learning words before this rule). It turns the sentences that carry the content into Japanese or mixed
-   sentences, each with its translation on the closing mark. The rules and the list of known sense traps are
+   sentences, each with its translation on the closing mark, each within the first line's length and grammar: a
+   sentence that needs more is split, rephrased or kept English. The rules and the list of known sense traps are
    `weave.DRAFT_RULES`.
-4. Claude passes the reply to `fw.py check-reply`, fixes what it lists and sends it.
+4. Claude passes the reply to `fw.py check-reply --level N`, which lists what code can see is wrong and scores each
+   Japanese or mixed sentence (its Japanese characters, its patterns, its predicted open chance), flagging one too
+   long, using grammar not allowed or too likely to be opened, and ends with the expected sentence opens against the
+   level's budget. Claude fixes what it lists by splitting, simplifying or keeping sentences English, checks again (at
+   most twice in all) and sends the reply.
 
 The full steps go out on a chat's first turn and every 20 turns or after a compaction; other turns carry a short
-digest. Draft and weave needs `<abbr>` glosses (T3 Code with `fw.py glosses abbr`) and node or bun. It is off in
+digest. While English only is on (T3 Code's shortcut, for an hour) or chat intensity is off, the hook sends a one-line
+note to reply in plain English instead, and `fw.py weave` refuses. Draft and weave needs `<abbr>` glosses (T3 Code with `fw.py glosses abbr`) and node or bun. It is off in
 Codex and terminals, and with `fw.py chat-style classic`, which bring back the brief in which Claude weaves as it
 writes. The calibration line and topical words belong to the classic brief: in draft style the weave sets the
 amounts. Brief records carry `mode: draft`.

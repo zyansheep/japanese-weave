@@ -132,9 +132,11 @@ class Check(unittest.TestCase):
         self.assertTrue(any(p.startswith('v') for p in types['使う']))
 
     def test_fw_check_reply_reads_stdin(self):
-        with mock.patch.object(sys, 'stdin', io.StringIO('Plain English.')), \
+        with tempfile.TemporaryDirectory() as home, \
+                mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': home, 'JAPANESE_WEAVE_NO_REFRESH': '1'}), \
+                mock.patch.object(sys, 'stdin', io.StringIO('Plain English.')), \
                 mock.patch.object(sys, 'stdout', new_callable=io.StringIO) as out:
-            fw.main(['check-reply'])
+            fw.main(['check-reply'])  # never this machine's own state
         self.assertIn('no problems', out.getvalue())
 
 
@@ -153,7 +155,7 @@ class Brief(unittest.TestCase):
         plan = {'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {}, 'known': 3, 'whole': True}
         text, after, record = weave.compose_draft(self.STATE, 2, None, 'fw', plan)
         self.assertIn("fw weave --level 2 <<'DRAFT'", text)
-        self.assertIn("fw check-reply <<'REPLY'", text)
+        self.assertIn("fw check-reply --level 2 <<'REPLY'", text)
         self.assertIn('穏やか', text)  # the trap list
         self.assertEqual((after['rules'], record['mode'], record['whole']), ('draft', 'draft', True))
         later, after2, record2 = weave.compose_draft(self.STATE, 0, dict(after, known=[]), 'fw', plan)

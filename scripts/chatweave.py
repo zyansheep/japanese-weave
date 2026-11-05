@@ -13,9 +13,11 @@ from pathlib import Path
 
 import fwlib
 import fw_host
+import grammar
 import hub
 import intensity
 import knowledge
+import sentence_model
 import webdata
 
 SCRIPT = Path(__file__).resolve().parent / 'chatweave.mjs'
@@ -88,6 +90,21 @@ def pool(words, state, know):
     return extra
 
 
+def sentence_plan(state, know):
+    """What the weave's first line says about Japanese and mixed sentences (docs/grammar.md): sentenceChance, the
+    open chance of a typical allowed sentence once the sentence model is ready (sentence_model.typical; the count it
+    pays for is used when smaller than the price's, chatweave.mjs), maxChars, the most Japanese characters in one (sentence_model.max_chars), and grammar:
+    the names of the known patterns and this week's learning pattern ({name, explain, example} or None)."""
+    model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
+    statuses = grammar.statuses(state)
+    shape = sentence_model.typical(model)
+    learning, _since = grammar.learning(state)
+    return {'sentenceChance': round(shape[1], 4) if shape else None, 'maxChars': sentence_model.max_chars(model),
+            'grammar': {'known': [p.name for p in grammar.PATTERNS if statuses[p.id] == 'known'],
+                        'learning': {'name': learning.name, 'explain': learning.explain, 'example': learning.example}
+                        if learning else None}}
+
+
 def weave(draft, level=0, state=None):
     """The draft woven at the level (intensity.LEVELS above off): the weave's first line, -----, then the text."""
     js = runtime()
@@ -102,7 +119,7 @@ def weave(draft, level=0, state=None):
     budget = intensity.budget(level, knowledge.challenge_of(state) or None) if not full else 0
     payload = {'draft': draft, 'words': words, 'intensity': 3 if full else level,
                'budgetPer100': budget if math.isfinite(budget) else 0, 'recency': adaptive.get('recency'),
-               'sentencePrice': intensity.sentence_price(know)}
+               'sentencePrice': intensity.sentence_price(know), **sentence_plan(state, know)}
     run = subprocess.run([js, str(SCRIPT)], input=json.dumps(payload, ensure_ascii=False), capture_output=True,
                          text=True, timeout=TIMEOUT)
     if run.returncode != 0:

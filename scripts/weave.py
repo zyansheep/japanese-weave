@@ -645,6 +645,12 @@ Prefer a verb to "noun + があります". Never put する on an English word (
 Japanese sentence stay singular, and Japanese words in it take no spaces between them (spaces only around the \
 English). Drop English articles inside a Japanese or mixed sentence, and never write "an" before a Japanese word. \
 Don't open a sentence with そして as "And...": use また or それに, or join the clauses with the て-form.
+   - Grammar and length. The weave's first line says how many Japanese characters a Japanese or mixed sentence may \
+have and which grammar patterns it may use: the known ones, plus at most one learning pattern in a sentence. Split a \
+longer sentence into two short ones, or keep part of it English. Grammar the line doesn't list stays out (plain \
+forms like 〜た, 〜ない and だ, quoting with と思う or という, から and ので clauses, のは clefts, stacked particles like \
+には, and the rest): rephrase the sentence with listed patterns, or keep it English. Use this week's learning pattern \
+on purpose once or twice where it fits.
    - Sentences that stay English keep only the swaps that are nouns, and adjectives right before an English noun. \
 Undo every other swap in them (verbs, adverbs, connectives like もし, そして and でも, and pronouns) by putting the \
 English back. Those words go only inside Japanese or mixed sentences.
@@ -718,9 +724,12 @@ def draft_rules(stage, level, command):
             'meaning">Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. '
             'Its first line says how many sentences to make Japanese or mixed.\n'
             '2. Rewrite its output into your reply:\n' + DRAFT_RULES + '\n'
-            f'3. Check the reply in one Bash call:\n{command} check-reply <<\'REPLY\'\n(your reply)\nREPLY\n'
-            '   It lists what code can see is wrong. Fix each item, keeping one only where the check is plainly wrong, '
-            'and check again if you changed much.\n'
+            f'3. Check the reply in one Bash call:\n{command} check-reply --level {level} <<\'REPLY\'\n(your reply)\nREPLY\n'
+            '   It lists what code can see is wrong, and scores each Japanese or mixed sentence: its length, its grammar '
+            'patterns and its chance of sending the user to the translation, flagging one that is too long, uses '
+            'grammar not on the list (or two learning patterns) or is too likely to be opened. Fix each item, keeping '
+            'one only where the check is plainly wrong; fix a flagged sentence by splitting it, simplifying it or '
+            'leaving it English. Then check again, at most twice in all.\n'
             '4. Send the reply as your final message. Leave out the weave\'s first line and the ----- under it. Don\'t '
             'mention the draft, the commands or these steps: the user sees only your final message. If a command fails, '
             'send the English reply as it is.')
@@ -730,7 +739,9 @@ def draft_digest(stage, level, command):
     """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
     return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the steps earlier in this chat still '
             f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, rewrite '
-            f'its output as those steps say, pass that to `{command} check-reply` and fix what it lists, then send it. '
+            f'its output as those steps say (sentence lengths and grammar as its first line says), pass that to '
+            f'`{command} check-reply --level {level}` and fix what it lists and flags (at most two checks), then send '
+            'it. '
             'Plain English with no Japanese for health, medication, legal, money, safety or urgent topics, and for a '
             'reply of a sentence or two.')
 
@@ -1130,11 +1141,21 @@ def interactive(env=None, data=None, exec_check=codex_exec, args_check=claude_ar
 
 def off_note(until, codex=False):
     """What the hook says instead of the brief while chat intensity is off (intensity.py), like threads.note."""
-    how = ('pressing heavier (Alt+Shift+.) or saying "japanese back on"' if codex else
-           'pressing heavier (Alt+Shift+.), saying "japanese back on" or running /japanese-weave:intensity normal')
+    how = ('the up arrow in T3 Code\'s Japanese Weave panel or saying "japanese back on"' if codex else
+           'the up arrow in T3 Code\'s Japanese Weave panel, saying "japanese back on" or running '
+           '/japanese-weave:intensity normal')
     return (f'Japanese Weave: the user turned Japanese off in chat replies for now, until {intensity.clock(until)}, so '
             'reply in plain English, with no Japanese words or glosses. They can bring it back sooner by '
             f'{how}.')
+
+
+def english_note(until, codex=False):
+    """What the hook says instead of the brief while English only is on in chat (intensity.py): plain English, as at
+    off."""
+    how = ('the English-only shortcut in T3 Code or `fw.py intensity english off`' if codex else
+           'the English-only shortcut or the Japanese Weave panel in T3 Code, or /japanese-weave:intensity english off')
+    return (f'Japanese Weave: the user switched chat to English only until {intensity.clock(until)}, so reply in plain '
+            f'English, with no Japanese words or glosses. They can switch it back sooner with {how}.')
 
 
 def switch(session, prompt, thread):
@@ -1186,9 +1207,9 @@ def main(argv):
         return 0
     session = data.get('session_id') if threads.valid_session(data.get('session_id')) else None
     try:
-        live, thread = hub.live_chat(session, state)
+        live, thread, english = hub.live_chat_all(session, state)
     except Exception:
-        live, thread = dict(intensity.NORMAL), None
+        live, thread, english = dict(intensity.NORMAL), None, dict(intensity.ENGLISH_OFF)
     level = live['level']
     if session:
         thread = switch(session, data.get('prompt'), thread)
@@ -1199,8 +1220,10 @@ def main(argv):
             live = dict(intensity.NORMAL)
         level = live['level']
     codex = 'turn_id' in data
-    # Japanese off in this chat (at any level), or in all chats for now: one line instead of the brief and its extras
-    note =(threads.note(codex=codex) if threads.is_off(thread) else
+    # English only for now, Japanese off in this chat (at any level), or in all chats for now: one line instead of the
+    # brief and its extras
+    note = (english_note(english['until'], codex) if english.get('on') else
+            threads.note(codex=codex) if threads.is_off(thread) else
             off_note(live['until'], codex) if intensity.is_off(level) else None)
     if note:
         print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': note}},
