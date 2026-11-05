@@ -853,11 +853,15 @@ def check_reply_cmd(args):
     text = read_input(args.file)
     try:
         plan = check_reply.Plan.load(args.level)
-    except Exception as error:  # no state here: the problems alone, as before levels
-        print(f'(No sentence scores or levels: {error.__class__.__name__}.)', file=sys.stderr)
-        print(check_reply.report(text))
+    except Exception as error:  # no state here: no levels, so nothing to send with twins
+        print(f'jw-check: the check could not run here ({error.__class__.__name__}), so there is no final markup. '
+              'Send your English reply as it is, with the <ja> twins taken out.')
         return
-    print(check_reply.finish(text, plan).text)
+    try:
+        print(check_reply.finish(text, plan).text)
+    except Exception as error:
+        print(f'jw-check: the check failed ({error.__class__.__name__}: {error}), so there is no final markup. '
+              'Send your English reply as it is, with the <ja> twins taken out.')
 
 
 def glosses(args):

@@ -418,7 +418,7 @@ def _english_view(parts, keep):
 
 
 def _twin_words(marked, costly):
-    """The lookup chances of the costly words in a twin's Japanese: its glossed words that are (a form of) one of the
+    """The costly words in a twin's Japanese, [(ja, lookup chance)]: its glossed words that are (a form of) one of the
     weave's costly swaps ({ja: p})."""
     import inflection
     if not costly:
@@ -430,7 +430,7 @@ def _twin_words(marked, costly):
             continue
         ja = lex.entry(m.group(2))
         if ja in costly:
-            out.append(costly[ja])
+            out.append((ja, costly[ja]))
     return out
 
 
@@ -474,7 +474,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
                'to send:']
         out += [f'- line {n}: {what}' for n, what in sorted(set(blocking))]
         out.append('Write every Japanese sentence as the English sentence followed by its twin in <ja>...</ja> on the '
-                   'same line, keep other Japanese in glosses, then run check-reply again.')
+                   'same line, keep other Japanese in glosses (or quoted in backticks), then run check-reply again.')
         return Checked('\n'.join(out))
     fixed = [f'- line {n}: {what}' for n, what in notes]
     for w in words:
@@ -498,8 +498,10 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         t['marked'] = twins.japanese_twin(t['japanese'], english)
         found = grammar.sentences(t['marked']) if JAPANESE.search(t['japanese']) else []
         t['sentences'] = [(s['jchars'], grammar.scan_ids(s['segments'])) for s in found]
-        why = None
-        if not found:
+        why = t.get('why')  # cut through markdown or more than one sentence (twins.twin_trouble)
+        if why:
+            pass
+        elif not found:
             why = 'no Japanese sentence in it'
         elif len(found) > twins.MAX_SENTENCES:
             why = f'{len(found)} Japanese sentences, at most {twins.MAX_SENTENCES} in one twin'
@@ -540,6 +542,8 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     # the elements, in document order (a twin before its English's words)
     els, owner = [], {}
     seen_costly = set()
+    dictionary = {w['ja'] for w in words if w['dictionary']} | {
+        x['ja'] for x in plan.swaps if x.get('dictionary') and x.get('ja')}
 
     def word_element(w, parent):
         free = w['free']
@@ -561,18 +565,23 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             continue
         if id(p) in kept_ids:
             ps = [sentence_model.predict(plan.model, chars, ids, plan.statuses) for chars, ids in p['sentences']]
-            inside = _twin_words(p['marked'], costly)
+            held = _twin_words(p['marked'], costly)
+            inside = [x for _ja, x in held]
             ids_all = {i for _c, ids in p['sentences'] for i in ids}
             p['p'] = ps
             twin = len(els)
             owner[id(p)] = twin
+            # a dictionary word, or a learning word already used before it, shows only at full: so does its twin
+            late = any(ja in dictionary or ja in seen_costly for ja, _x in held)
             els.append(twins.Element('s', cost_s=sum(max(x, plan.price) for x in ps), cost_w=sum(inside),
                                      opens=sum(ps) + sum(inside),
                                      value=twins.SENTENCE_VALUE + sum(twins.learning_value(x) for x in inside)
-                                     + (twins.PATTERN_VALUE if plan.learning in ids_all else 0.0)))
+                                     + (twins.PATTERN_VALUE if plan.learning in ids_all else 0.0),
+                                     fixed=twins.FULL if late else None))
             for q in p['english']:
                 if not isinstance(q, tuple) and keep.index(id(q)) not in reverted:
                     word_element(q, twin)
+            seen_costly.update(ja for ja, _x in held)
         else:
             for q in p['english']:
                 if not isinstance(q, tuple) and keep.index(id(q)) not in reverted:

@@ -13,8 +13,9 @@ list, heading or quote marker. Code puts that English sentence on each bare clos
 written once, and adds a closing mark the twin lacks.
 
 What Claude sends (the final markup, written by code: markup; the contract with the T3 clients):
-  - a swapped word in English text: <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>,
-    the gloss at levels >= N and the plain English of data-en below;
+  - a swapped word in English text:
+    <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>, the gloss at levels >= N
+    and the plain English of data-en below;
   - a twinned sentence: <span data-jw="ja" data-on="N">JAPANESE</span><span data-jw="en" data-on="N">ENGLISH</span>,
     the Japanese at levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on (it shows
     or hides whole), the English keeps its own swaps, whose thresholds are at most N (a sentence turns English before
@@ -91,9 +92,13 @@ CODE_SPAN = re.compile(r'``.+?``|`[^`\n]+`')
 FENCE_LINE = re.compile(r'^\s*(```|~~~)')
 PLACEHOLDER = '\ue000-\uf8ff'
 PROTECTED = re.compile(f'[{PLACEHOLDER}]')
-# Where an English sentence ends inside a line: as grammar.BOUNDARY, a placeholder (code or a glossed word) counting
-# as a word before the mark.
-BOUNDARY = re.compile(rf'(?<=[A-Za-z0-9`)\]"\'*{PLACEHOLDER}])[.!?:;](?:\*\*)?(?=\s)|[:.](?=\*\*\s)')
+# Where an English sentence ends inside a line: a . ! ? : or ; after anything but a space (a word, a number, 5%, 30°,
+# "...", _italic_, ~~struck~~, a placeholder for code or a glossed word), with any closing quotes, brackets or emphasis
+# marks after it, then a space; or an emoji before a space, which ends a sentence of its own.
+EMOJI = '\u2600-\u27bf\U0001f300-\U0001faff'
+BOUNDARY = re.compile(rf'(?<=\S)[.!?:;][\'"”’)\]*_~]*(?=\s)|[:.](?=\*\*\s)|[{EMOJI}](?=\s)')
+SENTENCE_END = re.compile(r'[.!?][\'"”’)\]*_~]*\s')  # inside a twin's English: one sentence too many when 2+
+TASK = re.compile(r'^\[[ xX]\]')
 ABBREVIATIONS = ('e.g.', 'i.e.', 'etc.', 'vs.', 'cf.', 'approx.', 'mr.', 'mrs.', 'ms.', 'dr.', 'no.', 'fig.')
 PREFIX = re.compile(r'^\s*(?:(?:[-*+]|\d+[.)])\s+|#{1,6}\s+|>\s*)*')
 LETTER = re.compile(f'[A-Za-z{PLACEHOLDER}]')
@@ -152,12 +157,15 @@ def tokens(text):
         if code:
             out.append(('raw', piece))
             continue
+        saved = []  # inline code apart, so a </span> or an abbr in it is text
+        piece = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), piece)
+        back = lambda t: _restore(t, saved)
         at = 0
         for m in PAIR.finditer(piece):
-            out += _abbrs(piece[at:m.start()])
-            out.append(('pair', int(m.group(1)), m.group(2), m.group(4)))
+            out += _abbrs(back(piece[at:m.start()]))
+            out.append(('pair', int(m.group(1)), back(m.group(2)), back(m.group(4))))
             at = m.end()
-        out += _abbrs(piece[at:])
+        out += _abbrs(back(piece[at:]))
     return out
 
 
@@ -318,9 +326,44 @@ def _sentence_start(s, start, end):
     return begin
 
 
+def _open_marks(text):
+    """The markdown text leaves open, on a line with its code and glosses as placeholders: bold (**), italic (* or _
+    at a word's edge), a link's [ or (, or a backtick; '' when none."""
+    single = re.sub(r'\*\*', '', text)
+    found = [mark for mark, n in (('**', text.count('**')),
+                                  ('*', len(re.findall(r'\*', re.sub(r'(?<=\s)\*(?=\s)', '', single)))),
+                                  ('_', len(re.findall(r'(?<!\w)_|_(?!\w)', text))), ('`', text.count('`')))
+             if n % 2]
+    found += [o for o, c in (('[', ']'), ('(', ')')) if text.count(o) != text.count(c)]
+    return ' '.join(found)
+
+
+def twin_trouble(s, begin, english, japanese):
+    """Why a twin can't stand in for its English, or None (s: its line with code and glosses as placeholders; begin:
+    where its English starts): its English is more than one sentence, sits in a table row or a task list, holds a
+    link, leaves
+    markdown open (bold, italic, a link, code) or starts inside markdown the line left open before it, or its Japanese
+    leaves markdown open. Such a twin would cut through the reader's markdown, or hide a sentence with its own."""
+    if len(SENTENCE_END.findall(english + ' ')) > 1:
+        return 'its English holds more than one sentence'
+    if s.lstrip().startswith('|'):
+        return 'it is in a table'
+    if TASK.match(english):
+        return 'it is in a task list'
+    if LINK.search(english):
+        return 'its English holds a link, which the twin would hide'
+    for where, text in (('its English', english), ('the line before its English', s[:begin]),
+                        ('its Japanese', japanese)):
+        left = _open_marks(text)
+        if left:
+            return f'{where} leaves markdown open ({left})'
+    return None
+
+
 def parse_authored(text):
-    """What Claude wrote, as lines of segments: [[('raw', text) | ('twin', english, japanese)]] with each line's
-    number, and what it found: (lines, problems, notes). problems stop the check (a <ja> without its </ja> or its
+    """What Claude wrote, as lines of segments: [[('raw', text) | ('twin', english, japanese, why)]] with each line's
+    number, and what it found: (lines, problems, notes). why: twin_trouble's reason to keep the sentence English, or
+    None. problems stop the check (a <ja> without its </ja> or its
     English sentence, a Japanese sentence outside <ja>); notes are what code fixed or kept ({{...}} marks the writer
     left, put back in English). Fenced code is raw, as is inline code."""
     out, problems, notes, fence = [], [], [], False
@@ -362,7 +405,9 @@ def parse_authored(text):
             else:
                 if begin > at:
                     segments.append(('raw', _restore(s[at:begin], saved)))
-                segments.append(('twin', _restore(english, saved), _restore(s[open_at.end():m.start()], saved).strip()))
+                japanese = s[open_at.end():m.start()]
+                segments.append(('twin', _restore(english, saved), _restore(japanese, saved).strip(),
+                                 twin_trouble(s, begin, english, japanese)))
             at, open_at = m.end(), None
         if open_at is not None:
             problems.append((number, 'a <ja> with no </ja> on the same line'))
@@ -376,21 +421,29 @@ def parse_authored(text):
 
 def _english(text, number, sid, parent):
     """English text (with the weave's swaps) as parts: ('raw', text) and words {k: 'w', title, ja, en?, line, sid,
-    twin}; sid counts the line's sentences (a list, shared along the line)."""
+    twin}; sid counts the line's sentences (a list, shared along the line), its ends found with code and glosses as
+    placeholders, so a sentence that ends right after a gloss ends there."""
     out, saved = [], []
     s = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), text)
+    found = list(ABBR.finditer(s))
+    flat = ABBR.sub('\ue000', s)  # each gloss one placeholder: where the sentence ends fall, gloss by gloss
+    shift, ends, starts = 0, [m.end() for m in BOUNDARY.finditer(flat)], []
+    for m in found:
+        starts.append(m.start() - shift)
+        shift += len(m.group()) - 1
     at = 0
-    for m in ABBR.finditer(s):
+    for m, place in zip(found, starts):
         before = s[at:m.start()]
         if before:
             out.append(('raw', _restore(before, saved)))
-        sid[0] += len(BOUNDARY.findall(before))
         a = attrs(m.group(1))
+        n = sid[0] + sum(1 for e in ends if e <= place)
         out.append({'k': 'w', 'title': a.get('title', ''), 'ja': m.group(2), 'en': a.get('data-en'), 'line': number,
-                    'sid': ('twin', parent) if parent is not None else (number, sid[0]), 'twin': parent})
+                    'sid': ('twin', parent) if parent is not None else (number, n), 'twin': parent})
         at = m.end()
     if at < len(s):
         out.append(('raw', _restore(s[at:], saved)))
+    sid[0] += len(ends)
     return out
 
 
@@ -425,7 +478,7 @@ def reply_parts(lines):
                 out += _english(seg[1], number, sid, None)
             else:
                 out.append({'k': 't', 'english': _english(seg[1], number, [0], twins), 'japanese': seg[2],
-                            'line': number, 'source': seg[1]})
+                            'line': number, 'source': seg[1], 'why': seg[3] if len(seg) > 3 else None})
                 sid[0] += 1
                 twins += 1
     return out
@@ -516,7 +569,11 @@ def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_senten
     docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. An element is
     taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform draw
     per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same draw
-    at every level keeps the sets nested, and a level's expected spend is its part (systematic rounding)."""
+    at every level keeps the sets nested, and a level's expected spend is its part (systematic rounding). A twin's
+    costly words are held to the words' part the same way, with that part's draw. So an element can show at any level
+    where what came before it leaves its part unspent: the randomization never rules it out. What still depends on the
+    model's predictions is how likely it is: its cost (its predicted chances), and for the elements not explored, its
+    place by value per expected open; the propensities say by how much."""
     n = len(els)
     on = [e.fixed for e in els]
     explored = [False] * n
@@ -535,7 +592,7 @@ def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_senten
             e = els[i]
             freed = sum(els[c].cost_w for c in e.children if shown(c, level))
             if spent_s + u_s * e.cost_s <= sentences_part + 1e-12 and \
-                    (e.cost_w <= freed or spent_w + e.cost_w - freed <= words_part + 1e-12):
+                    (e.cost_w <= freed or spent_w + u_w * (e.cost_w - freed) <= words_part + 1e-12):
                 on[i] = level
                 spent_s += e.cost_s
                 spent_w += e.cost_w - freed

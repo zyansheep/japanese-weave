@@ -29,10 +29,14 @@ every level at once, so the reader's level is applied when it is shown (below).
 3. Claude writes the reply from the output: its English sentences with the swaps whose sense fits, and right after
    each sentence that fits, on the same line, its twin in `<ja>...</ja>`: one Japanese or mixed sentence, or two short
    ones for a long English sentence, glossed as before, each ending with a bare 。 or ？. The twin's English is the text
-   back to the end of the sentence before it (a `.`, `!`, `?`, `:` or `;` and a space, abbreviations like "e.g."
-   aside), the end of an earlier `</ja>` on the line, or the line's start after a list, heading or quote marker. Code
-   puts the English sentence on each closing mark as its translation, so it is written once. The rules and the list of
-   known sense traps are `weave.DRAFT_RULES`.
+   back to the end of the sentence before it (a `.`, `!`, `?`, `:` or `;` after anything but a space, with any
+   closing quotes, brackets or emphasis marks, then a space, abbreviations like "e.g." aside; or an emoji and a space),
+   the end of an earlier `</ja>` on the line, or the line's start after a list, heading or quote marker. Code puts the
+   English sentence on each closing mark as its translation, so it is written once. A twin that would cut through the
+   reader's markdown keeps its sentence English (`twins.twin_trouble`): its English holds more than one sentence, sits
+   in a table row or a task list, holds a link, or leaves bold, italic, a link or code open (or starts inside one the
+   line left open), or its Japanese does. Japanese may be quoted in backticks; elsewhere it goes in twins or glosses.
+   The rules and the list of known sense traps are `weave.DRAFT_RULES`.
 
        This is a problem.<ja><abbr title="this">これ</abbr>は<abbr title="もんだい · problem">問題</abbr>です。</ja>
 

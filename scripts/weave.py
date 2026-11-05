@@ -641,8 +641,9 @@ DRAFT_RULES = """\
    - Twins. After an English sentence that carries the content (the advice, the explanation, the conclusion) and \
 that you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
 on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
-before it, so make it one whole sentence, with any bold or link closed inside it. Write twins up to the first line's \
-number; code chooses which twins each level shows, so never add stock lines to get more. A twin is one Japanese or \
+before it, so make it one whole sentence, not in a table, task list or link, with any bold or code closed inside it \
+(code drops a twin that cuts through markdown). Write twins up to the first line's number; code chooses which twins \
+each level shows, so never add stock lines to get more. A twin is one Japanese or \
 mixed sentence, or two short ones for a long English sentence, and ends with a bare 。 or ？: code puts the English \
 sentence on it as its translation. Write each twin around its Japanese words in Japanese word order with particles \
 and grammar (verb endings, です/ます, これ/それ), keeping English nouns where no Japanese word was swapped in. Only an \
@@ -693,8 +694,8 @@ to do"). Grammar that carries meaning is glossed too: だけ, それから, の�
 〜のが) with the word before it. Only the structural particles (は が を に で の へ と ね よ) and です/ます stay outside \
 the tags; every particle or ending that carries meaning is glossed: か (or), や (and so on), も (also), から, まで, より, \
 なら, けど, ので, のに, が or ですが meaning "but", と meaning "when". Gloss 自分で whole ("by oneself"). Leave a twin's \
-closing 。 or ？ bare. All Japanese goes in twins or glosses, none bare in the English. No bold on Japanese words, and \
-no footer."""
+closing 。 or ？ bare. All Japanese goes in twins or glosses, none bare in the English except quoted in backticks. \
+No bold on Japanese words, and no footer."""
 
 
 def chat_style(state, codex=False, markup=False, runtime=None):

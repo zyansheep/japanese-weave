@@ -419,5 +419,115 @@ class Calibration(unittest.TestCase):
         self.assertIn('Chat twins placed at random (20% of places): 0.07 opens expected and 1 seen over 1.5 read', text)
 
 
+class ReviewRound1(Home):
+    """Regression tests for the first adversarial review (scratchpad review-b/py/t1.py..t10.py)."""
+    TWIN = f'<ja>{P}は{SMALL}です。</ja>'
+    FILLER = ' Then run the tests and read what they print, line by line, until it all passes and nothing is left.'
+
+    def twins_of(self, text):
+        lines, problems, _notes = twins.parse_authored(text)
+        self.assertEqual(problems, [])
+        return [(seg[1], seg[3]) for _n, segs in lines for seg in segs if seg[0] == 'twin']
+
+    def test_t1_sentence_ends_after_any_mark(self):
+        for before in ('The rate rose 5%. ', 'He said “stop.” ', 'Wait... ', 'Done ✅ ', 'It is 30°. ',
+                       'Use ~~that~~. ', 'It is _fine_. ', 'It works in the U.S. '):
+            with self.subTest(before):
+                self.assertEqual(self.twins_of(f'{before}The {P} is small.{self.TWIN}'),
+                                 [(f'The {P} is small.', None)])
+        why = twins.twin_trouble('x', 0, 'Ask Dr. Who or Mr. Bean now.', '')
+        self.assertEqual(why, 'its English holds more than one sentence')
+
+    def test_t2_t7_t9_twins_that_cut_through_markdown_stay_english(self):
+        cases = {f'**Bold intro. The {P} is small.**{self.TWIN}': 'leaves markdown open (**)',
+                 f'*Italic intro. The {P} is small.*{self.TWIN}': 'leaves markdown open (*)',
+                 f'[Read this. The {P} is small](http://x/y).{self.TWIN}': 'its English leaves markdown open ([)',
+                 f'[The {P} is small.](http://x){self.TWIN}': 'holds a link',
+                 f'| a | The {P} is small.{self.TWIN} |': 'in a table',
+                 f'- [ ] The {P} is small.{self.TWIN}': 'in a task list',
+                 f'Run `make` and the {P} is small.<ja>{P}は**{SMALL}です。</ja>': 'its Japanese leaves markdown open',
+                 f'**Note:** run it. The {P} is small `x.{self.TWIN}': 'leaves markdown open (`)'}
+        for text, why in cases.items():
+            with self.subTest(text):
+                found = self.twins_of(text)
+                self.assertEqual(len(found), 1)
+                self.assertIn(why, found[0][1] or '')
+                checked = check_reply.finish(text + self.FILLER, plan(), TYPES, seed=1, remember=False)
+                self.assertNotIn('data-jw', checked.final)  # its sentence stays English
+                self.assertIn('twin dropped (its sentence stays English): ' + found[0][1], checked.text)
+        for text in (f'Term: the {P} is small.{self.TWIN}', f'See [the docs](http://x) because the {P} is small.'
+                     f'{self.TWIN}'.replace('See [the docs](http://x) because', 'See the docs. Then')):
+            self.assertIsNone(self.twins_of(text)[0][1], text)
+        self.assertIn('cuts through markdown', weave.DRAFT_RULES)
+
+    def test_t3_t4_each_level_joins_and_propensities_match(self):
+        checked = check_reply.finish(AUTHORED, plan(), TYPES, seed=3, now_ms=NOW)
+        by_fp = sentence_model.records_by_fp([grammar.record(checked.final, DAY)])
+        for level in twins.SHOWING:
+            notes = grammar.annotation_texts(twins.render(checked.final, level))
+            found = sentence_model.message_sentences({'annotations': [[a, 0, 20 * k] for k, a in enumerate(notes)],
+                                                      'level': level}, by_fp)
+            self.assertEqual(len(found), sum(1 for a in notes if a in grammar.MARKS))
+        budgets = twins.budgets_for(check_reply.words_of(twins.render(checked.final, -3)))
+        rng, n = random.Random(12345), 3000
+        counts = [[0] * 5 for _ in checked.elements]
+        for _ in range(n):
+            on, _x = twins.assign(checked.elements, budgets, rng)
+            for i in range(len(on)):
+                for k, level in enumerate(twins.BUDGETED):
+                    counts[i][k] += twins.shown_at(checked.elements, on, i, level)
+        for i, row in enumerate(counts):
+            for k in range(5):
+                self.assertAlmostEqual(checked.props[i][k], row[k] / n, delta=0.05)
+
+    def test_t5_a_sentence_ending_right_after_a_gloss_ends_there(self):
+        text = f'Read the {INFO}. Then check the {LOG} and the {INFO} again. Look at the {LOG}! Fine, the {LOG}? Yes.'
+        parts = twins.reply_parts(twins.parse_authored(text)[0])
+        self.assertEqual([p['sid'] for p in parts if isinstance(p, dict)], [(1, 0), (1, 1), (1, 1), (1, 2), (1, 3)])
+
+    def test_t6_a_twin_with_a_dictionary_word_or_a_later_use_shows_only_at_full(self):
+        swaps = SWAPS + [{'ja': '簡単', 'title': 'かんたん · simple', 'en': 'simple', 'kana': 'かんたん', 'p': 0.05,
+                          'free': False, 'dictionary': True}]
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
+        easy = '<abbr title="かんたん · simple">簡単</abbr>'
+        text = f'The {P} is simple.<ja>{P}は{easy}です。</ja>' + self.FILLER * 3
+        for seed in range(30):
+            checked = check_reply.finish(text, own, TYPES, seed=seed, remember=False)
+            self.assertEqual([on for e, on in zip(checked.elements, checked.on) if e.kind == 's'], [twins.FULL])
+        later = (f'Read the {INFO} first.' + self.FILLER + f' The {INFO} is small.<ja>{INFO}は{SMALL}です。</ja>')
+        checked = check_reply.finish(later, plan(), TYPES, seed=1, remember=False)
+        self.assertEqual([on for e, on in zip(checked.elements, checked.on) if e.kind == 's'], [twins.FULL])
+
+    def test_t7_an_explored_twin_can_show_at_every_level(self):
+        text = f'The {INFO} is small.<ja>{INFO}は{SMALL}です。</ja>' + self.FILLER
+        checked = check_reply.finish(text, plan(), TYPES, seed=1, remember=False)
+        twin = next(p for e, p in zip(checked.elements, checked.props) if e.kind == 's')
+        self.assertTrue(all(x > 0 for x in twin), twin)
+
+    def test_8_no_plan_means_send_the_english(self):
+        with mock.patch.object(check_reply.Plan, 'load', side_effect=OSError('no state')), \
+                mock.patch('sys.stdin', new=io.StringIO(f'The {P} is small.{self.TWIN}')), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            import fw
+            fw.main(['check-reply'])
+        self.assertIn('Send your English reply as it is, with the <ja> twins taken out', out.getvalue())
+        self.assertNotIn(check_reply.SEPARATOR, out.getvalue())
+
+    def test_9_code_with_a_closing_span_in_a_twins_english(self):
+        text = f'Close with `</span>` since the {P} is small.{self.TWIN}' + self.FILLER
+        checked = check_reply.finish(text, plan(), TYPES, seed=1, remember=False)
+        back, _owners = twins.elements(checked.final)
+        self.assertEqual([b['kind'] for b in back].count('s'), 1)
+        self.assertIn('`</span>`', twins.render(checked.final, -3))
+        self.assertNotIn('`</span>`', twins.render(checked.final, 3))
+
+    def test_10_japanese_quoted_in_backticks_passes(self):
+        checked = check_reply.finish(f'Write it as `問題` here.' + self.FILLER, plan(), TYPES, remember=False)
+        self.assertIsNotNone(checked.final)
+        self.assertIn('quoted in backticks', weave.DRAFT_RULES)
+        self.assertIsNone(check_reply.finish('It is 問題 here.' + self.FILLER, plan(), TYPES, remember=False).final)
+
+
+
 if __name__ == '__main__':
     unittest.main()
