@@ -264,6 +264,13 @@ sync reordered, so most of it wasn't what a model thinks of as common.
   never a medical, legal or financial entry.
 - A topical word that keeps coming up is nominated like any other.
 
+**Built (2026-11):** grammar as items in chat (docs/grammar.md). The open chance of a sentence's translation is fitted
+from its length in Japanese characters and the difficulty of each grammar pattern the reader doesn't know yet (odds
+about 3 times per 10 characters on the log); each Japanese sentence is held to the known patterns plus one learning
+pattern, and to the length at which known patterns reach a 5% open chance; one pattern is learned at a time, the next
+only while opens stay under 5% of sentences read. T3 Code's shortcut now toggles English only for an hour, a lighter
+press and weak evidence that the sentences on screen were too hard.
+
 ## 7. Experiments
 
 Two effects the model can't check on its own get randomized tests.
@@ -328,7 +335,9 @@ state and whether each "done when" is met):
   topical words found by code;
 - the dictionary, the matcher, sense flags, and the checked web pipeline in the extension: safe swaps show within a
   second and the model's check adds the rest;
-- the probe, now in the review stream (T3 Code's review cards).
+- the probe, now in the review stream (T3 Code's review cards);
+- grammar patterns in chat: a sentence-open model by length and pattern, one learning pattern at a time, the weave's
+  sentence budget and limits from it, check-reply's sentence scores, and English only for an hour from T3 Code.
 
 Left: the live check (2 to 4 weeks of data), the experiment's readout (about 8 weeks), a memory strength per word
 (after 60 days and a positive readout), and the deferred single planner and chat replay lab. Reading speed as

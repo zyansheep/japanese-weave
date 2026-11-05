@@ -174,8 +174,10 @@ lab's judged passages (lab, fresh, fresh2).
     seeds.
 19. **Reading speed as evidence.** Slower paragraphs probably held unknown words. Every paragraph has a speed, so this
     is evidence even without a lookup.
-20. **Later:** a tolerance model by context [C], a lookup habit that changes over time [R], and grammar patterns as
-    items.
+20. **Later:** a tolerance model by context [C] and a lookup habit that changes over time [R]. Grammar patterns as
+    items are built for chat (2026-11, docs/grammar.md): a sentence-open model by length and the difficulty of each
+    pattern not known yet, one pattern learned at a time. Next for them: the web's sentences, and a pattern's
+    difficulty per sentence position or with more than one learning pattern.
 
 ## After deployment
 
@@ -188,6 +190,13 @@ say what Haiku makes of last clauses, which nothing has measured.
 collector has no `/v1/review/next` and rejects review items. Its first refresh refits from nothing under the new model
 version (fit 6). Then watch `fw.py knowledge` for the separation of the reveal times and `fw.py status` for the probe's
 rolling estimate.
+
+**Sentence calibration and English only** (docs/grammar.md): update the collector before the T3 Code builds with the
+English-only shortcut and the panel, since an older collector has no `/v1/english` and doesn't send `english` with the
+level. The first refresh on each machine with chats reads every transcript again for its sentence records (once, in
+the background). Then watch `fw.py status` for the learning pattern and the sentence open rate (intake waits while it
+is 5% or more), `fw.py knowledge` for the length slope and the hardest patterns, and check-reply's flags in replies:
+if the 9-character limit leaves too few Japanese sentences, the target (`sentence_model.TARGET`) is the knob.
 
 **Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
 entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):

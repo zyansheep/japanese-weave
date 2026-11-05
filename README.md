@@ -64,12 +64,19 @@ level from [blocks/](blocks/level-01.md).
   installed). The brief has Claude write each reply in plain English first and pass it to `fw.py weave`, which weaves
   in Japanese with the extension's own code: every place one of your words could go, picked by your word model and the
   chat's level. Claude then rewrites the result, keeping the swaps whose sense fits and turning about as many sentences
-  as the level allows into Japanese or mixed Japanese and English, each with its translation on the closing 。. Finally
-  it runs `fw.py check-reply`, which lists what code can see is wrong (an "if" with no conditional ending, pronouns,
-  する on an English verb, unglossed grammar and the like), and sends the fixed reply. In four rounds of blind-judged
+  as the level allows into Japanese or mixed Japanese and English, each with its translation on the closing 。. Each
+  such sentence is short (at most as many Japanese characters as your log says you read without opening the
+  translation, 9 on 2026-11-04) and uses only grammar you know, plus at most one pattern you are learning, one at a
+  time, which the weave names with an example so Claude uses it on purpose ([docs/grammar.md](docs/grammar.md)).
+  Finally it runs `fw.py check-reply`, which lists what code can see is wrong (an "if" with no conditional ending,
+  pronouns, する on an English verb, unglossed grammar and the like), scores each Japanese sentence (length, grammar,
+  the chance you open its translation), and Claude fixes what it flags and sends the reply. In four rounds of blind-judged
   replies this beat Claude weaving as it writes on every question, with fewer errors and more Japanese grammar, in
   about half the time ([docs/chat-weave.md](docs/chat-weave.md)). At full it also brings in dictionary words you
   haven't met. `fw.py chat-style classic` goes back to the brief above; terminals and Codex always use it.
+- **English only in T3 Code**: one keyboard shortcut shows every chat message on screen in English (words as their
+  meanings, Japanese sentences as their translations) and has new replies written in plain English, for an hour or
+  until you press it again. The arrows of T3 Code's Japanese Weave panel set the level (heavier, lighter).
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
   order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
   all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a
@@ -118,6 +125,7 @@ way round.
 | `/japanese-weave:challenge off\|0.5-3` | Set normal's lookup budget per 100 words (the other levels scale with it) |
 | `/japanese-weave:intensity [chat\|browser] up\|down\|normal\|off\|full` | More or less Japanese, none (off) or all you can follow (full), for the next 3 hours |
 | `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
+| `/japanese-weave:intensity english on\|off` | Chat replies in plain English for an hour (T3 Code's shortcut), or back |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
 | `/japanese-weave:pause` / `resume` | Stop or restart Japanese in chat and on websites |
 | `/japanese-weave:export [--chatgpt]` | Paste-ready block for claude.ai or ChatGPT |
@@ -276,7 +284,8 @@ says which files to copy over (state.json and its neighbours) to move that list 
 one keeps this machine's old list in `before-collector/` in the state folder.
 
 T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL` set to the collector's
-`/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches. Its review cards come from the
+`/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches. Its English-only shortcut
+goes to the same collector (`/v1/english`), and its panel's arrows to `/v1/intensity`. Its review cards come from the
 same collector (`/v1/review/next`), and what happened to each goes with the popover events.
 
 ## Adaptive difficulty
@@ -290,7 +299,8 @@ and appear wherever they fit, and the budget goes to the words closest to a 25% 
 pages and in chat. Once your log shows that a word's chance falls right after you read it and climbs back over a week,
 the fit follows that too: known at a glance is judged on the chance a week on, a lookup costs the chance now, and a word
 read too recently waits. A whole sentence in Japanese costs too: how often a sentence's translation gets opened, fitted
-from your log (0.08 until it has enough), and it takes its sentence's one place; sentences may take up to 18% of the
+from your log (0.08 until it has enough; in chat, the open chance of a short sentence of grammar you know, from the
+sentence model in [docs/grammar.md](docs/grammar.md), once it has enough), and it takes its sentence's one place; sentences may take up to 18% of the
 budget and learning words the rest, and what one can't use goes to the other. A challenge (`fw.py challenge 1.5`, the
 command above, or the popup) is normal's budget. The same fit labels every word
 ([How words advance](#how-words-advance)). Why it works this way and what comes next: [PLAN.md](PLAN.md) and
@@ -300,8 +310,9 @@ Every passage shown on the web counts as evidence, weighted by the chance you re
 screen while you were reading.
 
 **For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours, in
-the browser (a toast on the page and the toolbar badge show the level) and in a T3 Code build with the shortcut (for
-chat replies); also the popup's Less/More buttons and `fw.py intensity [chat|browser] up|down|normal`. Each press is
+the browser (a toast on the page and the toolbar badge show the level); in chat, the arrows of T3 Code's Japanese Weave
+panel do the same (T3 Code's shortcut toggles English only, below); also the popup's Less/More buttons and
+`fw.py intensity [chat|browser] up|down|normal`. Each press is
 logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a glance, so
 `fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed and opens by
 how much Japanese a passage had, and how often you turned it down or up. It also checks the model, per surface and class
@@ -319,13 +330,19 @@ at heavier and much heavier), and the line on the last reply says whether it wen
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
 for 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
-means the hook sends only a one-line note to reply in plain English, until the time runs out, you press heavier,
-or you say "japanese back on" in any chat.
+means the hook sends only a one-line note to reply in plain English, until the time runs out, you press the panel's
+up arrow, or you say "japanese back on" in any chat.
 In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
 known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English
 (steps, code, commands, exact technical detail) swap in every known or learning word, with no cap per sentence. A
 chat turned off with `off here` stays off at any level.
 `fw.py calibrate` counts a press into off as lighter and into full as heavier.
+
+**English only, for an hour (T3 Code).** T3 Code's keyboard shortcut turns chat to English only: every message on
+screen shows English at once, and the hook has new replies written in plain English, as at off, until the hour runs
+out or you press it again (or `fw.py intensity english on|off`). Messages shown meanwhile don't count as reading, and
+each time you turn it on counts as a lighter press in `fw.py calibrate`; the Japanese sentences that were on screen
+count as weak evidence that they were too hard (docs/grammar.md).
 
 **Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
 Japanese in what you say to me") or run `/japanese-weave:intensity off here`, and that chat gets no Japanese from
@@ -336,8 +353,16 @@ switch is kept per session id, recorded as a `thread` op (so the collector has i
 of reach still holds here at once), and forgotten 60 days after its last change. `fw.py calibrate` counts each chat
 turned off as a lighter press.
 
-`fw.py knowledge` shows normal's budget, the fitted chat offset and reading model, and the words with the most
-evidence; `fw.py why <word>` shows one word's estimate and every observation behind it; `fw.py evaluate` scores the
+**Grammar in chat.** Each Japanese sentence in a chat reply is held to the grammar you know (50 patterns, 19 basics
+known from the start) plus at most one you are learning, and to a length your log supports: the sentence model fits
+the chance you open a sentence's translation from its length in Japanese characters and the difficulty of each pattern
+you don't know yet. One pattern is learned at a time: it becomes known after 15 sentences with it read without extra
+opens, and the next, the one replies use most, comes in only while you open under 5% of the sentences you read.
+`fw.py status` shows the pattern being learned, `fw.py grammar` all of them, `fw.py knowledge` the fit
+([docs/grammar.md](docs/grammar.md)).
+
+`fw.py knowledge` shows normal's budget, the fitted chat offset and reading model, the sentence model, and the words
+with the most evidence; `fw.py why <word>` shows one word's estimate and every observation behind it; `fw.py evaluate` scores the
 model on your log day by day, each day predicted from the days before, against the online model it replaced and a
 constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
@@ -376,7 +401,8 @@ simulated readers.
 
 Everything stays on your machine in `~/.japanese-weave` (override with `JAPANESE_WEAVE_HOME`). The hook reads your
 local Claude Code and Codex transcripts to count exposure and words from your reading, and sends only counts (to your
-collector, if you set one), never the text. The extension sends
+collector, if you set one), never the text: for each reply's Japanese sentences, a hash of its glossed words and per
+sentence its length, English word count and grammar pattern ids. The extension sends
 readable page text from sites you allow to the model you chose, Google's Gemini API or Anthropic's API, with your key
 (free-tier Gemini keys allow Google to train on prompts); without a key no text leaves the browser. Of what you read on
 those sites it sends the plugin counts per dictionary entry and a hash of each passage, never the text. Private sites start off even when every site is on: webmail and messaging, AI chat, password
