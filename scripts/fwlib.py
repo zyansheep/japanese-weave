@@ -959,7 +959,7 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
                 sentence_records(text, day, sentences)
             shown = text
             if twins.has_levels(text):
-                plans = read_json(home() / twins.PLANS, {}) if plans is None else plans
+                plans = twins.plans_now() if plans is None else plans
                 shown = twins.view(text, level, plans)
             prose = norm(CODE.sub(' ', shown))
             used = [w['ja'] for w in words if uses(w, prose)]

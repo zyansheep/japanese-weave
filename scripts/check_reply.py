@@ -603,7 +603,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         return Checked(f'jw-check: something went wrong in code ({error}). Send the English reply as you wrote it, '
                        'with the <ja> twins taken out.')
     summary = _summary(els, on, budgets, plan)
-    if remember:
+    if remember and els:
         sentence_ps = [round(x, 4) for t in kept for x in t['p']]
         twins.remember_plan(grammar.fingerprint(texts), {
             'level': plan.level, 'view': plan.view,

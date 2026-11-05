@@ -57,8 +57,9 @@
                                                      propensities) and print the final markup to send
   fw.py grammar [known|learning|new PATTERN]         the grammar patterns with your status and fitted difficulty
                                                      (docs/grammar.md), or set one pattern's status
-  fw.py intensity english [on|off]                   chat replies in plain English for an hour (T3 Code's shortcut
-                                                     does the same), or back to Japanese
+  fw.py intensity english [on|off]                   chat shown in English for an hour (T3 Code's shortcut does
+                                                     the same; replies keep their twins, shown once it is off),
+                                                     or back to Japanese
   fw.py intensity [chat|browser] [up|down|normal|off|full]
                                                      Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; off: none, full: every sentence

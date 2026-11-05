@@ -647,9 +647,25 @@ def remember_plan(fp, plan, now_ms=None):
         pass
 
 
+_plans = (None, None)  # (the plans file and its modification time, its contents): a scan reads it once
+
+
+def plans_now():
+    """reply-plans.json's contents, read again only when the file changed."""
+    global _plans
+    path = fwlib.home() / PLANS
+    try:
+        key = (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        return {}
+    if _plans[0] != key:
+        _plans = (key, fwlib.read_json(path, {}))
+    return _plans[1]
+
+
 def plan_for(text, plans=None):
     """The plan check-reply kept for this reply (remember_plan), or None."""
-    plans = plans if plans is not None else fwlib.read_json(fwlib.home() / PLANS, {})
+    plans = plans if plans is not None else plans_now()
     if not isinstance(plans, dict) or not has_levels(text):
         return None
     found = plans.get(grammar.fingerprint(annotation_texts(text)))
