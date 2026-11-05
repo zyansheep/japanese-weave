@@ -9,8 +9,8 @@
 // shows. Code fences, inline code, link targets, URLs and tags are left alone. Reads one JSON object on stdin: { draft,
 // words (the host's state message's words, with the pool's), recency, intensity (levels.js: 3 is full, the default) }.
 // Prints one JSON object: { text: the woven draft, words: its word count, swaps: [{ ja, title, en, kana, p, free,
-// dictionary, unsure }] }, p the word's current lookup chance as levels.js costOf prices it (its long-term chance when
-// known at a glance). Runs under node or bun.
+// dictionary, unsure, before, after }] }, p the word's current lookup chance as levels.js costOf prices it (its
+// long-term chance when known at a glance), before and after the draft's English around it. Runs under node or bun.
 import { readFileSync } from 'node:fs';
 
 const src = (name) => new URL(`../extension/src/${name}`, import.meta.url).href;
@@ -22,6 +22,7 @@ const { locate } = await import(src('text.js'));
 
 const DICTIONARY_MAX = 6; // dictionary words offered in one reply: they show only at full
 const PRIOR_K = 1.0; // levels.js PRIOR_K: the knowledge of a word the log has nothing on
+const CONTEXT = 60; // characters of the draft kept on each side of a swap
 
 const input = JSON.parse(readFileSync(0, 'utf8'));
 const words = Array.isArray(input.words) ? input.words : [];
@@ -105,5 +106,8 @@ const result = lines.map((l) => {
 }).join('\n');
 
 const round = (x) => Math.round(x * 10000) / 10000;
+// The English around each swap in the draft, for the check to tell apart two uses of a word with one gloss.
+const context = (from, to) => whole.slice(Math.max(0, from), Math.max(0, to)).replace(/[\uE000-\uF8FF]/g, ' ');
 console.log(JSON.stringify({ text: result, words: wordCount(whole), swaps: swaps.map((s) => ({ ja: s.ja, title: title(s),
-  en: s.en, kana: s.reading || '', p: round(s.p), free: s.free, dictionary: s.dictionary, unsure: s.unsure })) }));
+  en: s.en, kana: s.reading || '', p: round(s.p), free: s.free, dictionary: s.dictionary, unsure: s.unsure,
+  before: context(s.start - CONTEXT, s.start), after: context(s.end, s.end + CONTEXT) })) }));

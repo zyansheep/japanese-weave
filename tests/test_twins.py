@@ -435,7 +435,7 @@ class ReviewRound1(Home):
             with self.subTest(before):
                 self.assertEqual(self.twins_of(f'{before}The {P} is small.{self.TWIN}'),
                                  [(f'The {P} is small.', None)])
-        why = twins.twin_trouble('x', 0, 'Ask Dr. Who or Mr. Bean now.', '')
+        why = twins.twin_trouble('x', 0, 'Is it fine? Yes, it runs! Ship it.', '')
         self.assertEqual(why, 'its English holds more than one sentence')
 
     def test_t2_t7_t9_twins_that_cut_through_markdown_stay_english(self):
@@ -574,8 +574,10 @@ class ReviewRound2(Home):
     AGAIN = '<abbr title="again / also">また</abbr>'
 
     def test_1_each_use_of_a_word_and_gloss_keeps_its_own_english(self):
-        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True},
-                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True}]
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+                          'before': 'Run the tests ', 'after': ' and check the result.'},
+                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                          'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         text = f'Run the tests {self.AGAIN} and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, dict(TYPES, また={'n', 'adv'}), seed=1, remember=False).final
@@ -619,7 +621,7 @@ class ReviewRound2(Home):
 
     def test_4_a_single_letter_and_a_period_ends_no_sentence(self):
         for text in (f'Use the U.S. version, the {P} is small.{self.TWIN}', f'Meet at 9 a.m. tomorrow, the {P} is '
-                     f'small.{self.TWIN}', f'It works in the U.S. The {P} is small.{self.TWIN}'):
+                     f'small.{self.TWIN}'):
             lines, _problems, _notes = twins.parse_authored(text)
             found = [seg for _n, segs in lines for seg in segs if seg[0] == 'twin']
             self.assertEqual((found[0][1], found[0][3]), (text.split('<ja>')[0], None))
@@ -663,6 +665,59 @@ class ReviewRound2(Home):
         self.assertEqual((result['stored'], result['rejected']), (1, 1))
         self.assertEqual([r['item'] for r in result['reasons']], [1])
         self.assertIn('no Japanese on screen', result['reasons'][0]['error'])
+
+
+class ReviewRound3(Home):
+    """Regression tests for the third adversarial review (scratchpad review-r2a reply3*.txt, review-r2c/r3)."""
+    FILLER = ReviewRound1.FILLER
+    TWIN = ReviewRound1.TWIN
+    AGAIN = ReviewRound2.AGAIN
+
+    def test_1_an_abbreviation_before_a_capital_is_ambiguous(self):
+        for before in ('It works in the U.S. The', 'Then run plan A. The', 'Pick option B. The', 'Ask Dr. Smith if the'):
+            text = f'{before} {P} is small.{self.TWIN}'
+            lines, _problems, _notes = twins.parse_authored(text)
+            found = [seg for _n, segs in lines for seg in segs if seg[0] == 'twin']
+            self.assertEqual(found[0][1], text.split('<ja>')[0], before)  # its English isn't cut at a guess
+            self.assertIn('where its sentence starts is unclear', found[0][3])
+            checked = check_reply.finish(text + self.FILLER, plan(), TYPES, seed=1, remember=False)
+            self.assertNotIn('data-jw', checked.final)  # its sentence stays English, whole
+            self.assertIn('where its sentence starts is unclear', checked.text)
+        for text in (f'Use e.g. the cache, the {P} is small.{self.TWIN}', f'Meet at 9 a.m. tomorrow, the {P} is small.'
+                     f'{self.TWIN}'):
+            lines, _problems, _notes = twins.parse_authored(text)
+            found = [seg for _n, segs in lines for seg in segs if seg[0] == 'twin']
+            self.assertEqual((found[0][1], found[0][3]), (text.split('<ja>')[0], None))
+        self.assertIsNone(twins.twin_trouble('x', 0, 'Use e.g. this or i.e. that one now.', ''))  # abbreviations
+
+    def test_2_a_dropped_earlier_swap_leaves_the_later_ones_their_english(self):
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+                          'before': 'Run the tests ', 'after': ' and check the result.'},
+                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                          'before': 'the result. It ', 'after': ' fixes the bug.'}]
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
+        types = dict(TYPES, また={'n', 'adv'})
+        text = f'Run the tests again and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
+        final = check_reply.finish(text, own, types, seed=1, remember=False).final
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['also'])
+        unsure = [dict(x, before='', after='') for x in swaps]  # no context to tell: the gloss's first meaning
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, unsure, 0.08, None, None)
+        final = check_reply.finish(text, own, types, seed=1, remember=False).final
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again'])
+
+    def test_3_a_twins_unoffered_words_are_priced_as_the_weave_prices(self):
+        know = {'offset': {'t3': 1.5}, 'words': {}}  # the chat offset, which the weave doesn't apply
+        words = [{'ja': '小さい', 'kana': 'ちいさい', 'status': 'active', 'k': 0.5, 'free': False},
+                 {'ja': '新しい', 'kana': 'あたらしい', 'status': 'active', 'k': 0.5, 'free': False,
+                  'dictionary': True}]
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, know, SWAPS, 0.08, None, None, words)
+        checked = check_reply.finish(f'The {P} is small.{self.TWIN}' + self.FILLER, own, TYPES, seed=1, remember=False)
+        twin = next(e for e in checked.elements if e.kind == 's')
+        self.assertAlmostEqual(twin.cost_w, 1 / (1 + math.exp(0.5)))  # k on the web's scale, as the weave's swaps
+        new_word = '<abbr title="あたらしい · new">新しい</abbr>'  # flagged dictionary as the weave flags it: full only
+        checked = check_reply.finish(f'The {P} is new.<ja>{P}は{new_word}です。</ja>' + self.FILLER, own, TYPES,
+                                     seed=1, remember=False)
+        self.assertEqual([on for e, on in zip(checked.elements, checked.on) if e.kind == 's'], [twins.FULL])
 
 
 if __name__ == '__main__':

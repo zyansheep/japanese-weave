@@ -34,7 +34,9 @@ every level at once, so the reader's level is applied when it is shown (below).
    (U.S., a.m.) aside; or an emoji and a space),
    the end of an earlier `</ja>` on the line, or the line's start after a list, heading or quote marker. Code puts the
    English sentence on each closing mark as its translation, so it is written once. A twin that would cut through the
-   reader's markdown keeps its sentence English (`twins.twin_trouble`): its English holds more than one sentence, sits
+   reader's markdown keeps its sentence English (`twins.twin_trouble`), and so does one whose English has an
+   abbreviation or a single letter's period before a capital ("the U.S. The", "plan A. It", "Dr. Smith"), where code
+   can't tell whether a sentence ends: its English holds more than one sentence, sits
    in a table row or a task list, holds a link, or leaves bold, italic, a link or code open (or starts inside one the
    line left open), or its Japanese does. Japanese may be quoted in backticks; elsewhere it goes in twins or glosses.
    The rules and the list of known sense traps are `weave.DRAFT_RULES`.
@@ -50,10 +52,12 @@ every level at once, so the reader's level is applied when it is shown (below).
    - puts back in English a swap that breaks the stays-English rules (only nouns, and adjectives right before a noun),
      and a content word's fifth gloss;
    - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave;
-     the nth use of a word and gloss takes the weave's nth swap of them, so a word offered for two senses keeps each
-     sense's English). A twin's words the weave didn't offer are priced too: a word of the reader's list at its
-     estimate, while a content word not on the list (a dictionary word, or none), like a dictionary word or a learning
-     word's later use, makes the twin show only at full; glossed grammar costs nothing. It then
+     each kept swap is the draft's swap of the same word and gloss whose English around it, kept by the weave,
+     overlaps most with the reply's, so a word offered for two senses keeps each sense's English even when Claude puts
+     an earlier one back; with no clear match its English is the gloss's meaning). A twin's words the weave didn't offer
+     are priced as the weave prices its swaps, from the same word list and on the same scale, while a content word not
+     on that list or flagged a dictionary word, like a dictionary word or a learning word's later use, makes the twin
+     show only at full; glossed grammar costs nothing. It then
      decides what each level shows (thresholds and propensities, below), writes the final markup, checks that it reads
      back to the same elements and thresholds and that every level renders clean, and keeps the plan in
      `reply-plans.json` for the hook's sentence record;

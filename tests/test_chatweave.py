@@ -64,6 +64,7 @@ class Weave(unittest.TestCase):
                          ('information', 'じょうほう · information', False, False))
         self.assertAlmostEqual(info['p'], 1 / (1 + math.exp(1.2)), places=3)  # its chance from k, as costOf prices it
         self.assertTrue(next(s for s in swaps if s['ja'] == '今')['unsure'])
+        self.assertEqual((info['before'][-9:], info['after'][:6]), ('Read the ', ' below'))  # its context
         self.assertTrue(next(s for s in swaps if s['ja'] == '問題')['free'])
         self.assertTrue(30 < out['words'] < len(DRAFT.split()))  # the prose's words, the fence's left out
         self.assertIn('Twins. After an English sentence', weave.DRAFT_RULES)

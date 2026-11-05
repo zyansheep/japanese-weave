@@ -506,16 +506,27 @@ def _restore(text, saved):
 SINGLE = re.compile(r'(?:^|[\s.(])[A-Za-z]\.$')  # U.S., a.m., e.g.: a single letter and a period ends no sentence
 
 
+def _abbreviation(before):
+    """Whether text ending with a period ends with an abbreviation of ABBREVIATIONS or a single letter's period (U.S.,
+    a.m., plan A.): a period that may or may not end a sentence."""
+    low = before.lower()
+    listed = low.endswith(ABBREVIATIONS) and re.search(
+        r'(^|[\s(])(' + '|'.join(map(re.escape, ABBREVIATIONS)) + r')$', low)
+    return bool(listed or SINGLE.search(before))
+
+
+# An abbreviation or a single letter's period, then a space and a capital: "the U.S. The cache", "plan A. It is",
+# "Dr. Smith". Whether a sentence ends there can't be told, so a twin's English with one keeps its sentence English.
+AMBIGUOUS = re.compile(r'(?:(?<![A-Za-z])[A-Za-z]|(?<![A-Za-z])(?i:' + '|'.join(
+    re.escape(a[:-1]) for a in ABBREVIATIONS) + r'))\.\s+(?=[A-Z])')
+
+
 def boundaries(s, start=0, end=None):
     """The sentence ends (BOUNDARY matches) in s[start:end], but for the abbreviations in ABBREVIATIONS and a period
     after a single letter (U.S., a.m.)."""
     end = len(s) if end is None else end
     for m in BOUNDARY.finditer(s, start, end):
-        before = s[start:m.start() + 1]
-        low = before.lower()
-        if low.endswith(ABBREVIATIONS) and re.search(r'(^|\s)(' + '|'.join(map(re.escape, ABBREVIATIONS)) + r')$', low):
-            continue
-        if m.group().startswith('.') and SINGLE.search(before):
+        if m.group().startswith('.') and _abbreviation(s[start:m.start() + 1]):
             continue
         yield m
 
@@ -545,12 +556,15 @@ def _open_marks(text):
 
 def twin_trouble(s, begin, english, japanese):
     """Why a twin can't stand in for its English, or None (s: its line with code and glosses as placeholders; begin:
-    where its English starts): its English is more than one sentence, sits in a table row or a task list, holds a
-    link, leaves
-    markdown open (bold, italic, a link, code) or starts inside markdown the line left open before it, or its Japanese
+    where its English starts): its English is more than one sentence (abbreviations aside), or has an abbreviation or
+    a single letter's period before a capital (AMBIGUOUS: where it starts can't be told), sits in a table row or a
+    task list, holds a link, leaves markdown open (bold, italic, a link, code) or starts inside markdown the line left open before it, or its Japanese
     leaves markdown open. Such a twin would cut through the reader's markdown, or hide a sentence with its own."""
+    if AMBIGUOUS.search(english):
+        return ('its English has an abbreviation or a single letter with a period before a capital (as in "the U.S. '
+                'The" or "Dr. Smith"), so where its sentence starts is unclear')
     ends = [m for m in SENTENCE_END.finditer(english + ' ')
-            if not (m.group().startswith('.') and SINGLE.search(english[:m.start() + 1]))]
+            if not (m.group().startswith('.') and _abbreviation(english[:m.start() + 1]))]
     if len(ends) > 1:
         return 'its English holds more than one sentence'
     if s.lstrip().startswith('|'):

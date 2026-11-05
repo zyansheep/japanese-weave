@@ -226,18 +226,19 @@ class Plan:
     model (knowledge.json "grammar", or None), the chat level with normal's budget (the challenge, or None), and for
     the levels (finish): knowledge.json (know, for a word the weave didn't offer), the weave's swaps (twins.swaps_for),
     the price of a sentence, this week's learning pattern (its id, or None), the level the reply is read at (view:
-    the chat level, also while English only is on, since the reply shows its Japanese once that is off) and the word
-    list (words; None: the twins' words the weave didn't offer go unpriced)."""
+    the chat level, also while English only is on, since the reply shows its Japanese once that is off), the weave's
+    word list and recency (words, recency; words None: the twins' words the weave didn't offer go unpriced)."""
 
     def __init__(self, statuses, model=None, level=0, normal=None, know=None, swaps=(), price=None, learning=None,
-                 view=None, words=None):
+                 view=None, words=None, recency=None):
         self.statuses, self.model, self.level, self.normal = statuses, model, level, normal
         self.ready = bool(model and model.get('ready'))
         self.limit = sentence_model.max_chars(model)
         self.know, self.swaps, self.learning = know or {}, list(swaps or ()), learning
         self.price = price if price is not None else intensity.sentence_price(know)
         self.view = level if view is None else view
-        self.words = words  # the word list ([{ja, kana, status}]), for the twins' words the weave didn't offer
+        self.words = words  # the weave's word list (chatweave.words_for), for the twins' words it didn't offer
+        self.recency = recency  # and the fit's recency, as the weave has it (fw_host.adaptive)
 
     @classmethod
     def load(cls, level=None, session=None):
@@ -250,9 +251,15 @@ class Plan:
         level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
         model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
         learning = grammar.learning(state)[0]
+        try:  # the words the weave weaves from, with their estimates, as it prices them
+            import chatweave
+            words, adaptive = chatweave.words_for(state)
+            recency = adaptive.get('recency')
+        except Exception:
+            words, recency = fwlib.public_state(state)['words'], None
         return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None, know,
                    twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level,
-                   state.get('words') or [])
+                   words, recency)
 
 
 def score(text, plan):
@@ -379,43 +386,118 @@ def _walk(parts, line=1):
                 yield line, q, p
 
 
-def _word_info(w, plan, now_ms, nth=0):
+def _word_info(w, plan, now_ms, swap=None):
     """A word's English original, lookup chance, whether it is known at a glance and whether it is a dictionary word
-    the reader doesn't have: from the weave's swap, the nth use of a word and gloss taking the nth swap of them in the
-    weave's order (a word offered for two senses, "again" and "also", keeps each sense's English; the last when there
-    are more uses than swaps), else by word alone; else knowledge.json, else the neutral prior."""
+    the reader doesn't have: from its swap in the weave (match_swaps), its English the swap's when the match is sure,
+    else its gloss's meaning; without one, from knowledge.json, else the neutral prior."""
     import fwlib
     import knowledge
     import twins
-    same = [s for s in plan.swaps if s.get('ja') == w['ja'] and s.get('title') == w['title']]
-    found = same[min(nth, len(same) - 1)] if same else next((s for s in plan.swaps if s.get('ja') == w['ja']), None)
-    en = w.get('en') or (found or {}).get('en') or twins.meaning(w['title'])
-    if found and isinstance(found.get('p'), (int, float)):
-        return en, float(found['p']), bool(found.get('free')), bool(found.get('dictionary'))
+    same = swap or next((s for s in plan.swaps if s.get('ja') == w['ja']), None)
+    en = w.get('en') or (swap or {}).get('en') or twins.meaning(w['title'])
+    if same and isinstance(same.get('p'), (int, float)):
+        return en, float(same['p']), bool(same.get('free')), bool(same.get('dictionary'))
     estimate = knowledge.word_estimate(plan.know, w['ja'], 't3', now_ms)
     if estimate:
         return en, estimate[0], estimate[0] < fwlib.FREE_P, False
     return en, twins.PRIOR_P, False, False
 
 
+CONTEXT_WORDS = 6
+WORD = re.compile(r"[a-z0-9']+")
+
+
+def _context_words(text, last):
+    """The words of English text, lowercased: its last CONTEXT_WORDS (last) or its first."""
+    found = WORD.findall(str(text or '').lower())
+    return found[-CONTEXT_WORDS:] if last else found[:CONTEXT_WORDS]
+
+
+def reply_contexts(parts):
+    """{id of a word part: (words before it, words after it)} in the reply's English as the reader reads it in English
+    (twins' English, code out), other swaps skipped: what match_swaps compares with the draft's English around each
+    swap."""
+    stream = []  # words, and word parts
+    def add(q):
+        if isinstance(q, tuple):
+            if q[0] == 'raw':
+                stream.extend(WORD.findall(re.sub(r'`[^`]*`', ' ', q[1]).lower()))
+        elif q['k'] == 'w':
+            stream.append(q)
+    for p in parts:
+        if isinstance(p, dict) and p['k'] == 't':
+            for q in p['english']:
+                add(q)
+        else:
+            add(p)
+    out = {}
+    for i, q in enumerate(stream):
+        if isinstance(q, dict):
+            before = [x for x in stream[:i] if isinstance(x, str)][-CONTEXT_WORDS:]
+            after = [x for x in stream[i + 1:] if isinstance(x, str)][:CONTEXT_WORDS]
+            out[id(q)] = (before, after)
+    return out
+
+
+def match_swaps(words, contexts, swaps):
+    """{id of a word part: (its swap in the weave, sure)}: each kept swap matched to the draft's swap of the same word
+    and gloss whose English around it overlaps most with the reply's (contexts: reply_contexts), each draft swap used
+    once, so a dropped earlier use doesn't shift the later ones. Sure: one candidate, or all with one English, or the
+    best overlap above every candidate with another English; else the English is the gloss's meaning."""
+    out, used = {}, set()
+    score = lambda w, s: (len(set(contexts.get(id(w), ([], []))[0]) & set(_context_words(s.get('before'), True)))
+                          + len(set(contexts.get(id(w), ([], []))[1]) & set(_context_words(s.get('after'), False))))
+    for w in words:
+        same = [s for s in swaps if s.get('ja') == w['ja'] and s.get('title') == w['title']]
+        free = [s for s in same if id(s) not in used] or same
+        if not free:
+            continue
+        if len({s.get('en') for s in free}) == 1:
+            best, sure = free[0], True
+        else:
+            ranked = sorted(free, key=lambda s: -score(w, s))
+            best = ranked[0]
+            top = score(w, best)
+            sure = top > 0 and all(score(w, s) < top for s in ranked[1:] if s.get('en') != best.get('en'))
+        if sure:
+            used.add(id(best))
+        out[id(w)] = (best, sure)
+    return out
+
+
 GRAMMAR_WORDS = set(grammar.WHOLE) | set(grammar.BARE_WORDS) | set(grammar.KOSOADO) | set(grammar.CONJUNCTIONS)
 CONTENT = re.compile('[㐀-鿿々ァ-ヺ]')  # kanji or katakana: a content word, not grammar
 
 
+def weave_price(word, recency, now_ms):
+    """(lookup chance, known at a glance) of a word of the weave's list ({ja, status, k?, free?, read?}: the host's
+    words, chatweave.words_for), as the weave prices a swap (chatweave.mjs chanceOf, levels.js costOf): k from the
+    word, else its status's prior; its free flag, else its long-term chance under FREE_P; its long-term chance when
+    free, else its current one (recency), on the web's scale as the weave's are."""
+    import fwlib
+    import knowledge
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    k = word['k'] if number(word.get('k')) else (fwlib.KNOWN_PRIOR_K if word.get('status') == 'known' else 1.0)
+    long = knowledge.sigmoid(-k)
+    free = word['free'] if isinstance(word.get('free'), bool) else long < fwlib.FREE_P
+    if free:
+        return long, True
+    return knowledge.current_chance({'k': k, 'read': word.get('read')}, recency, now_ms), False
+
+
 def _unoffered(marked, plan, now_ms):
     """The content words of a twin's Japanese the weave didn't offer: (priced, outside). priced: [(ja, chance)] of the
-    reader's words among them that aren't known at a glance (the word list's entry, a conjugated form too, at its
-    knowledge.json chance, else its status's prior); outside: whether one isn't in the word list (a dictionary word,
-    or none): such a twin shows only at full, as a dictionary word does. Grammar (kana only, every piece a grammar unit
-    or a listed grammar word) costs nothing. Without the word list (plan.words None), nothing is priced."""
-    import fwlib
+    weave's own words among them that aren't known at a glance (an entry of the list the weave weaves from, a
+    conjugated form too, priced as the weave prices its swaps: weave_price); outside: whether one isn't on that list
+    (a dictionary word, a word the list leaves out, or none): such a twin shows only at full, as a dictionary word
+    does. Grammar (kana only, every piece a grammar unit or a listed grammar word) costs nothing. Without the list
+    (plan.words None), nothing is priced."""
     import inflection
-    import knowledge
     if plan.words is None:
         return [], False
     offered = inflection.Lexicon([{'ja': s['ja'], 'kana': s.get('kana') or ''} for s in plan.swaps if s.get('ja')])
     listed = inflection.lexicon([{'ja': w['ja'], 'kana': w.get('kana') or ''} for w in plan.words])
-    status = {w['ja']: w.get('status') for w in plan.words}
+    by_ja = {w['ja']: w for w in plan.words}
     priced, outside = [], False
     for m in ABBR.finditer(marked):
         word = m.group(2).strip()
@@ -425,13 +507,11 @@ def _unoffered(marked, plan, now_ms):
                                          all(x in grammar.UNITS for x in grammar._split(word, glossed=True))):
             continue
         ja = listed.entry(word)
-        if ja is None:
+        if ja is None or by_ja[ja].get('dictionary'):
             outside = True
             continue
-        estimate = knowledge.word_estimate(plan.know, ja, 't3', now_ms)
-        chance = estimate[0] if estimate else knowledge.sigmoid(
-            -(fwlib.KNOWN_PRIOR_K if status.get(ja) == 'known' else knowledge.prior(None)))
-        if chance >= fwlib.FREE_P:
+        chance, free = weave_price(by_ja[ja], plan.recency, now_ms)
+        if not free:
             priced.append((ja, chance))
     return priced, outside
 
@@ -517,11 +597,13 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
                    'same line, keep other Japanese in glosses (or quoted in backticks), then run check-reply again.')
         return Checked('\n'.join(out))
     fixed = [f'- line {n}: {what}' for n, what in notes]
-    uses = {}
-    for w in words:  # in document order: the nth use of a word and gloss is the weave's nth swap of them
-        key = (w['ja'], w['title'])
-        w['en'], w['p'], w['free'], w['dictionary'] = _word_info(w, plan, now_ms, uses.get(key, 0))
-        uses[key] = uses.get(key, 0) + 1
+    matched = match_swaps(words, reply_contexts(parts), plan.swaps)
+    for w in words:  # each kept swap is the draft's swap whose English around it matches best
+        swap, sure = matched.get(id(w), (None, False))
+        w['en'], w['p'], w['free'], w['dictionary'] = _word_info(w, plan, now_ms, swap if sure else None)
+        if swap is not None and not sure:  # the word's numbers from its swap all the same: only the English is unsure
+            w['p'], w['free'], w['dictionary'] = float(swap.get('p', w['p'])), bool(swap.get('free')), \
+                bool(swap.get('dictionary'))
     # English sentences: swaps that can't stay go back to English
     keep = [id(w) for w in words]
     reverted = {}
