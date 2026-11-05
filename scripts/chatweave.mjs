@@ -10,7 +10,7 @@
 // (chatweave.py sentence_plan). Prints a first line with what it did, how many sentences to make Japanese (the
 // sentences' share of the budget over sentenceChance, the open chance of a typical allowed sentence, when the sentence
 // model is ready, else over the price), how long each may be and which grammar they may use, a line of -----, then
-// the woven draft. Runs under node or bun.
+// the woven draft; the count is never more than the price alone gives. Runs under node or bun.
 import { readFileSync } from 'node:fs';
 
 const src = (name) => new URL(`../extension/src/${name}`, import.meta.url).href;
@@ -90,8 +90,11 @@ const result = lines.map((l) => {
 }).join('\n');
 
 const learning = swaps.filter((s) => !s.free);
+// The sentence model's count (the budget over a typical allowed sentence's open chance), never more than the count the
+// price gave before it (the reader found that many already too much): the smaller of the two.
 const chance = input.sentenceChance > 0 && input.sentenceChance <= 1 ? input.sentenceChance : price;
-const sentences = Math.max(1, Math.round((budgetPer100 * wordCount(whole) / 100) * SENTENCE_SHARE / chance));
+const sentenceBudget = (budgetPer100 * wordCount(whole) / 100) * SENTENCE_SHARE;
+const sentences = Math.max(1, Math.min(Math.round(sentenceBudget / chance), Math.round(sentenceBudget / price)));
 const maxChars = Number.isFinite(input.maxChars) && input.maxChars > 0 ? input.maxChars : 14;
 const g = input.grammar && Array.isArray(input.grammar.known) ? input.grammar : null;
 const l = g && g.learning;

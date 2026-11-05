@@ -317,9 +317,9 @@ class FirstLine(unittest.TestCase):
         plan = {'sentenceChance': 0.02, 'maxChars': 11,
                 'grammar': {'known': ['は (topic)', 'です (is)'],
                             'learning': {'name': teiru.name, 'explain': teiru.explain, 'example': teiru.example}}}
-        head = self.run_mjs(**plan)
+        head = self.run_mjs(**dict(plan, sentenceChance=0.2))  # a model that pays for fewer than the price
         words = len(re.findall(r"[A-Za-z']+", self.DRAFT))
-        self.assertIn(f'Make about {round(0.5 * words / 100 * intensity.SENTENCE_SHARE / 0.02)} sentences', head)
+        self.assertIn(f'Make about {round(0.5 * words / 100 * intensity.SENTENCE_SHARE / 0.2)} sentence', head)
         self.assertIn('at most 11 Japanese characters', head)
         self.assertIn('grammar patterns: は (topic), です (is); plus at most one learning pattern', head)
         self.assertIn(f"This week's learning pattern is {teiru.name}: {teiru.explain}, as in {teiru.example}", head)
@@ -327,6 +327,19 @@ class FirstLine(unittest.TestCase):
         priced = self.run_mjs(**dict(plan, sentenceChance=None))  # not ready: the price
         self.assertIn(f'Make about {round(0.5 * words / 100 * intensity.SENTENCE_SHARE / 0.08)} sentences', priced)
         self.assertIn('No learning pattern this week', self.run_mjs(**dict(plan, grammar={'known': [], 'learning': None})))
+
+    def test_the_count_never_exceeds_the_old_price_rule(self):
+        count = lambda head: int(head.split('Make about ')[1].split(' ')[0])
+        for budget in (0.15, 0.5, 1.2):
+            for price in (0.08, 0.11):
+                old = count(self.run_mjs(budgetPer100=budget, sentencePrice=price))  # the rule before the model
+                for chance in (0.005, 0.034, 0.08, 0.5):
+                    new = count(self.run_mjs(budgetPer100=budget, sentencePrice=price, sentenceChance=chance,
+                                             maxChars=9, grammar={'known': ['は (topic)'], 'learning': None}))
+                    self.assertLessEqual(new, old, (budget, price, chance))
+                    if chance >= price:
+                        self.assertEqual(new, max(1, round(budget * len(re.findall(r"[A-Za-z']+", self.DRAFT)) / 100
+                                                           * intensity.SENTENCE_SHARE / chance)))
 
     def test_the_plan_from_the_state_and_the_fit(self):
         state = {'words': [], 'grammar': {'teiru': {'status': 'learning', 'since': '2026-11-01'}}}

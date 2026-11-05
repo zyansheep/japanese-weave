@@ -92,8 +92,8 @@ def pool(words, state, know):
 
 def sentence_plan(state, know):
     """What the weave's first line says about Japanese and mixed sentences (docs/grammar.md): sentenceChance, the
-    open chance of a typical allowed sentence once the sentence model is ready (sentence_model.typical; it replaces
-    the price of a sentence), maxChars, the most Japanese characters in one (sentence_model.max_chars), and grammar:
+    open chance of a typical allowed sentence once the sentence model is ready (sentence_model.typical; the count it
+    pays for is used when smaller than the price's, chatweave.mjs), maxChars, the most Japanese characters in one (sentence_model.max_chars), and grammar:
     the names of the known patterns and this week's learning pattern ({name, explain, example} or None)."""
     model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
     statuses = grammar.statuses(state)

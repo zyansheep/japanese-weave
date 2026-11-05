@@ -171,7 +171,10 @@ characters. The hardest patterns, with 90% intervals: から (from) +1.20 [+0.44
 
 **The weave's first line** (`fw.py weave`) says how many sentences to make Japanese or mixed: the level's budget times
 the sentences' share (18%), over the open chance of a typical allowed sentence (known patterns only, 70% of the length
-limit) once the fit is ready, else over the price as before; at most how many Japanese characters each may have (where
+limit) once the fit is ready, but never more than the same budget over the price gives (the count asked for before
+the model, which the reader already found too many), so the smaller of the two; before the fit is ready, the price's
+count as before. On the live log a typical allowed sentence's chance (3.4%) is under the price (8%), so the count stays
+what it was and the sentences only get shorter and simpler; at most how many Japanese characters each may have (where
 known patterns alone reach 5%, between 8 and 24; 14 until the fit is ready); the known patterns by name, plus at most
 one learning pattern a sentence; and this week's learning pattern with its explanation and example, to use on purpose
 once or twice. Other grammar stays out: the sentence is rephrased or stays English. `DRAFT_RULES` says the same.

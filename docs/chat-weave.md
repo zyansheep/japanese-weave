@@ -16,8 +16,8 @@ and to a length the log supports ([grammar.md](grammar.md)).
    Words known at a glance go in line by line. Learning words come from one budget for the whole reply, at most the
    level's number a sentence. A span the web would ask its model about is taken at its first option and marked
    `{{English→Japanese}}`. The first line says how many sentences to make Japanese or mixed: the level's budget times
-   the 18% sentence share, divided by the open chance of a typical allowed sentence once the sentence model is ready
-   (else by the price of a sentence). It also gives the most Japanese characters a sentence may have, the grammar
+   the 18% sentence share, divided by the open chance of a typical allowed sentence once the sentence model is ready,
+   but never more than divided by the price of a sentence gives (the count before the model): the smaller of the two. It also gives the most Japanese characters a sentence may have, the grammar
    patterns it may use (the known ones, plus at most one learning pattern), and this week's learning pattern with its
    explanation and example, to use on purpose once or twice (`chatweave.sentence_plan`). At full (level 3) there is no
    budget, and every dictionary entry with a sense flagged safe joins the pool, priced by its fitted prior; the length
