@@ -91,6 +91,24 @@ class Leveled:
         self.r, self.twins = r, twins
         self.els = [{'kind': e[0], 'on': e[1], 'parent': None if e[2] < 0 else e[2]} for e in r['e']]
 
+    def _shown(self, level):
+        owners = self.r['a']
+        return list(range(len(owners))) if level is None else [
+            j for j, o in enumerate(owners) if self.twins.visible(self.els, o, level)]
+
+    def twin_groups(self, level):
+        """{index of a sentence mark among the annotations shown at level: the indexes there of every annotation of
+        the same twin's Japanese}."""
+        owners, shown = self.r['a'], self._shown(level)
+        by_twin = {}
+        for k, j in enumerate(shown):
+            o = owners[j]
+            if o >= 0 and self.els[o]['kind'] == 's':
+                by_twin.setdefault(o, []).append(k)
+        marks = {s[0] for s in self.r['s']}
+        return {k: set(by_twin[owners[j]]) for k, j in enumerate(shown)
+                if j in marks and owners[j] >= 0 and owners[j] in by_twin}
+
     def sentences(self, level):
         """[(index among the annotations shown at level, chars, en, ids, meta)] for the sentences shown at level;
         level None: as if every glossed word showed (a client that doesn't know levels). meta: (level, threshold,
@@ -116,6 +134,32 @@ class Leveled:
             meta = (level, e[1] if e else None, prop, s[4] if len(s) > 4 else None, e[5] if e else None)
             out.append((place[s[0]], s[1], s[2], tuple(i for i in s[3] if i in grammar.BY_ID), meta))
         return out
+
+
+def mark_twins(contexts, by_fp):
+    """Gives each T3 message joined to a record with levels its twins: context "twins", {index of a sentence mark: the
+    indexes of every annotation of the same twin's Japanese}, at the level it reports (message_level), for
+    knowledge._in_english. Returns how many it marked."""
+    marked = 0
+    for c in contexts.values():
+        if c.get('surface') != 't3':
+            continue
+        found = by_fp.get(context_fp(c))
+        if not isinstance(found, tuple):
+            continue
+        entry, levels = found
+        groups = entry.twin_groups(message_level(c, levels))
+        if groups:
+            c['twins'] = groups
+            marked += 1
+    return marked
+
+
+def message_level(context, levels):
+    """The level a message joined to a record with levels is read at: the level it reports when its annotations match
+    the record's there, else the highest level they match (None: every glossed word, a client without levels)."""
+    return context.get('level') if context.get('level') in levels else max(
+        levels, key=lambda x: -9 if x is None else x)
 
 
 def records_by_fp(records):
@@ -165,8 +209,7 @@ def message_sentences(context, by_fp):
     notes = context['annotations']
     if isinstance(found, tuple):
         entry, levels = found
-        level = context.get('level') if context.get('level') in levels else max(levels, key=lambda x: -9 if x is None
-                                                                                 else x)
+        level = message_level(context, levels)
         return [(i, chars, ids, meta) for i, chars, _en, ids, meta in entry.sentences(level)
                 if i < len(notes) and notes[i][0] in grammar.MARKS]
     return [(i, chars, ids) for i, (chars, _en, ids) in sorted(found.items())

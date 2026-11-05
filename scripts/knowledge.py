@@ -378,12 +378,16 @@ def _opened(surface, notes, items):
     return opened
 
 
-def _in_english(notes, opened):
+def _in_english(notes, opened, twins=None):
     """The indexes of the annotations read in English: those of a sentence whose whole-sentence translation (its end,
-    a PUNCTUATION annotation) was opened, back to the previous sentence end."""
+    a PUNCTUATION annotation) was opened, back to the previous sentence end. In a message with levels (twins: {mark
+    index: the indexes of its twin's Japanese}, sentence_model.mark_twins), the opened mark's twin's own words only:
+    the English sentences around it, with their own swaps, were read as they are."""
     excluded = set()
     for index in opened:
-        if notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
+        if twins is not None and index in twins:
+            excluded.update(i for i in twins[index] if i != index)
+        elif notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
             start = max((i for i in range(index) if notes[i][0] in PUNCTUATION), default=-1)
             excluded.update(range(start + 1, index))
     return excluded
@@ -410,7 +414,7 @@ def observed(surface, context, items, listed, read=None):
     opened = _opened(surface, notes, items)
     if not opened and read is None:
         return []
-    excluded = _in_english(notes, opened)
+    excluded = _in_english(notes, opened, context.get('twins'))
     line = _line_height([n[2] for n in notes])
     lowest = max(notes[i][2] for i in opened) if opened else None
     best = {}
@@ -3027,6 +3031,12 @@ def refresh(now=None):
         changes = feedback.intensity_changes(feedback.default_path())
         english = [c for c in changes if c['surface'] == 'english']
         contexts = without_english(everything, english, now_ms)
+        try:  # a message with levels: an opened translation stands for its twin's words alone (_in_english)
+            import sentence_model
+            sentence_model.mark_twins(contexts, sentence_model.records_by_fp(
+                feedback.sentence_records(feedback.default_path())))
+        except Exception as error:
+            print(f'Japanese Weave: twins not marked ({error.__class__.__name__}: {error})', file=sys.stderr)
         reviews = feedback.reviews(feedback.default_path())
         state = fwlib.load_state()
         previous = load()

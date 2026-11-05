@@ -601,6 +601,22 @@ class ReviewRound2(Home):
         self.assertAlmostEqual(twin.cost_w, 1 / (1 + math.e))
         self.assertIsNone(twin.fixed)
 
+    def test_3_an_opened_twin_leaves_the_english_around_it_as_read(self):
+        info = '<abbr title="じょうほう · information" data-en="information" data-on="-2">情報</abbr>'
+        final = (f'Read the {info} below. <span data-jw="ja" data-on="0">{P}は{SMALL}です'
+                 '<abbr title="The problem is small.">。</abbr></span><span data-jw="en" data-on="0">The problem is '
+                 f'small.</span> The {info} is long.')
+        by_fp = sentence_model.records_by_fp([grammar.record(final, DAY)])
+        notes = [[w, 10, 0] for w in twins.shown_texts(final, 0)]
+        self.assertEqual([n[0] for n in notes], ['情報', '問題', '小さい', '。', '情報'])
+        context = {'surface': 't3', 'annotations': notes, 'level': 0}
+        self.assertEqual(sentence_model.mark_twins({('t3', 'v', 'c'): context}, by_fp), 1)
+        self.assertEqual(knowledge._in_english(notes, {3: 1.0}, context['twins']), {1, 2})  # the twin's own words
+        self.assertEqual(knowledge._in_english(notes, {3: 1.0}), {0, 1, 2})  # before: the English one too
+        observed = knowledge.observed('t3', context, [{'kind': 'pin', 'word': '。', 'position': 3, 'dwell_ms': 900}],
+                                      {'情報', '問題', '小さい'})
+        self.assertIn('情報', [o[0] for o in observed])  # read in the English sentence before it
+
     def test_4_a_single_letter_and_a_period_ends_no_sentence(self):
         for text in (f'Use the U.S. version, the {P} is small.{self.TWIN}', f'Meet at 9 a.m. tomorrow, the {P} is '
                      f'small.{self.TWIN}', f'It works in the U.S. The {P} is small.{self.TWIN}'):

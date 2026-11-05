@@ -121,6 +121,9 @@ about 0.03 of the exact chance), kept with its threshold, its prediction and whe
   (`grammar.record_levels`). The collector keeps each level a message was shown at as a showing of its own (its items
   carry the level; feedback.py stores them under `<message>@<level>`), and the join matches a showing's annotations
   against the fingerprint at its level, so it knows which sentences were on screen and where (`sentence_model`).
+  When the reader opens a twin's translation, only that twin's own words count as read in English
+  (`knowledge._in_english`, from the record's elements): the English sentences around it, and their swaps, were read
+  as they are.
 - *Selection.* Thresholds depend on the model's predictions, so without exploration the model would only see what it
   already predicts to be easy. `fw.py calibrate` compares expected and seen opens on the twins placed at random against
   those the model ranked, and gives the open chance over every twin written by inverse propensity. The fit itself stays
