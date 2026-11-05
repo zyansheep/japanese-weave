@@ -6,7 +6,8 @@ time to the reveal, the grade and the time to it. Python 3.9+, standard library 
 
   POST /v1/review/next  {"source": "desktop"|"mobile", "exclude"?: [up to EXCLUDE_MAX card ids the client holds],
                          "more"?: true to lift today's new-card limit for this request,
-                         "peek"?: true for the counts alone (a badge): card null, nothing served}
+                         "peek"?: true for the counts alone (a badge): card null, nothing served,
+                         "release"?: [up to EXCLUDE_MAX card ids served to this client and never shown]}
                         -> {"ok": true, "card": {"id", "ja", "kana", "gloss", "queue": "new"|"learning"|"review",
                             "intervals": {"again", "hard", "good", "easy"}} or null,
                             "counts": {"new", "learning", "review"}}
@@ -18,31 +19,37 @@ done for today (the client offers "Review more", which asks again with more). ca
 while the cards counted are held by the client or pending (below); the client asks again later. peek answers the
 counts alone, as the same request without it would have them, and serves nothing: no cards row is written, so no word
 is held back as pending and no made-up or probe word is used up (T3 Code's header badge and the phone's badge poll
-it).
+it). release gives back cards served to this client (source) and never shown, a dropped prefetch (feedback.
+release_cards): they are no longer pending, never count as left, and nothing reads them (no probe or made-up word used
+up, no showing); it is applied first, with peek too. A review item for a released card is rejected.
 
 The deck: every word with a graded learning card (its schedule: the replay of its graded reviews in time order, srs.
-replay, cached per database until another graded card is stored: schedules), plus the new cards: the learning words
+replay, each from the time its buttons were worked out, so the grade gets what its button showed; kept under the
+word's dictionary entry id when its cards had one, else its spelling, feedback.deck_key; cached per database until
+another graded card is stored: schedules), plus the new cards: the learning words
 (status learning) without one. A word the reader marked known themselves (the known command or op: its latest known
 or learn command is known and its status still is; known_by_command) leaves the deck; a word the model labels known
 keeps its schedule, since the model moving on says nothing about recall; a later learn command (or the model labelling
 it learning again) brings it back with its schedule. A word the delayed-start experiment hides or is about to probe
 (fwlib.phase held, paused or probe) is never served, nor counted, as before.
 
-Queue, Anki's order (v3, default options): first the learning and relearning cards due now, the earliest due first;
-then the review cards due today (Anki's day starts at 4am: srs.day_number), by due day, then at random; then new cards
-while today's limit lasts (NEW_PER_DAY, Anki's default 20: a word is new on the day of its first graded review), in
-today's order: the words behind on showings first (in their first BEHIND_DAYS days in use, from the delayed-start
-draw's time, else the day the word became learning, fewer than BEHIND_PER_DAY showings a day so far: the gloss log's,
-knowledge.json "history", and their review cards; the furthest behind first), then the least certain (the highest sd
-in knowledge.json); last, when nothing else is due, a learning card due within the learn-ahead window. more lifts the
-day's limit for one request (Anki's custom study "increase today's new card limit", without remembering it). Words
-of the cards in exclude are skipped, and so are words served in the last PENDING_MS whose review hasn't come back yet
-(a grade sent through T3 Code's batched events can arrive after the next request, which would otherwise show the same
-word again); neither is taken off the counts. A card left without a grade schedules nothing and stays due, but for
-LEFT_HOURS it waits behind every other card that can be served (the longest left first): a reader who closed the panel
-on it sees it again, and a client from before grades, which leaves every card, still moves through the words instead
-of getting the same one again. RECENT_HOURS no longer applies to these cards: learning steps come back within
-minutes.
+Queue, Anki's order (v3, default options): first the learning and relearning cards due now, the earliest due first; then
+the review cards due today (Anki's day starts at 4am: srs.day_number), by due day, then in an order fixed for the day (a
+hash of the day and the word, so ties don't reshuffle between requests); then new cards while today's limit lasts
+(NEW_PER_DAY, Anki's default 20: a word is new on the day of its first graded review, and a word served as new today
+whose review hasn't come back yet counts against the limit too, so a grade in flight can't let a 21st in), in today's
+order (ties broken by the same daily hash): the words behind on showings first (in their first BEHIND_DAYS days in use,
+from the delayed-start draw's time, else the day the word became learning, fewer than BEHIND_PER_DAY showings a day so
+far: the gloss log's, knowledge.json "history", and their review cards; the furthest behind first), then the least
+certain (the highest sd in knowledge.json); last, when nothing else is due, a learning card due within the learn-ahead
+window. more lifts the day's limit for one request (Anki's custom study "increase today's new card limit", without
+remembering it). Words of the cards in exclude are skipped, and so are words served in the last PENDING_MS whose review
+hasn't come back yet (a grade sent through T3 Code's batched events can arrive after the next request, which would
+otherwise show the same word again); neither is taken off the counts. A card left without a grade schedules nothing and
+stays due, but for LEFT_HOURS it waits behind every other card that can be served (the longest left first): a reader who
+closed the panel on it sees it again, and a client from before grades, which leaves every card, still moves through the
+words instead of getting the same one again. RECENT_HOURS no longer applies to these cards: learning steps come back
+within minutes.
 
 Probe and made-up cards are interleaved at random while there is a real card to serve: PROBE_SHARE (10%) of the cards
 served are probe words and FAKE_SHARE (5%) made-up words, drawn per request so the pattern can't be learned; they look
@@ -115,11 +122,12 @@ def request_error(body):
     """What is wrong with a POST /v1/review/next body, or None."""
     ident = lambda x: isinstance(x, str) and 0 < len(x) <= 64 and all(c.isalnum() or c in '_:-' for c in x)
     if not isinstance(body, dict) or body.get('source') not in SOURCES:
-        return 'need {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: true|false, "peek"?: true|false}'
-    exclude = body.get('exclude')
-    if exclude is not None and (not isinstance(exclude, list) or len(exclude) > EXCLUDE_MAX
-                                or not all(ident(x) for x in exclude)):
-        return f'exclude: a list of at most {EXCLUDE_MAX} card ids'
+        return ('need {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: true|false, "peek"?: true|false, '
+                '"release"?: [card ids]}')
+    for name in ('exclude', 'release'):
+        ids = body.get(name)
+        if ids is not None and (not isinstance(ids, list) or len(ids) > EXCLUDE_MAX or not all(ident(x) for x in ids)):
+            return f'{name}: a list of at most {EXCLUDE_MAX} card ids'
     for name in ('more', 'peek'):
         if body.get(name) is not None and not isinstance(body[name], bool):
             return f'{name}: true or false'
@@ -127,10 +135,12 @@ def request_error(body):
 
 
 def schedules(con, path=None):
-    """{word: (srs.Card, review log)} for every word with a graded learning card: its schedule, the replay of its graded
-    reviews in the order they were graded (feedback.graded; a review's time is when the grade was given), and the log,
-    [(reviewed ms, grade, the state it was in, grade_ms)]. Cached per database (path) under feedback.graded_mark and
-    the scheduler's settings, so storing a grade, or changing a parameter, recomputes them."""
+    """{key: (srs.Card, review log, word)} for every word with a graded learning card, under feedback.deck_key (its
+    entry id, else its spelling; feedback.deck_groups): its schedule, the replay of its graded reviews in the order they
+    were graded (feedback.graded; a review's time is when the grade was given, worked out from when the card was
+    served, its buttons' time), the log, [(reviewed ms, grade, the state it was in, grade_ms)], and its latest spelling.
+    Cached per database (path) under feedback.graded_mark and the scheduler's settings, so storing a grade, or changing
+    a parameter, recomputes them."""
     key = (feedback.graded_mark(con), srs.PARAMETERS, srs.DESIRED_RETENTION, srs.LEARNING_STEPS, srs.RELEARNING_STEPS,
            srs.MAXIMUM_INTERVAL, srs.ROLLOVER_HOUR)
     name = str(path or feedback.default_path())
@@ -138,13 +148,11 @@ def schedules(con, path=None):
         found = _SCHEDULES.get(name)
     if found and found[0] == key:
         return found[1]
-    by_word = {}
-    for r in feedback.graded(con=con):
-        by_word.setdefault(r['word'], []).append(r)
     out = {}
-    for word, rows in by_word.items():
-        card, log = srs.replay([(r['reviewed'], r['grade']) for r in rows], srs.card_id(word))
-        out[word] = (card, [(at, grade, state, r['grade_ms']) for (at, grade, state), r in zip(log, rows)])
+    for key, rows in feedback.deck_groups(feedback.graded(con=con)).items():
+        card, log = srs.replay([(r['reviewed'], r['grade'], r['served']) for r in rows], srs.card_id(key))
+        out[key] = (card, [(at, grade, state, r['grade_ms']) for (at, grade, state), r in zip(log, rows)],
+                    rows[-1]['word'])
     with _SCHEDULES_LOCK:
         _SCHEDULES[name] = (key, out)
     return out
@@ -160,47 +168,81 @@ def known_by_command(state, commands):
             if w.get('status') == 'known' and last.get(w['ja']) == 'known'}
 
 
-def queues(state, know, served, decks, now_ms, rng, more=False, commands=()):
-    """Today's queues and counts, as the module docstring orders them: {learning: [(card, word)] due now, earliest
-    first; review: [(card, word)] due today; new: [word] in today's order, within today's room (all with more); ahead:
-    [(card, word)] learning cards due within the learn-ahead window; counts: {new, learning, review}; introduced: words
-    whose first graded review was today}. word: the word state's entry."""
+def entry_of(w, know):
+    """A word state entry's dictionary entry id, as a card served for it records it (knowledge.json's, else the word
+    state's), or None."""
+    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    entry = entries.get(w['ja']) if isinstance(entries.get(w['ja']), dict) else {}
+    return entry.get('id') if isinstance(entry.get('id'), int) else w.get('id') if isinstance(w.get('id'), int) \
+        else None
+
+
+def daily(day, word):
+    """A tie-break fixed for the day: the same order on every request of Anki's day `day`."""
+    return fwlib.draw(f'review:{day}', word)
+
+
+def queues(state, know, served, decks, now_ms, rng=None, more=False, commands=()):
+    """Today's queues and counts, as the module docstring orders them: {learning: [(card, word, key)] due now,
+    earliest first; review: [(card, word, key)] due today; new: [word] in today's order, within today's room (all with
+    more), less the words served as new and still pending; ahead: [(card, word, key)] learning cards due within the
+    learn-ahead window; counts: {new, learning, review}; introduced: words whose first graded review was today;
+    pending: words served as new today, their review not back}. word: the word state's entry; key: its deck key.
+    served: feedback.cards (released ones are left out here). rng: unused (the order is fixed per day)."""
     today, day = knowledge.day_of(now_ms), srs.day_number(now_ms)
+    served = [c for c in served if c.get('released') is None]
     out = {'learning': [], 'review': [], 'new': [], 'ahead': [], 'introduced': 0}
     by_ja = {w['ja']: w for w in (state or {}).get('words') or ()
              if isinstance(w, dict) and isinstance(w.get('ja'), str)}
-    mine = known_by_command(state, commands)
-    for ja, (card, log) in decks.items():
+    by_entry = {}
+    for w in by_ja.values():
+        entry = entry_of(w, know)
+        if entry is not None:
+            by_entry.setdefault(entry, w)
+    mine, scheduled = known_by_command(state, commands), set()
+    for key, (card, log, spelling) in decks.items():
         if log and srs.day_number(log[0][0]) == day:
             out['introduced'] += 1
-        w = by_ja.get(ja)
-        if w is None or ja in mine or fwlib.phase(w, today) in HIDDEN or not 0 < len(ja) <= MAX_JA:
+        w = by_entry.get(int(key[6:])) if key.startswith('entry:') else None
+        w = w or by_ja.get(spelling)
+        if w is None:
+            continue
+        scheduled.add(w['ja'])
+        ja = w['ja']
+        if ja in mine or fwlib.phase(w, today) in HIDDEN or not 0 < len(ja) <= MAX_JA:
             continue
         if card.state == srs.REVIEW:
             if srs.is_due(card, now_ms):
-                out['review'].append((srs.day_number(card.due), rng.random(), card, w))
+                out['review'].append((srs.day_number(card.due), daily(day, ja), card, w, key))
         elif srs.is_due(card, now_ms):
-            out['learning'].append((card.due, card, w))
+            out['learning'].append((card.due, card, w, key))
         elif srs.is_due(card, now_ms, srs.LEARN_AHEAD_S):
-            out['ahead'].append((card.due, card, w))
-    out['learning'] = [(c, w) for _due, c, w in sorted(out['learning'], key=lambda t: t[0])]
-    out['ahead'] = [(c, w) for _due, c, w in sorted(out['ahead'], key=lambda t: t[0])]
-    out['review'] = [(c, w) for _d, _r, c, w in sorted(out['review'], key=lambda t: t[:2])]
-    fresh = _new_order(state, know, served, set(decks) | mine, today, now_ms, rng)
-    room = len(fresh) if more else max(0, NEW_PER_DAY - out['introduced'])
+            out['ahead'].append((card.due, card, w, key))
+    out['learning'] = [t[1:] for t in sorted(out['learning'], key=lambda t: (t[0], t[3]))]
+    out['ahead'] = [t[1:] for t in sorted(out['ahead'], key=lambda t: (t[0], t[3]))]
+    out['review'] = [t[2:] for t in sorted(out['review'], key=lambda t: t[:2])]
+    fresh = _new_order(state, know, served, scheduled | mine, today, now_ms, day)
+    pending = {c['word'] for c in served if c['kind'] == 'learning' and c.get('at') is None
+               and c['served_at'] >= now_ms - PENDING_MS and srs.day_number(c['served_at']) == day}
+    out['pending'] = {w['ja'] for w in fresh if w['ja'] in pending}
+    fresh = [w for w in fresh if w['ja'] not in out['pending']]
+    room = len(fresh) if more else max(0, NEW_PER_DAY - out['introduced'] - len(out['pending']))
     out['new'] = fresh[:room]
     out['counts'] = {'new': len(out['new']), 'learning': len(out['learning']) + len(out['ahead']),
                      'review': len(out['review'])}
     return out
 
 
-def next_card(source, exclude=(), db=None, now_ms=None, rng=None, more=False, peek=False):
+def next_card(source, exclude=(), db=None, now_ms=None, rng=None, more=False, peek=False, release=()):
     """The next card for a client, served and recorded here, and today's counts: ({id, ja, kana, gloss, queue,
-    intervals} or None, {new, learning, review}). peek: (None, the counts), nothing served or written. The word state
-    must exist (the collector answers 409 before asking)."""
+    intervals} or None, {new, learning, review}). peek: (None, the counts), nothing served or written. release: card
+    ids served to this source and never shown, given back first (feedback.release_cards). The word state must exist
+    (the collector answers 409 before asking)."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     rng = rng or random.SystemRandom()
     since = now_ms - max(probe.REPEAT_DAYS, FAKE_REUSE_DAYS) * DAY_MS
+    if release:
+        feedback.release_cards(release, source, now_ms, db)
     if peek:
         return None, counts_now(db, now_ms, more)
     with SERVING:
@@ -233,8 +275,7 @@ def counts_now(db=None, now_ms=None, more=False):
         served = feedback.cards(since=now_ms - max(probe.REPEAT_DAYS, FAKE_REUSE_DAYS) * DAY_MS, con=con)
     finally:
         con.close()
-    return queues(state, knowledge.load(), served, decks, now_ms, random.Random(0), more,
-                  knowledge.read_commands())['counts']
+    return queues(state, knowledge.load(), served, decks, now_ms, None, more, knowledge.read_commands())['counts']
 
 
 def choose(state, know, served, decks, exclude=(), now_ms=None, rng=None, frame=None, d=None, more=False,
@@ -246,19 +287,21 @@ def choose(state, know, served, decks, exclude=(), now_ms=None, rng=None, frame=
         return None, dict(NO_COUNTS)
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     rng = rng or random.SystemRandom()
+    served = [c for c in served if c.get('released') is None]  # given back unshown: as if never served
     q = queues(state, know, served, decks, now_ms, rng, more, commands)
     held = set(exclude or ())
     busy = {c['word'] for c in served
             if c['id'] in held or (c.get('at') is None and c['served_at'] >= now_ms - PENDING_MS)}
     left = _left(served, now_ms)
-    ready = [(card, w) for name in ('learning', 'review', 'new', 'ahead')
-             for card, w in (q[name] if name != 'new' else ((srs.NEW_CARD, w) for w in q['new']))
+    ready = [(card, w, key) for name in ('learning', 'review', 'new', 'ahead')
+             for card, w, key in (q[name] if name != 'new' else
+                                  ((srs.NEW_CARD, w, feedback.deck_key(entry_of(w, know), w['ja'])) for w in q['new']))
              if w['ja'] not in busy]
     found = next((t for t in ready if t[1]['ja'] not in left), None) or \
         min(ready, key=lambda t: left[t[1]['ja']], default=None)
     if found is None:
         return None, q['counts']
-    real = _deck_card(found[1], found[0], know, now_ms)
+    real = _deck_card(found[1], found[0], found[2], know, now_ms)
     draw = rng.random()
     if draw < PROBE_SHARE + FAKE_SHARE:
         today = knowledge.day_of(now_ms)
@@ -286,15 +329,12 @@ def _left(served, now_ms):
             if grade is None and at >= now_ms - LEFT_HOURS * 3_600_000}
 
 
-def _deck_card(w, card, know, now_ms):
-    """A deck word's card: its word, reading and meaning, entry id, queue and the four intervals."""
-    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
-    entry = entries.get(w['ja']) if isinstance(entries.get(w['ja']), dict) else {}
-    found = entry.get('id') if isinstance(entry.get('id'), int) else w.get('id') if isinstance(w.get('id'), int) \
-        else None
+def _deck_card(w, card, key, know, now_ms):
+    """A deck word's card: its word, reading and meaning, entry id, queue and the four intervals (key: its deck key,
+    the fuzz's card id)."""
     return {'word': w['ja'], 'kind': 'learning', 'kana': (w.get('kana') or '')[:MAX_KANA],
-            'gloss': (w.get('en') or '')[:MAX_GLOSS], 'entry': found, 'queue': srs.queue_of(card),
-            'intervals': srs.intervals(card, now_ms, srs.card_id(w['ja']))}
+            'gloss': (w.get('en') or '')[:MAX_GLOSS], 'entry': entry_of(w, know), 'queue': srs.queue_of(card),
+            'intervals': srs.intervals(card, now_ms, srs.card_id(key))}
 
 
 def learning_start(word):
@@ -314,9 +354,10 @@ def _number(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
-def _new_order(state, know, served, out, today, now_ms, rng):
+def _new_order(state, know, served, out, today, now_ms, day):
     """The learning words not in `out` (the deck's words and the ones marked known), in today's order: those behind on
-    showings first, the furthest behind first, then the least certain first."""
+    showings first, the furthest behind first, then the least certain first; ties by a hash fixed for Anki's day
+    `day` (daily)."""
     entries = know.get('words') if isinstance(know.get('words'), dict) else {}
     reviewed = {}
     for c in served:
@@ -335,10 +376,10 @@ def _new_order(state, know, served, out, today, now_ms, rng):
             shown = sum(1 for h in entry.get('history') or () if isinstance(h, dict) and _number(h.get('at'))
                         and h['at'] >= start) + sum(1 for at in reviewed.get(w['ja'], ()) if at >= start)
             if shown < BEHIND_PER_DAY * days:
-                behind.append((shown / days, rng.random(), w))
+                behind.append((shown / days, daily(day, w['ja']), w))
                 continue
         sd = entry.get('sd') if _number(entry.get('sd')) else math.inf  # no estimate yet: the least certain
-        rest.append((-sd, rng.random(), w))
+        rest.append((-sd, daily(day, w['ja']), w))
     return [t[2] for t in sorted(behind, key=lambda t: t[:2]) + sorted(rest, key=lambda t: t[:2])]
 
 
@@ -410,7 +451,7 @@ def summary(db=None, now_ms=None):
         con.close()
     start, month = srs.day_start(srs.day_number(now_ms)), now_ms - 30 * DAY_MS
     graded = [c['at'] + (c['grade_ms'] or 0) for c in served if c.get('grade') is not None]
-    log = [entry for _card, entries in decks.values() for entry in entries]
+    log = [entry for _card, entries, _word in decks.values() for entry in entries]
     kept = lambda since: [sum(1 for at, g, s, _ms in log if s == srs.REVIEW and at >= since and g > srs.AGAIN),
                           sum(1 for at, _g, s, _ms in log if s == srs.REVIEW and at >= since)]
     return {'counts': dict(counts), 'deck': len(decks), 'today': sum(1 for at in graded if at >= start),
@@ -423,15 +464,15 @@ REVLOG_COLUMNS = ('card_id', 'review_time', 'review_rating', 'review_state', 're
 
 def revlog(db=None):
     """The graded learning cards as the FSRS optimizer reads a review log (REVLOG_COLUMNS: the card's id, srs.card_id
-    of its word; when it was graded, ms; the grade 1..4; the state it was in, 0 new, 1 learning, 2 review, 3
+    of its deck key; when it was graded, ms; the grade 1..4; the state it was in, 0 new, 1 learning, 2 review, 3
     relearning; ms from shown to the grade), oldest first."""
     con = feedback.connect(db)
     try:
         decks = schedules(con, db)
     finally:
         con.close()
-    rows = [(srs.card_id(word), at, grade, srs.REVLOG_STATES[state], ms if ms is not None else '')
-            for word, (_card, log) in decks.items() for at, grade, state, ms in log]
+    rows = [(srs.card_id(key), at, grade, srs.REVLOG_STATES[state], ms if ms is not None else '')
+            for key, (_card, log, _word) in decks.items() for at, grade, state, ms in log]
     return sorted(rows, key=lambda r: (r[1], r[0]))
 
 

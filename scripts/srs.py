@@ -41,6 +41,9 @@ Scheduling, as Anki (v3 scheduler, FSRS on, default deck options):
   pure function of the card's id and its number of reviews so far (deterministic: a replay gives the same days, and
   the intervals shown on the buttons are the ones that will be used). A learning step gets up to 25% more, at most 5
   minutes, from the same factor; the buttons show the step without it, as Anki's do.
+- The buttons are what a grade gets (answer's shown): the transition is worked out at the time the buttons were (the
+  card's serving), and its interval counted from the grade (Anki answers with the states it showed, and counts a review
+  interval from the day of the answer), so a grade given past 4am, or on a card held a while, gets its button's days.
 - LEARN_AHEAD_S (20 minutes, Anki's learn-ahead limit): review.py shows a learning card that early when nothing else is
   due, and counts it among the learning cards due.
 
@@ -314,14 +317,18 @@ def learn_fuzz(u, secs):
     return secs if u is None or extra <= 0 else secs + int(math.floor(u * extra))
 
 
-def answer(card, grade, at, cid, fuzz=True):
+def answer(card, grade, at, cid, fuzz=True, shown=None):
     """The card after grading it `grade` (1..4) at `at` (ms): the memory state, the queue state and when it is due.
-    cid: card_id; fuzz False: no fuzz at all (to compare with an unfuzzed reference)."""
+    cid: card_id; fuzz False: no fuzz at all (to compare with an unfuzzed reference). shown: when its buttons were
+    worked out (intervals), if earlier: the memory state and the delay are the ones they showed, counted from the
+    grade (Anki answers with the state its buttons were computed from, and counts a review interval from the day of
+    the answer), so a grade given past 4am, or on a card held a while, gets what its button said."""
     u = fuzz_factor(cid, card.reps) if fuzz else None
-    nxt, (unit, n) = schedule(card, grade, next_states(card, at), u)
+    then = at if shown is None else min(at, max(shown, card.last if card.last is not None else shown))
+    nxt, (unit, n) = schedule(card, grade, next_states(card, then), u)
     today = day_number(at)
     if unit == 'secs':
-        days = _as_days(n, at)
+        days = _as_days(n, then)
         due = day_start(today + days) if days is not None else at + 1000 * learn_fuzz(u, n)
     else:
         due = day_start(today + n)
@@ -343,12 +350,14 @@ def intervals(card, at, cid, fuzz=True):
 
 
 def replay(reviews, cid, fuzz=True):
-    """A card's state after its graded reviews, [(at ms, grade)] in any order (sorted here by time, ties kept in the
-    order given), and its review log: [(at, grade, the state it was in)]. No reviews: NEW_CARD."""
+    """A card's state after its graded reviews, [(at ms, grade)] or [(at, grade, shown: when its buttons were worked
+    out)] in any order (sorted here by time, ties kept in the order given), and its review log: [(at, grade, the state
+    it was in)]. No reviews: NEW_CARD."""
     card, log = NEW_CARD, []
-    for at, grade in sorted(reviews, key=lambda r: r[0]):
+    for review in sorted(reviews, key=lambda r: r[0]):
+        at, grade = review[0], review[1]
         log.append((at, grade, card.state))
-        card = answer(card, grade, at, cid, fuzz)
+        card = answer(card, grade, at, cid, fuzz, review[2] if len(review) > 2 else None)
     return card, log
 
 

@@ -372,16 +372,22 @@ the grade (1 to 4), S the stability in days, D the difficulty (1 to 10):
 
 Around it, what Anki does (its scheduler's source, rslib/src/scheduler/states): days counted between day numbers with
 the day starting at 4am; learning steps of 1 and 10 minutes (Hard on the first: 5.5 minutes), relearning in 10 (Hard:
-15); graduation at the Good interval, Easy at least a day more; review intervals with Hard < Good < Easy and none
-shrunk by fuzz below the last; at most 36,500 days; Anki's fuzz (none under 2.5 days, then about +-1 day plus 15%, 10%
-and 5% of the days in its ranges), at a point fixed by the card's id and review count, so the intervals on the buttons
-are the ones used and a replay lands on the same days; up to 25% (at most 5 minutes) more on a learning step; and a
-20-minute learn-ahead. The fuzz factor comes from SHA-256 rather than Anki's random generator (another day within the
-same range), there is no load balancer, and the arithmetic is in doubles.
+15); graduation at the Good interval, Easy at least a day more; review intervals with Hard < Good < Easy and none shrunk
+by fuzz below the last; at most 36,500 days; Anki's fuzz (none under 2.5 days, then about +-1 day plus 15%, 10% and 5%
+of the days in its ranges), at a point fixed by the card's id and review count, so the intervals on the buttons are the
+ones used and a replay lands on the same days; up to 25% (at most 5 minutes) more on a learning step; and a 20-minute
+learn-ahead. As in Anki, a grade gets what its button showed: the transition is worked out when the card was served and
+counted from the day of the grade, so a card held past 4am keeps its button's days. A word's schedule is kept under its
+dictionary entry id when its cards have one (a card served before the word had an id joins the id's schedule by
+spelling, so nothing needs migrating), else its spelling. The fuzz factor comes from SHA-256 rather than Anki's random
+generator (another day within the same range), there is no load balancer, and the arithmetic is in doubles.
 
 The queue is Anki's: learning cards due, then review cards due today, then new cards, up to 20 a day (Review more lifts
-the limit for a request), from the learning words in the order the cards used before (behind on showings first, then
-the least certain), then a learning card up to 20 minutes early. A word the reader marks known leaves the deck; one the
+the limit for a request; a new card served and not yet graded counts against it, so a grade in flight can't let a 21st
+in), from the learning words in the order the cards used before (behind on showings first, then the least certain,
+ties broken the same way all day), then a learning card up to 20 minutes early. A client gives back cards it fetched
+ahead and never showed (release): they are as if never served, and a review of one is refused. A grade arriving for a
+card already reported as left completes it. A word the reader marks known leaves the deck; one the
 model labels known keeps its schedule (the model moving on says nothing about recall). Probe and made-up cards come in
 between at random while there is a real card to serve, 10% and 5% of the cards served, half the shares of the stream
 before grades: a day of Anki serves several times the 20 cards a day of then (each new word comes back through its
@@ -401,16 +407,19 @@ compares the review cards' observed retention with the 90% aimed for.
 
 ### Review cards in the fit
 
-A review card's outcome, for the reading model, is its grade when it has one, else the time from its appearing to the
-reveal, or that the reader moved on without one. A graded card of a real word is an explicit answer, read as a probe's
-answers are: Again is not known at recall (likelihood 1 - z), Hard, Good or Easy known (z), with z = sigmoid(k -
-review) below, and no correction for over-claiming, since the grade comes after the reveal. Its reveal time stays out of
-the mixture: the grade says more, and in the graded flow every card is revealed, which would bend the components'
-chance of no reveal. A made-up word's grade is given after the reveal says it is made up, so it claims nothing: its
-reveal time pins the "not known" component, graded or not. Ungraded cards (from clients before grades, or closed
-before grading) are read as before: times over a minute (distraction) and cards left within 150 ms (not looked at) are
-dropped, and every card of a real word is a read for the recency clock either way (it shows the word, and a reveal its
-meaning).
+A review card's outcome, for the reading model, depends on its flow. A client's cards are of the graded flow from its
+first grade on (the review panel: every graded card revealed first), else of the reveal flow (the wedge). A graded card
+of a real word is an explicit answer, read as a probe's answers are: Again is not known at recall (likelihood 1 - z),
+Hard, Good or Easy known (z), with z = sigmoid(k - review) below, and no correction for over-claiming, since the grade
+comes after the reveal. Not every grade is an answer: one on a learning or relearning step the same day, minutes after
+the last (Again, then Good after a minute, then Good after ten), says how the steps went, so only grades from the new or
+review state, or from a step left overnight, count, and at most one a word an Anki day; read as three answers, those
+steps cancelled the Again. The graded flow's other cards say nothing: one closed without a reveal is not a reader who
+knew the word (read as a reveal time, three such closes moved a word up by 0.44), and its made-up cards, always revealed
+to be graded, would drive the "not known" chance of no reveal toward 0. The mixture below is fitted from the reveal
+flow's cards alone, which are read as before: times over a minute (distraction) and cards left within 150 ms (not looked
+at) are dropped, and every card of a real word is a read for the recency clock either way (it shows the word, and a
+reveal its meaning).
 
 The ungraded outcome is a mixture (knowledge.Components). Known at recall: log time N(mu_K, s_K), and no reveal with chance
 a_K. Not known: N(mu_U, s_U) and a_U. These six are shared by every word; each component is held by a prior worth 10

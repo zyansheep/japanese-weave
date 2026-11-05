@@ -396,13 +396,14 @@ its intervals come out conservative: more reviews than strictly needed. A gloss 
 future "Again" signal, to be checked against your reviews once there is data.
 
 The fit reads a grade as an answer: Again as not known at recall, Hard, Good or Easy as known, at the word's knowledge
-with an offset of its own, as it reads a probe's answers. A card without a grade (from a client before grades, or one
-you closed) is read from its reveal time: one of two kinds, a word known at recall (quick) or not (slow, or a
-give-up), each with its own spread of times and its own chance of moving on without a reveal, shared by all words and
-held by a prior so a handful of cards can't swing them. Made-up words are never known, so their times are what "not
-known" looks like, give-ups included. If you give up on words you don't know as fast as you reveal words you do, the
-two kinds overlap and every such card counts for little; `fw.py knowledge` says how well they separate (how much of a
-yes/no answer one card is worth), and so does `fw.py status` for the probe.
+with an offset of its own, as it reads a probe's answers; not a grade on a learning step minutes after the last, and one
+a word a day. A card you close without grading says nothing, and the probe's estimate reads a probe card's grade as its
+answer. A card from a client before grades is read from its reveal time: one of two kinds, a word known at recall
+(quick) or not (slow, or a give-up), each with its own spread of times and its own chance of moving on without a reveal,
+shared by all words and held by a prior so a handful of cards can't swing them. Made-up words are never known, so their
+times are what "not known" looks like, give-ups included. If you give up on words you don't know as fast as you reveal
+words you do, the two kinds overlap and every such card counts for little; `fw.py knowledge` says how well they separate
+(how much of a yes/no answer one card is worth), and so does `fw.py status` for the probe.
 
 **The probe, in the review stream.** The probe and made-up cards of the last 30 days measure the goal directly: the
 share of the words in your reading you would read in Japanese without a lookup, each word weighted by how often it
