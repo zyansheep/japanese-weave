@@ -674,7 +674,8 @@ class ReviewRound3(Home):
     AGAIN = ReviewRound2.AGAIN
 
     def test_1_an_abbreviation_before_a_capital_is_ambiguous(self):
-        for before in ('It works in the U.S. The', 'Then run plan A. The', 'Pick option B. The', 'Ask Dr. Smith if the'):
+        for before in ('It works in the U.S. The', 'Then run plan A. The', 'Pick option B. The',
+                       'Ask Dr. Smith if the'):
             text = f'{before} {P} is small.{self.TWIN}'
             lines, _problems, _notes = twins.parse_authored(text)
             found = [seg for _n, segs in lines for seg in segs if seg[0] == 'twin']
@@ -738,6 +739,41 @@ class ReviewRound3(Home):
         self.assertEqual(render(unclosed), ['Intro. It rains. Out.'] * 4)  # a Japanese twin left open: English
         for text in (f'The {word} is small. {pair}', self_closing, lone, unclosed):
             self.assertFalse(twins.well_formed(text))
+
+
+class ClientParity(unittest.TestCase):
+    """What T3's clients show for markup check-reply doesn't write (review-r2c/r3 corpus, desktop and mobile)."""
+    PAIR = (f'<span data-jw="ja" data-on="{{on}}">{P}は{SMALL}です<abbr title="The problem is small.">。</abbr></span>'
+            '<span data-jw="en" data-on="{on}">The problem is small.</span>')
+
+    def test_an_invalid_threshold_renders_as_written_and_english_only_reads_it(self):
+        for on in ('−1', '01', '4', '-3', '+1'):
+            text = self.PAIR.format(on=on)
+            for level in twins.SHOWING:  # as written: both spans, the Japanese glossed
+                self.assertEqual(twins.shown_texts(text, level), ['問題', '小さい', '。'], (on, level))
+            shown = re.sub(r'<[^>]+>', '', twins.render(text, twins.OFF))
+            self.assertEqual(shown, 'The problem is small.The problem is small.', on)  # no Japanese in English only
+
+    def test_english_only_on_old_markup_follows_the_clients(self):
+        old = (f'Old <abbr title="あめ · rain">雨</abbr>です<abbr title="It is rain.">。</abbr> '
+               '<abbr title="もんだい · problem" data-en="problem" data-on="1">問題</abbr>.')
+        self.assertEqual(twins.render(old, twins.OFF), 'It is rain. problem.')
+        self.assertEqual(twins.shown_texts(old, 0), ['雨', '。'])
+        two = (f'Fine. {P}は{SMALL}です<abbr title="The problem is small.">。</abbr>Next <abbr title="いま · now">今</abbr>.')
+        self.assertEqual(twins.render(two, twins.OFF), 'Fine. The problem is small.Next now.')  # as the clients
+
+    def test_an_unclosed_level_abbr_replaces_only_its_run_of_japanese(self):
+        word = '<abbr title="もんだい · problem" data-en="problem" data-on="1">'
+        for after, expected in (('問題 is small.', 'The problem is small.'),
+                                ('問題です is small.', 'The problem is small.'),
+                                ('データー is new.', 'The problem is new.'), ('問題abc here.', 'The problemabc here.')):
+            for level in (twins.OFF, 0, 3):
+                self.assertEqual(twins.render(f'The {word}{after}', level), expected, (after, level))
+
+    def test_an_abbr_inside_another_goes_with_it(self):
+        nested = '<abbr title="a · x" data-en="x" data-on="1"><abbr title="b · y">雨</abbr></abbr> end.'
+        self.assertEqual(twins.render(nested, 0), 'x end.')
+        self.assertEqual(twins.shown_texts(nested, 0), [])
 
 
 if __name__ == '__main__':

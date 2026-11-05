@@ -87,12 +87,16 @@ unchanged. Malformed markup renders by one rule on both clients, which `twins.re
 a Japanese span pairs with an English one right after it (whitespace between allowed) of the same threshold; a lone
 English span always shows; a lone Japanese one shows from its threshold and below it is its last sentence mark's
 translation; in a broken message (a twin span left open, split by a blank line, or inside another) every pair shows its
-English, and a Japanese twin left open never shows; a `data-on` that isn't exactly -2..3 renders as written; an empty
-`data-en` is the gloss's first meaning; a self-closing `<abbr/>` or level `<span/>` is dropped; a level abbr whose
-`</abbr>` doesn't come before the next abbr or the end of its block is its English at every level, in place of its tag
-and the word after it, the rest of the block as it is; markup in code (inline, fenced or indented) is text. On the review's corpus of malformed and edge cases the Python
-rendering's glosses match the clients' in all 442 renderings where the two clients agree. A sentence record is made only
-for well-formed markup. Each report item T3 sends carries the level the message was rendered at, and the annotations and
+English, and a Japanese twin left open never shows; a `data-on` that isn't exactly -2..3 (`4`, `01`, a Unicode minus)
+renders as written; an empty `data-en` is the gloss's first meaning; a self-closing `<abbr/>` or level `<span/>` is
+dropped; a level abbr whose own `</abbr>` (abbrs nest as in HTML) doesn't come before the end of its block is its
+English at every level, in place of its tag and the run of Japanese (Han, kana, the long-vowel mark) its text starts
+with, the rest of the block as it is; English only (and off) renders everything as written below every threshold and
+then as the clients' English-only view reads older markup: each glossed sentence its translation, back to the previous
+mark, an English sentence's end, code, a tag or a line break, and each glossed word its meaning; markup in code (inline,
+fenced or indented) is text. On the review's corpus of malformed and edge cases the Python rendering's glosses match the
+clients' in every rendering where the two clients agree (code shown literally aside). A sentence record is made only for
+well-formed markup. Each report item T3 sends carries the level the message was rendered at, and the annotations and
 words it reports come from the screen, so a hidden word is never reported as shown.
 
 **Thresholds.** One order per reply and kind, cut at each budgeted level's lookup budget (`intensity.budget` per 100 of

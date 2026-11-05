@@ -256,16 +256,30 @@ def _last_translation(content):
     return found
 
 
+JAPANESE_CHARS = '\u3005\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f'
+JAPANESE_RUN = re.compile(f'[{JAPANESE_CHARS}]*')
 SELF_CLOSING = re.compile(r'<(abbr|span)\b' + TAG_BODY + r'/>', re.I)
 ABBR_OPEN = re.compile(r'<abbr\b' + TAG_BODY + r'>', re.I)
 ABBR_CLOSE = re.compile(r'</abbr\s*>', re.I)
+ABBR_TAG = re.compile(r'<abbr\b' + TAG_BODY + r'>|</abbr\s*>', re.I)
+
+
+def _abbr_close(text, m):
+    """The </abbr> that closes the abbr opened at m, as HTML nests them, or None."""
+    depth = 1
+    for t in ABBR_TAG.finditer(text, m.end()):
+        depth += -1 if t.group().startswith('</') else 1
+        if depth == 0:
+            return t
+    return None
 
 
 def _repair(p):
     """p (code out) as the clients read a finished message's broken tags: a self-closing <abbr/> or level <span/> is
-    dropped; an abbr with a threshold whose </abbr> doesn't come before the next abbr or the end of its block is its
-    English (data-en, else its gloss's meaning) in place of its tag and the word after it, at every level, and the rest
-    of the block is read as it is."""
+    dropped; an abbr with a threshold whose own </abbr> (as HTML nests them) doesn't come before the end of its block
+    is its English (data-en, else its gloss's meaning) in place of its tag and the run of Japanese its text starts with
+    (Han, hiragana, katakana and the long-vowel mark: JAPANESE_RUN), at every level, and the rest of the block is read
+    as it is."""
     def drop(m):
         a = attrs(m.group(2))
         return '' if m.group(1).lower() == 'abbr' or 'data-jw' in a or 'data-on' in a else m.group()
@@ -275,15 +289,14 @@ def _repair(p):
         if m.start() < at:
             continue
         a = attrs(m.group(1))
-        close, after = ABBR_CLOSE.search(p, m.end()), ABBR_OPEN.search(p, m.end())
+        close = _abbr_close(p, m)
         block = BLANK_LINE.search(p, m.end())
-        limit = min(x.start() for x in (after, block) if x) if (after or block) else len(p)
-        if _threshold(a) is None or (close and close.start() < limit):
+        if _threshold(a) is None or (close and (not block or close.start() < block.start())):
             continue
-        word = re.match(r'[^\s<]*', p[m.end():])
+        word = JAPANESE_RUN.match(p, m.end())
         english = a.get('data-en') or meaning(a.get('title'))
         out.append(p[at:m.start()] + esc_text(english))
-        at = m.end() + word.end()
+        at = word.end()
     return ''.join(out) + p[at:]
 
 
@@ -336,12 +349,22 @@ def tokens(text):
 
 
 def _abbrs(text, back=lambda t: t):
-    out, at = [], 0
-    for m in ABBR.finditer(text):
+    """[('raw', text) | ('abbr', {attributes}, inner, as written)] of text, each abbr matched to its own </abbr> as
+    HTML nests them (an abbr inside another is part of the outer one's inner text); an abbr never closed is text."""
+    out, at, pos = [], 0, 0
+    while True:
+        m = ABBR_OPEN.search(text, pos)
+        if not m:
+            break
+        close = _abbr_close(text, m)
+        if close is None:
+            pos = m.end()
+            continue
         if m.start() > at:
             out.append(('raw', back(text[at:m.start()])))
-        out.append(('abbr', attrs(m.group(1)), back(m.group(2)), back(m.group())))
-        at = m.end()
+        out.append(('abbr', attrs(back(m.group(1))), back(text[m.end():close.start()]),
+                    back(text[m.start():close.end()])))  # backticks in a value too
+        at = pos = close.end()
     if at < len(text):
         out.append(('raw', back(text[at:])))
     return out
@@ -361,8 +384,7 @@ def _threshold(a):
 
 def _word(t, level):
     """One glossed word at a level: one with a threshold shows from it (else its data-en, else its meaning, else as
-    written); one with a data-on that isn't one, or with none, as written above off, and at off its meaning (a
-    closing mark: nothing), as English only shows older messages."""
+    written); one with a data-on that isn't one, or with none, as written (at off, english_only then reads it)."""
     a, inner, raw = t[1], t[2], t[3]
     on = _threshold(a)
     if on is not None:
@@ -370,10 +392,8 @@ def _word(t, level):
             return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
         english = a.get('data-en') or meaning(a.get('title'))
         return esc_text(english) if english else raw
-    if 'data-on' in a and level > OFF:
+    if 'data-on' in a:
         return raw
-    if level <= OFF:
-        return '' if grammar.clean(inner).strip() in END_MARKS else esc_text(meaning(a.get('title')))
     return f'<abbr title="{esc(a.get("title", ""))}">{inner}</abbr>'
 
 
@@ -396,8 +416,9 @@ def render(text, level):
     its Japanese from its threshold and its English below; an English twin with no pair always shows; a Japanese one
     with no pair shows from its threshold and below it is its last sentence mark's translation, or nothing; in a
     broken message (_spans) every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in
-    inline code is text. A reply without levels is unchanged above off; at off its glossed words become their meanings
-    and its sentence marks go (English only)."""
+    inline code is text. A reply without levels is unchanged above off. At off (and English only) everything is
+    rendered as written below every threshold, then read as English only shows it (english_only): its glossed
+    sentences their translations, its glossed words their meanings."""
     text = str(text)
     if not has_levels(text) and level > OFF:
         return text
@@ -420,6 +441,59 @@ def render(text, level):
             if not t[3]:
                 out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
                            esc_text(_last_translation(t[2])))
+    return english_only(''.join(out)) if level <= OFF else ''.join(out)
+
+
+SENTENCE_MARK = re.compile(r'[。？！?!]+')
+ENGLISH_END = re.compile(r'[.?!]["\'’”)\]]*\s')
+STOP = re.compile(ABBR.pattern + r'|<[^>]*>|\n|[\ue000-\uefff]', re.S | re.I)
+JAPANESE_ANY = re.compile(f'[{JAPANESE_CHARS}]')
+
+
+def english_only(text):
+    """Text as English only shows it, by the clients' transform (T3's markdownLevel toEnglish): each sentence ending in
+    a glossed closing mark (its title the translation) is its translation, from the mark back to the previous mark,
+    an English sentence's end in text, code, a tag or a line break, or the start, keeping the space before it (and
+    adding one after English); then each glossed word with Japanese in it is its meaning. Code stays as written."""
+    out = []
+    for code, piece in _chunks(str(text)):
+        if code:
+            out.append(piece)
+            continue
+        p, saved = _code_out(piece)  # code: placeholders from U+E000, a stop
+        words = []                   # glossed words kept for now: placeholders from U+F000
+        res, floor, at = '', 0, 0
+        for m in STOP.finditer(p):
+            res += p[at:m.start()]
+            at = m.end()
+            token = m.group()
+            if not token.lower().startswith('<abbr'):
+                res += token
+                floor = len(res)
+                continue
+            a = attrs(m.group(1))
+            title = a.get('title', '').strip()
+            inner = grammar.clean(m.group(2)).strip()
+            if title and SENTENCE_MARK.fullmatch(inner):
+                start = floor
+                for e in ENGLISH_END.finditer(res, floor):
+                    start = e.end()
+                leading = re.match(r'\s*', res[start:]).group()
+                res = res[:start]
+                before = res[-1:] if len(res) > floor or start > floor else ''
+                space = leading or (' ' if before and not before.isspace() else '')
+                res += space + esc_text(title)
+                floor = len(res)
+                continue
+            words.append((token, title, inner))
+            res += chr(0xF000 + len(words) - 1)
+        res += p[at:]
+        def word(m):
+            token, title, inner = words[ord(m.group()) - 0xF000]
+            english = meaning(title) if JAPANESE_ANY.search(inner) else ''
+            return esc_text(english) if english else token
+        res = re.sub('[\uf000-\uf8ff]', word, res)
+        out.append(_restore(res, saved))
     return ''.join(out)
 
 
@@ -593,8 +667,9 @@ def twin_trouble(s, begin, english, japanese):
     """Why a twin can't stand in for its English, or None (s: its line with code and glosses as placeholders; begin:
     where its English starts): its English is more than one sentence (abbreviations aside), or has an abbreviation or
     a single letter's period before a capital (AMBIGUOUS: where it starts can't be told), sits in a table row or a
-    task list, holds a link, leaves markdown open (bold, italic, a link, code) or starts inside markdown the line left open before it, or its Japanese
-    leaves markdown open. Such a twin would cut through the reader's markdown, or hide a sentence with its own."""
+    task list, holds a link, leaves markdown open (bold, italic, a link, code) or starts inside markdown the line left
+    open before it, or its Japanese leaves markdown open. Such a twin would cut through the reader's markdown, or hide
+    a sentence with its own."""
     if AMBIGUOUS.search(english):
         return ('its English has an abbreviation or a single letter with a period before a capital (as in "the U.S. '
                 'The" or "Dr. Smith"), so where its sentence starts is unclear')
