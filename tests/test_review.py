@@ -314,7 +314,7 @@ class Events(Home):
                dict(good, revealMs=-1), dict(good, revealMs=True), dict(good, revealMs='700'),
                dict(good, shownMs=None), dict(good, shownMs=feedback.MAX_REVIEW_MS + 1),
                dict(good, source='web'), dict(good, uid='a b'), dict(good, card=''), dict(good, card='x' * 65),
-               dict(good, word=''), dict(good, at=self.NOW - 8 * DAY), dict(good, at=self.NOW + HOUR),
+               dict(good, word=''), dict(good, at=self.NOW - 8 * DAY), dict(good, at=self.NOW + HOUR + 1),
                {k: v for k, v in good.items() if k != 'card'}, {k: v for k, v in good.items() if k != 'shownMs'}]
         found = self.record(*bad)
         self.assertEqual(len(found.pop('reasons')), len(bad))  # each with why
@@ -353,6 +353,34 @@ class Events(Home):
         self.assertEqual(self.record(dict(late, grade=1, uid='g-2')), {'stored': 0, 'duplicates': 1, 'rejected': 0})
         self.assertEqual(self.record(late), {'stored': 0, 'duplicates': 1, 'rejected': 0})
         self.assertEqual([r['card'] for r in feedback.graded(self.db)], ['c0'])
+
+    def test_a_client_clock_ahead_is_taken_as_now(self):
+        ahead = reviewed('c0', self.NOW + 30 * 60_000, 700, 2000, word='問題', grade=3, graded=1200)
+        self.assertEqual(self.record(ahead)['stored'], 1)
+        self.assertEqual(feedback.reviews(self.db)[0]['at'], self.NOW)
+        found = self.record(reviewed('c1', self.NOW + HOUR + 1, 700, word='時間'))
+        self.assertEqual(found['reasons'], [{'item': 0, 'error': 'at: a time within the last 7 days'}])
+
+    def test_every_rejected_item_has_its_reason(self):
+        """A batch of 50 rejected items (as T3 Code sends them): one reason each, by index, so each can be settled."""
+        items = [reviewed('c9', self.NOW - 1000, 700, word='問題') for _ in range(25)]
+        items += [{'kind': 'peek', 'view': 'v', 'context': 'c'} for _ in range(24)]  # malformed interactions too
+        items.append(reviewed('c0', self.NOW - 1000, 700, word='問題'))  # stored
+        found = self.record(*items)
+        self.assertEqual((found['stored'], found['rejected']), (1, 49))
+        self.assertEqual([r['item'] for r in found['reasons']], list(range(49)))
+        self.assertEqual(found['reasons'][30]['error'], 'malformed or too old')
+
+    def test_a_long_left_card_completed_keeps_its_times_in_order(self):
+        self.record(reviewed('c0', self.NOW - 3 * HOUR, None, 2000, word='問題'))
+        late = reviewed('c0', self.NOW - 1000, 700, 1500, word='問題', grade=3, graded=1200)
+        self.assertEqual(self.record(late)['stored'], 1)
+        row = feedback.cards(self.db)[0]
+        self.assertTrue(row['reveal_ms'] <= row['grade_ms'] <= row['shown_ms'] <= feedback.MAX_REVIEW_MS, row)
+        self.record(reviewed('c1', self.NOW - 3 * DAY, None, 2000, word='時間'))  # left days ago
+        self.record(reviewed('c1', self.NOW - 1000, 700, 1500, word='時間', grade=1, graded=1200))
+        row = [r for r in feedback.cards(self.db) if r['id'] == 'c1'][0]
+        self.assertEqual((row['reveal_ms'], row['grade_ms'], row['shown_ms']), (feedback.MAX_REVIEW_MS,) * 3)
 
     def test_a_rejected_review_says_why(self):
         long = reviewed('c0', self.NOW - 1000, 700, feedback.MAX_REVIEW_MS + 1, word='問題')
@@ -941,7 +969,49 @@ class Queue(Deck):
         deck = self.deck()
         self.assertEqual(list(deck), ['entry:1234567'])
         self.assertEqual((deck['entry:1234567'][0].state, deck['entry:1234567'][0].reps), ('review', 2))
-        self.assertEqual(review.revlog(self.db)[0][0], srs.card_id('entry:1234567'))
+        self.assertEqual(review.revlog(self.db)[0][0], srs.card_id(w0))  # the fuzz's id: unchanged by the id
+
+    def test_two_spellings_of_one_entry_are_one_card(self):
+        """Two learning words with one dictionary entry (a kanji spelling and a kana one): one new card, one schedule;
+        the other spelling never comes up as new, and the day's limit counts the word once."""
+        w0, w1 = self.words[:2]
+        know = fwlib.read_json(fwlib.home() / knowledge.KNOWLEDGE)
+        know['words'][w0]['id'] = know['words'][w1]['id'] = 4242
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, know)
+        card, counts = self.next(self.T0)
+        self.assertEqual((card['ja'], counts['new']), (w0, 20))
+        self.grade(card, self.T0, srs.GOOD)
+        seen = []
+        for i in range(25):
+            card, counts = self.next(self.T0 + (i + 1) * 30_000)
+            if card is None:
+                break
+            seen.append(card['ja'])
+            self.grade(card, self.T0 + (i + 1) * 30_000, srs.EASY)
+        self.assertNotIn(w1, seen)
+        self.assertEqual(len([k for k in self.deck() if k == 'entry:4242']), 1)
+        self.assertEqual(len(self.deck()), review.NEW_PER_DAY)  # the shared word once among the day's 20
+
+    def test_a_word_whose_entry_id_changes_keeps_one_schedule(self):
+        rows = [{'card': 'a', 'word': 'x', 'entry': None}, {'card': 'b', 'word': 'x', 'entry': 7},
+                {'card': 'c', 'word': 'x', 'entry': 8}, {'card': 'd', 'word': 'y', 'entry': 8},
+                {'card': 'e', 'word': 'z', 'entry': None}]
+        groups = feedback.deck_groups(rows)
+        self.assertEqual({k: [r['card'] for r in v] for k, v in groups.items()},
+                         {'entry:8': ['a', 'b', 'c', 'd'], 'z': ['e']})
+
+    def test_text_is_cut_as_t3_counts_it(self):
+        wide = chr(0x20000)  # a character beyond the BMP: two UTF-16 code units
+        self.assertEqual(review.utf16('a' + wide), 3)
+        self.assertEqual(review.cut('a' * 199 + wide, 200), 'a' * 199)  # not split, and within 200 code units
+        self.assertEqual(review.cut(wide * 100, 200), wide * 100)
+        state = fwlib.load_state()
+        for w in state['words']:
+            if w['ja'] == self.words[0]:
+                w['en'] = 'b' * 199 + wide + 'c'
+        fwlib.save_state(state)
+        card, _ = self.next(self.T0)
+        self.assertEqual((card['ja'], review.utf16(card['gloss'])), (self.words[0], 199))
 
     def test_pending_and_excluded_words_wait(self):
         w0, w1, w2 = self.words[:3]

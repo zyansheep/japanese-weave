@@ -63,8 +63,9 @@ gradeMs, revealMs <= gradeMs <= shownMs; an item without one is a card left (clo
 schedules nothing. A review is stored on its card's row, once: it must name a card served here with that word and not
 released, and a second review of a card (a resend, with or without the same uid) is a duplicate, except that a graded
 item completes a card stored as left (no grade yet: a client that reported closing the card, then the grade), keeping
-the first time it was shown. A rejected review item's reason comes back in the reply (reasons), so a client can say why
-(shownMs over MAX_REVIEW_MS, a day, is one: clients clamp to it). With a collector configured (setup
+the first time it was shown. Every rejected item's reason comes back in the reply (reasons, by index), so a client can
+settle items one by one and say why (shownMs over MAX_REVIEW_MS, a day, is one: clients clamp to it); a review item's
+time up to FUTURE_MS ahead of the collector's clock is taken as now. With a collector configured (setup
 --collector), the native host forwards items to it instead (see collector.py), and knowledge.py runs there.
 """
 import gzip
@@ -92,6 +93,8 @@ REVIEW_SOURCES = ('desktop', 'mobile')
 GRADES = (1, 2, 3, 4)  # a review card's grade, as Anki's buttons: Again, Hard, Good, Easy (srs.py)
 CARD_KINDS = ('learning', 'probe', 'fake')
 MAX_REVIEW_MS = 86_400_000  # the longest a card may have been on screen (knowledge.py drops those over a minute)
+FUTURE_MS = 3_600_000      # a review item's time this far ahead of the collector's clock is taken as now (a client
+                           # clock running fast would otherwise lose its grades for good); further ahead, rejected
 BLANK = '[]'  # the annotations of a passage shown without Japanese
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
@@ -316,8 +319,9 @@ def _clean_review(item, now, num, word, ident):
     (a gradeMs without a grade is malformed too)."""
     at, reveal, shown, uid = item.get('at'), item.get('revealMs'), item.get('shownMs'), item.get('uid')
     grade, graded = item.get('grade'), item.get('gradeMs')
-    if not num(at) or not now - WINDOW_MS <= at <= now + 60_000:
+    if not num(at) or not now - WINDOW_MS <= at <= now + FUTURE_MS:
         return 'at: a time within the last 7 days'
+    at = min(at, now)  # a client clock running ahead: taken as now (not up to FUTURE_MS: dropped)
     if not ident(item.get('card')) or not word(item.get('word')) or item.get('source') not in REVIEW_SOURCES:
         return 'card, word and source ("desktop" or "mobile") are needed'
     if not num(shown) or not 0 <= shown <= MAX_REVIEW_MS:
@@ -401,7 +405,6 @@ CARD_REVIEW = ('UPDATE cards SET at = ?, reveal_ms = ?, shown_ms = ?, via = ?, u
 CARD_GRADE = ('UPDATE cards SET reveal_ms = ?, shown_ms = ?, grade = ?, grade_ms = ?, via = ?, '
               'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) '
               'WHERE id = ? AND word = ? AND at IS NOT NULL AND grade IS NULL AND released IS NULL')
-MAX_REASONS = 20
 
 
 def _complete(con, c):
@@ -412,16 +415,17 @@ def _complete(con, c):
     if c['grade'] is None or not found:
         return False
     shift = c['at'] - found[0]
-    reveal = max(0, c['revealMs'] + shift)
-    graded = max(reveal, c['gradeMs'] + shift)
+    graded = min(MAX_REVIEW_MS, max(0, c['gradeMs'] + shift))  # 0 <= reveal <= graded <= shown <= MAX_REVIEW_MS
+    reveal = min(graded, max(0, c['revealMs'] + shift))
     shown = min(MAX_REVIEW_MS, max(graded, c['shownMs'] + shift))
     return con.execute(CARD_GRADE, (reveal, shown, c['grade'], graded, c['source'], c['card'],
                                     c['word'])).rowcount > 0
 
 
 def record(items, surface, path=None, now=None, hide=None):
-    """Stores well-formed items. Returns {stored, duplicates, rejected} and, when a review item was rejected, reasons:
-    [{item: its index in items, error}] (at most MAX_REASONS): a resent interaction (same uid) is stored once, and
+    """Stores well-formed items. Returns {stored, duplicates, rejected} and, from T3 when any item was rejected,
+    reasons: [{item: its index in items, error}], one per rejected item (every one, so T3 Code's server can settle
+    items one by one): a resent interaction (same uid) is stored once, and
     malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its card
     (CARD_REVIEW): one naming no card served here with its word, or a card released, is rejected; one for a card
     already reviewed is a duplicate, unless it brings the grade of a card stored as left (_complete). hide: (start,
@@ -435,14 +439,15 @@ def record(items, surface, path=None, now=None, hide=None):
     cleaned = []
     for index, item in enumerate(batch):
         c = _clean(item, now)
-        if isinstance(c, str) or (c and c['kind'] == REVIEW and surface != 't3'):
-            why = c if isinstance(c, str) else 'review items come from T3 (surface t3)'
+        if not c or isinstance(c, str) or (c['kind'] == REVIEW and surface != 't3'):
+            why = c if isinstance(c, str) else 'malformed or too old' if not c else \
+                'review items come from T3 (surface t3)'
             reasons.append({'item': index, 'error': why})
-        elif c:
+        elif hide and surface == 't3' and c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1]:
+            reasons.append({'item': index, 'error': 'shown while English only was on'})
+        else:
             c['index'] = index
             cleaned.append(c)
-    if hide and surface == 't3':
-        cleaned = [c for c in cleaned if not (c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1])]
     stored = duplicates = refused = 0
     if cleaned:
         con = connect(path)
@@ -496,7 +501,9 @@ def record(items, surface, path=None, now=None, hide=None):
         finally:
             con.close()
     out = {'stored': stored, 'duplicates': duplicates, 'rejected': len(batch) - len(cleaned) + refused}
-    return dict(out, reasons=reasons[:MAX_REASONS]) if reasons else out
+    if not reasons or surface != 't3':  # T3 Code's server settles its items one by one; the browser's host needn't
+        return out
+    return dict(out, reasons=sorted(reasons, key=lambda r: r['item']))
 
 
 CARD_COLUMNS = ('id', 'served_at', 'source', 'word', 'kind', 'entry', 'band', 'weight', 'at', 'reveal_ms', 'shown_ms',
@@ -564,18 +571,31 @@ def deck_key(entry, word):
 
 
 def deck_groups(rows):
-    """Graded learning cards (graded, or reviews' rows of kind learning) grouped by deck_key, oldest grade first: a
-    card served without an entry id joins the entry of another card of the same spelling, so the replay needs no
-    migration when a word gets its id later."""
-    entries = {}
+    """Graded learning cards (graded, or reviews' rows of kind learning; in the order given, oldest grade first) as one
+    group per word: cards are one word's when they share a spelling or an entry id, transitively (a card served before
+    the word had an id, a word whose id changed, two spellings of one entry: one schedule, no migration). {key: rows},
+    the key deck_key of the group's latest entry id (else its latest spelling)."""
+    parent = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    entry_of = lambda r: r.get('entry') if isinstance(r.get('entry'), int) and not isinstance(r.get('entry'), bool) \
+        else None
     for r in rows:
-        if isinstance(r.get('entry'), int) and not isinstance(r.get('entry'), bool):
-            entries.setdefault(r['word'], r['entry'])
+        if entry_of(r) is not None:
+            parent[find(('w', r['word']))] = find(('e', entry_of(r)))
+        find(('w', r['word']))
+    groups = {}
+    for r in rows:
+        groups.setdefault(find(('w', r['word'])), []).append(r)
     out = {}
-    for r in rows:
-        entry = r.get('entry') if isinstance(r.get('entry'), int) and not isinstance(r.get('entry'), bool) \
-            else entries.get(r['word'])
-        out.setdefault(deck_key(entry, r['word']), []).append(r)
+    for group in groups.values():
+        entries = [entry_of(r) for r in group if entry_of(r) is not None]
+        out[deck_key(entries[-1] if entries else None, group[-1]['word'])] = group
     return out
 
 

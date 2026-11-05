@@ -13,8 +13,8 @@ private network such as Tailscale. Python 3.9+, standard library only.
   POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
                           -> {"ok": true, "stored": n, "duplicates": n, "rejected": n, "reasons"?: [{"item": index,
                           "error"}]}  (see feedback.py; T3 also sends review items, what happened to a review card,
-                          with its grade when given; reasons: why review items were rejected, such as a shownMs over a
-                          day)
+                          with its grade when given; reasons, from T3: why each rejected item was, by index, such as a
+                          shownMs over a day)
   POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool, "peek"?: bool,
                           "release"?: [card ids]}: the next review card, in Anki's order (review.py; more: past today's
                           new-card limit; peek: the counts alone, for a badge: card null, nothing served or recorded;

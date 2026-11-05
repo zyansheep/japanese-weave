@@ -1361,7 +1361,11 @@ def is_grade(g):
 
 
 def graded_flow(reviews):
-    """{client: when it first sent a grade}: from then on its cards are of the graded flow (review_answers)."""
+    """{client: when it first sent a grade}: from then on its cards are of the graded flow (review_answers). A client is
+    a review item's source (desktop or mobile): the items carry no finer client id, so an older build of the same
+    source that never grades, still in use after a newer one graded, has its cards read as graded-flow cards left
+    without a grade, which say nothing. That loses only the reveal times' weak evidence, for as long as the old build
+    runs; a client id on review items would be the fix if that ever matters."""
     out = {}
     for r in reviews or ():
         if isinstance(r, dict) and is_grade(r.get('grade')) and isinstance(r.get('at'), (int, float)):
@@ -1384,9 +1388,10 @@ def counted_grades(reviews):
             if isinstance(r, dict) and is_grade(r.get('grade')) and number(r.get('at'))
             and isinstance(r.get('word'), str) and r.get('kind') in ('learning', 'probe')]
     out = {r.get('card') for r in rows if r['kind'] == 'probe'}
-    for key, group in feedback.deck_groups([r for r in rows if r['kind'] == 'learning']).items():
+    for group in feedback.deck_groups([r for r in rows if r['kind'] == 'learning']).values():
         group = sorted(group, key=lambda r: r['reviewed'])
-        _card, log = srs.replay([(r['reviewed'], r['grade'], r.get('served')) for r in group], srs.card_id(key))
+        _card, log = srs.replay([(r['reviewed'], r['grade'], r.get('served')) for r in group],
+                                srs.card_id(group[0]['word']))  # the card id review.schedules replays with
         before = None
         for r, (at, _g, state) in zip(group, log):
             if state in (srs.NEW, srs.REVIEW) or srs.day_number(at) > srs.day_number(before):

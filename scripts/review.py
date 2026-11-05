@@ -31,7 +31,10 @@ another graded card is stored: schedules), plus the new cards: the learning word
 or learn command is known and its status still is; known_by_command) leaves the deck; a word the model labels known
 keeps its schedule, since the model moving on says nothing about recall; a later learn command (or the model labelling
 it learning again) brings it back with its schedule. A word the delayed-start experiment hides or is about to probe
-(fwlib.phase held, paused or probe) is never served, nor counted, as before.
+(fwlib.phase held, paused or probe) is never served, nor counted, as before. Words are one card by deck key: two
+spellings of one entry (a kanji spelling and its kana one) give one new card and share one schedule, and a spelling
+whose cards have a schedule is never new again. Text is cut to its limits as T3 Code counts length (UTF-16 code
+units: cut), so a character beyond the BMP at a limit can't fail its check.
 
 Queue, Anki's order (v3, default options): first the learning and relearning cards due now, the earliest due first; then
 the review cards due today (Anki's day starts at 4am: srs.day_number), by due day, then in an order fixed for the day (a
@@ -135,12 +138,14 @@ def request_error(body):
 
 
 def schedules(con, path=None):
-    """{key: (srs.Card, review log, word)} for every word with a graded learning card, under feedback.deck_key (its
-    entry id, else its spelling; feedback.deck_groups): its schedule, the replay of its graded reviews in the order they
-    were graded (feedback.graded; a review's time is when the grade was given, worked out from when the card was
-    served, its buttons' time), the log, [(reviewed ms, grade, the state it was in, grade_ms)], and its latest spelling.
-    Cached per database (path) under feedback.graded_mark and the scheduler's settings, so storing a grade, or changing
-    a parameter, recomputes them."""
+    """{key: (srs.Card, review log, word, cid, words)} for every word with a graded learning card, under
+    feedback.deck_key (its entry id, else its spelling; feedback.deck_groups: one group per word, spellings and ids
+    joined): its schedule, the replay of its graded reviews in the order they were graded (feedback.graded; a review's
+    time is when the grade was given, worked out from when the card was served, its buttons' time), the log, [(reviewed
+    ms, grade, the state it was in, grade_ms)], its latest spelling, its card id (srs.card_id of its first graded card's
+    spelling, as a new card's buttons have it: stable when the word gains or changes its entry id), and every spelling
+    its cards had. Cached per database (path) under feedback.graded_mark and the scheduler's settings, so storing a
+    grade, or changing a parameter, recomputes them."""
     key = (feedback.graded_mark(con), srs.PARAMETERS, srs.DESIRED_RETENTION, srs.LEARNING_STEPS, srs.RELEARNING_STEPS,
            srs.MAXIMUM_INTERVAL, srs.ROLLOVER_HOUR)
     name = str(path or feedback.default_path())
@@ -150,9 +155,10 @@ def schedules(con, path=None):
         return found[1]
     out = {}
     for key, rows in feedback.deck_groups(feedback.graded(con=con)).items():
-        card, log = srs.replay([(r['reviewed'], r['grade'], r['served']) for r in rows], srs.card_id(key))
+        cid = srs.card_id(rows[0]['word'])
+        card, log = srs.replay([(r['reviewed'], r['grade'], r['served']) for r in rows], cid)
         out[key] = (card, [(at, grade, state, r['grade_ms']) for (at, grade, state), r in zip(log, rows)],
-                    rows[-1]['word'])
+                    rows[-1]['word'], cid, frozenset(r['word'] for r in rows))
     with _SCHEDULES_LOCK:
         _SCHEDULES[name] = (key, out)
     return out
@@ -183,11 +189,12 @@ def daily(day, word):
 
 
 def queues(state, know, served, decks, now_ms, rng=None, more=False, commands=()):
-    """Today's queues and counts, as the module docstring orders them: {learning: [(card, word, key)] due now,
-    earliest first; review: [(card, word, key)] due today; new: [word] in today's order, within today's room (all with
-    more), less the words served as new and still pending; ahead: [(card, word, key)] learning cards due within the
-    learn-ahead window; counts: {new, learning, review}; introduced: words whose first graded review was today;
-    pending: words served as new today, their review not back}. word: the word state's entry; key: its deck key.
+    """Today's queues and counts, as the module docstring orders them: {learning: [(card, word, cid)] due now,
+    earliest first; review: [(card, word, cid)] due today; new: [word] in today's order, one a deck key (two spellings
+    of one entry are one card) and none whose key or spelling has a schedule, within today's room (all with more), less
+    the words served as new and still pending; ahead: [(card, word, cid)] learning cards due within the learn-ahead
+    window; counts: {new, learning, review}; introduced: words whose first graded review was today; pending: words
+    served as new today, their review not back}. word: the word state's entry; cid: the card id the fuzz uses.
     served: feedback.cards (released ones are left out here). rng: unused (the order is fixed per day)."""
     today, day = knowledge.day_of(now_ms), srs.day_number(now_ms)
     served = [c for c in served if c.get('released') is None]
@@ -199,29 +206,34 @@ def queues(state, know, served, decks, now_ms, rng=None, more=False, commands=()
         entry = entry_of(w, know)
         if entry is not None:
             by_entry.setdefault(entry, w)
-    mine, scheduled = known_by_command(state, commands), set()
-    for key, (card, log, spelling) in decks.items():
+    mine = known_by_command(state, commands)
+    spellings = {word for _card, _log, _spelling, _cid, words in decks.values() for word in words}
+    for key, (card, log, spelling, cid, _words) in decks.items():
         if log and srs.day_number(log[0][0]) == day:
             out['introduced'] += 1
         w = by_entry.get(int(key[6:])) if key.startswith('entry:') else None
         w = w or by_ja.get(spelling)
         if w is None:
             continue
-        scheduled.add(w['ja'])
         ja = w['ja']
-        if ja in mine or fwlib.phase(w, today) in HIDDEN or not 0 < len(ja) <= MAX_JA:
+        if ja in mine or fwlib.phase(w, today) in HIDDEN or not 0 < utf16(ja) <= MAX_JA:
             continue
         if card.state == srs.REVIEW:
             if srs.is_due(card, now_ms):
-                out['review'].append((srs.day_number(card.due), daily(day, ja), card, w, key))
+                out['review'].append((srs.day_number(card.due), daily(day, ja), card, w, cid))
         elif srs.is_due(card, now_ms):
-            out['learning'].append((card.due, card, w, key))
+            out['learning'].append((card.due, card, w, cid))
         elif srs.is_due(card, now_ms, srs.LEARN_AHEAD_S):
-            out['ahead'].append((card.due, card, w, key))
+            out['ahead'].append((card.due, card, w, cid))
     out['learning'] = [t[1:] for t in sorted(out['learning'], key=lambda t: (t[0], t[3]))]
     out['ahead'] = [t[1:] for t in sorted(out['ahead'], key=lambda t: (t[0], t[3]))]
     out['review'] = [t[2:] for t in sorted(out['review'], key=lambda t: t[:2])]
-    fresh = _new_order(state, know, served, scheduled | mine, today, now_ms, day)
+    fresh, keys = [], set()
+    for w in _new_order(state, know, served, mine, today, now_ms, day):  # one card a word: by deck key, as the deck
+        key = feedback.deck_key(entry_of(w, know), w['ja'])
+        if key not in decks and key not in keys and w['ja'] not in spellings:
+            keys.add(key)
+            fresh.append(w)
     pending = {c['word'] for c in served if c['kind'] == 'learning' and c.get('at') is None
                and c['served_at'] >= now_ms - PENDING_MS and srs.day_number(c['served_at']) == day}
     out['pending'] = {w['ja'] for w in fresh if w['ja'] in pending}
@@ -293,9 +305,9 @@ def choose(state, know, served, decks, exclude=(), now_ms=None, rng=None, frame=
     busy = {c['word'] for c in served
             if c['id'] in held or (c.get('at') is None and c['served_at'] >= now_ms - PENDING_MS)}
     left = _left(served, now_ms)
-    ready = [(card, w, key) for name in ('learning', 'review', 'new', 'ahead')
-             for card, w, key in (q[name] if name != 'new' else
-                                  ((srs.NEW_CARD, w, feedback.deck_key(entry_of(w, know), w['ja'])) for w in q['new']))
+    ready = [(card, w, cid) for name in ('learning', 'review', 'new', 'ahead')
+             for card, w, cid in (q[name] if name != 'new' else
+                                  ((srs.NEW_CARD, w, srs.card_id(w['ja'])) for w in q['new']))
              if w['ja'] not in busy]
     found = next((t for t in ready if t[1]['ja'] not in left), None) or \
         min(ready, key=lambda t: left[t[1]['ja']], default=None)
@@ -329,12 +341,31 @@ def _left(served, now_ms):
             if grade is None and at >= now_ms - LEFT_HOURS * 3_600_000}
 
 
-def _deck_card(w, card, key, know, now_ms):
-    """A deck word's card: its word, reading and meaning, entry id, queue and the four intervals (key: its deck key,
-    the fuzz's card id)."""
-    return {'word': w['ja'], 'kind': 'learning', 'kana': (w.get('kana') or '')[:MAX_KANA],
-            'gloss': (w.get('en') or '')[:MAX_GLOSS], 'entry': entry_of(w, know), 'queue': srs.queue_of(card),
-            'intervals': srs.intervals(card, now_ms, srs.card_id(key))}
+def utf16(text):
+    """A string's length as T3 Code counts it (UTF-16 code units: a character beyond the BMP is two)."""
+    return len(text.encode('utf-16-le')) // 2
+
+
+def cut(text, limit):
+    """`text` cut to at most `limit` UTF-16 code units, never inside a character (T3 Code checks lengths so)."""
+    text = text or ''
+    if utf16(text) <= limit:
+        return text
+    out, used = [], 0
+    for ch in text:
+        used += 2 if ord(ch) > 0xFFFF else 1
+        if used > limit:
+            break
+        out.append(ch)
+    return ''.join(out)
+
+
+def _deck_card(w, card, cid, know, now_ms):
+    """A deck word's card: its word, reading and meaning, entry id, queue and the four intervals (cid: the card id the
+    fuzz uses, the replay's)."""
+    return {'word': w['ja'], 'kind': 'learning', 'kana': cut(w.get('kana'), MAX_KANA),
+            'gloss': cut(w.get('en'), MAX_GLOSS), 'entry': entry_of(w, know), 'queue': srs.queue_of(card),
+            'intervals': srs.intervals(card, now_ms, cid)}
 
 
 def learning_start(word):
@@ -367,7 +398,7 @@ def _new_order(state, know, served, out, today, now_ms, day):
     for w in state.get('words') or []:
         if w.get('status') not in ('active', 'shaky') or fwlib.phase(w, today) in HIDDEN:
             continue
-        if w['ja'] in out or not 0 < len(w['ja']) <= MAX_JA:
+        if w['ja'] in out or not 0 < utf16(w['ja']) <= MAX_JA:
             continue
         entry = entries.get(w['ja']) if isinstance(entries.get(w['ja']), dict) else {}
         start = learning_start(w)
@@ -409,12 +440,13 @@ def _probe(state, served, blocked, hidden, know, today, rng, frame=None, d=None)
         h = rng.choices(bands, [frame.shares[b] for b in bands])[0]
         bands.remove(h)
         pool = [it for it in frame.bands[h] if fwlib.key(it['ja']) not in out and not ids.intersection(it['ids'])
-                and len(it['ja']) <= MAX_JA]
+                and utf16(it['ja']) <= MAX_JA]
         while pool:
             it = probe.pick(pool, 1, last, today, probe.REPEAT_DAYS, rng, key=lambda it: it['ja'])[0]
             e = d.get(it['ids'][0])
             if e is not None and fwlib.key(e['kana']) not in readings:
-                return {'word': it['ja'], 'kind': 'probe', 'kana': e['kana'][:MAX_KANA], 'gloss': e['en'][:MAX_GLOSS],
+                return {'word': it['ja'], 'kind': 'probe', 'kana': cut(e['kana'], MAX_KANA),
+                        'gloss': cut(e['en'], MAX_GLOSS),
                         'entry': e['id'], 'band': h, 'weight': float(f'{it["weight"]:.6g}')}
             pool.remove(it)
     return None
@@ -430,7 +462,7 @@ def _fake(served, blocked, now_ms, rng):
         return None
     fresh = [f for f in pool if now_ms - last.get(f[0], -math.inf) >= FAKE_REUSE_DAYS * DAY_MS]
     ja, kana = rng.choice(fresh) if fresh else min(pool, key=lambda f: last[f[0]])
-    return {'word': ja, 'kind': 'fake', 'kana': kana[:MAX_KANA], 'gloss': MADE_UP}
+    return {'word': ja, 'kind': 'fake', 'kana': cut(kana, MAX_KANA), 'gloss': MADE_UP}
 
 
 # ---- fw.py review: what the schedule looks like ----
@@ -451,7 +483,7 @@ def summary(db=None, now_ms=None):
         con.close()
     start, month = srs.day_start(srs.day_number(now_ms)), now_ms - 30 * DAY_MS
     graded = [c['at'] + (c['grade_ms'] or 0) for c in served if c.get('grade') is not None]
-    log = [entry for _card, entries, _word in decks.values() for entry in entries]
+    log = [entry for _card, entries, _word, _cid, _words in decks.values() for entry in entries]
     kept = lambda since: [sum(1 for at, g, s, _ms in log if s == srs.REVIEW and at >= since and g > srs.AGAIN),
                           sum(1 for at, _g, s, _ms in log if s == srs.REVIEW and at >= since)]
     return {'counts': dict(counts), 'deck': len(decks), 'today': sum(1 for at in graded if at >= start),
@@ -463,16 +495,16 @@ REVLOG_COLUMNS = ('card_id', 'review_time', 'review_rating', 'review_state', 're
 
 
 def revlog(db=None):
-    """The graded learning cards as the FSRS optimizer reads a review log (REVLOG_COLUMNS: the card's id, srs.card_id
-    of its deck key; when it was graded, ms; the grade 1..4; the state it was in, 0 new, 1 learning, 2 review, 3
-    relearning; ms from shown to the grade), oldest first."""
+    """The graded learning cards as the FSRS optimizer reads a review log (REVLOG_COLUMNS: the card's id, the one
+    its fuzz uses (schedules); when it was graded, ms; the grade 1..4; the state it was in, 0 new, 1 learning, 2
+    review, 3 relearning; ms from shown to the grade), oldest first."""
     con = feedback.connect(db)
     try:
         decks = schedules(con, db)
     finally:
         con.close()
-    rows = [(srs.card_id(key), at, grade, srs.REVLOG_STATES[state], ms if ms is not None else '')
-            for key, (_card, log, _word) in decks.items() for at, grade, state, ms in log]
+    rows = [(cid, at, grade, srs.REVLOG_STATES[state], ms if ms is not None else '')
+            for _card, log, _word, cid, _words in decks.values() for at, grade, state, ms in log]
     return sorted(rows, key=lambda r: (r[1], r[0]))
 
 

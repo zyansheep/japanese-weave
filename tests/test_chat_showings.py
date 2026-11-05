@@ -349,7 +349,9 @@ class Store(Home):
         stays = self.stays(now - 3_590_000)
         bad = [dict(stays[0], words=True, uid='x1'), dict(stays[0], words=-1, uid='x2'),
                dict(stays[0], words=10_001, uid='x3'), dict(stays[0], words=2.5, uid='x4')]
-        self.assertEqual(feedback.record([shown] + stays + bad, 't3'), {'stored': 4, 'duplicates': 0, 'rejected': 4})
+        found = feedback.record([shown] + stays + bad, 't3')
+        self.assertEqual([r['item'] for r in found.pop('reasons')], [4, 5, 6, 7])  # T3: each rejected item, by index
+        self.assertEqual(found, {'stored': 4, 'duplicates': 0, 'rejected': 4})
         self.assertEqual(feedback.record([dict(stays[0], words=0, uid='x5', at=now - 3_500_000)], 't3')['stored'], 1)
         visible = [r for r in feedback.recent() if r['kind'] == 'visible']
         self.assertIn({'wall': 30_500, 'away': 500, 'media': 0, 'idle': 0, 'words': 30}, [r['detail'] for r in visible])

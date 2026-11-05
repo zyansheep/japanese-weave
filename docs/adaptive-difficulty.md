@@ -408,7 +408,9 @@ compares the review cards' observed retention with the 90% aimed for.
 ### Review cards in the fit
 
 A review card's outcome, for the reading model, depends on its flow. A client's cards are of the graded flow from its
-first grade on (the review panel: every graded card revealed first), else of the reveal flow (the wedge). A graded card
+first grade on (the review panel: every graded card revealed first), else of the reveal flow (the wedge); a client is
+the item's source (desktop or mobile), so an old build that never grades, still running after a newer one of the same
+source has graded, has its cards read as left (no evidence) until it is updated. A graded card
 of a real word is an explicit answer, read as a probe's answers are: Again is not known at recall (likelihood 1 - z),
 Hard, Good or Easy known (z), with z = sigmoid(k - review) below, and no correction for over-claiming, since the grade
 comes after the reveal. Not every grade is an answer: one on a learning or relearning step the same day, minutes after

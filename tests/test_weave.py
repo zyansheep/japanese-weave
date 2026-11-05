@@ -823,7 +823,9 @@ class FeedbackStore(Home):
         trace = dict(where, kind='trace', points=[[0, 10, 4], [120, 60.4, 5], [480, 120, 30]])
         bad = [dict(stay, ms=60_000), dict(stay, idle=-1), dict(stay, wall=4_000_000), dict(trace, points=[]),
                dict(trace, points=[[100, 1, 1], [50, 2, 2]]), dict(trace, points=[[0, 1, 1]] * 201), dict(trace, points=[[0, 1]])]
-        self.assertEqual(feedback.record([stay, trace] + bad, 't3'), {'stored': 2, 'duplicates': 0, 'rejected': 7})
+        found = feedback.record([stay, trace] + bad, 't3')
+        self.assertEqual([r['item'] for r in found.pop('reasons')], list(range(2, 9)))
+        self.assertEqual(found, {'stored': 2, 'duplicates': 0, 'rejected': 7})
         rows = {r['kind']: r for r in feedback.recent()}
         self.assertEqual((rows['visible']['ms'], rows['visible']['detail']),
                          (42_000, {'wall': 50_000, 'away': 5000, 'media': 0, 'idle': 3000}))
@@ -905,7 +907,8 @@ class Collector(Home):
     def test_collector_stores_json_and_refuses_page_style_posts(self):
         import urllib.request
         self.assertEqual(feedback.forward(self.url, [self.item('pin'), {'kind': 'bad'}], 't3'),
-                         {'ok': True, 'stored': 1, 'duplicates': 0, 'rejected': 1})
+                         {'ok': True, 'stored': 1, 'duplicates': 0, 'rejected': 1,
+                          'reasons': [{'item': 1, 'error': 'malformed or too old'}]})
         # A web page can only send a "simple" cross-site POST (text/plain, forms) without a preflight: refused.
         form = urllib.request.Request(self.url + '/v1/interactions', data=b'{"surface": "t3", "items": []}',
                                       headers={'Content-Type': 'text/plain'})
