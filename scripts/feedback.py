@@ -20,7 +20,10 @@ Stored in <state dir>/interactions.sqlite (schema 8):
                 and candidates counts those the passage can place; since extension 0.11 paint: 'sure' if this is the
                 painting of code's sure swaps, the model's answer not in, else 'final', and dictionary: dictionary
                 words kept, at +1 and +2, when any}); seq orders changes for export. A sentence's
-                closing mark (。) among the glossed words stands for its translation (in the browser since then too)
+                closing mark (。) among the glossed words stands for its translation (in the browser since then too).
+                A T3 message whose items carry the level it was rendered at (render-time levels, twins.py) has a row
+                per level it was shown at, its context "<message id>@<level>" (level_context), each a showing of its
+                own with the annotations that level showed
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -56,10 +59,10 @@ Stored in <state dir>/interactions.sqlite (schema 8):
                 schedule (review.py, srs.py)
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
-the peek rate), or (T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its
-id, "word": the word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" |
-"mobile", "uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its
-gradeMs, revealMs <= gradeMs <= shownMs; an item without one is a card left (closed, backgrounded, skipped), which
+the peek rate); from T3, any of them may carry "level": -3..3, the level the message was rendered at (record); or
+(T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its id, "word": the
+word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" | "mobile",
+"uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its gradeMs, revealMs <= gradeMs <= shownMs; an item without one is a card left (closed, backgrounded, skipped), which
 schedules nothing. A review is stored on its card's row, once: it must name a card served here with that word and not
 released, and a second review of a card (a resend, with or without the same uid) is a duplicate, except that a graded
 item completes a card stored as left (no grade yet: a client that reported closing the card, then the grade), keeping
@@ -81,6 +84,7 @@ import urllib.request
 import fwlib
 import intensity
 
+LEVEL_MARK = '@'  # a T3 message shown at a level is stored as <its context id>@<level> (level_context)
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
 SCHEMA_VERSION = 8
@@ -266,8 +270,11 @@ def _clean(item, now):
         return None
     if not all(isinstance(a, list) and len(a) == 3 and word(a[0]) and num(a[1]) and num(a[2]) for a in notes):
         return None
+    level = item.get('level')
+    if level is not None and (not isinstance(level, int) or isinstance(level, bool) or level not in intensity.LEVELS):
+        return None
     clean = {'kind': item['kind'], 'view': item['view'], 'context': item['context'], 'at': int(at), 'box': box,
-             'annotations': [[a[0], round(a[1]), round(a[2])] for a in notes]}
+             'annotations': [[a[0], round(a[1]), round(a[2])] for a in notes], 'level': level}
     if item['kind'] == SHOWN:
         words = item.get('words')
         if not isinstance(words, int) or isinstance(words, bool) or not 0 < words <= 10_000:
@@ -422,6 +429,24 @@ def _complete(con, c):
                                     c['word'])).rowcount > 0
 
 
+def level_context(context, level):
+    """The context id a T3 message shown at a level is stored under: a message shown at another level, or re-rendered
+    at one while on screen, is another showing, with its own annotations and items (render-time levels, twins.py)."""
+    return f'{context}{LEVEL_MARK}{level}'
+
+
+def split_context(context):
+    """(message id, level or None) of a stored T3 context id (level_context)."""
+    base, mark, level = str(context).rpartition(LEVEL_MARK)
+    if mark and base and level.lstrip('-').isdigit() and int(level) in intensity.LEVELS:
+        return base, int(level)
+    return context, None
+
+
+SIBLING_WORDS = ('SELECT words FROM contexts WHERE surface = ? AND view = ? AND words IS NOT NULL AND '
+                 '(context = ? OR substr(context, 1, ?) = ?) ORDER BY seq DESC LIMIT 1')
+
+
 def record(items, surface, path=None, now=None, hide=None):
     """Stores well-formed items. Returns {stored, duplicates, rejected} and, from T3 when any item was rejected,
     reasons: [{item: its index in items, error}], one per rejected item (every one, so T3 Code's server can settle
@@ -430,7 +455,13 @@ def record(items, surface, path=None, now=None, hide=None):
     (CARD_REVIEW): one naming no card served here with its word, or a card released, is rejected; one for a card
     already reviewed is a duplicate, unless it brings the grade of a card stored as left (_complete). hide: (start,
     end) of an English-only spell in chat (intensity.py): a T3 message's shown record from then is dropped (counted as
-    rejected), since its Japanese wasn't on screen."""
+    rejected), since its Japanese wasn't on screen.
+
+    A T3 item with a level (the level the message was rendered at, -3..3: render-time levels) is stored under
+    level_context, so each level a message was shown at is a showing of its own; an item at -3 (off, English only)
+    showed no Japanese and is dropped (rejected), and hide leaves items with a level alone (they say what was shown).
+    A level's first item that isn't its shown record starts the showing: its word count from the message's showing at
+    another level, shown when that item came."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
@@ -443,9 +474,14 @@ def record(items, surface, path=None, now=None, hide=None):
             why = c if isinstance(c, str) else 'malformed or too old' if not c else \
                 'review items come from T3 (surface t3)'
             reasons.append({'item': index, 'error': why})
-        elif hide and surface == 't3' and c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1]:
+        elif c['kind'] != REVIEW and surface == 't3' and c.get('level') is not None and c['level'] <= intensity.OFF:
+            reasons.append({'item': index, 'error': 'shown at -3 (off or English only): no Japanese on screen'})
+        elif hide and surface == 't3' and c['kind'] == SHOWN and c.get('level') is None \
+                and hide[0] <= c['at'] < hide[1]:
             reasons.append({'item': index, 'error': 'shown while English only was on'})
         else:
+            if c['kind'] != REVIEW and surface != 't3':
+                c['level'] = None  # levels are chat's
             c['index'] = index
             cleaned.append(c)
     stored = duplicates = refused = 0
@@ -475,10 +511,18 @@ def record(items, surface, path=None, now=None, hide=None):
                         continue
                     shown = c['kind'] == SHOWN
                     plan = c.get('plan') if shown else None
+                    words, shown_at = (c['words'], c['at']) if shown else (None, None)
+                    if c.get('level') is not None:
+                        base = c['context']
+                        c = dict(c, context=level_context(base, c['level']))
+                        if not shown and not con.execute('SELECT 1 FROM contexts WHERE surface = ? AND view = ? AND '
+                                                         'context = ?', (surface, c['view'], c['context'])).fetchone():
+                            sibling = con.execute(SIBLING_WORDS, (surface, c['view'], base, len(base) + 1,
+                                                                  base + LEVEL_MARK)).fetchone()
+                            words, shown_at = (sibling[0] if sibling else None), c['at']
                     con.execute(CONTEXT_UPSERT, (surface, c['view'], c['context'], *c['box'],
                                                  json.dumps(c['annotations'], ensure_ascii=False),
-                                                 c['words'] if shown else None, c['at'] if shown else None,
-                                                 json.dumps(plan) if plan else None))
+                                                 words, shown_at, json.dumps(plan) if plan else None))
                     if shown:
                         stored += 1
                         continue
@@ -752,7 +796,8 @@ def load(path=None):
     each with its plan (None when not recorded), its time on screen when a reader could have been reading it
     ("active", the ms of its visible stays, 0 without any) and when its last stay began ("seen_until"). T3 messages
     also keep their stays one by one, oldest first ("stays": [{y, height, ms, words}], words None when not sent): each
-    is one paragraph's band."""
+    is one paragraph's band; and the message they are and the level they were shown at ("message", "level": None for
+    a client that sends no level; split_context)."""
     con = connect(path)
     try:
         rows = [dict(zip(INTERACTION_COLUMNS, r)) for r in con.execute(
@@ -765,6 +810,7 @@ def load(path=None):
             c['active'], c['seen_until'] = 0, None
             if c['surface'] == 't3':
                 c['stays'] = []
+                c['message'], c['level'] = split_context(c['context'])
             contexts[(c['surface'], c['view'], c['context'])] = c
         for surface, view, context, ms, last in con.execute(
                 "SELECT surface, view, context, coalesce(sum(ms), 0), max(at) FROM reading WHERE kind = 'visible' "

@@ -26,6 +26,7 @@ import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
 import threads  # noqa: E402
+import twins  # noqa: E402
 
 STALE = 30 * 60  # refresh chat exposure in the background when the index is older than this
 SYNC_EVERY = 120  # with a collector: sync the cache in the background when it is older than this
@@ -188,10 +189,12 @@ def turn_text(item):
     return ('user' if kind == 'user' else 'reply'), text
 
 
-def recent_turns(lines, prompt='', turns=TOPICAL_TURNS, most=TOPICAL_CHARS):
+def recent_turns(lines, prompt='', turns=TOPICAL_TURNS, most=TOPICAL_CHARS, level=None):
     """The text of a chat's latest turns, for its topical words: the prompt being sent, and before it the user's prompts
     and Claude's replies back to the `turns`-th prompt, from the transcript's last lines; at most `most` characters,
-    the latest kept. Anything about the plugin itself ('Japanese Weave', as the transcript scan has it) stays out."""
+    the latest kept. Anything about the plugin itself ('Japanese Weave', as the transcript scan has it) stays out. A
+    reply with render-time levels counts as the user saw it (twins.view: at the level it was sent at, else `level`),
+    never its hidden twins."""
     texts = [prompt] if isinstance(prompt, str) and prompt and 'Japanese Weave' not in prompt else []
     size, prompts = sum(map(len, texts)), 0
     for line in reversed(lines or []):
@@ -207,7 +210,7 @@ def recent_turns(lines, prompt='', turns=TOPICAL_TURNS, most=TOPICAL_CHARS):
         if not text.strip() or 'Japanese Weave' in text:
             continue
         prompts += kind == 'user'
-        texts.append(text)
+        texts.append(twins.view(text, level) if kind == 'reply' else text)
         size += len(text)
     text = '\n'.join(reversed(texts))
     return text if len(text) <= most else text[len(text) - most:].split(None, 1)[-1]  # from a whole word
@@ -1255,6 +1258,7 @@ def main(argv):
         try:
             lines = tail_lines(data['transcript_path'])
             reply, mark = last_reply(None, lines), compaction(lines)
+            reply = twins.view(reply, intensity.OFF if english_on else level) if reply else reply
         except Exception:
             pass  # no transcript yet or unreadable: the brief alone still helps
     try:  # in draft style the weave sets the amounts, so the reply needs no correction toward them
@@ -1265,7 +1269,8 @@ def main(argv):
     topical = []
     if hook and style == 'classic':
         try:  # never block a prompt because of them: without the reading index (not built yet) there are none
-            topical = topical_words(state, know, days, recent_turns(lines, data.get('prompt')))
+            topical = topical_words(state, know, days, recent_turns(lines, data.get('prompt'),
+                                                                    level=intensity.OFF if english_on else level))
         except Exception as error:
             print(f'Japanese Weave: no topical words ({error.__class__.__name__})', file=sys.stderr)
     build = lambda had: compose(state, seen, markup=markup, know=know, level=level, had=had, tail=tail,

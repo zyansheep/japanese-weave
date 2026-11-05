@@ -27,9 +27,13 @@ Ops (each also carries uid, day, at and machine; see stamp):
                                                        was pressed (intensity.py; POST /v1/english)
   grammar   {"set": [[pattern id, "known"|"learning"|"new"]], "source"}   the reader's grammar patterns (grammar.py):
                                                        intake's choice, or a command
-  sentences {"replies": [{"fp", "day", "v", "s": [[mark index, Japanese characters, English words, [pattern ids]]]}]}
+  sentences {"replies": [{"fp", "day", "v", "s": [[mark index, Japanese characters, English words, [pattern ids],
+             predicted open chance?]], "e"?, "a"?, "fps"?, "lv"?, "d"?}]}
                                                        the Japanese sentences of chat replies scanned on some machine,
-                                                       never their text (grammar.record); a record only
+                                                       never their text (grammar.record); a reply with render-time
+                                                       levels also has its elements with thresholds and propensities,
+                                                       each glossed word's element and each level's fingerprint
+                                                       (grammar.record_levels); a record only
   labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
@@ -191,7 +195,8 @@ def validate(op):
         replies = op.get('replies')
         if set(op) - {'uid', 'day', 'at', 'machine', 'kind', 'replies'} or not isinstance(replies, list) \
                 or not 0 < len(replies) <= SENTENCE_REPLIES or not all(grammar.valid_record(r) for r in replies):
-            return 'sentences: {"replies": [{"fp", "day", "v", "s": [[index, chars, english words, [pattern ids]]]}]}'
+            return ('sentences: {"replies": [{"fp", "day", "v", "s": [[index, chars, english words, [pattern ids]]], '
+                    '"e"?, "a"?, "fps"?, "lv"?, "d"?}]} (grammar.valid_record)')
     elif kind == 'labels':
         return labels_error(op)
     elif kind == 'brief':
