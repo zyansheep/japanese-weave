@@ -12,9 +12,16 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           -> {"ok": true, "results": [...], "rev"}
   POST /v1/interactions   {"surface": "browser"|"t3", "items": [...]}
                           -> {"ok": true, "stored": n, "duplicates": n, "rejected": n}  (see feedback.py; T3 also
-                          sends review items, what happened to a review card)
-  POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids]}: the next review card (review.py)
-                          -> {"ok": true, "card": {"id", "ja", "kana", "gloss"}} or {"ok": true, "card": null}
+                          sends review items, what happened to a review card, with its grade when given)
+  POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool}: the next review card,
+                          in Anki's order (review.py; more: past today's new-card limit)
+                          -> {"ok": true, "card": {"id", "ja", "kana", "gloss", "queue": "new"|"learning"|"review",
+                              "intervals": {"again", "hard", "good", "easy"} (seconds)} or null,
+                              "counts": {"new", "learning", "review"}}
+  GET  /v1/review/stats   the review schedule's numbers, for fw.py review -> {"ok": true, "review": {counts, deck,
+                          today, month, graded, optimize, retention, desired}} (review.summary)
+  GET  /v1/review/revlog  the graded reviews as the FSRS optimizer reads them -> {"ok": true, "columns": [...],
+                          "rows": [[card_id, review_time, review_rating, review_state, review_duration], ...]}
   GET  /v1/stats?since=MS how much has been collected, in all and since MS (default: the start of today here)
                           -> {"ok": true, "counts": {"browser:peek": [all, since], ...}, "shownWords",
                               "blankPassages", "readingMs", "last"}
@@ -134,6 +141,17 @@ class Handler(BaseHTTPRequestHandler):
             if 'session' in query:  # the hook asks for its chat's switch in the same request
                 body['thread'] = threads.entry(state, query['session'][0])
             return self.reply(200, body)
+        if url.path in ('/v1/review/stats', '/v1/review/revlog'):
+            if not (fwlib.home() / 'state.json').exists():
+                return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
+            try:
+                if url.path == '/v1/review/stats':
+                    return self.reply(200, {'ok': True, 'review': review.summary(self.db)})
+                return self.reply(200, {'ok': True, 'columns': list(review.REVLOG_COLUMNS),
+                                        'rows': [list(r) for r in review.revlog(self.db)]})
+            except Exception as error:  # a report: the server stays up
+                print(f'review report failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
+                return self.reply(500, {'ok': False, 'error': 'the collector failed to read the review cards'})
         if url.path == '/v1/recent':
             try:
                 limit = max(1, min(500, number('limit', 20)))
@@ -169,11 +187,12 @@ class Handler(BaseHTTPRequestHandler):
             if not (fwlib.home() / 'state.json').exists():
                 return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
             try:
-                card = review.next_card(body['source'], body.get('exclude') or (), self.db)
+                card, counts = review.next_card(body['source'], body.get('exclude') or (), self.db,
+                                                more=body.get('more') is True)
             except Exception as error:  # a broken card must not take the server down; the client tries again later
                 print(f'review card failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
                 return self.reply(500, {'ok': False, 'error': 'no card: the collector failed to choose one'})
-            return self.reply(200, {'ok': True, 'card': card})
+            return self.reply(200, {'ok': True, 'card': card, 'counts': counts})
         if path == '/v1/intensity':
             source = body.get('source', 'unknown') if isinstance(body, dict) else None
             if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \

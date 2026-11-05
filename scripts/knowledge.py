@@ -28,9 +28,11 @@ much every EVIDENCE_DAYS; known and learn commands are one-sided pseudo-observat
 counts FORM_WEIGHT; the monthly probe's answers (probe.py) are observations of their own kind with their own offset,
 corrected for the over-claiming its made-up words show (probe_answers), and the probe's own estimate of the goal stays
 computed from its answers alone, so it remains the check on the model; the review cards (review.py: a word alone, its
-reading and meaning revealed on request) are observations of their own kind too, the time to the reveal or its absence a
-mixture of known at recall and not (Components, review_answers), whose made-up words pin the "not known" side, and they
-are reads for the recency clock. Each word's uncertainty is the fit's curvature
+reading and meaning revealed on request, then graded as in Anki) are observations of their own kind too: a graded card
+of a real word is an explicit answer (Again: not known at recall; Hard, Good, Easy: known), read as the probe's answers
+are, at the review offset; an ungraded one's time to the reveal or its absence is a mixture of known at recall and not
+(Components, review_answers), whose made-up words pin the "not known" side; and every one is a read for the recency
+clock. Each word's uncertainty is the fit's curvature
 (Laplace). The reading model (pace and cap) is chosen once a day by profile likelihood over a grid, on both surfaces.
 Each passage's or paragraph's time on screen can be evidence too (SPEED, off until the replay shows a gain: Fit's
 speed, speed_units). The fit is the Fit class, which evaluate.py's "fit" model (evaluate.CURRENT) runs too; the online
@@ -1146,6 +1148,7 @@ def evidenced(log, until):
             out.add(event.word)
     out.update(ja for at, ja, _y in probe_log(log)[0] if at < until)
     out.update(ja for at, ja, _x in review_log(log)[0] if at < until)
+    out.update(ja for at, ja, _y in review_log(log)[4] if at < until)
     return out
 
 
@@ -1352,18 +1355,22 @@ class Components:
 
 
 def review_answers(reviews, entries, d=None):
-    """The reviewed cards (feedback.reviews) as the fit reads them: (answers, fakes, extra, shown). answers: [(at, ja,
-    x)] per card of a real word (learning or probe) with an outcome (review_outcome: x a log time, or None for no
-    reveal); fakes: [(at, x)] per made-up word's card with one; shown: [(at, ja)] every real word's card, dropped
-    outcomes too (each is a read, for the recency clock). ja is the word state's word for the card's entry (entries:
-    {ja: its dictionary entry}, by id, else by spelling), else the entry's own spelling, with that entry in extra (for
-    the word features), as probe_answers finds a probe's words."""
+    """The reviewed cards (feedback.reviews) as the fit reads them: (answers, fakes, extra, shown, graded). answers:
+    [(at, ja, x)] per ungraded card of a real word (learning or probe) with an outcome (review_outcome: x a log time,
+    or None for no reveal); graded: [(at, ja, y)] per graded card of a real word, y 1 for Again (not known at recall,
+    the event the fit counts, as a probe answer of not known) and 0 for Hard, Good or Easy, its reveal time left out
+    of the mixture (the grade says more, and in the graded flow every card is revealed, which would bend the
+    components' chance of no reveal); fakes: [(at, x)] per made-up word's card with an outcome, graded or not (its grade
+    is given after the reveal says it is made up, so it claims nothing); shown: [(at, ja)] every real word's card,
+    dropped outcomes too (each is a read, for the recency clock). ja is the word state's word for the card's entry
+    (entries: {ja: its dictionary entry}, by id, else by spelling), else the entry's own spelling, with that entry in
+    extra (for the word features), as probe_answers finds a probe's words."""
     by_id, by_key = {}, {}
     for ja, e in (entries or {}).items():
         if e is not None:
             by_id.setdefault(e['id'], ja)
         by_key.setdefault(fwlib.key(ja), ja)
-    answers, fakes, extra, shown = [], [], {}, []
+    answers, fakes, extra, shown, graded = [], [], {}, [], []
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
     for r in reviews or ():
         if not isinstance(r, dict) or not number(r.get('at')) or not isinstance(r.get('word'), str):
@@ -1392,9 +1399,11 @@ def review_answers(reviews, entries, d=None):
             ja = entry['ja']
             extra[ja] = entry
         shown.append((r['at'], ja))
-        if x is not False:
+        if r.get('grade') in (1, 2, 3, 4) and not isinstance(r['grade'], bool):
+            graded.append((r['at'], ja, 1 if r['grade'] == 1 else 0))
+        elif x is not False:
             answers.append((r['at'], ja, x))
-    return answers, fakes, extra, shown
+    return answers, fakes, extra, shown, graded
 
 
 def review_log(log):
@@ -1404,7 +1413,7 @@ def review_log(log):
     found = origin.__dict__.get('_reviewed')
     if found is None:
         reviews = getattr(origin, 'reviews', None) or ()
-        found = review_answers(reviews, getattr(log, 'entries', None) or {}) if reviews else ((), (), {}, ())
+        found = review_answers(reviews, getattr(log, 'entries', None) or {}) if reviews else ((), (), {}, (), ())
         origin.__dict__['_reviewed'] = found
     return found
 
@@ -1441,9 +1450,10 @@ class Fit:
     The monthly probes' answers before `until` (probe_log, without them when probes is False) are observations too,
     each at the word's long-term chance with an offset of its own (_probe_terms); a probed word outside the word state
     takes its features from its dictionary entry. So are the review cards' outcomes before `until` (review_log, without
-    them when reviews is False; _review_terms): a mixture, known at recall with chance sigmoid(k - review), whose two
-    components (Components: reveal time and no reveal, known and not; the made-up words' cards are of the second alone)
-    are fitted with the words by EM, each held by its prior (REVIEW_PRIOR), with k held at each step.
+    them when reviews is False; _review_terms): a graded card a yes/no answer, known at recall with chance
+    sigmoid(k - review); an ungraded one a mixture, known at recall with that chance, whose two components (Components:
+    reveal time and no reveal, known and not; the made-up words' cards are of the second alone) are fitted with the
+    words by EM, each held by its prior (REVIEW_PRIOR), with k held at each step.
 
     Minimized: their negative log likelihood; (k_w - mean_w)^2 / 2 width^2 for every word with evidence, mean_w the
     regression on its features (features) and width its kind's; a command's one-sided term, COMMAND_WEIGHT (decayed)
@@ -1704,13 +1714,22 @@ class Fit:
         self.probe_terms = (tuple(i for i, _y in keys), tuple(y for _i, y in keys), tuple(pooled[k] for k in keys))
 
     def _review_terms(self, log):
-        """The review cards' outcomes before until (review_log): review_terms (word, x, weight) for real words' cards
-        and review_fakes (x, weight) for made-up words', x review_outcome's, each weighted like evidence. A real word's
-        card has likelihood z A + (1 - z) B, z = sigmoid(k - review) the chance the word is known at recall and A, B
-        the outcome's under the known and not known components; a made-up word's, B. A card adds its weight to its
-        word's evidence (n)."""
-        answers, fakes, _extra, _shown = review_log(log) if self.reviews else ((), (), {}, ())
-        terms, made_up = [], []
+        """The review cards' outcomes before until (review_log): review_terms (word, x, weight) for real words'
+        ungraded cards, review_graded (word, y, weight) for their graded ones and review_fakes (x, weight) for made-up
+        words', x review_outcome's, each weighted like evidence. With z = sigmoid(k - review) the chance the word is
+        known at recall: a graded card has likelihood 1 - z if Again (y 1), else z, as a probe answer has (its offset
+        the review one, and no over-claiming: the grade comes after the reveal); an ungraded real word's card z A +
+        (1 - z) B, A and B the outcome's under the known and not known components; a made-up word's, B. A card adds its
+        weight to its word's evidence (n)."""
+        answers, fakes, _extra, _shown, graded = review_log(log) if self.reviews else ((), (), {}, (), ())
+        terms, made_up, explicit = [], [], []
+        for at, ja, y in graded:
+            if at >= self.until:
+                continue
+            i, v = self._word(ja), 0.5 ** ((self.until - at) / DAY_MS / EVIDENCE_DAYS)
+            explicit.append((i, y, v))
+            self.n[i] += v
+        self.review_graded = explicit
         for at, ja, x in answers:
             if at >= self.until:
                 continue
@@ -1861,6 +1880,17 @@ class Fit:
             gr -= v * d
             hrr += i
         total -= sum(v * lb for (_x, v), lb in zip(self.review_fakes, self._fake_logs))
+        for w, y, v in self.review_graded:  # eta = k - review, z its chance known: Again 1 - z, else z
+            kw = k[w]
+            eta = (-30.0 if kw < -30.0 else 30.0 if kw > 30.0 else kw) - recall
+            z = sigmoid(eta)
+            total += v * (softplus(eta) if y else softplus(-eta))
+            d, i = z - (1 - y), v * z * (1 - z)
+            grad[w] += v * d
+            info[w] += i
+            jreview[w] -= i
+            gr -= v * d
+            hrr += i
         g[REVIEW] += gr
         h[REVIEW][REVIEW] += hrr
         for (a, b), value in (((T3, T3), htt), ((T3, FORM), htf), ((T3, FLOOR), htl), ((T3, CONTEXT), htc),
@@ -2155,13 +2185,14 @@ class Fit:
         return {name: round(v, 4) for name, v in zip(self.names, self.theta)}
 
     def review_summary(self):
-        """The review cards as fitted: how many (real words' and made-up words' cards with an outcome, before until),
-        the components (Components.summary: each one's median reveal, spread and chance of no reveal, and their
-        separation) and the offset with its sd; None without any card."""
-        if not (self.review_terms or self.review_fakes):
+        """The review cards as fitted: how many (real words' ungraded and graded cards and made-up words' cards with an
+        outcome, before until), the components (Components.summary: each one's median reveal, spread and chance of no
+        reveal, and their separation) and the offset with its sd; None without any card."""
+        if not (self.review_terms or self.review_fakes or self.review_graded):
             return None
         return dict(self.review_parts.summary(), cards=len(self.review_terms), fakes=len(self.review_fakes),
-                    offset=round(self.theta[REVIEW], 4), offsetSd=round(self.theta_sd[REVIEW], 4))
+                    graded=len(self.review_graded), offset=round(self.theta[REVIEW], 4),
+                    offsetSd=round(self.theta_sd[REVIEW], 4))
 
     def speed_summary(self):
         """The speed term as fitted (None without it): its shared parameters with their sd, the groups' sd, how many

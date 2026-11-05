@@ -1,7 +1,9 @@
 """The probe (PLAN.md section 1 and row R, NEXT_STEPS step 7): a measure of the goal taken directly instead of through
 the model, whose own number moves when you get used to the glosses or it is refitted. Since the review wedge it lives
-in the review stream: about one review card in five shows a probe word and one in ten a made-up one (review.py), and
-the estimate here is computed from those cards over the last ROLLING_DAYS days (rolling), on every refresh. The
+in the review stream: about one review card in ten shows a probe word and one in twenty a made-up one, in between the
+Anki-scheduled cards (review.py; one in five and one in ten before grades, of a smaller stream), and the estimate here
+is computed from those cards over the last ROLLING_DAYS days (rolling), on every refresh, from their reveal times (a
+grade on a probe card is not read here yet). The
 monthly 3-minute probe and its chat command are gone; its records stay readable (--history), and a terminal can still
 take one (fw.py probe). Python 3.9+, standard library only.
 
@@ -624,8 +626,8 @@ def rolling_text(know):
     review = (know or {}).get('review') if isinstance((know or {}).get('review'), dict) else None
     est = (review or {}).get('probe') if isinstance((review or {}).get('probe'), dict) else None
     if est is None or est.get('known') is None:
-        return (f'probe: no probe cards reviewed in the last {ROLLING_DAYS} days yet (the wedge on a gloss in T3 Code '
-                'starts the review cards; about one in five is a probe word)')
+        return (f'probe: no probe cards reviewed in the last {ROLLING_DAYS} days yet (T3 Code\'s review panel and the '
+                'phone\'s Review screen show the review cards; about one in ten is a probe word)')
     sep = est.get('separation') or {}
     rests = (f'{est["n"]} probe card{"s" if est["n"] != 1 else ""} and {est.get("fakes", 0)} made-up '
              f'one{"s" if est.get("fakes", 0) != 1 else ""}')
