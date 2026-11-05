@@ -208,11 +208,11 @@ def queues(state, know, served, decks, now_ms, rng=None, more=False, commands=()
             by_entry.setdefault(entry, w)
     mine = known_by_command(state, commands)
     spellings = {word for _card, _log, _spelling, _cid, words in decks.values() for word in words}
-    for key, (card, log, spelling, cid, _words) in decks.items():
+    for key, (card, log, spelling, cid, words) in decks.items():
         if log and srs.day_number(log[0][0]) == day:
             out['introduced'] += 1
-        w = by_entry.get(int(key[6:])) if key.startswith('entry:') else None
-        w = w or by_ja.get(spelling)
+        w = by_ja.get(spelling) or (by_entry.get(int(key[6:])) if key.startswith('entry:') else None) or \
+            next((by_ja[s] for s in sorted(words) if s in by_ja), None)  # the latest graded spelling shown, if it can be
         if w is None:
             continue
         ja = w['ja']

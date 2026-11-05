@@ -425,7 +425,7 @@ def _complete(con, c):
 def record(items, surface, path=None, now=None, hide=None):
     """Stores well-formed items. Returns {stored, duplicates, rejected} and, from T3 when any item was rejected,
     reasons: [{item: its index in items, error}], one per rejected item (every one, so T3 Code's server can settle
-    items one by one): a resent interaction (same uid) is stored once, and
+    items one by one; items past MAX_ITEMS in one batch are rejected too, each with its reason): a resent interaction (same uid) is stored once, and
     malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its card
     (CARD_REVIEW): one naming no card served here with its word, or a card released, is rejected; one for a card
     already reviewed is a duplicate, unless it brings the grade of a card stored as left (_complete). hide: (start,
@@ -500,7 +500,9 @@ def record(items, surface, path=None, now=None, hide=None):
                     duplicates += 1 - added
         finally:
             con.close()
-    out = {'stored': stored, 'duplicates': duplicates, 'rejected': len(batch) - len(cleaned) + refused}
+    reasons += [{'item': index, 'error': f'over {MAX_ITEMS} in one batch'} for index in range(len(batch), len(items))]
+    out = {'stored': stored, 'duplicates': duplicates,
+           'rejected': len(batch) - len(cleaned) + refused + len(items) - len(batch)}
     if not reasons or surface != 't3':  # T3 Code's server settles its items one by one; the browser's host needn't
         return out
     return dict(out, reasons=sorted(reasons, key=lambda r: r['item']))
@@ -572,30 +574,19 @@ def deck_key(entry, word):
 
 def deck_groups(rows):
     """Graded learning cards (graded, or reviews' rows of kind learning; in the order given, oldest grade first) as one
-    group per word: cards are one word's when they share a spelling or an entry id, transitively (a card served before
-    the word had an id, a word whose id changed, two spellings of one entry: one schedule, no migration). {key: rows},
-    the key deck_key of the group's latest entry id (else its latest spelling)."""
-    parent = {}
-
-    def find(x):
-        while parent.setdefault(x, x) != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    entry_of = lambda r: r.get('entry') if isinstance(r.get('entry'), int) and not isinstance(r.get('entry'), bool) \
-        else None
+    group per word: a spelling's cards all go to the group of the latest entry id any of them had (a card served before
+    the word had an id joins it; a spelling whose id changed moves, all its cards with it, to the new id's group, and
+    leaves the old id's other spellings where they are), spellings of one entry share its group (a kanji spelling and
+    its kana one), and a spelling never given an id is a group of its own. {key: rows}, the key deck_key of the group's
+    entry id, else its spelling."""
+    latest = {}
     for r in rows:
-        if entry_of(r) is not None:
-            parent[find(('w', r['word']))] = find(('e', entry_of(r)))
-        find(('w', r['word']))
-    groups = {}
-    for r in rows:
-        groups.setdefault(find(('w', r['word'])), []).append(r)
+        entry = r.get('entry')
+        if isinstance(entry, int) and not isinstance(entry, bool):
+            latest[r['word']] = entry
     out = {}
-    for group in groups.values():
-        entries = [entry_of(r) for r in group if entry_of(r) is not None]
-        out[deck_key(entries[-1] if entries else None, group[-1]['word'])] = group
+    for r in rows:
+        out.setdefault(deck_key(latest.get(r['word']), r['word']), []).append(r)
     return out
 
 

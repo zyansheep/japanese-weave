@@ -371,6 +371,13 @@ class Events(Home):
         self.assertEqual([r['item'] for r in found['reasons']], list(range(49)))
         self.assertEqual(found['reasons'][30]['error'], 'malformed or too old')
 
+    def test_items_past_the_batch_limit_are_rejected_with_a_reason(self):
+        items = [{'kind': 'peek'}] * feedback.MAX_ITEMS + [reviewed('c0', self.NOW - 1000, 700, word='問題')] * 2
+        found = self.record(*items)
+        self.assertEqual((found['stored'], found['rejected']), (0, feedback.MAX_ITEMS + 2))
+        self.assertEqual(len(found['reasons']), feedback.MAX_ITEMS + 2)
+        self.assertEqual(found['reasons'][-1], {'item': feedback.MAX_ITEMS + 1, 'error': 'over 500 in one batch'})
+
     def test_a_long_left_card_completed_keeps_its_times_in_order(self):
         self.record(reviewed('c0', self.NOW - 3 * HOUR, None, 2000, word='問題'))
         late = reviewed('c0', self.NOW - 1000, 700, 1500, word='問題', grade=3, graded=1200)
@@ -999,6 +1006,29 @@ class Queue(Deck):
         groups = feedback.deck_groups(rows)
         self.assertEqual({k: [r['card'] for r in v] for k, v in groups.items()},
                          {'entry:8': ['a', 'b', 'c', 'd'], 'z': ['e']})
+
+    def test_an_id_change_moves_its_spelling_and_chains_nothing(self):
+        """kata had id 1; ho had 1, then 2; hou has 2: ho moves to 2 with hou (one entry, two spellings), kata stays."""
+        rows = [{'card': 'a', 'word': 'kata', 'entry': 1}, {'card': 'b', 'word': 'ho', 'entry': 1},
+                {'card': 'c', 'word': 'ho', 'entry': 2}, {'card': 'd', 'word': 'hou', 'entry': 2},
+                {'card': 'e', 'word': 'ho', 'entry': None}]
+        groups = feedback.deck_groups(rows)
+        self.assertEqual({k: [r['card'] for r in v] for k, v in groups.items()},
+                         {'entry:1': ['a'], 'entry:2': ['b', 'c', 'd', 'e']})
+
+    def test_a_schedule_shows_its_latest_graded_spelling_or_any_it_can(self):
+        w0, w1, w2 = self.words[:3]
+        know = fwlib.read_json(fwlib.home() / knowledge.KNOWLEDGE)
+        know['words'][w0]['id'] = know['words'][w1]['id'] = 4242  # w0 first in the state: by entry id, w0
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, know)
+        due = srs.Card(state=srs.REVIEW, stability=5.0, difficulty=5.0, last=self.T0 - 9 * DAY,
+                       due=self.T0 - DAY, interval=8, reps=3)
+        log = [(self.T0 - 9 * DAY, 3, srs.REVIEW, 1000)]
+        decks = {'entry:4242': (due, log, w1, 1, frozenset({w0, w1})),  # last graded as w1: shown as w1
+                 'entry:9': (due, log, 'gone', 2, frozenset({'gone', w2}))}  # neither id nor latest in the state
+        q = review.queues(fwlib.load_state(), know, [], decks, self.T0)
+        self.assertEqual(sorted(w['ja'] for _card, w, _cid in q['review']), sorted([w1, w2]))
+        self.assertNotIn(w0, [w['ja'] for w in q['new']])  # nor is the other spelling a new card
 
     def test_text_is_cut_as_t3_counts_it(self):
         wide = chr(0x20000)  # a character beyond the BMP: two UTF-16 code units
