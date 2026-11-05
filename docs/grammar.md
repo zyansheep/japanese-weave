@@ -143,6 +143,16 @@ after an update reads every transcript on the machine once more for these record
 `VERSION`), so the model starts from the replies the log already has; run it on each machine with chats (`fw.py
 refresh`).
 
+A reply with render-time levels ([chat-weave.md](chat-weave.md), "Levels after the fact") shows a different subset of
+its glossed words at each level, so its record also has, still never text: each element (a twin or a swapped word)
+with its threshold, the twin holding a word, its propensities at -2..2, its expected opens and whether its place was
+drawn at random, from check-reply's plan when it is on the machine; which element each glossed word belongs to; the
+fingerprint of what each level -2..3 shows; the level the reply was shown at when sent; each sentence's predicted open
+chance; and the patterns of the twins check-reply dropped. Its sentences are numbered among all its glossed words. T3
+reports the level a message was rendered at, the collector keeps each level a message was shown at as a showing of its
+own, and the join matches a showing's annotations against the fingerprint at its level, so a sentence counts only where
+it was on screen, and where.
+
 ## The model
 
     logit P(open | read) = a + b * (Japanese characters / 10) + the sum of d_p over the patterns p not known yet
@@ -169,38 +179,43 @@ characters. The hardest patterns, with 90% intervals: から (from) +1.20 [+0.44
 
 ## Uses
 
-**The weave's first line** (`fw.py weave`) says how many sentences to make Japanese or mixed: the level's budget times
-the sentences' share (18%), over the open chance of a typical allowed sentence (known patterns only, 70% of the length
-limit) once the fit is ready, but never more than the same budget over the price gives (the count asked for before
-the model, which the reader already found too many), so the smaller of the two; before the fit is ready, the price's
-count as before. On the live log a typical allowed sentence's chance (3.4%) is under the price (8%), so the count stays
-what it was and the sentences only get shorter and simpler; at most how many Japanese characters each may have (where
-known patterns alone reach 5%, between 8 and 24; 14 until the fit is ready); the known patterns by name, plus at most
-one learning pattern a sentence; and this week's learning pattern with its explanation and example, to use on purpose
-once or twice. Other grammar stays out: the sentence is rephrased or stays English. `DRAFT_RULES` says the same.
+**The weave's first line** (`fw.py weave`) asks for a Japanese twin of each sentence that fits the limits, up to a cap
+(1.5 times the sentences much heavier pays for at the price, at least 3): at most so many Japanese characters a
+sentence (where known patterns alone reach 5%, between 8 and 24; 14 until the fit is ready); the known patterns by
+name, plus at most one learning pattern a sentence; and this week's learning pattern with its explanation and example,
+to use on purpose in a twin or two. Other grammar stays out: the sentence is rephrased or gets no twin.
+`DRAFT_RULES` says the same.
 
-**check-reply** (`fw.py check-reply --level N`) scores each Japanese or mixed sentence: its Japanese characters, its
-patterns and its predicted open chance. It flags a sentence over the limit, one using a new pattern or two learning
-ones, and (once the fit is ready) one predicted over 5%, and ends with the reply's expected sentence opens against the
-level's budget for sentences. The brief has the writer fix a flagged sentence by splitting it, simplifying it or
-leaving it English, then check again, at most twice.
+**check-reply** (`fw.py check-reply --level N`) scores each twin's sentences: their Japanese characters, their patterns
+and their predicted open chance. It drops a twin with a sentence over the limit, a new pattern or two learning ones (its
+sentence stays English), and decides which twins each level shows: the sentences' share of each level's budget (18%)
+pays for them at their predicted open chance but never less than the price, so no level shows more Japanese sentences
+than the count before the model asked for (on the live log a typical allowed sentence's chance, 3.4%, is under the
+price, 8%, so the counts stay what they were and the sentences only get shorter and simpler), the twins with this
+week's pattern or learning words first. It ends with each level's expected sentence opens against that share.
 
 ## Intake
 
 One pattern is learned at a time. It becomes known once 15 sentences with it were read since it began (weighted by
 read chance) and its fitted difficulty is at most +0.3 (near zero; at 15 sentences its interval is still too wide to
 judge on). With none being learned, the next comes in only while sentence opens per read sentence over the last 7 days
-are under 5% (or fewer than 20 were read): the new pattern most used in the replies of the last 30 days. The change is
+are under 5% (or fewer than 20 were read): the new pattern most used in the replies of the last 30 days (what the
+writing uses: every twin a reply carries, shown at some level or not, and the twins check-reply dropped, which is
+where a new pattern shows up once the limits keep it out of what is sent). Only sentences that were shown count as
+read, at the level they were shown at. The change is
 a `grammar` op, so the collector holds the statuses and every cache sees them. `fw.py status` shows the pattern being
 learned, its evidence and the rate. On the live log's copy the first was stacked particles (に + は and the like, in 135
 sentences of 30 days), with the rate at 4.4%.
 
 ## English only
 
-T3 Code's keyboard shortcut toggles English only in chat: while it is on, every message on screen shows English (words
-as their meanings, Japanese and mixed sentences as their translations) and the hook has new replies written in plain
-English, as at off. It lasts an hour unless turned off. The heavier and lighter levels are set from the arrows of T3
-Code's Japanese Weave panel (`POST /v1/intensity`, unchanged).
+T3 Code's keyboard shortcut toggles English only in chat: while it is on, every message on screen shows English, and
+it lasts an hour unless turned off. With render-time levels it is level -3 at render time: a message with levels shows
+its English twins and its swaps' English, an older one its words as their meanings and its sentences as their
+translations. In draft style the hook keeps having replies written with their twins meanwhile (the reader sees them in
+English until English only is off, then at the level then); in the classic brief it has them written in plain English,
+as at off. The heavier and lighter levels are set from the arrows of T3 Code's Japanese Weave panel (`POST
+/v1/intensity`, unchanged), and they too change every message on screen at once.
 
 - `GET /v1/intensity?surface=chat` adds `"english": {"on", "until" (ms, 0 when off), "at" (ms of the last change, 0 if
   never)}`.
@@ -210,6 +225,7 @@ Code's Japanese Weave panel (`POST /v1/intensity`, unchanged).
   hour again); off sets it to 0. Each press is an `english` op with its contexts.
 - `fw.py intensity english on|off` does the same from a terminal.
 
-In the model: T3 messages shown during an English spell don't count (the collector drops their shown records and the
-refresh leaves them out); each press turning it on counts as a lighter press in `fw.py calibrate`; and the Japanese
-sentences of the messages it names are weak opens, as above.
+In the model: a T3 message's items at -3 are dropped (no Japanese was on screen); from a client that sends no level,
+messages shown during an English spell don't count (the collector drops their shown records and the refresh leaves them
+out); each press turning it on counts as a lighter press in `fw.py calibrate`; and the Japanese sentences of the
+messages it names, as shown at the chat level then, are weak opens, as above.

@@ -4,7 +4,7 @@ renders the message at the reader's current level, so the panel's arrows and Eng
 screen after the fact. Python 3.9+, standard library only.
 
 What Claude writes (the authoring syntax, read by fw.py check-reply: parse_authored): the reply in English, keeping
-the weave's word swaps whose sense fits as <abbr title="reading · meaning">語</abbr>, and right after an English
+the weave's word swaps whose sense fits as <abbr title="reading · meaning">JAPANESE</abbr>, and right after an English
 sentence that can be Japanese within the weave's limits, on the same line, its Japanese twin in <ja>...</ja>: one or
 two Japanese or mixed sentences glossed as before, each ending with a bare 。 or ？. The twin's English sentence is the
 text right before the <ja>: back to the end of the sentence before it (a . ! ? : or ; followed by a space, the
@@ -13,7 +13,7 @@ list, heading or quote marker. Code puts that English sentence on each bare clos
 written once, and adds a closing mark the twin lacks.
 
 What Claude sends (the final markup, written by code: markup; the contract with the T3 clients):
-  - a swapped word in English text: <abbr title="reading · meaning" data-en="original English" data-on="N">語</abbr>,
+  - a swapped word in English text: <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>,
     the gloss at levels >= N and the plain English of data-en below;
   - a twinned sentence: <span data-jw="ja" data-on="N">JAPANESE</span><span data-jw="en" data-on="N">ENGLISH</span>,
     the Japanese at levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on (it shows

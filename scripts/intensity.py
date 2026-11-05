@@ -9,9 +9,11 @@ same choices with no budget). Each change is a `set` op on the pref intensity_ch
 intensity_browser ({level, until, at, source}), so the collector's ops table keeps every press: how often and when the
 reader turns it down or up is the evidence for whether the default amount is right (knowledge.py calibration).
 
-English only (chat): T3 Code's keyboard shortcut toggles it. While it is on, every chat message on screen shows English
-(words as their meanings, Japanese and mixed sentences as their translations) and the hook has new replies written
-in plain English, as at off; it lasts ENGLISH_MS unless turned off sooner. Each press is an `english` op ({on, until,
+English only (chat): T3 Code's keyboard shortcut toggles it. While it is on, every chat message on screen shows English:
+a reply with render-time levels (twins.py) as at OFF, its English twins and its swaps' English; an older one its words
+as their meanings and its Japanese and mixed sentences as their translations. In draft style the hook keeps having new
+replies written with their twins (they show once English only is off); the classic brief has them written in plain
+English, as at off. It lasts ENGLISH_MS unless turned off sooner. Each press is an `english` op ({on, until,
 source, contexts: the messages on screen}, hub.py) and its value the pref english_chat ({on, until, at, source}). A
 press turning it on counts as a lighter press in calibration, and the Japanese sentences of the messages it names as
 weak evidence of an open (sentence_model.py)."""

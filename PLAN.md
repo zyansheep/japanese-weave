@@ -270,7 +270,11 @@ from its length in Japanese characters and the difficulty of each grammar patter
 about 3 times per 10 characters on the log); each Japanese sentence is held to the known patterns plus one learning
 pattern, and to the length at which known patterns reach a 5% open chance; one pattern is learned at a time, the next
 only while opens stay under 5% of sentences read. T3 Code's shortcut now toggles English only for an hour, a lighter
-press and weak evidence that the sentences on screen were too hard.
+press and weak evidence that the sentences on screen were too hard. Since then a chat reply carries every level at once: Claude
+writes a Japanese twin after each sentence that fits, code gives each twin and swap the lowest level it shows at (by
+value per expected open, within each level's budget, a fifth of the places drawn at random so each element's chance of
+showing is known), and T3 Code shows the message at the reader's level, so the arrows and English only change what is
+on screen after the fact; the model counts only what was shown, at the level it was shown at (docs/chat-weave.md).
 
 ## 7. Experiments
 
