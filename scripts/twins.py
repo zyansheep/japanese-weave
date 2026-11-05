@@ -689,7 +689,7 @@ def swaps_for(session=None):
 
 def remember_plan(fp, plan, now_ms=None):
     """Keeps a checked reply's plan under its fingerprint (grammar.fingerprint of annotation_texts): {at, level (the
-    chat level it was checked at), view (the level shown when it was sent: -3 while English only is on), e: [[kind,
+    chat level it was checked at), view (the level it is read at: the chat level, English only aside), e: [[kind,
     on, propensities, p, x]] per element in document order, d: [[pattern ids]] per dropped twin, s: [p] per Japanese
     sentence}, the last PLANS_KEPT."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -730,22 +730,24 @@ def plan_for(text, plans=None):
 
 
 def level_now(state=None):
-    """The level a reply is shown at now on this machine's state: -3 while English only is on, else the chat level."""
+    """The chat level on this machine's state: the level a reply is read at once any English-only spell is over (a
+    reply written during one shows its Japanese then)."""
     state = state if state is not None else fwlib.load_state()
-    prefs = (state or {}).get('prefs')
-    if intensity.english_current(prefs)['on']:
-        return OFF
-    return intensity.current(prefs, 'chat')['level']
+    return intensity.current((state or {}).get('prefs'), 'chat')['level']
 
 
 def view(text, level=None, plans=None):
     """What a reader of the transcript counts as shown (fwlib.read_replies, the hook's last reply and topical words):
-    the reply rendered at the level it was shown at when sent (its plan's view), else at `level` (the level in force
-    now). A reply without levels is unchanged above off. Only rendered Japanese is an exposure."""
+    the reply rendered at the level it was shown at when sent (its plan's view), else at `level` (the chat level in
+    force now). A plan from a check under English only (view -3, from before views were the chat level) counts at
+    `level` instead: the reply shows its Japanese once English only is off. A reply without levels is unchanged above
+    off. Only rendered Japanese is an exposure."""
     if not has_levels(text):
         return text if level is None or level > OFF else render(text, level)
     plan = plan_for(text, plans)
-    shown = plan.get('view') if plan and isinstance(plan.get('view'), int) else level
+    shown = plan.get('view') if plan and isinstance(plan.get('view'), int) else None
+    if shown is None or shown <= OFF:
+        shown = level
     return render(text, 0 if shown is None else shown)
 
 

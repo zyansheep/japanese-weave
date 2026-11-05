@@ -504,6 +504,36 @@ class ReviewRound1(Home):
         twin = next(p for e, p in zip(checked.elements, checked.props) if e.kind == 's')
         self.assertTrue(all(x > 0 for x in twin), twin)
 
+    def test_t8_a_message_first_shown_in_english_becomes_a_showing_later(self):
+        db = self.home / 'log.sqlite'
+        now = intensity.now_ms()
+        notes = [['問題', 10, 0], ['。', 60, 0]]
+        item = lambda kind, level, at, **kw: dict({'kind': kind, 'view': 'v1', 'context': 'm1', 'at': at,
+                                                   'box': [0, 0, 600, 400], 'annotations': notes, 'level': level}, **kw)
+        visible = dict(y=0, height=24, ms=4000, wall=4000, away=0, media=0, idle=0)
+        result = feedback.record([item('shown', -3, now - 9000, words=40), item('visible', 0, now - 5000, **visible),
+                                  item('pin', 0, now - 4000, word='。', position=1, dwellMs=900),
+                                  item('visible', -3, now - 3000, **visible)], 't3', db, now=now)
+        self.assertEqual((result['stored'], result['rejected']), (3, 1))
+        rows, contexts = feedback.load(db)
+        english, at0 = contexts[('t3', 'v1', 'm1@-3')], contexts[('t3', 'v1', 'm1@0')]
+        self.assertEqual((english['annotations'], knowledge.is_showing(english)), ([], False))
+        self.assertEqual(at0['words'], 40)
+        self.assertEqual(len(knowledge.showings(rows, contexts, now + knowledge.SETTLE_MS + 1)), 1)
+        feedback.record([item('shown', 0, now - 2000, words=55)], 't3', db, now=now)  # the level's own count wins
+        self.assertEqual(feedback.load(db)[1][('t3', 'v1', 'm1@0')]['words'], 55)
+        self.assertEqual(feedback.stats(path=db)['blankPassages'], [0, 0])  # no blank web passage
+
+    def test_t10_a_reply_checked_under_english_only_counts_at_the_chat_level(self):
+        old = check_reply.finish(AUTHORED, plan(level=0, view=-3), TYPES, seed=3, now_ms=NOW)  # a plan from before
+        self.assertGreater(twins.view(old.final, level=0).count('<abbr'), 0)
+        self.assertEqual(twins.view(old.final, level=-3).count('<abbr'), 0)  # chat off now: none
+        state = fwlib.new_state(known_top=10)
+        state.setdefault('prefs', {})[intensity.ENGLISH] = intensity.english_at(True, 't3')
+        fwlib.save_state(state)
+        self.assertEqual(check_reply.Plan.load(1).view, 1)  # English only is a view: the reply is read at 1
+        self.assertEqual(twins.level_now(state), 0)
+
     def test_8_no_plan_means_send_the_english(self):
         with mock.patch.object(check_reply.Plan, 'load', side_effect=OSError('no state')), \
                 mock.patch('sys.stdin', new=io.StringIO(f'The {P} is small.{self.TWIN}')), \
@@ -527,6 +557,14 @@ class ReviewRound1(Home):
         self.assertIn('quoted in backticks', weave.DRAFT_RULES)
         self.assertIsNone(check_reply.finish('It is 問題 here.' + self.FILLER, plan(), TYPES, remember=False).final)
 
+    def test_11_an_item_without_a_level_is_stored_as_before(self):
+        db = self.home / 'log.sqlite'
+        now = intensity.now_ms()
+        shown = {'kind': 'shown', 'view': 'v1', 'context': 'old1', 'at': now - 1000, 'box': [0, 0, 1, 1],
+                 'annotations': [['問題', 0, 0]], 'words': 30}
+        self.assertEqual(feedback.record([shown], 't3', db, now=now)['stored'], 1)
+        context = feedback.load(db)[1][('t3', 'v1', 'old1')]
+        self.assertEqual((context['message'], context['level'], context['words']), ('old1', None, 30))
 
 
 if __name__ == '__main__':

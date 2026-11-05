@@ -225,8 +225,8 @@ class Plan:
     """What the sentence scorer and the levels need: the reader's pattern statuses (grammar.statuses), the sentence
     model (knowledge.json "grammar", or None), the chat level with normal's budget (the challenge, or None), and for
     the levels (finish): knowledge.json (know, for a word the weave didn't offer), the weave's swaps (twins.swaps_for),
-    the price of a sentence, this week's learning pattern (its id, or None) and the level the reply is shown at when
-    sent (view: -3 while English only is on)."""
+    the price of a sentence, this week's learning pattern (its id, or None) and the level the reply is read at (view:
+    the chat level, also while English only is on, since the reply shows its Japanese once that is off)."""
 
     def __init__(self, statuses, model=None, level=0, normal=None, know=None, swaps=(), price=None, learning=None,
                  view=None):
@@ -248,10 +248,8 @@ class Plan:
         level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
         model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
         learning = grammar.learning(state)[0]
-        english = intensity.english_current(state.get('prefs'))['on']
         return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None, know,
-                   twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None,
-                   intensity.OFF if english else level)
+                   twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level)
 
 
 def score(text, plan):

@@ -181,8 +181,8 @@ def read_commands():
 def is_showing(context):
     """A browser passage with a shown record, or a T3 message with a word count (from its shown record, or backfilled
     from its transcript): replayed whole, opened or not (showings)."""
-    if context['surface'] == 't3':
-        return context.get('words') is not None
+    if context['surface'] == 't3':  # a message shown at -3 (English only) showed no Japanese: a word count only
+        return context.get('words') is not None and (context.get('level') is None or context['level'] > intensity.OFF)
     return context['surface'] == 'browser' and context.get('shown_at') is not None
 
 

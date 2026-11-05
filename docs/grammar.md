@@ -225,7 +225,8 @@ as at off. The heavier and lighter levels are set from the arrows of T3 Code's J
   hour again); off sets it to 0. Each press is an `english` op with its contexts.
 - `fw.py intensity english on|off` does the same from a terminal.
 
-In the model: a T3 message's items at -3 are dropped (no Japanese was on screen); from a client that sends no level,
+In the model: a T3 message's items at -3 are dropped (no Japanese was on screen), its shown record kept only for its
+word count; from a client that sends no level,
 messages shown during an English spell don't count (the collector drops their shown records and the refresh leaves them
 out); each press turning it on counts as a lighter press in `fw.py calibrate`; and the Japanese sentences of the
 messages it names, as shown at the chat level then, are weak opens, as above.

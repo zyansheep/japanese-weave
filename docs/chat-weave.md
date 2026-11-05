@@ -100,8 +100,9 @@ about 0.03 of the exact chance), kept with its threshold, its prediction and whe
 
 **What the reading model sees.** Only what was rendered is evidence:
 - *Exposure.* T3 reports what is on screen, and the word model reads only a showing's annotations. The transcript
-  readers on each machine count a reply with levels as it was shown when it was sent (its plan's level, else the level
-  in force now, -3 while English only is on), never its full markup: the exposure scan's words and reading entries
+  readers on each machine count a reply with levels at the level it is read at (its plan's level, else the chat level
+  in force now; English only doesn't count, since the reply shows its Japanese once that is off), never its full
+  markup: the exposure scan's words and reading entries
   (`fwlib.read_replies`), the hook's last reply and its topical turns (`twins.view`).
 - *The join.* The hook's sentence record of a reply with levels keeps, never text, every element with its threshold
   and propensities, which element each glossed word belongs to, and the fingerprint of what each level shows
@@ -116,16 +117,20 @@ about 0.03 of the exact chance), kept with its threshold, its prediction and whe
   can weight each sentence by 1 / its propensity at its level (clipped, normalized), which makes it estimate the open
   chance over every twin written; or be fitted on the random ones alone as a check.
 - *Another level.* A message read again at another level is another showing, not a duplicate, and a level change while
-  it is on screen splits its reports (the client's later items carry the new level). A level's first report that isn't
-  its shown record starts that showing, with the word count of the message's other level.
+  it is on screen splits its reports (the client's later items carry the new level). The client sends a shown record
+  for each level a message with level markup is shown at, with that level's word count; a level's first report that
+  isn't its shown record starts that showing with the word count of another level until it comes.
 - *Presses.* The panel's arrows and English only now change what is on screen at once; they are logged as before, and
   calibrate counts them as before (English only on as a lighter press). A press of English only names the messages on
   screen, read as shown at the chat level then; their Japanese sentences are weak opens.
-- *English only* is level -3 at render time: items at -3 show no Japanese and are dropped. In draft style the hook
+- *English only* is level -3 at render time: items at -3 show no Japanese and are dropped, but for a shown record,
+  kept with no annotations and never a showing, so a message first shown in English gets its word count for the
+  levels it is read at later. In draft style the hook
   keeps writing twins while it is on, so turning it off (or its hour running out) shows those replies' Japanese at the
   level then, like every other message, and English only is a view, as the arrows are; at off (-3 from the arrows) or
   in a chat with Japanese off, the hook still has replies written in plain English: those mean no Japanese work.
-- *Older messages* (no thresholds) are read as before, and so are clients that send no level.
+- *Older messages* (no thresholds) are read as before: clients send a level only for messages with level markup, and
+  an item without one is stored as it always was, one showing per message.
 
 **Deploying.** The collector first (it takes the level and the new record fields; an older one rejects the records and
 keeps every level of a message in one row), then the T3 builds that render levels (an older build shows both twins),

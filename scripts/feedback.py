@@ -62,8 +62,9 @@ Items are interactions, or {"kind": "shown", "words": N, ...} records that only 
 the peek rate); from T3, any of them may carry "level": -3..3, the level the message was rendered at (record); or
 (T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its id, "word": the
 word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" | "mobile",
-"uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its gradeMs, revealMs <= gradeMs <= shownMs; an item without one is a card left (closed, backgrounded, skipped), which
-schedules nothing. A review is stored on its card's row, once: it must name a card served here with that word and not
+"uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its gradeMs,
+revealMs <= gradeMs <= shownMs; an item without one is a card left (closed, backgrounded, skipped), which schedules
+nothing. A review is stored on its card's row, once: it must name a card served here with that word and not
 released, and a second review of a card (a resend, with or without the same uid) is a duplicate, except that a graded
 item completes a card stored as left (no grade yet: a client that reported closing the card, then the grade), keeping
 the first time it was shown. Every rejected item's reason comes back in the reply (reasons, by index), so a client can
@@ -457,11 +458,14 @@ def record(items, surface, path=None, now=None, hide=None):
     end) of an English-only spell in chat (intensity.py): a T3 message's shown record from then is dropped (counted as
     rejected), since its Japanese wasn't on screen.
 
-    A T3 item with a level (the level the message was rendered at, -3..3: render-time levels) is stored under
-    level_context, so each level a message was shown at is a showing of its own; an item at -3 (off, English only)
-    showed no Japanese and is dropped (rejected), and hide leaves items with a level alone (they say what was shown).
-    A level's first item that isn't its shown record starts the showing: its word count from the message's showing at
-    another level, shown when that item came."""
+    A T3 item with a level (the level the message was rendered at, -3..3: render-time levels; the client sends one
+    only for a message with level markup, so an older message stays one showing, as before) is stored under
+    level_context, so each level a message was shown at is a showing of its own, with its shown record (one per
+    message and level) giving its own word count. An item at -3 (off, English only) showed no Japanese: it is dropped
+    (rejected), but for a shown record, kept with no annotations (never a showing: knowledge.is_showing) so its word
+    count is there for the levels that follow; hide leaves items with a level alone (they say what was shown). A
+    level's first item that isn't its shown record starts the showing: its word count from the message's showing at
+    another level, shown when that item came, until the level's own shown record brings its own."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
@@ -474,8 +478,9 @@ def record(items, surface, path=None, now=None, hide=None):
             why = c if isinstance(c, str) else 'malformed or too old' if not c else \
                 'review items come from T3 (surface t3)'
             reasons.append({'item': index, 'error': why})
-        elif c['kind'] != REVIEW and surface == 't3' and c.get('level') is not None and c['level'] <= intensity.OFF:
-            reasons.append({'item': index, 'error': 'shown at -3 (off or English only): no Japanese on screen'})
+        elif c['kind'] not in (REVIEW, SHOWN) and surface == 't3' and c.get('level') is not None \
+                and c['level'] <= intensity.OFF:  # a shown record at -3 is kept for its word count (below)
+            reasons.append({'item': index, 'error': 'at -3 (off or English only): no Japanese on screen'})
         elif hide and surface == 't3' and c['kind'] == SHOWN and c.get('level') is None \
                 and hide[0] <= c['at'] < hide[1]:
             reasons.append({'item': index, 'error': 'shown while English only was on'})
@@ -515,6 +520,8 @@ def record(items, surface, path=None, now=None, hide=None):
                     if c.get('level') is not None:
                         base = c['context']
                         c = dict(c, context=level_context(base, c['level']))
+                        if c['level'] <= intensity.OFF:  # shown in English: its words, for the levels that follow
+                            c['annotations'] = []
                         if not shown and not con.execute('SELECT 1 FROM contexts WHERE surface = ? AND view = ? AND '
                                                          'context = ?', (surface, c['view'], c['context'])).fetchone():
                             sibling = con.execute(SIBLING_WORDS, (surface, c['view'], base, len(base) + 1,
@@ -708,7 +715,8 @@ def stats(since=0, path=None):
         shown = con.execute('SELECT coalesce(sum(words), 0), coalesce(sum(CASE WHEN shown_at >= ? THEN words END), 0) '
                             'FROM contexts WHERE shown_at IS NOT NULL AND annotations != ?', (since, BLANK)).fetchone()
         blank = con.execute('SELECT count(*), coalesce(sum(shown_at >= ?), 0) FROM contexts '
-                            'WHERE shown_at IS NOT NULL AND annotations = ?', (since, BLANK)).fetchone()
+                            "WHERE surface = 'browser' AND shown_at IS NOT NULL AND annotations = ?",
+                            (since, BLANK)).fetchone()  # a T3 message shown in English (at -3) is no blank passage
         onscreen = con.execute('SELECT coalesce(sum(r.ms), 0), coalesce(sum(CASE WHEN r.at >= ? THEN r.ms END), 0) '
                                'FROM reading r JOIN contexts c USING (surface, view, context) '
                                "WHERE r.kind = 'visible' AND c.annotations != ?", (since, BLANK)).fetchone()
