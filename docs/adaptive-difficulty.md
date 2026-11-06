@@ -349,15 +349,81 @@ not (two seeds here): the fit then reads every "yes" at face value, as the probe
 These were the probes of old, taken once a month with a command. Since the review wedge (2026-11) the probe lives in
 the review stream (next section) and the command is gone; the old records still feed the fit as above.
 
+### Review cards on a schedule (FSRS, as Anki)
+
+Since 2026-11 the review cards (scripts/review.py; T3 Code's review panel and the phone's Review screen) work as Anki
+does: one word alone, its reading and meaning revealed on request, then a grade with Anki's four buttons (Again, Hard,
+Good, Easy), each showing when the card would come back. A word's schedule is FSRS-6 (scripts/srs.py) replayed over its
+graded learning cards in time order, so a change of parameters recomputes every card; the collector caches the
+schedules until another graded card arrives.
+
+The memory model, checked against py-fsrs 6.3.2, the reference implementation (tests/test_srs.py has worked cases
+computed with its own code; on 2026-11-05 the two also agreed to machine precision on the memory states of 3,000
+random histories, the intervals differing only where Anki's rules below apply), with w the 21 default parameters, G
+the grade (1 to 4), S the stability in days, D the difficulty (1 to 10):
+
+- forgetting curve R(t, S) = (1 + F t / S)^-w20, F = 0.9^(-1/w20) - 1, so R(S, S) = 90%; the decay w20 is trainable;
+- first review S0 = w[G-1], D0 = w4 - e^(w5 (G-1)) + 1;
+- difficulty D + dD (10 - D) / 9, dD = -w6 (G - 3) (linear damping), reverted toward D0(4) by w7;
+- recall S (1 + e^w8 (11 - D) S^-w9 (e^(w10 (1 - R)) - 1)), times w15 for Hard and w16 for Easy;
+- forgetting min(w11 D^-w12 ((S + 1)^w13 - 1) e^(w14 (1 - R)), S / e^(w17 w18));
+- a same-day review S e^(w17 (G - 3 + w18)) S^-w19, never lower for Hard, Good or Easy;
+- the interval at desired retention r: S / F (r^(-1/w20) - 1) days, S itself at r = 90%.
+
+Around it, what Anki does (its scheduler's source, rslib/src/scheduler/states): days counted between day numbers with
+the day starting at 4am; learning steps of 1 and 10 minutes (Hard on the first: 5.5 minutes), relearning in 10 (Hard:
+15); graduation at the Good interval, Easy at least a day more; review intervals with Hard < Good < Easy and none shrunk
+by fuzz below the last; at most 36,500 days; Anki's fuzz (none under 2.5 days, then about +-1 day plus 15%, 10% and 5%
+of the days in its ranges), at a point fixed by the card's id and review count, so the intervals on the buttons are the
+ones used and a replay lands on the same days; up to 25% (at most 5 minutes) more on a learning step; and a 20-minute
+learn-ahead. As in Anki, a grade gets what its button showed: the transition is worked out when the card was served and
+counted from the day of the grade, so a card held past 4am keeps its button's days. A word's schedule is kept under its
+dictionary entry id when its cards have one (a card served before the word had an id joins the id's schedule by
+spelling, so nothing needs migrating), else its spelling. The fuzz factor comes from SHA-256 rather than Anki's random
+generator (another day within the same range), there is no load balancer, and the arithmetic is in doubles.
+
+The queue is Anki's: learning cards due, then review cards due today, then new cards, up to 20 a day (Review more lifts
+the limit for a request; a new card served and not yet graded counts against it, so a grade in flight can't let a 21st
+in), from the learning words in the order the cards used before (behind on showings first, then the least certain,
+ties broken the same way all day), then a learning card up to 20 minutes early. A client gives back cards it fetched
+ahead and never showed (release): they are as if never served, and a review of one is refused. A grade arriving for a
+card already reported as left completes it. A word the reader marks known leaves the deck; one the
+model labels known keeps its schedule (the model moving on says nothing about recall). Probe and made-up cards come in
+between at random while there is a real card to serve, 10% and 5% of the cards served, half the shares of the stream
+before grades: a day of Anki serves several times the 20 cards a day of then (each new word comes back through its
+steps and reviews), so the probe gets as many cards or more. They look like new cards and never get a schedule. A card
+left without a grade schedules nothing and waits behind the other cards for 4 hours, so a client that never grades
+(from before grades) still moves through the words. A badge asks for the counts alone (peek): nothing is served or
+recorded, so polling it holds no word back.
+
+**What FSRS doesn't see.** FSRS assumes the reviews are the only memory events. This reader also meets their words in
+chat and on web pages, glossed, opened or not, so every meeting outside the reviews is practice the schedule ignores:
+version 1 feeds FSRS the graded reviews alone, and its intervals come out conservative (more reviews than strictly
+needed). An open gloss while reading is a candidate "Again" signal (recall failed in context), and an unopened gloss
+on a read line a weak "Good"; neither goes in until the log can show that an open predicts an Again at the next review
+(and by how much), since a wrong signal would make the schedule worse than none. `fw.py review revlog` writes the graded
+reviews in the optimizer's format; with about 1,000 of them FSRS's own parameters can be fitted, and `fw.py review`
+compares the review cards' observed retention with the 90% aimed for.
+
 ### Review cards in the fit
 
-The review wedge (scripts/review.py) turns a T3 Code gloss into a card: one word alone, its reading and meaning
-revealed on request. A card's outcome is the time from its appearing to the reveal, or that the reader moved on
-without one; times over a minute (distraction) and cards left within 150 ms (not looked at) are dropped, and every
-card of a real word is a read for the recency clock either way (it shows the word, and a reveal its meaning). About 7
-cards in 10 are learning words, 2 probe words and 1 a made-up word (data/fakes.tsv), in random order.
+A review card's outcome, for the reading model, depends on its flow. A client's cards are of the graded flow from its
+first grade on (the review panel: every graded card revealed first), else of the reveal flow (the wedge); a client is
+the item's source (desktop or mobile), so an old build that never grades, still running after a newer one of the same
+source has graded, has its cards read as left (no evidence) until it is updated. A graded card
+of a real word is an explicit answer, read as a probe's answers are: Again is not known at recall (likelihood 1 - z),
+Hard, Good or Easy known (z), with z = sigmoid(k - review) below, and no correction for over-claiming, since the grade
+comes after the reveal. Not every grade is an answer: one on a learning or relearning step the same day, minutes after
+the last (Again, then Good after a minute, then Good after ten), says how the steps went, so only grades from the new or
+review state, or from a step left overnight, count, and at most one a word an Anki day; read as three answers, those
+steps cancelled the Again. The graded flow's other cards say nothing: one closed without a reveal is not a reader who
+knew the word (read as a reveal time, three such closes moved a word up by 0.44), and its made-up cards, always revealed
+to be graded, would drive the "not known" chance of no reveal toward 0. The mixture below is fitted from the reveal
+flow's cards alone, which are read as before: times over a minute (distraction) and cards left within 150 ms (not looked
+at) are dropped, and every card of a real word is a read for the recency clock either way (it shows the word, and a
+reveal its meaning).
 
-The outcome is a mixture (knowledge.Components). Known at recall: log time N(mu_K, s_K), and no reveal with chance
+The ungraded outcome is a mixture (knowledge.Components). Known at recall: log time N(mu_K, s_K), and no reveal with chance
 a_K. Not known: N(mu_U, s_U) and a_U. These six are shared by every word; each component is held by a prior worth 10
 cards (about 1.2 s, sd 0.5, a_K 0.3; about 3 s, sd 0.7, a_U 0.1), so a handful of cards can't swing them. A real word's
 card has likelihood z A + (1 - z) B, with z = sigmoid(k - review), k the word's long-term knowledge and review an offset

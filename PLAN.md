@@ -43,7 +43,8 @@ It is measured two ways:
 - **By a probe**: words sampled by how often your reading uses them, each marked known or not, plus 1 in 10 made-up
   words to catch over-claiming. It is the check on the model's number. It was a monthly 3-minute list (standard error
   about 6 points), which also measured how often you look up a word you don't know (row R); since 2026-11 it lives in
-  the review stream (T3 Code's review cards: 1 in 5 a probe word, 1 in 10 made up), estimated over the last 30 days
+  the review stream (T3 Code's review cards: 1 in 10 a probe word, 1 in 20 made up, between the cards scheduled as in
+  Anki), estimated over the last 30 days
   from the time to each card's reveal, without the model.
 
 Two things multiply into the goal:

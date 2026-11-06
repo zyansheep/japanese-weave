@@ -5,7 +5,7 @@ on-screen time in passages with glossed words are kept too, as more evidence of 
 long, and browser passages planned to get Japanese that got none (blank) are kept as shown and on screen, the baseline
 for calibration (knowledge.py). Words, positions, times and counts only, never text.
 
-Stored in <state dir>/interactions.sqlite (schema 5):
+Stored in <state dir>/interactions.sqlite (schema 8):
   contexts      one row per passage per page load (browser) or message render (T3): its box on the page, the
                 glossed words in it as JSON [[word, x, y], ...] (positions relative to the passage), its word count
                 and when it was shown ("shown": in the browser when its glossed words were first on screen, for a
@@ -48,13 +48,24 @@ Stored in <state dir>/interactions.sqlite (schema 5):
                 weight, probe.py; fake: a made-up word, data/fakes.tsv; the client is never told), the word's entry id
                 when known; then what happened, from its review item (below): when it was shown (at), ms from shown to
                 the reveal of its reading and meaning (reveal_ms, NULL when it was left without one), ms on screen in
-                all (shown_ms), the client (via) and its uid; seq orders changes for export, as for contexts
+                all (shown_ms), the client (via) and its uid, and the reader's grade, as Anki's buttons (grade: 1
+                Again, 2 Hard, 3 Good, 4 Easy; NULL: left without one, or a client from before grades) with the ms
+                from shown to it (grade_ms); released, when the client gave the card back unshown (a dropped
+                prefetch, POST /v1/review/next's release: never reviewed, never read); seq orders changes for export,
+                as for contexts. A word's graded learning cards, replayed in time order, are its spaced-repetition
+                schedule (review.py, srs.py)
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
 the peek rate), or (T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its
 id, "word": the word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" |
-"mobile", "uid"?}. A review is stored on its card's row, once: it must name a card served here with that word, and a
-second review of a card (a resend, with or without the same uid) is a duplicate. With a collector configured (setup
+"mobile", "uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its
+gradeMs, revealMs <= gradeMs <= shownMs; an item without one is a card left (closed, backgrounded, skipped), which
+schedules nothing. A review is stored on its card's row, once: it must name a card served here with that word and not
+released, and a second review of a card (a resend, with or without the same uid) is a duplicate, except that a graded
+item completes a card stored as left (no grade yet: a client that reported closing the card, then the grade), keeping
+the first time it was shown. Every rejected item's reason comes back in the reply (reasons, by index), so a client can
+settle items one by one and say why (shownMs over MAX_REVIEW_MS, a day, is one: clients clamp to it); a review item's
+time up to FUTURE_MS ahead of the collector's clock is taken as now. With a collector configured (setup
 --collector), the native host forwards items to it instead (see collector.py), and knowledge.py runs there.
 """
 import gzip
@@ -72,15 +83,18 @@ import intensity
 
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 SURFACES = ('browser', 't3')
 KINDS = ('peek', 'pin', 'flip')  # the gloss was opened, or the word turned back to English
 READING = ('click', 'select', 'visible', 'trace')  # where the reader was; knowledge.py reads the visible stays
 SHOWN = 'shown'
 REVIEW = 'review'  # what happened to a review card (cards table; review.py serves them)
 REVIEW_SOURCES = ('desktop', 'mobile')
+GRADES = (1, 2, 3, 4)  # a review card's grade, as Anki's buttons: Again, Hard, Good, Easy (srs.py)
 CARD_KINDS = ('learning', 'probe', 'fake')
 MAX_REVIEW_MS = 86_400_000  # the longest a card may have been on screen (knowledge.py drops those over a minute)
+FUTURE_MS = 3_600_000      # a review item's time this far ahead of the collector's clock is taken as now (a client
+                           # clock running fast would otherwise lose its grades for good); further ahead, rejected
 BLANK = '[]'  # the annotations of a passage shown without Japanese
 MAX_ITEMS = 500
 MAX_ANNOTATIONS = 200
@@ -153,7 +167,10 @@ CREATE TABLE IF NOT EXISTS cards (
   shown_ms INTEGER,
   via TEXT,
   uid TEXT,
-  seq INTEGER NOT NULL DEFAULT 0
+  seq INTEGER NOT NULL DEFAULT 0,
+  grade INTEGER,
+  grade_ms INTEGER,
+  released INTEGER
 );
 """
 INDEXES = """
@@ -194,7 +211,8 @@ def connect(path=None, timeout=10):
 def _migrate(con):
     """Schema 1 -> 2: word counts, shown times and a change sequence on contexts; client ids on interactions.
     Schemas 3 and 4 only added the reading table, which READING_TABLE creates. Schema 5: the plan of a shown passage.
-    Schema 6 only added the cards table, which CARDS_TABLE creates."""
+    Schema 6 only added the cards table, which CARDS_TABLE creates. Schema 7: a review card's grade and grade_ms;
+    schema 8: its released mark."""
     columns = lambda table: {row[1] for row in con.execute(f'PRAGMA table_info({table})')}
     with con:
         have = columns('contexts')
@@ -205,6 +223,10 @@ def _migrate(con):
         con.execute('UPDATE contexts SET seq = rowid WHERE seq = 0')
         if 'uid' not in columns('interactions'):
             con.execute('ALTER TABLE interactions ADD COLUMN uid TEXT')
+        have = columns('cards')
+        for name in ('grade', 'grade_ms', 'released'):
+            if name not in have:
+                con.execute(f'ALTER TABLE cards ADD COLUMN {name} INTEGER')
 
 
 def _migrate_reading(con):
@@ -291,22 +313,30 @@ def _plan_ok(plan, num):
 
 
 def _clean_review(item, now, num, word, ident):
-    """A review item as stored (cards table), or None when anything is malformed: at within the window, the card's
-    id, the word it showed, revealMs null or 0..shownMs, shownMs 0..MAX_REVIEW_MS, the client and an optional uid."""
+    """A review item as stored (cards table), or why it isn't (a string) when anything is malformed: at within the
+    window, the card's id, the word it showed, revealMs null or 0..shownMs, shownMs 0..MAX_REVIEW_MS, the client, an
+    optional uid, and an optional grade (1..4) with its gradeMs, which needs a reveal: revealMs <= gradeMs <= shownMs
+    (a gradeMs without a grade is malformed too)."""
     at, reveal, shown, uid = item.get('at'), item.get('revealMs'), item.get('shownMs'), item.get('uid')
-    if not num(at) or not now - WINDOW_MS <= at <= now + 60_000:
-        return None
+    grade, graded = item.get('grade'), item.get('gradeMs')
+    if not num(at) or not now - WINDOW_MS <= at <= now + FUTURE_MS:
+        return 'at: a time within the last 7 days'
+    at = min(at, now)  # a client clock running ahead: taken as now (not up to FUTURE_MS: dropped)
     if not ident(item.get('card')) or not word(item.get('word')) or item.get('source') not in REVIEW_SOURCES:
-        return None
+        return 'card, word and source ("desktop" or "mobile") are needed'
     if not num(shown) or not 0 <= shown <= MAX_REVIEW_MS:
-        return None
+        return f'shownMs: 0 to {MAX_REVIEW_MS} ms'
     if reveal is not None and (not num(reveal) or not 0 <= reveal <= shown):
-        return None
+        return 'revealMs: null or 0 to shownMs'
     if uid is not None and not ident(uid):
-        return None
+        return 'uid: up to 64 letters, digits, _ : -'
+    if grade is not None or graded is not None:
+        if grade not in GRADES or isinstance(grade, bool) or reveal is None or not num(graded) \
+                or not reveal <= graded <= shown:
+            return 'grade: 1 to 4, with a reveal and gradeMs from revealMs to shownMs'
     return {'kind': REVIEW, 'at': int(at), 'card': item['card'], 'word': item['word'],
             'revealMs': None if reveal is None else round(reveal), 'shownMs': round(shown), 'source': item['source'],
-            'uid': uid}
+            'uid': uid, 'grade': grade, 'gradeMs': None if graded is None else round(graded)}
 
 
 MAX_TRACE_POINTS = 200
@@ -369,23 +399,55 @@ CONTEXT_UPSERT = (
     'plan = coalesce(contexts.plan, excluded.plan), seq = excluded.seq')
 
 
-CARD_REVIEW = ('UPDATE cards SET at = ?, reveal_ms = ?, shown_ms = ?, via = ?, uid = ?, '
-               'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) WHERE id = ? AND word = ? AND at IS NULL')
+CARD_REVIEW = ('UPDATE cards SET at = ?, reveal_ms = ?, shown_ms = ?, via = ?, uid = ?, grade = ?, grade_ms = ?, '
+               'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) '
+               'WHERE id = ? AND word = ? AND at IS NULL AND released IS NULL')
+CARD_GRADE = ('UPDATE cards SET reveal_ms = ?, shown_ms = ?, grade = ?, grade_ms = ?, via = ?, '
+              'seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) '
+              'WHERE id = ? AND word = ? AND at IS NOT NULL AND grade IS NULL AND released IS NULL')
+
+
+def _complete(con, c):
+    """A graded item for a card stored as left: its reveal, end and grade on the row, in ms from the first time the
+    card was shown (kept). Returns whether it was stored."""
+    found = con.execute('SELECT at FROM cards WHERE id = ? AND word = ? AND at IS NOT NULL AND grade IS NULL',
+                        (c['card'], c['word'])).fetchone()
+    if c['grade'] is None or not found:
+        return False
+    shift = c['at'] - found[0]
+    graded = min(MAX_REVIEW_MS, max(0, c['gradeMs'] + shift))  # 0 <= reveal <= graded <= shown <= MAX_REVIEW_MS
+    reveal = min(graded, max(0, c['revealMs'] + shift))
+    shown = min(MAX_REVIEW_MS, max(graded, c['shownMs'] + shift))
+    return con.execute(CARD_GRADE, (reveal, shown, c['grade'], graded, c['source'], c['card'],
+                                    c['word'])).rowcount > 0
 
 
 def record(items, surface, path=None, now=None, hide=None):
-    """Stores well-formed items. Returns {stored, duplicates, rejected}: a resent interaction (same uid) is stored
-    once, and malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its
-    card (CARD_REVIEW): one naming no card served here with its word is rejected, and one for a card already reviewed
-    is a duplicate. hide: (start, end) of an English-only spell in chat (intensity.py): a T3 message's shown record
-    from then is dropped (counted as rejected), since its Japanese wasn't on screen."""
+    """Stores well-formed items. Returns {stored, duplicates, rejected} and, from T3 when any item was rejected,
+    reasons: [{item: its index in items, error}], one per rejected item (every one, so T3 Code's server can settle
+    items one by one; items past MAX_ITEMS in one batch are rejected too, each with its reason): a resent interaction (same uid) is stored once, and
+    malformed or too old items are rejected (never worth resending). A review (T3 only) is stored on its card
+    (CARD_REVIEW): one naming no card served here with its word, or a card released, is rejected; one for a card
+    already reviewed is a duplicate, unless it brings the grade of a card stored as left (_complete). hide: (start,
+    end) of an English-only spell in chat (intensity.py): a T3 message's shown record from then is dropped (counted as
+    rejected), since its Japanese wasn't on screen."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
     batch = items[:MAX_ITEMS]
-    cleaned = [c for c in (_clean(item, now) for item in batch) if c and (c['kind'] != REVIEW or surface == 't3')]
-    if hide and surface == 't3':
-        cleaned = [c for c in cleaned if not (c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1])]
+    reasons = []
+    cleaned = []
+    for index, item in enumerate(batch):
+        c = _clean(item, now)
+        if not c or isinstance(c, str) or (c['kind'] == REVIEW and surface != 't3'):
+            why = c if isinstance(c, str) else 'malformed or too old' if not c else \
+                'review items come from T3 (surface t3)'
+            reasons.append({'item': index, 'error': why})
+        elif hide and surface == 't3' and c['kind'] == SHOWN and hide[0] <= c['at'] < hide[1]:
+            reasons.append({'item': index, 'error': 'shown while English only was on'})
+        else:
+            c['index'] = index
+            cleaned.append(c)
     stored = duplicates = refused = 0
     if cleaned:
         con = connect(path)
@@ -395,16 +457,21 @@ def record(items, surface, path=None, now=None, hide=None):
                     if c['kind'] == REVIEW:
                         try:
                             added = con.execute(CARD_REVIEW, (c['at'], c['revealMs'], c['shownMs'], c['source'],
-                                                              c['uid'], c['card'], c['word'])).rowcount
+                                                              c['uid'], c['grade'], c['gradeMs'], c['card'],
+                                                              c['word'])).rowcount
                         except sqlite3.IntegrityError:  # its uid is stored already: a resend
                             added = 0
-                        if added:
+                        if added or _complete(con, c):
                             stored += 1
-                        elif con.execute('SELECT 1 FROM cards WHERE id = ? AND word = ?',
-                                         (c['card'], c['word'])).fetchone():
+                            continue
+                        row = con.execute('SELECT released FROM cards WHERE id = ? AND word = ?',
+                                          (c['card'], c['word'])).fetchone()
+                        if row and row[0] is None:
                             duplicates += 1
-                        else:
-                            refused += 1
+                            continue
+                        refused += 1
+                        reasons.append({'item': c['index'], 'error': 'card released unshown' if row else
+                                        'no card served here with this id and word'})
                         continue
                     shown = c['kind'] == SHOWN
                     plan = c.get('plan') if shown else None
@@ -433,11 +500,16 @@ def record(items, surface, path=None, now=None, hide=None):
                     duplicates += 1 - added
         finally:
             con.close()
-    return {'stored': stored, 'duplicates': duplicates, 'rejected': len(batch) - len(cleaned) + refused}
+    reasons += [{'item': index, 'error': f'over {MAX_ITEMS} in one batch'} for index in range(len(batch), len(items))]
+    out = {'stored': stored, 'duplicates': duplicates,
+           'rejected': len(batch) - len(cleaned) + refused + len(items) - len(batch)}
+    if not reasons or surface != 't3':  # T3 Code's server settles its items one by one; the browser's host needn't
+        return out
+    return dict(out, reasons=sorted(reasons, key=lambda r: r['item']))
 
 
 CARD_COLUMNS = ('id', 'served_at', 'source', 'word', 'kind', 'entry', 'band', 'weight', 'at', 'reveal_ms', 'shown_ms',
-                'via', 'uid', 'seq')
+                'via', 'uid', 'seq', 'grade', 'grade_ms', 'released')
 
 
 def serve_card(card, path=None, con=None):
@@ -457,7 +529,8 @@ def serve_card(card, path=None, con=None):
 
 def cards(path=None, since=0, con=None):
     """Every review card served at or after `since` (ms), oldest first, reviewed or not: {id, served_at, source,
-    word, kind, entry, band, weight, at, reveal_ms, shown_ms, via, uid, seq} (at None: no review yet)."""
+    word, kind, entry, band, weight, at, reveal_ms, shown_ms, via, uid, seq, grade, grade_ms, released} (at None: no
+    review yet; grade None: none given; released: when it was given back unshown, else None)."""
     own = con is None
     con = con or connect(path)
     try:
@@ -469,17 +542,84 @@ def cards(path=None, since=0, con=None):
     return [dict(zip(CARD_COLUMNS, r)) for r in rows]
 
 
+GRADED = "FROM cards WHERE grade IS NOT NULL AND at IS NOT NULL AND kind = 'learning'"
+
+
+def graded_mark(con):
+    """What changes whenever a graded learning card is stored (count, newest seq): review.py's schedules are cached
+    under it."""
+    return tuple(con.execute(f'SELECT count(*), coalesce(max(seq), 0) {GRADED}').fetchone())
+
+
+def graded(path=None, con=None):
+    """Every graded learning card (the reviews spaced repetition replays; probe and made-up cards never schedule
+    anything), in the order they were graded: {card, word, entry, served (when it was served, its buttons' time), at
+    (shown), grade, grade_ms, reviewed (at + grade_ms, when the grade was given)}."""
+    own = con is None
+    con = con or connect(path)
+    try:
+        rows = con.execute(f'SELECT id, word, entry, served_at, at, grade, grade_ms {GRADED} '
+                           'ORDER BY at + coalesce(grade_ms, 0), id').fetchall()
+    finally:
+        if own:
+            con.close()
+    return [{'card': card, 'word': word, 'entry': entry, 'served': served, 'at': at, 'grade': grade, 'grade_ms': ms,
+             'reviewed': at + (ms or 0)} for card, word, entry, served, at, grade, ms in rows]
+
+
+def deck_key(entry, word):
+    """The key a word's schedule is kept under: its dictionary entry id when the card had one, else its spelling."""
+    return f'entry:{entry}' if isinstance(entry, int) and not isinstance(entry, bool) else word
+
+
+def deck_groups(rows):
+    """Graded learning cards (graded, or reviews' rows of kind learning; in the order given, oldest grade first) as one
+    group per word: a spelling's cards all go to the group of the latest entry id any of them had (a card served before
+    the word had an id joins it; a spelling whose id changed moves, all its cards with it, to the new id's group, and
+    leaves the old id's other spellings where they are), spellings of one entry share its group (a kanji spelling and
+    its kana one), and a spelling never given an id is a group of its own. {key: rows}, the key deck_key of the group's
+    entry id, else its spelling."""
+    latest = {}
+    for r in rows:
+        entry = r.get('entry')
+        if isinstance(entry, int) and not isinstance(entry, bool):
+            latest[r['word']] = entry
+    out = {}
+    for r in rows:
+        out.setdefault(deck_key(latest.get(r['word']), r['word']), []).append(r)
+    return out
+
+
+def release_cards(ids, source, now, path=None, con=None):
+    """Marks cards served to `source` and never reviewed as released (given back unshown: a dropped prefetch): no
+    longer pending, never left, never read. Returns how many."""
+    ids = list(ids or ())
+    if not ids:
+        return 0
+    own = con is None
+    con = con or connect(path)
+    try:
+        with con:  # one row at a time, so each gets a seq of its own
+            return sum(con.execute('UPDATE cards SET released = ?, seq = (SELECT coalesce(max(seq), 0) + 1 FROM cards) '
+                                   'WHERE id = ? AND source = ? AND at IS NULL AND released IS NULL',
+                                   (now, card, source)).rowcount for card in dict.fromkeys(ids))
+    finally:
+        if own:
+            con.close()
+
+
 def reviews(path=None):
     """Every reviewed card, oldest review first, as knowledge.py and probe.py read them: {card, at (when it was shown),
     served (when it was served), word, kind, entry, band, weight, reveal (ms, None: left without a reveal), shown (ms
-    on screen), source}."""
+    on screen), source, grade (1..4, None: none given), grade_ms (ms from shown to the grade)}."""
     con = connect(path)
     try:
-        rows = con.execute('SELECT id, at, served_at, word, kind, entry, band, weight, reveal_ms, shown_ms, via '
-                           'FROM cards WHERE at IS NOT NULL ORDER BY at, id').fetchall()
+        rows = con.execute('SELECT id, at, served_at, word, kind, entry, band, weight, reveal_ms, shown_ms, via, grade, '
+                           'grade_ms FROM cards WHERE at IS NOT NULL ORDER BY at, id').fetchall()
     finally:
         con.close()
-    names = ('card', 'at', 'served', 'word', 'kind', 'entry', 'band', 'weight', 'reveal', 'shown', 'source')
+    names = ('card', 'at', 'served', 'word', 'kind', 'entry', 'band', 'weight', 'reveal', 'shown', 'source', 'grade',
+             'grade_ms')
     return [dict(zip(names, r)) for r in rows]
 
 

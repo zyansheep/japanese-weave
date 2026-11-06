@@ -75,9 +75,17 @@
   fw.py probe [--history]                            how much of your reading you would read without a lookup:
                                                      --history lists every probe taken and the estimate from the
                                                      review cards (the probe now lives in their stream: about one
-                                                     card in five is a probe word, one in ten made up); without
+                                                     card in ten is a probe word, one in twenty made up); without
                                                      it, a one-off probe of about 60 words and 6 made-up ones,
                                                      one at a time in a terminal, y or n (scripts/probe.py)
+  fw.py review                                       the review cards' schedule (FSRS, as Anki): new, learning and
+                                                     review cards due today, cards graded today and in 30 days,
+                                                     the review cards' retention against the desired 90%, and
+                                                     how many graded reviews FSRS has (about 1,000 before its
+                                                     parameters are worth fitting); from the collector when set
+  fw.py review revlog                                the graded reviews as CSV in the FSRS optimizer's layout
+                                                     (card_id, review_time, review_rating, review_state,
+                                                     review_duration)
   fw.py relabel [--dry-run] [--home DIR] [--examples N]
                                                      the words whose labels the fitted model would change from
                                                      the day-count rules', grouped and explained; writes nothing
@@ -120,6 +128,7 @@ import experiment  # noqa: E402
 import knowledge  # noqa: E402
 import probe  # noqa: E402
 import relabel  # noqa: E402
+import review  # noqa: E402
 import threads  # noqa: E402
 import chatweave  # noqa: E402
 import check_reply  # noqa: E402
@@ -733,6 +742,28 @@ def log_cmd(args):
                   f'{plural(glossed - 1, "other glossed word")} in the passage')
 
 
+def review_cmd(args):
+    """fw.py review [revlog]: the schedule's numbers (review.summary), or the graded reviews as the FSRS optimizer's
+    CSV; from the collector when one is set, where the cards live."""
+    collector = fwlib.collector_url()
+    path = 'revlog' if args.what == 'revlog' else 'stats'
+    if collector:
+        reply = feedback.request(f'{collector.rstrip("/")}/v1/review/{path}', timeout=30)
+        if not isinstance(reply, dict) or not reply.get('ok'):
+            sys.exit(f'Collector {collector}: {(reply or {}).get("error", "no answer")}')
+    elif not (fwlib.home() / 'state.json').exists():
+        raise fwlib.NoState(f'no word state in {fwlib.home()}: run fw.py setup first')
+    else:
+        reply = {'review': review.summary()} if path == 'stats' else {'rows': review.revlog()}
+    if path == 'stats':
+        print(review.summary_text(reply['review']))
+        return
+    import csv
+    writer = csv.writer(sys.stdout, lineterminator='\n')
+    writer.writerow(review.REVLOG_COLUMNS)
+    writer.writerows(reply.get('rows') or [])
+
+
 def plural(n, noun):
     return f'{n} {noun}{"" if n == 1 else "s"}'
 
@@ -894,7 +925,8 @@ def knowledge_cmd(args):
     model = (know.get('review') or {}).get('model') if isinstance(know.get('review'), dict) else None
     if isinstance(model, dict):
         known, unknown = model.get('known') or {}, model.get('unknown') or {}
-        print(f'  review cards: {model.get("cards", 0)} of real words and {model.get("fakes", 0)} made up; a word known '
+        print(f'  review cards: {model.get("graded", 0)} graded and {model.get("cards", 0)} ungraded of real words, '
+              f'{model.get("fakes", 0)} made up; a word known '
               f'at recall revealed in about {known.get("ms")} ms (no reveal {known.get("skip")}), one not known in about '
               f'{unknown.get("ms")} ms (no reveal {unknown.get("skip")}); separation '
               f'{"weak" if model.get("weak") else "good"}: worth {model.get("worth")} of a yes/no answer, auc '
@@ -1101,6 +1133,9 @@ def main(argv=None):
     p = sub.add_parser('evaluate')
     evaluate.add_arguments(p)
     p.set_defaults(run=evaluate.run)
+    p = sub.add_parser('review')
+    p.add_argument('what', nargs='?', choices=['revlog'], help='revlog: the graded reviews as the FSRS optimizer\'s CSV')
+    p.set_defaults(run=review_cmd)
     p = sub.add_parser('relabel')
     relabel.add_arguments(p)
     p.set_defaults(run=relabel.run)

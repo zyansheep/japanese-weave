@@ -256,8 +256,9 @@ you could have been reading: the page visible and its window focused, no sound o
 or idle, so a page left open or a video doesn't look like reading. `fw.py log` shows totals and the latest entries, and
 the extension's popup shows how many peeks have been collected.
 
-Review cards (T3 Code) are kept there too: each card served (the word, whether it was a learning, probe or made-up word)
-and, once shown, how long until the reveal and how long it stayed on screen.
+Review cards (T3 Code and the phone) are kept there too: each card served (the word, whether it was a learning, probe or
+made-up word) and, once shown, how long until the reveal, the grade you gave it (Again, Hard, Good or Easy) and when,
+and how long it stayed on screen. A word's graded cards are its review schedule.
 
 By default it goes to `interactions.sqlite` in the state folder.
 
@@ -367,23 +368,42 @@ model on your log day by day, each day predicted from the days before, against t
 constant guess. The design, with its sources:
 [docs/adaptive-difficulty.md](docs/adaptive-difficulty.md).
 
-**Review cards (T3 Code).** In a T3 Code build with the review wedge, every gloss popover has a small wedge on its
-right edge. Click it (or press the right arrow while hovering a gloss) and the popover becomes a card: one Japanese word
-alone. The up arrow reveals its reading and meaning; the right arrow goes to the next card. On the phone it is a
-full-screen card: swipe up to reveal, left for the next. The only thing measured is the time from the card appearing to
-the reveal, or that you moved on without one. The cards come from the collector (`POST /v1/review/next`), in an order
-you can't predict: about 7 in 10 are words you are learning (first those behind on showings in their first two weeks,
-then the ones the model is least sure of), 2 in 10 probe words (below) and 1 in 10 made-up words, whose meaning says
-so. Never a word the delayed-start experiment is holding back, nor one you had in the last 4 hours. A review counts as
-a showing of its word: right after it the word's lookup chance is near the floor, like any read.
+**Review cards, scheduled like Anki (T3 Code and the phone).** T3 Code's review panel (in the sidebar) and the phone's
+Review screen show one Japanese word alone. Reveal its reading and meaning, then grade it with Anki's four buttons:
+Again (you didn't recall it), Hard, Good or Easy; above each, when the card would come back (`<1m`, `10m`, `3d`,
+`1.2mo`). The schedule is FSRS-6 with its default parameters, applied the way Anki applies it (`scripts/srs.py`): a new
+word goes through a 1-minute and a 10-minute step, then comes back in days, each review spacing it further while you
+recall it, aiming at a 90% chance of recall when it comes back; a word you forget relearns in 10 minutes. The cards come
+from the collector (`POST /v1/review/next`) in Anki's order: words in their learning steps that are due, then words due
+for review today (a day starts at 4am), then up to 20 new words a day, the words you are learning in today's order
+(first those behind on showings in their first two weeks, then those the model is least sure of), and last, when
+nothing else is due, a learning step up to 20 minutes early. The panel shows Anki's three counts (new left today,
+learning, review due), and so do T3 Code's header badge and the phone's, which ask for the counts alone without taking
+a card; at 0, 0, 0 you are done for the day, and "Review more" brings in more new words. About 1 card
+in 10 is a probe word (below) and 1 in 20 a made-up word, whose meaning says so: they look like new cards, aren't
+counted, and grading them schedules nothing. A card you close without grading isn't scheduled; it comes back after the
+other cards due. Never a word the delayed-start experiment is holding back; a word you mark known (`fw.py known`)
+leaves the deck, while one the model labels known keeps its schedule. A review counts as a showing of its word: right
+after it the word's lookup chance is near the floor, like any read.
 
-The fit reads a reveal time as one of two kinds: a word known at recall (quick) or not (slow, or a give-up), each with
-its own spread of times and its own chance of moving on without a reveal, shared by all words and held by a prior so a
-handful of cards can't swing them. The chance a word is known at recall comes from its knowledge with an offset of its
-own. Made-up words are never known, so their times are what "not known" looks like, give-ups included. If you give up
-on words you don't know as fast as you reveal words you do, the two kinds overlap and every card counts for little;
-`fw.py knowledge` says how well they separate (how much of a yes/no answer one card is worth), and so does
-`fw.py status` for the probe.
+`fw.py review` shows today's counts, the cards graded today and in the last 30 days, the share of your review cards
+you recalled (not Again) against the 90% aimed for, and how many graded reviews FSRS has: its parameters can be fitted
+to you once there are on the order of 1,000, and `fw.py review revlog` writes them in the FSRS optimizer's format.
+
+One caveat. FSRS assumes your reviews are the only times you meet a word, but here you also meet your words in chat and
+on web pages, glossed, whether you open the gloss or not. This first version feeds FSRS your graded reviews alone, so
+its intervals come out conservative: more reviews than strictly needed. A gloss you open while reading is a likely
+future "Again" signal, to be checked against your reviews once there is data.
+
+The fit reads a grade as an answer: Again as not known at recall, Hard, Good or Easy as known, at the word's knowledge
+with an offset of its own, as it reads a probe's answers; not a grade on a learning step minutes after the last, and one
+a word a day. A card you close without grading says nothing, and the probe's estimate reads a probe card's grade as its
+answer. A card from a client before grades is read from its reveal time: one of two kinds, a word known at recall
+(quick) or not (slow, or a give-up), each with its own spread of times and its own chance of moving on without a reveal,
+shared by all words and held by a prior so a handful of cards can't swing them. Made-up words are never known, so their
+times are what "not known" looks like, give-ups included. If you give up on words you don't know as fast as you reveal
+words you do, the two kinds overlap and every such card counts for little; `fw.py knowledge` says how well they separate
+(how much of a yes/no answer one card is worth), and so does `fw.py status` for the probe.
 
 **The probe, in the review stream.** The probe and made-up cards of the last 30 days measure the goal directly: the
 share of the words in your reading you would read in Japanese without a lookup, each word weighted by how often it

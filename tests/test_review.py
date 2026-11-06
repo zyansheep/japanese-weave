@@ -1,10 +1,19 @@
-"""Offline tests for the review cards (scripts/review.py, the review wedge): the collector's POST /v1/review/next (the
-card's shape, exclude, words the delayed-start experiment hides never served, nothing to review), review items in
-POST /v1/interactions (stored once on their card, malformed ones rejected, the mirror gets them), the card choice
-(the mix, learning words behind first, made-up words reused least recently), the mixture of reveal times in the fit
-(two clear components separate, overlapping ones report a weak separation, made-up words pin the "not known" side),
-a review as a read (the recency clock, the experiment's exposure) and the probe's rolling estimate on a simulated
-reader. Run: python3 -m unittest tests/test_review.py"""
+"""Offline tests for the review cards (scripts/review.py, scheduled as Anki with FSRS, scripts/srs.py): the collector's
+POST /v1/review/next (the card's shape with its queue, intervals and today's counts, exclude, more, peek: the counts
+alone with nothing served or held back, release: cards given back unshown, words the delayed-start experiment hides
+never served, nothing to review) and GET /v1/review/stats and revlog, review items in POST /v1/interactions (stored once
+on their card with their grade, malformed ones rejected, an old database migrated, a card left then graded, a rejected
+review's reason, the mirror gets them), the queue (new cards through their learning steps, Anki's order, the day's
+new-card limit and Review more, held while a grade is in flight, ties fixed for the day, the buttons' intervals being
+the ones a grade past 4am gets, a schedule kept under the entry id, the learn-ahead window, a word marked known leaving
+the deck while the model's known keeps its schedule, pending and excluded words waiting, a left card served again, the
+schedules' cache, probe and made-up cards interleaved as new cards), the card choice's helpers (learning words behind
+first, made-up words reused least recently, probe words not repeated), graded cards as explicit answers in the fit (not
+a learning step's, one a word a day; the graded flow kept out of the mixture) and the mixture of ungraded reveal times
+(two clear components separate, overlapping ones report a weak separation, made-up words pin the "not known" side), a
+review as a read (the recency clock, the experiment's exposure), fw.py review's numbers and review log, and the probe's
+rolling estimate on a simulated reader (and on the graded panel's stream). Run: python3 -m unittest
+tests/test_review.py"""
 import json
 import math
 import os
@@ -24,6 +33,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 os.environ['JAPANESE_WEAVE_NO_REFRESH'] = '1'
 
 import collector  # noqa: E402
+import contextlib  # noqa: E402
 import dictionary  # noqa: E402
 import evaluate  # noqa: E402
 import experiment  # noqa: E402
@@ -32,6 +42,10 @@ import fwlib  # noqa: E402
 import knowledge  # noqa: E402
 import probe  # noqa: E402
 import review  # noqa: E402
+import srs  # noqa: E402
+import fw  # noqa: E402
+import io  # noqa: E402
+import sqlite3  # noqa: E402
 
 DAY = 86_400_000
 HOUR = 3_600_000
@@ -81,10 +95,12 @@ def fresh_state(day):
     return state
 
 
-def reviewed(card, at, reveal, shown=None, uid=None, source='desktop', word=None):
-    """A review item as the T3 Code fork sends it."""
+def reviewed(card, at, reveal, shown=None, uid=None, source='desktop', word=None, grade=None, graded=None):
+    """A review item as the T3 Code fork sends it; with a grade, gradeMs (default: 400 ms after the reveal)."""
     item = {'kind': 'review', 'at': at, 'card': card, 'word': word, 'revealMs': reveal,
             'shownMs': shown if shown is not None else (reveal or 0) + 900, 'source': source}
+    if grade is not None:
+        item = dict(item, grade=grade, gradeMs=graded if graded is not None else reveal + 400)
     return dict(item, uid=uid) if uid else item
 
 
@@ -128,7 +144,13 @@ class Endpoint(Home):
         status, body = self.post('/v1/review/next', {'source': 'desktop'})
         self.assertEqual((status, body['ok']), (200, True))
         card = body['card']
-        self.assertEqual(set(card), {'id', 'ja', 'kana', 'gloss'})
+        self.assertEqual(set(body), {'ok', 'card', 'counts'})
+        self.assertEqual(set(card), {'id', 'ja', 'kana', 'gloss', 'queue', 'intervals'})
+        self.assertEqual(card['queue'], 'new')  # nothing graded yet: a new card (or a probe or made-up one, alike)
+        self.assertEqual({k: card['intervals'][k] for k in ('again', 'hard', 'good')}, {'again': 60, 'hard': 330,
+                                                                                         'good': 600})
+        self.assertEqual(card['intervals']['easy'] % 86_400, 0)
+        self.assertEqual(body['counts'], {'new': len(self.active), 'learning': 0, 'review': 0})
         self.assertTrue(1 <= len(card['id']) <= 64 and 1 <= len(card['ja']) <= 40)
         self.assertTrue(len(card['kana']) <= 40 and len(card['gloss']) <= 200)
         row = feedback.cards(self.db)[0]
@@ -142,10 +164,18 @@ class Endpoint(Home):
 
     def test_bad_requests_and_no_state(self):
         for body in ({}, {'source': 'web'}, {'source': 'desktop', 'exclude': 'x'},
-                     {'source': 'desktop', 'exclude': ['a b']}, {'source': 'desktop', 'exclude': ['x'] * 21}, []):
+                     {'source': 'desktop', 'exclude': ['a b']}, {'source': 'desktop', 'exclude': ['x'] * 21}, [],
+                     {'source': 'desktop', 'more': 'yes'}, {'source': 'desktop', 'more': 1},
+                     {'source': 'desktop', 'peek': 'yes'}, {'source': 'desktop', 'peek': 0},
+                     {'source': 'desktop', 'release': 'x'}, {'source': 'desktop', 'release': ['a b']},
+                     {'source': 'desktop', 'release': ['x'] * 21}):
             status, reply = self.post('/v1/review/next', body)
             self.assertEqual((status, reply['ok']), (400, False), body)
         self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'exclude': ['x'] * 20})[0], 200)
+        self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'more': True})[0], 200)
+        self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'peek': False})[0], 200)
+        status, reply = self.post('/v1/review/next', {'source': 'desktop', 'peek': True, 'release': ['x'] * 20})
+        self.assertEqual((status, reply['card'], set(reply['counts'])), (200, None, {'new', 'learning', 'review'}))
         (fwlib.home() / 'state.json').rename(fwlib.home() / 'elsewhere.json')
         status, reply = self.post('/v1/review/next', {'source': 'desktop'})
         self.assertEqual((status, reply['ok']), (409, False))
@@ -154,8 +184,21 @@ class Endpoint(Home):
         state = fwlib.load_state()
         state['paused'] = True
         fwlib.save_state(state)
-        self.assertEqual(self.post('/v1/review/next', {'source': 'desktop'}), (200, {'ok': True, 'card': None}))
+        self.assertEqual(self.post('/v1/review/next', {'source': 'desktop'}),
+                         (200, {'ok': True, 'card': None, 'counts': {'new': 0, 'learning': 0, 'review': 0}}))
         self.assertEqual(feedback.cards(self.db), [])
+        self.assertEqual(self.post('/v1/review/next', {'source': 'mobile', 'peek': True}),
+                         (200, {'ok': True, 'card': None, 'counts': {'new': 0, 'learning': 0, 'review': 0}}))
+
+    def test_a_peek_answers_the_counts_and_serves_nothing(self):
+        for _ in range(3):  # a badge polling
+            self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'peek': True}),
+                             (200, {'ok': True, 'card': None,
+                                    'counts': {'new': len(self.active), 'learning': 0, 'review': 0}}))
+        self.assertEqual(feedback.cards(self.db), [])  # no cards row: nothing pending, no probe or made-up word used
+        _status, body = self.post('/v1/review/next', {'source': 'desktop'})
+        self.assertIsNotNone(body['card'])
+        self.assertEqual(len(feedback.cards(self.db)), 1)
 
     def test_no_word_to_offer_means_nothing_to_review(self):
         state = fwlib.load_state()
@@ -165,7 +208,8 @@ class Endpoint(Home):
         fwlib.save_state(state)
         with mock.patch.object(dictionary, 'PATH', self.home / 'no-dictionary.tsv'):
             for _ in range(20):  # a made-up word alone is never a card
-                self.assertEqual(self.post('/v1/review/next', {'source': 'desktop'})[1], {'ok': True, 'card': None})
+                self.assertEqual(self.post('/v1/review/next', {'source': 'desktop', 'more': True})[1],
+                                 {'ok': True, 'card': None, 'counts': {'new': 0, 'learning': 0, 'review': 0}})
 
     def test_hidden_words_are_never_served(self):
         """Over many cards, hours apart (so nothing is held back for being recent), no word the experiment hides or is
@@ -181,10 +225,17 @@ class Endpoint(Home):
         hidden |= {fwlib.key(w['kana']) for w in state['words'] if fwlib.phase(w) in review.HIDDEN and w.get('kana')}
         self.assertGreaterEqual(len(hidden), 12)
         now, rng, kinds = int(time.time() * 1000), random.Random(5), {}
-        with mock.patch.object(review, 'MIX', (('learning', 0.4), ('probe', 0.5), ('fake', 0.1))):
+        with mock.patch.object(review, 'PROBE_SHARE', 0.5):
             for i in range(300):
-                card = review.next_card('desktop', (), self.db, now - (300 - i) * 5 * 60_000, rng)
+                at = now - (300 - i) * 5 * 60_000
+                pending = {r['word'] for r in feedback.cards(self.db) if r['kind'] == 'learning'  # in flight today
+                           and r['at'] is None and r['served_at'] >= at - review.PENDING_MS
+                           and srs.day_number(r['served_at']) == srs.day_number(at)}
+                card, counts = review.next_card('desktop', (), self.db, at, rng)
                 self.assertNotIn(fwlib.key(card['ja']), hidden)
+                if i % 2:  # every other card left (the rest never reported): the words go round
+                    feedback.record([reviewed(card['id'], at, None, 2000, word=card['ja'])], 't3', self.db, now=at)
+                self.assertEqual(counts['new'] + len(pending), len(self.active))  # hidden words aren't counted either
         for row in feedback.cards(self.db):
             kinds[row['kind']] = kinds.get(row['kind'], 0) + 1
         self.assertGreater(kinds['probe'], 100)
@@ -196,16 +247,38 @@ class Endpoint(Home):
         card = body['card']
         now = int(time.time() * 1000)
         stored = self.post('/v1/interactions', {'surface': 't3', 'items': [
-            reviewed(card['id'], now - 2000, 800, uid='r1', word=card['ja'])]})
+            reviewed(card['id'], now - 2000, 800, uid='r1', word=card['ja'], grade=3, graded=1300)]})
         self.assertEqual(stored[1], {'ok': True, 'stored': 1, 'duplicates': 0, 'rejected': 0})
         old = feedback.export(0, 0, 10, self.db)
         self.assertNotIn('cards', old)  # a mirror from before cards asks for none
         mirror = self.home / 'mirror.sqlite'
         self.assertEqual(feedback.sync_mirror(self.url, mirror), (True, None))
         [row] = feedback.reviews(mirror)
-        self.assertEqual((row['card'], row['word'], row['reveal'], row['source']), (card['id'], card['ja'], 800,
-                                                                                    'desktop'))
+        self.assertEqual((row['card'], row['word'], row['reveal'], row['source'], row['grade'], row['grade_ms']),
+                         (card['id'], card['ja'], 800, 'desktop', 3, 1300))
         self.assertEqual(feedback.stats(0, self.db)['counts']['t3:review'], [1, 1])
+
+
+    def get(self, path):
+        with urllib.request.urlopen(self.url + path, timeout=10) as reply:
+            return json.loads(reply.read())
+
+    def test_the_schedules_numbers_and_review_log_over_http(self):
+        _status, body = self.post('/v1/review/next', {'source': 'desktop'})
+        card = body['card']
+        now = int(time.time() * 1000)
+        self.post('/v1/interactions', {'surface': 't3', 'items': [
+            reviewed(card['id'], now - 3000, 700, 2500, word=card['ja'], grade=4, graded=1100)]})
+        found = self.get('/v1/review/stats')
+        self.assertTrue(found['ok'])
+        self.assertEqual(found['review']['today'], 1)
+        rows = self.get('/v1/review/revlog')
+        self.assertEqual(rows['columns'], list(review.REVLOG_COLUMNS))
+        learning_card = feedback.cards(self.db)[0]['kind'] == 'learning'
+        self.assertEqual(len(rows['rows']), 1 if learning_card else 0)  # a probe or made-up card schedules nothing
+        if learning_card:
+            self.assertEqual(rows['rows'][0], [srs.card_id(card['ja']), now - 3000 + 1100, 4, 0, 1100])
+            self.assertEqual(found['review']['deck'], 1)
 
 
 class Events(Home):
@@ -241,13 +314,114 @@ class Events(Home):
                dict(good, revealMs=-1), dict(good, revealMs=True), dict(good, revealMs='700'),
                dict(good, shownMs=None), dict(good, shownMs=feedback.MAX_REVIEW_MS + 1),
                dict(good, source='web'), dict(good, uid='a b'), dict(good, card=''), dict(good, card='x' * 65),
-               dict(good, word=''), dict(good, at=self.NOW - 8 * DAY), dict(good, at=self.NOW + HOUR),
+               dict(good, word=''), dict(good, at=self.NOW - 8 * DAY), dict(good, at=self.NOW + HOUR + 1),
                {k: v for k, v in good.items() if k != 'card'}, {k: v for k, v in good.items() if k != 'shownMs'}]
-        self.assertEqual(self.record(*bad), {'stored': 0, 'duplicates': 0, 'rejected': len(bad)})
-        self.assertEqual(self.record(good, surface='browser'), {'stored': 0, 'duplicates': 0, 'rejected': 1})
+        found = self.record(*bad)
+        self.assertEqual(len(found.pop('reasons')), len(bad))  # each with why
+        self.assertEqual(found, {'stored': 0, 'duplicates': 0, 'rejected': len(bad)})
+        self.assertEqual(self.record(good, surface='browser')['rejected'], 1)
         self.assertEqual(feedback.reviews(self.db), [])
         self.assertEqual(self.record(good, dict(good, revealMs=None)), {'stored': 1, 'duplicates': 1, 'rejected': 0})
         self.assertEqual(feedback.count(self.db), 0)  # no gloss interaction
+
+    def test_a_grade_needs_a_reveal_and_its_time_between_the_reveal_and_the_end(self):
+        good = reviewed('c0', self.NOW - 1000, 700, 2000, word='問題', grade=3, graded=1200)
+        bad = [dict(good, grade=0), dict(good, grade=5), dict(good, grade=True), dict(good, grade='3'),
+               dict(good, grade=2.5), dict(good, revealMs=None),  # no reveal
+               dict(good, gradeMs=600), dict(good, gradeMs=2100), dict(good, gradeMs=None),  # outside reveal..shown
+               {k: v for k, v in good.items() if k != 'gradeMs'}, {k: v for k, v in good.items() if k != 'grade'}]
+        found = self.record(*bad)
+        self.assertEqual([r['item'] for r in found.pop('reasons')], list(range(len(bad))))
+        self.assertEqual(found, {'stored': 0, 'duplicates': 0, 'rejected': len(bad)})
+        self.assertEqual(self.record(good, dict(good, grade=1)), {'stored': 1, 'duplicates': 1, 'rejected': 0})
+        self.assertEqual(self.record(reviewed('c1', self.NOW - 900, 700, 2000, word='時間', grade=1, graded=700)),
+                         {'stored': 1, 'duplicates': 0, 'rejected': 0})  # graded as it was revealed
+        left = reviewed('c2', self.NOW - 800, None, 1500, word='悪売')
+        self.assertEqual(self.record(left), {'stored': 1, 'duplicates': 0, 'rejected': 0})  # an old client's item
+        found = {r['card']: (r['grade'], r['grade_ms']) for r in feedback.reviews(self.db)}
+        self.assertEqual(found, {'c0': (3, 1200), 'c1': (1, 700), 'c2': (None, None)})
+        self.assertEqual([r['card'] for r in feedback.graded(self.db)], ['c0'])  # learning cards alone schedule
+
+    def test_a_card_left_then_graded_takes_the_grade_once(self):
+        left = reviewed('c0', self.NOW - 60_000, None, 3000, uid='l-1', word='問題')
+        self.assertEqual(self.record(left)['stored'], 1)
+        late = reviewed('c0', self.NOW - 59_000, 2000, 50_000, uid='g-1', word='問題', grade=3, graded=40_000)
+        self.assertEqual(self.record(late), {'stored': 1, 'duplicates': 0, 'rejected': 0})
+        [row] = feedback.cards(self.db)[:1]
+        self.assertEqual((row['at'], row['reveal_ms'], row['grade'], row['grade_ms'], row['shown_ms'], row['uid']),
+                         (self.NOW - 60_000, 3000, 3, 41_000, 51_000, 'l-1'))  # first shown kept, times from it
+        self.assertEqual(self.record(dict(late, grade=1, uid='g-2')), {'stored': 0, 'duplicates': 1, 'rejected': 0})
+        self.assertEqual(self.record(late), {'stored': 0, 'duplicates': 1, 'rejected': 0})
+        self.assertEqual([r['card'] for r in feedback.graded(self.db)], ['c0'])
+
+    def test_a_client_clock_ahead_is_taken_as_now(self):
+        ahead = reviewed('c0', self.NOW + 30 * 60_000, 700, 2000, word='問題', grade=3, graded=1200)
+        self.assertEqual(self.record(ahead)['stored'], 1)
+        self.assertEqual(feedback.reviews(self.db)[0]['at'], self.NOW)
+        found = self.record(reviewed('c1', self.NOW + HOUR + 1, 700, word='時間'))
+        self.assertEqual(found['reasons'], [{'item': 0, 'error': 'at: a time within the last 7 days'}])
+
+    def test_every_rejected_item_has_its_reason(self):
+        """A batch of 50 rejected items (as T3 Code sends them): one reason each, by index, so each can be settled."""
+        items = [reviewed('c9', self.NOW - 1000, 700, word='問題') for _ in range(25)]
+        items += [{'kind': 'peek', 'view': 'v', 'context': 'c'} for _ in range(24)]  # malformed interactions too
+        items.append(reviewed('c0', self.NOW - 1000, 700, word='問題'))  # stored
+        found = self.record(*items)
+        self.assertEqual((found['stored'], found['rejected']), (1, 49))
+        self.assertEqual([r['item'] for r in found['reasons']], list(range(49)))
+        self.assertEqual(found['reasons'][30]['error'], 'malformed or too old')
+
+    def test_items_past_the_batch_limit_are_rejected_with_a_reason(self):
+        items = [{'kind': 'peek'}] * feedback.MAX_ITEMS + [reviewed('c0', self.NOW - 1000, 700, word='問題')] * 2
+        found = self.record(*items)
+        self.assertEqual((found['stored'], found['rejected']), (0, feedback.MAX_ITEMS + 2))
+        self.assertEqual(len(found['reasons']), feedback.MAX_ITEMS + 2)
+        self.assertEqual(found['reasons'][-1], {'item': feedback.MAX_ITEMS + 1, 'error': 'over 500 in one batch'})
+
+    def test_a_long_left_card_completed_keeps_its_times_in_order(self):
+        self.record(reviewed('c0', self.NOW - 3 * HOUR, None, 2000, word='問題'))
+        late = reviewed('c0', self.NOW - 1000, 700, 1500, word='問題', grade=3, graded=1200)
+        self.assertEqual(self.record(late)['stored'], 1)
+        row = feedback.cards(self.db)[0]
+        self.assertTrue(row['reveal_ms'] <= row['grade_ms'] <= row['shown_ms'] <= feedback.MAX_REVIEW_MS, row)
+        self.record(reviewed('c1', self.NOW - 3 * DAY, None, 2000, word='時間'))  # left days ago
+        self.record(reviewed('c1', self.NOW - 1000, 700, 1500, word='時間', grade=1, graded=1200))
+        row = [r for r in feedback.cards(self.db) if r['id'] == 'c1'][0]
+        self.assertEqual((row['reveal_ms'], row['grade_ms'], row['shown_ms']), (feedback.MAX_REVIEW_MS,) * 3)
+
+    def test_a_rejected_review_says_why(self):
+        long = reviewed('c0', self.NOW - 1000, 700, feedback.MAX_REVIEW_MS + 1, word='問題')
+        found = self.record(long, reviewed('c9', self.NOW - 1000, 700, word='問題'))
+        self.assertEqual(found['rejected'], 2)
+        self.assertEqual(found['reasons'], [{'item': 0, 'error': 'shownMs: 0 to 86400000 ms'},
+                                            {'item': 1, 'error': 'no card served here with this id and word'}])
+        self.assertEqual(self.record(dict(long, shownMs=feedback.MAX_REVIEW_MS)),
+                         {'stored': 1, 'duplicates': 0, 'rejected': 0})  # clamped by the client: stored, no reasons
+
+    def test_an_old_database_gets_the_grade_columns(self):
+        path = self.home / 'old.sqlite'
+        con = sqlite3.connect(str(path))
+        con.executescript('''CREATE TABLE cards (id TEXT PRIMARY KEY, served_at INTEGER NOT NULL, source TEXT NOT NULL,
+            word TEXT NOT NULL, kind TEXT NOT NULL, entry INTEGER, band INTEGER, weight REAL, at INTEGER,
+            reveal_ms INTEGER, shown_ms INTEGER, via TEXT, uid TEXT, seq INTEGER NOT NULL DEFAULT 0);
+            PRAGMA user_version = 6;''')
+        con.execute("INSERT INTO cards VALUES ('old', 1, 'desktop', 'w', 'learning', NULL, NULL, NULL, 2, 900, 1500, "
+                    "'desktop', NULL, 1)")
+        con.commit()
+        con.close()
+        con = feedback.connect(path)
+        try:
+            self.assertEqual(con.execute('PRAGMA user_version').fetchone()[0], feedback.SCHEMA_VERSION)
+        finally:
+            con.close()
+        [row] = feedback.cards(path)
+        self.assertEqual((row['id'], row['reveal_ms'], row['grade'], row['grade_ms']), ('old', 900, None, None))
+        feedback.serve_card({'id': 'new', 'served_at': self.NOW - HOUR, 'source': 'mobile', 'word': '問題',
+                             'kind': 'learning'}, path)
+        stored = feedback.record([reviewed('new', self.NOW - 1000, 600, 1800, word='問題', grade=2, graded=900)], 't3',
+                                 path, now=self.NOW)
+        self.assertEqual(stored['stored'], 1)
+        self.assertEqual(feedback.graded(path)[0]['grade'], 2)
 
     def test_reviews_leave_the_gloss_log_alone(self):
         self.record(reviewed('c0', self.NOW - 1000, 700, 2000, word='問題'))
@@ -380,6 +554,78 @@ class InTheFit(unittest.TestCase):
         again = knowledge.Fit(self.log(self.reviews(until, known)), until, start=fit.state())
         self.assertAlmostEqual(again.estimate('時間')[0], fit.estimate('時間')[0], delta=0.05)
 
+    def test_graded_cards_are_explicit_answers(self):
+        """Every card revealed alike (900 ms): alone the reveal times can't tell the words apart, the grades do (a card
+        a day each, so every grade is an answer)."""
+        until = evaluate.day_start('2026-10-01')
+        known = {'時間', '問題', '世界'}
+        rows = []
+        for i in range(6):
+            at = until - 7 * DAY + i * DAY
+            for ja in self.WORDS:
+                rows.append({'card': f'{ja}{i}', 'at': at, 'word': ja, 'kind': 'learning', 'entry': None,
+                             'reveal': 900, 'shown': 2000, 'grade': 3 if ja in known else 1, 'grade_ms': 1300})
+                at += 60_000
+        rows.append({'card': 'f0', 'at': at, 'word': '悪売', 'kind': 'fake', 'reveal': 3000, 'shown': 4000,
+                     'grade': 3, 'grade_ms': 3500})
+        fit = knowledge.Fit(self.log(rows), until)
+        base = knowledge.Fit(self.log([]), until)
+        for ja in self.WORDS:
+            moved = fit.estimate(ja)[0] - base.estimate(ja)[0]
+            self.assertGreater(moved, 0.5) if ja in known else self.assertLess(moved, -0.5)
+        summary = fit.review_summary()
+        self.assertEqual((summary['graded'], summary['cards'], summary['fakes']), (36, 0, 0))  # the made-up card is
+        # of the graded flow: it claims nothing and stays out of the mixture
+        ungraded = knowledge.Fit(self.log([dict(r, grade=None) for r in rows]), until)
+        spread = lambda f: f.estimate('時間')[0] - f.estimate('仕事')[0]
+        self.assertGreater(spread(fit), spread(ungraded) + 1.0)
+        answers, _fakes, _extra, shown, graded = knowledge.review_answers(rows, self.log([]).entries)
+        self.assertEqual((len(answers), len(shown), len(graded)), (0, 36, 36))  # still reads for the clock
+        self.assertIn('世界', knowledge.evidenced(self.log(rows), until))
+
+    def card(self, ja, at, grade, kind='learning', reveal=2500, shown=4000):
+        return {'card': f'{ja}{at}{kind}', 'at': at, 'served': at, 'word': ja, 'kind': kind, 'entry': None,
+                'reveal': reveal, 'shown': shown, 'grade': grade, 'grade_ms': None if grade is None else 3000,
+                'source': 'desktop', 'band': 0, 'weight': 1.0}
+
+    def test_learning_steps_are_not_answers(self):
+        """Again, then Good after the 1-minute step and Good after the 10-minute one: one answer (not known), as one
+        Again alone is; a step the next day is an answer again; and at most one answer per word a day."""
+        until = evaluate.day_start('2026-10-01')
+        at, minute = until - 5 * DAY, 60_000
+        rows = [self.card('時間', at, 1), self.card('時間', at + minute, 3), self.card('時間', at + 12 * minute, 3),
+                self.card('問題', at, 1)]
+        fit, base = knowledge.Fit(self.log(rows), until), knowledge.Fit(self.log([]), until)
+        moved = [fit.estimate(ja)[0] - base.estimate(ja)[0] for ja in ('時間', '問題')]
+        self.assertLess(moved[0], -0.5)
+        self.assertAlmostEqual(moved[0], moved[1], delta=0.05)
+        _a, _f, _e, shown, graded = knowledge.review_answers(rows, self.log([]).entries)
+        self.assertEqual([(ja, y) for _at, ja, y in graded], [('時間', 1), ('問題', 1)])
+        self.assertEqual(len(shown), 4)  # every card still a read
+        rows += [self.card('世界', at, 1), self.card('世界', at + DAY, 3),  # a step overnight: an answer
+                 self.card('仕事', at, 3, 'probe'), self.card('仕事', at + HOUR, 1, 'probe')]  # one a day
+        graded = knowledge.review_answers(rows, self.log([]).entries)[4]
+        self.assertEqual([(ja, y) for _at, ja, y in graded if ja in ('世界', '仕事')],
+                         [('世界', 1), ('仕事', 0), ('世界', 0)])
+
+    def test_the_graded_flow_keeps_out_of_the_mixture(self):
+        """Once a client grades, a card it closes unrevealed is no evidence (it read as a strong known before), and its
+        made-up cards, always revealed to be graded, don't bend the components' chance of no reveal."""
+        until = evaluate.day_start('2026-10-01')
+        at = until - 5 * DAY
+        rows = [self.card('悪売', at + i * 60_000, 1, 'fake') for i in range(30)]
+        rows += [self.card('問題', at + i * DAY // 30, 3) for i in range(30)]
+        rows += [self.card('時間', at + DAY + i * HOUR, None, reveal=None, shown=5000) for i in range(3)]
+        fit = knowledge.Fit(self.log(rows), until)
+        alone = knowledge.Fit(self.log([r for r in rows if r['word'] != '時間']), until)
+        self.assertAlmostEqual(fit.estimate('時間')[0], alone.estimate('時間')[0], delta=1e-6)
+        summary = fit.review_summary()
+        self.assertEqual((summary['cards'], summary['fakes']), (0, 0))
+        self.assertEqual(summary['unknown']['skip'], knowledge.REVIEW_PRIOR['unknown'][2])
+        wedge = [dict(r, source='mobile', grade=None, grade_ms=None, at=r['at'] - 3 * DAY) for r in rows]
+        found = knowledge.review_answers(wedge + rows, self.log([]).entries)  # another client, before it graded
+        self.assertEqual((len(found[0]), len(found[1])), (33, 30))  # the reveal flow's cards, read as before
+
     def test_overlapping_components_tell_the_fit_little(self):
         until = evaluate.day_start('2026-10-01')
         known = {'時間', '問題', '世界'}
@@ -425,7 +671,7 @@ class AsARead(unittest.TestCase):
 
 
 class Choice(unittest.TestCase):
-    """review.choose, the card choice, on a word state alone."""
+    """review.py's helpers on a word state alone: the new cards' order, made-up and probe words."""
     NOW = int(time.time() * 1000)
 
     def state(self, n=8):
@@ -434,16 +680,7 @@ class Choice(unittest.TestCase):
         self.words = queue_words(state, n)
         return learning(state, self.words, fwlib.add_days(today, -30))
 
-    def test_the_mix_is_about_seven_two_one(self):
-        state, rng, counts = self.state(), random.Random(1), {}
-        for _ in range(3000):
-            card = review.choose(state, {}, [], (), self.NOW, rng, FRAME)
-            counts[card['kind']] = counts.get(card['kind'], 0) + 1
-        self.assertAlmostEqual(counts['learning'] / 3000, 0.7, delta=0.03)
-        self.assertAlmostEqual(counts['probe'] / 3000, 0.2, delta=0.03)
-        self.assertAlmostEqual(counts['fake'] / 3000, 0.1, delta=0.02)
-
-    def test_behind_first_then_the_least_certain_and_never_a_recent_or_excluded_word(self):
+    def test_behind_first_then_the_least_certain(self):
         state = self.state(4)
         a, b, c, d = self.words
         started = self.NOW - 3 * DAY
@@ -454,34 +691,24 @@ class Choice(unittest.TestCase):
         shown = [{'at': self.NOW - DAY + i, 'surface': 't3', 'y': 0.0, 'w': 1.0} for i in range(4)]
         know = {'words': {a: {'k': 0.5, 'sd': 0.2}, b: {'k': 0.5, 'sd': 0.9, 'history': shown},
                           c: {'k': 0.5, 'sd': 1.1}, d: {'k': 0.5, 'sd': 0.4}}}
-        served = []
-        with mock.patch.object(review, 'MIX', (('learning', 1.0), ('probe', 0.0), ('fake', 0.0))):
-            for i in range(4):
-                card = review.choose(state, know, served, (), self.NOW, random.Random(i), FRAME)
-                served.append({'id': f'x{i}', 'served_at': self.NOW - i * HOUR, 'word': card['word'],
-                               'kind': card['kind'], 'at': None})
-            order = [s['word'] for s in served]
-            self.assertEqual(order, [a, c, b, d])  # a is behind (0 showings in 3 days); b had 4, then by sd
-            card = review.choose(state, know, served, (), self.NOW, random.Random(9), FRAME)
-            self.assertEqual(card['kind'], 'probe')  # every word recent: the other real kind
-            served[0]['served_at'] = served[1]['served_at'] = self.NOW - 5 * HOUR  # a and c no longer recent
-            self.assertEqual(review.choose(state, know, served, (), self.NOW, random.Random(9), FRAME)['word'], a)
-            self.assertEqual(review.choose(state, know, served, ('x0',), self.NOW, random.Random(9), FRAME)['word'],
-                             c)  # a's card is held by the client
+        today = knowledge.day_of(self.NOW)
+        order = [w['ja'] for w in review._new_order(state, know, [], set(), today, self.NOW, random.Random(1))]
+        self.assertEqual(order, [a, c, b, d])  # a is behind (0 showings in 3 days); b had 4, then by sd
+        order = [w['ja'] for w in review._new_order(state, know, [], {a}, today, self.NOW, random.Random(1))]
+        self.assertEqual(order, [c, b, d])  # a word with a schedule (or marked known) is no new card
 
     def test_a_review_counts_as_a_showing_while_behind(self):
-        state = self.state(1)
-        [a] = self.words
+        state = self.state(2)
+        a, b = self.words
         started = self.NOW - 2 * DAY
         for w in state['words']:
-            if w['ja'] == a:
+            if w['ja'] in (a, b):
                 w['arm'] = {'arm': 'shown', 'draw': 0.9, 'day': knowledge.day_of(started), 'at': started,
                             'probe': fwlib.add_days(knowledge.day_of(started), 21)}
         served = [{'id': f'r{i}', 'served_at': self.NOW - 6 * HOUR, 'word': a, 'kind': 'learning',
                    'at': self.NOW - 6 * HOUR} for i in range(3)]
-        rng = random.Random(1)
-        behind = review._learning(state, {}, [], set(), knowledge.day_of(self.NOW), self.NOW, rng)
-        self.assertEqual(behind['word'], a)
+        today = knowledge.day_of(self.NOW)
+        self.assertEqual(review._new_order(state, {}, served, set(), today, self.NOW, random.Random(1))[0]['ja'], b)
         self.assertEqual(review.learning_start(next(w for w in state['words'] if w['ja'] == a)), started)
 
     def test_made_up_words_come_back_least_recently_used(self):
@@ -506,11 +733,408 @@ class Choice(unittest.TestCase):
             self.assertEqual(FRAME.bands[card['band']][0]['weight'] >= card['weight'], True)
 
 
-def simulate_stream(seed, days=30, per_day=20, alike=False, rates=(0.9, 0.7, 0.5, 0.3, 0.15, 0.05)):
+class Deck(Home):
+    """A state dir with 30 learning words in a known order (by sd), on a fixed clock, and the probe and made-up cards
+    off unless a test turns them on."""
+    T0 = int(time.mktime((2026, 6, 10, 12, 0, 0, 0, 0, -1)) * 1000)  # noon local, a day without a clock change
+
+    def setUp(self):
+        super().setUp()
+        state = fresh_state('2026-05-01')
+        self.words = queue_words(state, 30)
+        learning(state, self.words, '2026-05-01')  # learning for weeks: none behind, so the order is by sd
+        fwlib.save_state(state)
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, {'words': {
+            ja: {'k': 0.0, 'sd': 2.0 - i / 100} for i, ja in enumerate(self.words)}})  # today's order: as listed
+        self.quiet = mock.patch.multiple(review, PROBE_SHARE=0.0, FAKE_SHARE=0.0)
+        self.quiet.start()
+
+    def tearDown(self):
+        self.quiet.stop()
+        super().tearDown()
+
+    def next(self, at, exclude=(), more=False, seed=1):
+        return review.next_card('desktop', exclude, self.db, at, random.Random(seed), more)
+
+    def grade(self, card, at, grade, reveal=700):
+        """The review item of a card shown at `at`, graded `grade` 400 ms after its reveal (None: left)."""
+        item = reviewed(card['id'], at, reveal, reveal + 1500, word=card['ja'], grade=grade)
+        self.assertEqual(feedback.record([item], 't3', self.db, now=at + 5000)['stored'], 1)
+
+    def deck(self):
+        con = feedback.connect(self.db)
+        try:
+            return review.schedules(con, self.db)
+        finally:
+            con.close()
+
+class Queue(Deck):
+    """The queue through review.next_card, with grades stored as POST /v1/interactions stores them: new cards through
+    their learning steps, Anki's order, today's limit, Review more, the learn-ahead window, known words, pending and
+    left cards, the cache, and the probe and made-up cards in between."""
+
+    def test_new_cards_go_through_their_steps_and_graduate(self):
+        w0, w1, w2 = self.words[:3]
+        card, counts = self.next(self.T0)
+        self.assertEqual((card['ja'], card['queue'], counts), (w0, 'new', {'new': 20, 'learning': 0, 'review': 0}))
+        self.grade(card, self.T0, srs.GOOD)  # to the 10-minute step
+        card, counts = self.next(self.T0 + 5000)
+        self.assertEqual((card['ja'], card['queue'], counts), (w1, 'new', {'new': 19, 'learning': 1, 'review': 0}))
+        self.grade(card, self.T0 + 5000, srs.AGAIN)  # to the 1-minute step
+        card, _counts = self.next(self.T0 + 10_000)
+        self.assertEqual(card['ja'], w2)
+        self.grade(card, self.T0 + 10_000, None)  # left: schedules nothing, still new
+        card, counts = self.next(self.T0 + 120_000)  # w1 is due: learning before new
+        self.assertEqual((card['ja'], card['queue']), (w1, 'learning'))
+        self.assertEqual(card['intervals'], {'again': 60, 'hard': 330, 'good': 600,
+                                             'easy': card['intervals']['easy']})
+        self.assertEqual(counts, {'new': 18, 'learning': 2, 'review': 0})
+        self.grade(card, self.T0 + 120_000, srs.GOOD)
+        card, _counts = self.next(self.T0 + 125_000)
+        self.assertEqual((card['ja'], card['queue']), (self.words[3], 'new'))  # the card left waits behind the others
+        card, _counts = self.next(self.T0 + 125_000, exclude=[card['id']])
+        self.assertEqual((card['ja'], card['queue']), (self.words[4], 'new'))
+        self.grade(card, self.T0 + 125_000, srs.EASY)  # graduates at once
+        at = self.T0 + 15 * 60_000  # w0 due (10 minutes, fuzzed by up to 2.5)
+        card, _counts = self.next(at)
+        self.assertEqual((card['ja'], card['queue'], card['intervals']['good']), (w0, 'learning', 2 * 86_400))
+        self.grade(card, at, srs.GOOD)
+        w0_card = self.deck()[w0][0]
+        self.assertEqual((w0_card.state, w0_card.interval), ('review', 2))  # S 2.3: no fuzz under 2.5 days
+        self.assertEqual(w0_card.due, srs.day_start(srs.day_number(at) + 2))
+        two_days = self.T0 + 2 * DAY + HOUR
+        card, counts = self.next(two_days)
+        self.assertEqual((card['ja'], card['queue']), (w1, 'learning'))  # its 10-minute step, never graded: first
+        card, counts = self.next(two_days, exclude=[card['id']])
+        self.assertEqual((card['ja'], card['queue']), (w0, 'review'))  # due today: reviews before new cards
+        self.assertTrue(card['intervals']['hard'] < card['intervals']['good'] < card['intervals']['easy'])
+        self.assertEqual(counts['review'], 1)
+        self.assertEqual(counts['new'], 20)  # a new day, a new limit
+
+    def test_the_days_new_card_limit_and_review_more(self):
+        at = self.T0
+        for i in range(review.NEW_PER_DAY):
+            card, counts = self.next(at)
+            self.assertEqual((card['ja'], counts['new']), (self.words[i], review.NEW_PER_DAY - i))
+            self.grade(card, at, srs.EASY)  # graduates: due in days
+            at += 20_000
+        card, counts = self.next(at)
+        self.assertEqual((card, counts), (None, {'new': 0, 'learning': 0, 'review': 0}))  # done for today
+        card, counts = self.next(at, more=True)
+        self.assertEqual((card['ja'], card['queue'], counts['new']), (self.words[20], 'new', 10))
+        tomorrow = srs.day_start(srs.day_number(at) + 1) + 60_000
+        self.assertEqual(self.next(tomorrow)[1]['new'], 10)  # 10 words left: the one served, not graded, is too
+
+    def test_anki_order_learning_then_review_then_new_then_learn_ahead(self):
+        a, b, c = self.words[:3]
+        days_ago = self.T0 - 10 * DAY
+        card, _ = self.next(days_ago)
+        self.assertEqual(card['ja'], a)
+        self.grade(card, days_ago, srs.EASY)  # due in 6 to 10 days: a review card due now
+        held = lambda *words: [r['id'] for r in feedback.cards(self.db) if r['word'] in words]
+        card, _ = self.next(self.T0 - 3 * 60_000, exclude=held(a))  # a is due already
+        self.assertEqual(card['ja'], b)
+        self.grade(card, self.T0 - 3 * 60_000, srs.AGAIN)  # due in a minute or so: learning, due now
+        card, _ = self.next(self.T0 - 60_000, exclude=held(a, b))
+        self.assertEqual(card['ja'], c)
+        self.grade(card, self.T0 - 60_000, srs.GOOD)  # due in 10 minutes: within the learn-ahead window
+        card, counts = self.next(self.T0)
+        self.assertEqual(counts, {'new': review.NEW_PER_DAY - 2, 'learning': 2, 'review': 1})  # a came 10 days ago
+        self.assertEqual((card['ja'], card['queue']), (b, 'learning'))
+        card, _ = self.next(self.T0, exclude=held(b))
+        self.assertEqual((card['ja'], card['queue']), (a, 'review'))
+        card, _ = self.next(self.T0, exclude=held(a, b))
+        self.assertEqual((card['ja'], card['queue']), (self.words[3], 'new'))
+        state = fwlib.load_state()
+        for w in state['words']:
+            if w['ja'] in self.words[3:]:
+                w['status'] = 'queue'  # no new card left
+        fwlib.save_state(state)
+        card, counts = self.next(self.T0, exclude=held(a, b))
+        self.assertEqual((card['ja'], card['queue']), (c, 'learning'))  # nothing else: a learning card early
+        self.assertEqual(counts, {'new': 0, 'learning': 2, 'review': 1})
+
+    def test_marked_known_leaves_the_deck_and_the_models_known_keeps_its_schedule(self):
+        a, b = self.words[:2]
+        for ja in (a, b):
+            card, _ = self.next(self.T0 - 20 * DAY)
+            self.assertEqual(card['ja'], ja)
+            self.grade(card, self.T0 - 20 * DAY, srs.EASY)
+        state = fwlib.load_state()
+        for w in state['words']:
+            if w['ja'] in (a, b):
+                w['status'] = 'known'  # a by the reader's command, b by the model
+        fwlib.save_state(state)
+        knowledge.log_command([a], 'known', now=(self.T0 - DAY) / 1000)
+        card, counts = self.next(self.T0)
+        self.assertEqual((card['ja'], card['queue'], counts['review']), (b, 'review', 1))
+        knowledge.log_command([a], 'learn', now=(self.T0 - HOUR) / 1000)
+        self.assertEqual(self.next(self.T0, exclude=[card['id']])[1]['review'], 2)  # back, with its schedule
+
+    def test_hidden_deck_words_are_never_served_nor_counted(self):
+        a = self.words[0]
+        card, _ = self.next(self.T0 - 20 * DAY)
+        self.grade(card, self.T0 - 20 * DAY, srs.EASY)
+        state = fwlib.load_state()
+        for w in state['words']:
+            if w['ja'] == a:
+                w['arm'] = {'arm': 'held', 'draw': 0.1, 'day': '2026-06-05', 'probe': fwlib.add_days('2026-06-05', 21)}
+        fwlib.save_state(state)
+        card, counts = self.next(self.T0)
+        self.assertNotEqual(card['ja'], a)
+        self.assertEqual(counts['review'], 0)
+
+    def test_a_client_that_never_grades_moves_through_the_words(self):
+        """A client from before grades leaves every card: the words left go behind the others, longest left first,
+        so it sees the day's new cards in turn, then the first again, never the same card twice running."""
+        seen, at = [], self.T0
+        for _ in range(review.NEW_PER_DAY + 2):
+            card, counts = self.next(at)
+            self.assertEqual(counts['new'], review.NEW_PER_DAY)  # nothing graded: nothing introduced
+            self.grade(card, at, None)
+            seen.append(card['ja'])
+            at += 30_000
+        self.assertEqual(seen, self.words[:review.NEW_PER_DAY] + self.words[:2])
+        self.assertEqual(self.next(at + review.LEFT_HOURS * HOUR)[0]['ja'], self.words[0])  # waited long enough
+
+    def test_a_peek_holds_no_word_back(self):
+        """A badge's peeks between cards: the counts the real request would give, and the same card after them."""
+        card, _ = self.next(self.T0)
+        self.grade(card, self.T0, srs.GOOD)
+        for i in range(5):
+            self.assertEqual(review.next_card('mobile', (), self.db, self.T0 + 1000 + i, peek=True),
+                             (None, {'new': 19, 'learning': 1, 'review': 0}))
+        self.assertEqual(len(feedback.cards(self.db)), 1)
+        card, counts = self.next(self.T0 + 2000)
+        self.assertEqual((card['ja'], counts), (self.words[1], {'new': 19, 'learning': 1, 'review': 0}))
+        self.assertEqual(review.next_card('mobile', (), self.db, self.T0 + 3000, peek=True, more=True)[1]['new'],
+                         28)  # 29 left, one of them served and pending
+
+    def test_released_cards_are_as_if_never_served(self):
+        first, _ = self.next(self.T0)
+        prefetched, _ = self.next(self.T0 + 1000)  # the next card fetched ahead, then dropped unshown
+        self.assertEqual((first['ja'], prefetched['ja']), (self.words[0], self.words[1]))
+        self.grade(first, self.T0, None)
+        self.assertEqual(review.next_card('mobile', (), self.db, self.T0 + 2000, release=[prefetched['id']],
+                                          peek=True)[1]['new'], 19)  # another client's: still pending
+        card, counts = review.next_card('desktop', (), self.db, self.T0 + 2000, release=[prefetched['id']],
+                                        peek=True)
+        self.assertEqual((card, counts['new']), (None, 20))  # released along with a peek
+        self.assertEqual(self.next(self.T0 + 3000)[0]['ja'], self.words[1])  # no longer pending: served at once
+        stored = feedback.record([reviewed(prefetched['id'], self.T0 + 1000, 700, word=prefetched['ja'], grade=3)],
+                                 't3', self.db, now=self.T0 + 5000)
+        self.assertEqual((stored['rejected'], stored['reasons'][0]['error']), (1, 'card released unshown'))
+        self.assertNotIn(prefetched['ja'], review._left(feedback.cards(self.db), self.T0 + 6000))
+
+    def test_the_new_card_limit_holds_while_a_grade_is_in_flight(self):
+        """No sd yet (every new word ties): the order stays the same between requests, and the 20th new card's grade,
+        not back yet, keeps a 21st out."""
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, {'words': {}})
+        at, seen = self.T0, []
+        for i in range(review.NEW_PER_DAY - 1):
+            card, _ = self.next(at, seed=i)
+            seen.append(card['ja'])
+            self.grade(card, at, srs.EASY)
+            at += 20_000
+        twentieth, counts = self.next(at, seed=100)
+        self.assertEqual((twentieth['queue'], counts['new']), ('new', 1))
+        card, counts = self.next(at + 3000, seed=101)  # before its grade arrives
+        self.assertEqual((card, counts), (None, {'new': 0, 'learning': 0, 'review': 0}))
+        self.grade(twentieth, at, srs.EASY)
+        q = review.queues(fwlib.load_state(), knowledge.load(), feedback.cards(self.db), self.deck(), at + 9000)
+        self.assertEqual(q['introduced'], review.NEW_PER_DAY)
+        order = lambda seed: [w['ja'] for w in review.queues(fwlib.load_state(), knowledge.load(), [], {}, at,
+                                                              random.Random(seed), more=True)['new']]
+        self.assertEqual(order(1), order(2))  # ties broken the same way all day
+
+    def test_the_buttons_say_what_the_grade_gets_past_4am(self):
+        w = self.words[0]
+        start = self.T0 - 12 * DAY
+        card, _ = self.next(start)
+        self.grade(card, start, srs.EASY)
+        due = srs.day_number(self.deck()[w][0].due)
+        late = srs.day_start(due + 1) - 5 * 60_000  # 3:55, the card due
+        card, _ = self.next(late)
+        self.assertEqual((card['ja'], card['queue']), (w, 'review'))
+        item = reviewed(card['id'], late, 2000, 11 * 60_000, word=w, grade=srs.GOOD, graded=10 * 60_000)  # 4:05
+        self.assertEqual(feedback.record([item], 't3', self.db, now=late + 11 * 60_000)['stored'], 1)
+        after = self.deck()[w][0]
+        self.assertEqual(after.interval * 86_400, card['intervals']['good'])
+        self.assertEqual(after.due, srs.day_start(srs.day_number(late + 10 * 60_000) + after.interval))  # from 4:05
+
+    def test_a_schedule_follows_the_entry_id(self):
+        """A word served before it had an entry id, then with one: one schedule, under the id, found by either."""
+        w0 = self.words[0]
+        card, _ = self.next(self.T0)
+        self.grade(card, self.T0, srs.GOOD)
+        know = fwlib.read_json(fwlib.home() / knowledge.KNOWLEDGE)
+        know['words'][w0]['id'] = 1234567
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, know)
+        card, _ = self.next(self.T0 + 15 * 60_000)
+        self.assertEqual((card['ja'], card['queue']), (w0, 'learning'))
+        self.grade(card, self.T0 + 15 * 60_000, srs.GOOD)
+        deck = self.deck()
+        self.assertEqual(list(deck), ['entry:1234567'])
+        self.assertEqual((deck['entry:1234567'][0].state, deck['entry:1234567'][0].reps), ('review', 2))
+        self.assertEqual(review.revlog(self.db)[0][0], srs.card_id(w0))  # the fuzz's id: unchanged by the id
+
+    def test_two_spellings_of_one_entry_are_one_card(self):
+        """Two learning words with one dictionary entry (a kanji spelling and a kana one): one new card, one schedule;
+        the other spelling never comes up as new, and the day's limit counts the word once."""
+        w0, w1 = self.words[:2]
+        know = fwlib.read_json(fwlib.home() / knowledge.KNOWLEDGE)
+        know['words'][w0]['id'] = know['words'][w1]['id'] = 4242
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, know)
+        card, counts = self.next(self.T0)
+        self.assertEqual((card['ja'], counts['new']), (w0, 20))
+        self.grade(card, self.T0, srs.GOOD)
+        seen = []
+        for i in range(25):
+            card, counts = self.next(self.T0 + (i + 1) * 30_000)
+            if card is None:
+                break
+            seen.append(card['ja'])
+            self.grade(card, self.T0 + (i + 1) * 30_000, srs.EASY)
+        self.assertNotIn(w1, seen)
+        self.assertEqual(len([k for k in self.deck() if k == 'entry:4242']), 1)
+        self.assertEqual(len(self.deck()), review.NEW_PER_DAY)  # the shared word once among the day's 20
+
+    def test_a_word_whose_entry_id_changes_keeps_one_schedule(self):
+        rows = [{'card': 'a', 'word': 'x', 'entry': None}, {'card': 'b', 'word': 'x', 'entry': 7},
+                {'card': 'c', 'word': 'x', 'entry': 8}, {'card': 'd', 'word': 'y', 'entry': 8},
+                {'card': 'e', 'word': 'z', 'entry': None}]
+        groups = feedback.deck_groups(rows)
+        self.assertEqual({k: [r['card'] for r in v] for k, v in groups.items()},
+                         {'entry:8': ['a', 'b', 'c', 'd'], 'z': ['e']})
+
+    def test_an_id_change_moves_its_spelling_and_chains_nothing(self):
+        """kata had id 1; ho had 1, then 2; hou has 2: ho moves to 2 with hou (one entry, two spellings), kata stays."""
+        rows = [{'card': 'a', 'word': 'kata', 'entry': 1}, {'card': 'b', 'word': 'ho', 'entry': 1},
+                {'card': 'c', 'word': 'ho', 'entry': 2}, {'card': 'd', 'word': 'hou', 'entry': 2},
+                {'card': 'e', 'word': 'ho', 'entry': None}]
+        groups = feedback.deck_groups(rows)
+        self.assertEqual({k: [r['card'] for r in v] for k, v in groups.items()},
+                         {'entry:1': ['a'], 'entry:2': ['b', 'c', 'd', 'e']})
+
+    def test_a_schedule_shows_its_latest_graded_spelling_or_any_it_can(self):
+        w0, w1, w2 = self.words[:3]
+        know = fwlib.read_json(fwlib.home() / knowledge.KNOWLEDGE)
+        know['words'][w0]['id'] = know['words'][w1]['id'] = 4242  # w0 first in the state: by entry id, w0
+        fwlib.write_json(fwlib.home() / knowledge.KNOWLEDGE, know)
+        due = srs.Card(state=srs.REVIEW, stability=5.0, difficulty=5.0, last=self.T0 - 9 * DAY,
+                       due=self.T0 - DAY, interval=8, reps=3)
+        log = [(self.T0 - 9 * DAY, 3, srs.REVIEW, 1000)]
+        decks = {'entry:4242': (due, log, w1, 1, frozenset({w0, w1})),  # last graded as w1: shown as w1
+                 'entry:9': (due, log, 'gone', 2, frozenset({'gone', w2}))}  # neither id nor latest in the state
+        q = review.queues(fwlib.load_state(), know, [], decks, self.T0)
+        self.assertEqual(sorted(w['ja'] for _card, w, _cid in q['review']), sorted([w1, w2]))
+        self.assertNotIn(w0, [w['ja'] for w in q['new']])  # nor is the other spelling a new card
+
+    def test_text_is_cut_as_t3_counts_it(self):
+        wide = chr(0x20000)  # a character beyond the BMP: two UTF-16 code units
+        self.assertEqual(review.utf16('a' + wide), 3)
+        self.assertEqual(review.cut('a' * 199 + wide, 200), 'a' * 199)  # not split, and within 200 code units
+        self.assertEqual(review.cut(wide * 100, 200), wide * 100)
+        state = fwlib.load_state()
+        for w in state['words']:
+            if w['ja'] == self.words[0]:
+                w['en'] = 'b' * 199 + wide + 'c'
+        fwlib.save_state(state)
+        card, _ = self.next(self.T0)
+        self.assertEqual((card['ja'], review.utf16(card['gloss'])), (self.words[0], 199))
+
+    def test_pending_and_excluded_words_wait(self):
+        w0, w1, w2 = self.words[:3]
+        first, _ = self.next(self.T0)
+        self.assertEqual(first['ja'], w0)
+        self.assertEqual(self.next(self.T0 + 1000)[0]['ja'], w1)  # w0's grade may still be on its way
+        self.assertEqual(self.next(self.T0 + 2000, exclude=[first['id']])[0]['ja'], w2)
+        self.assertEqual(self.next(self.T0 + review.PENDING_MS + 1)[0]['ja'], w0)  # never reported: served again
+
+    def test_the_schedules_are_cached_until_a_grade_is_stored(self):
+        card, _ = self.next(self.T0)
+        before = self.deck()
+        self.assertIs(self.deck(), before)
+        self.grade(card, self.T0, None)  # left: nothing to replay
+        self.assertIs(self.deck(), before)
+        card, _ = self.next(self.T0 + 1000)
+        self.grade(card, self.T0 + 1000, srs.HARD)
+        after = self.deck()
+        self.assertIsNot(after, before)
+        self.assertEqual(list(after), [card['ja']])
+        with mock.patch.object(srs, 'PARAMETERS', srs.PARAMETERS[:20] + (0.2,)):  # another decay: recomputed
+            self.assertIsNot(self.deck(), after)
+
+    def test_probe_and_made_up_cards_come_in_between_as_new_cards(self):
+        self.quiet.stop()
+        shares = review.PROBE_SHARE, review.FAKE_SHARE
+        rng, kinds = random.Random(4), {}
+        try:
+            for i in range(400):
+                at = self.T0 + i * 60_000
+                pending = sum(1 for r in feedback.cards(self.db) if r['kind'] == 'learning'
+                              and r['served_at'] >= at - review.PENDING_MS)  # real new cards in flight count
+                card, counts = review.next_card('desktop', (), self.db, at, rng)
+                self.assertEqual(card['queue'], 'new')
+                self.assertEqual(counts, {'new': 20 - pending, 'learning': 0, 'review': 0})  # probe, fake: never
+                self.assertEqual({k: card['intervals'][k] for k in ('again', 'hard', 'good')},
+                                 {'again': 60, 'hard': 330, 'good': 600})
+        finally:
+            self.quiet.start()
+        for row in feedback.cards(self.db):
+            kinds[row['kind']] = kinds.get(row['kind'], 0) + 1
+        self.assertEqual(shares, (0.10, 0.05))
+        self.assertAlmostEqual(kinds.get('probe', 0) / 400, shares[0], delta=0.04)
+        self.assertAlmostEqual(kinds.get('fake', 0) / 400, shares[1], delta=0.03)
+        made_up = [r for r in feedback.cards(self.db) if r['kind'] == 'fake']
+        self.grade({'id': made_up[0]['id'], 'ja': made_up[0]['word']}, made_up[0]['served_at'], srs.GOOD)
+        self.assertEqual(self.deck(), {})  # graded, but no schedule
+
+
+class Summary(Deck):
+    """fw.py review: the schedule's numbers and the review log in the FSRS optimizer's layout."""
+
+    def test_the_numbers_and_the_review_log(self):
+        a, b = self.words[:2]
+        for ja in (a, b):
+            card, _ = self.next(self.T0 - 20 * DAY)
+            self.grade(card, self.T0 - 20 * DAY, srs.EASY)
+        for at, grade in ((self.T0 - HOUR, srs.GOOD), (self.T0 - HOUR + 60_000, srs.AGAIN)):  # both due: one kept,
+            card, _ = self.next(at)                                                          # one lapsed
+            self.assertEqual(card['queue'], 'review')
+            self.grade(card, at, grade)
+        found = review.summary(self.db, self.T0)
+        self.assertEqual(found['retention'], {'month': [1, 2], 'all': [1, 2]})
+        self.assertEqual((found['today'], found['month'], found['graded'], found['deck']), (2, 4, 4, 2))
+        self.assertEqual(found['counts'], {'new': review.NEW_PER_DAY, 'learning': 1, 'review': 0})
+        text = review.summary_text(found)
+        self.assertIn('50% of 2 in the last 30 days', text)
+        self.assertIn('on the order of 1,000 graded reviews', text)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            fw.main(['review', 'revlog'])
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], 'card_id,review_time,review_rating,review_state,review_duration')
+        rows = [line.split(',') for line in lines[1:]]
+        self.assertEqual([(int(r[2]), int(r[3])) for r in rows], [(4, 0), (4, 0), (3, 2), (1, 2)])
+        self.assertEqual({int(r[0]) for r in rows}, {srs.card_id(a), srs.card_id(b)})
+        self.assertEqual(int(rows[0][1]), self.T0 - 20 * DAY + 1100)  # graded 1.1 s after it was shown
+        self.assertEqual(rows[0][4], '1100')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            fw.main(['review'])  # no collector here: computed on this state dir
+        printed = out.getvalue()  # at the real clock, months after these reviews: only what doesn't depend on it
+        self.assertTrue(printed.startswith('Due today: 20 new, 1 learning, '))
+        self.assertIn('2 words have a schedule', printed)
+        self.assertIn('FSRS reviews (graded learning cards): 4.', printed)
+
+
+def simulate_stream(seed, days=30, per_day=20, alike=False, rates=(0.9, 0.7, 0.5, 0.3, 0.15, 0.05), graded=False):
     """A simulated reader's review cards over `days` days: per_day cards a day, 70% learning, 20% probe and 10% made
-    up (review.MIX), each probe word known or not once for all (by its band's rate), with outcomes as outcome()
-    draws them (alike: the reader gives up on unknown words as fast as they reveal known ones). Returns (reviews, the
-    true goal: the weighted share of the population known, now)."""
+    up (the wedge's mix), each probe word known or not once for all (by its band's rate), with outcomes as outcome()
+    draws them (alike: the reader gives up on unknown words as fast as they reveal known ones). graded: the review
+    panel instead, every card revealed and graded (a probe card Good when its word is known, else Again). Returns
+    (reviews, the true goal: the weighted share of the population known, now)."""
     rng = random.Random(seed)
     knows = {}
     for h, band in enumerate(FRAME.bands):
@@ -528,10 +1152,15 @@ def simulate_stream(seed, days=30, per_day=20, alike=False, rates=(0.9, 0.7, 0.5
             it = rng.choice(FRAME.bands[h])
             reveal, shown = outcome(rng, knows[it['ja']], **kinds)
             out.append({'card': f'c{i}', 'at': at, 'word': it['ja'], 'kind': 'probe', 'band': h,
-                        'weight': it['weight'], 'reveal': reveal, 'shown': shown})
+                        'weight': it['weight'], 'reveal': reveal, 'shown': shown,
+                        'grade': (3 if knows[it['ja']] else 1) if graded else None})
         else:
             reveal, shown = outcome(rng, kind == 'learning' and rng.random() < 0.4, **kinds)
-            out.append({'card': f'c{i}', 'at': at, 'word': f'w{i}', 'kind': kind, 'reveal': reveal, 'shown': shown})
+            out.append({'card': f'c{i}', 'at': at, 'word': f'w{i}', 'kind': kind, 'reveal': reveal, 'shown': shown,
+                        'grade': 1 if graded else None})
+        if graded:
+            out[-1].update(source='desktop', reveal=out[-1]['reveal'] or 800, shown=max(out[-1]['shown'], 2000),
+                           grade_ms=1500)
     return out, truth, now
 
 
@@ -552,6 +1181,20 @@ class Rolling(unittest.TestCase):
         self.assertGreaterEqual(covered, 15)
         self.assertLess(abs(sum(errors) / len(errors)), 0.05)
         self.assertLess(math.sqrt(sum(e * e for e in errors) / len(errors)), 0.1)
+
+    def test_a_graded_probe_card_is_a_sure_answer_and_one_closed_unrevealed_says_nothing(self):
+        """The review panel's stream: the estimate from the probe cards' grades, close to the truth; cards closed
+        without a reveal or a grade (here every unknown word's, once more) don't move it, where read as reveal times
+        they would look known."""
+        reviews, truth, now = simulate_stream(7, graded=True)
+        est = probe.rolling(reviews, now, FRAME)
+        self.assertAlmostEqual(est['known'], truth, delta=0.1)
+        self.assertEqual((est['fakes'], est['learning']), (0, 0))  # out of the components: they claim nothing
+        closed = [dict(r, card=r['card'] + 'x', at=r['at'] + 1, reveal=None, shown=3000, grade=None, grade_ms=None)
+                  for r in reviews if r['kind'] == 'probe' and r['grade'] == 1]
+        again = probe.rolling(reviews + closed, now, FRAME)
+        self.assertAlmostEqual(again['known'], est['known'], delta=0.03)  # each word's latest card: the graded one
+        self.assertLessEqual(again['n'], est['n'])
 
     def test_overlapping_components_widen_the_interval_and_say_so(self):
         reviews, _truth, now = simulate_stream(1)

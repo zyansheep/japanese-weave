@@ -1,7 +1,9 @@
 """The probe (PLAN.md section 1 and row R, NEXT_STEPS step 7): a measure of the goal taken directly instead of through
 the model, whose own number moves when you get used to the glosses or it is refitted. Since the review wedge it lives
-in the review stream: about one review card in five shows a probe word and one in ten a made-up one (review.py), and
-the estimate here is computed from those cards over the last ROLLING_DAYS days (rolling), on every refresh. The
+in the review stream: about one review card in ten shows a probe word and one in twenty a made-up one, in between the
+Anki-scheduled cards (review.py; one in five and one in ten before grades, of a smaller stream), and the estimate here
+is computed from those cards over the last ROLLING_DAYS days (rolling), on every refresh, from their reveal times (a
+grade on a probe card is not read here yet). The
 monthly 3-minute probe and its chat command are gone; its records stay readable (--history), and a terminal can still
 take one (fw.py probe). Python 3.9+, standard library only.
 
@@ -37,6 +39,13 @@ word of the band at random among those not asked in the last REPEAT_DAYS days (b
 none is left, the least recently asked), so within a band every word is equally likely and leaving recent ones out
 biases nothing. Made-up words (data/fakes.tsv, tools/build_fakes.py) come from review.py too, never reused within its
 FAKE_REUSE_DAYS while any other is left.
+
+Graded flow. Once a client grades (the review panel, scheduled like Anki), its cards change meaning: every
+card graded was revealed first and a card closed unrevealed is not a reader who knew it, so read as reveal times they
+would bend the components. From a client's first grade on (knowledge.graded_flow), a probe card's grade is its outcome,
+sure (Again: not known; Hard, Good, Easy: known, at face value: the grade comes after the reveal, so the made-up words
+can't measure over-claiming in it), and its other cards (made-up, learning, or left without a grade) are left out; the
+components are fitted from the reveal flow's cards alone.
 
 Estimate from the review stream (rolling). A probe card's outcome is a reveal time, or no reveal (knowledge.Components:
 known at recall, a log time N(mu_K, s_K) and a chance a_K of no reveal; not known, N(mu_U, s_U) and a_U). Of the cards
@@ -361,9 +370,15 @@ def rolling(reviews, now_ms, frame=None, days=ROLLING_DAYS, z=Z90):
     bands = [(share, len(b)) for share, b in zip(frame.shares, frame.bands)]
     since, latest, fakes, learning = now_ms - days * DAY_MS, {}, [], []
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    starts = knowledge.graded_flow(reviews)
     for r in sorted((r for r in reviews or () if isinstance(r, dict) and number(r.get('at'))), key=lambda r: r['at']):
         if not since <= r['at'] < now_ms or not number(r.get('shown')) or r.get('reveal') is not None \
                 and not number(r['reveal']):
+            continue
+        if knowledge.in_graded_flow(r, starts):  # the panel's: a probe card's grade alone (graded flow)
+            if knowledge.is_grade(r.get('grade')) and r.get('kind') == 'probe' and isinstance(r.get('band'), int) \
+                    and 0 <= r['band'] < len(bands) and number(r.get('weight')) and r['weight'] > 0:
+                latest[r.get('word')] = (r['band'], r['weight'], KNOWN if r['grade'] > 1 else UNKNOWN)
             continue
         x = knowledge.review_outcome(r.get('reveal'), r['shown'])
         if x is False:
@@ -384,8 +399,8 @@ def rolling(reviews, now_ms, frame=None, days=ROLLING_DAYS, z=Z90):
     for _ in range(2000):  # EM: the components, every band's mixture weight and the learning cards'
         found = [(h, w, x, knowledge.sigmoid(knowledge.logit(clamp(pi[h])) + _ratio(parts, x))) for h, w, x in cards]
         mine = [(x, knowledge.sigmoid(knowledge.logit(clamp(rest)) + _ratio(parts, x))) for x in learning]
-        moved = parts.update([(x, 1.0, r) for _h, _w, x, r in found] + [(x, 1.0, r) for x, r in mine],
-                             [(x, 1.0) for x in fakes])
+        moved = parts.update([(x, 1.0, r) for _h, _w, x, r in found if x not in SURE]  # sure cards shape nothing
+                             + [(x, 1.0, r) for x, r in mine], [(x, 1.0) for x in fakes])
         for h in range(len(bands)):
             sw = sum(w for b, w, _x, _r in found if b == h)
             if sw:
@@ -443,6 +458,8 @@ def _components_variance(parts, cards, pi, learning, rest, fakes, shares):
     clamp = lambda p: min(1 - 1e-3, max(1e-3, p))
 
     def scores(x, c):  # d log density / d (mu, log s, logit a) of component c
+        if x in SURE:
+            return [0.0, 0.0, 0.0]
         if x is None:
             return [0.0, 0.0, 1 - parts.a[c]]
         u = (x - parts.mu[c]) / parts.s[c]
@@ -484,8 +501,15 @@ def _components_variance(parts, cards, pi, learning, rest, fakes, shares):
     return max(0.0, full - alone)
 
 
+KNOWN, UNKNOWN = 'known', 'unknown'  # a graded probe card's outcome, sure (graded flow)
+SURE = (KNOWN, UNKNOWN)
+
+
 def _ratio(parts, x):
-    """log A - log B: how much more likely an outcome is from a word known at recall than from one not."""
+    """log A - log B: how much more likely an outcome is from a word known at recall than from one not (a graded
+    card's: as sure as the arithmetic allows)."""
+    if x in SURE:
+        return 30.0 if x == KNOWN else -30.0
     la, lb = parts.logs(x)
     return la - lb
 
@@ -624,8 +648,8 @@ def rolling_text(know):
     review = (know or {}).get('review') if isinstance((know or {}).get('review'), dict) else None
     est = (review or {}).get('probe') if isinstance((review or {}).get('probe'), dict) else None
     if est is None or est.get('known') is None:
-        return (f'probe: no probe cards reviewed in the last {ROLLING_DAYS} days yet (the wedge on a gloss in T3 Code '
-                'starts the review cards; about one in five is a probe word)')
+        return (f'probe: no probe cards reviewed in the last {ROLLING_DAYS} days yet (T3 Code\'s review panel and the '
+                'phone\'s Review screen show the review cards; about one in ten is a probe word)')
     sep = est.get('separation') or {}
     rests = (f'{est["n"]} probe card{"s" if est["n"] != 1 else ""} and {est.get("fakes", 0)} made-up '
              f'one{"s" if est.get("fakes", 0) != 1 else ""}')
