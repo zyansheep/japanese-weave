@@ -459,6 +459,51 @@ class Thresholds(unittest.TestCase):
         self.assertIn(' 0 normal (now):', same.text)
 
 
+class KnownAdverbs(unittest.TestCase):
+    """An English sentence may keep a swapped adverb the reader knows at a glance; verbs, pronouns, connectives and
+    adverbs still being learned stay out."""
+    TYPES = dict(tt.TYPES, もう={'adv'}, すぐ={'adv'}, もし={'adv'}, また={'adv', 'conj'}, そして={'conj'})
+
+    def swap(self, ja, title, en, p, free):
+        return {'ja': ja, 'title': title, 'en': en, 'kana': ja, 'p': p, 'free': free}
+
+    def test_which_swaps_stay_in_english_sentences(self):
+        swaps = tt.SWAPS + [self.swap('もう', 'already', 'already', 0.02, True),
+                            self.swap('すぐ', 'soon', 'soon', 0.3, False),
+                            self.swap('もし', 'if', 'if', 0.02, True),
+                            self.swap('また', 'again', 'again', 0.02, True),
+                            self.swap('また', 'and', 'and', 0.02, True),
+                            self.swap('使う', 'つかう · use', 'use', 0.02, True)]
+        a = lambda ja, title: f'<abbr title="{title}">{ja}</abbr>'
+        text = (f'The build is {a("もう", "already")} done. It will be ready {a("すぐ", "soon")}. Ask {a("もし", "if")} '
+                f'it fails. Run it {a("また", "again")} tomorrow. Fix it, {a("また", "and")} ship it. We '
+                f'{a("使う", "つかう · use")} the {tt.INFO} today.')
+        plan = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08)
+        checked = check_reply.finish(text, plan, self.TYPES, seed=1, remember=False)
+        back = [line for line in checked.text.split('\n') if line.startswith('- line') and 'put back' in line]
+        self.assertEqual(len(back), 4, back)
+        for ja in ('すぐ', 'もし', '使う'):  # learning, a connective, a verb
+            self.assertTrue(any(ja in line for line in back), ja)
+        self.assertTrue(any('また' in line for line in back))  # as "and"
+        self.assertIn('data-en="already"', checked.final)  # a known adverb stays
+        self.assertIn('data-en="again"', checked.final)
+        self.assertIn('adverbs known at a glance', back[0])
+        # without known words (the old check), an adverb is never a noun
+        sent = check_reply.sentences(f'It is {a("もう", "#0")} done.')[0]
+        self.assertTrue(check_reply.sentence_problems(sent, self.TYPES, english=True))
+        self.assertFalse(check_reply.sentence_problems(sent, self.TYPES, english=True, known=lambda t: True))
+
+    def test_the_brief_says_so(self):
+        self.assertIn('adverbs among the known-word swaps', weave.DRAFT_RULES)
+        self.assertIn('rather than one that drops the swap', weave.DRAFT_RULES)
+        self.assertEqual(weave.RULES, 'dials')
+        state = fwlib.new_state(known_top=10)
+        plan = {'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {}, 'known': 3, 'whole': True}
+        again, _after, record = weave.compose_draft(state, 0, {'rules': 'twins', 'known': []}, 'fw', plan)
+        self.assertTrue(record['whole'])  # a chat that had the steps before gets them again
+        self.assertIn('adverbs among the known-word swaps', again)
+
+
 class Calibration(unittest.TestCase):
     def test_sentence_presses_are_counted_on_their_own(self):
         changes = [{'at': NOW - 7_200_000, 'surface': 'sentences', 'level': -1, 'until': NOW + 3_600_000,

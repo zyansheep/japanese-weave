@@ -6,7 +6,8 @@ line. It finds the errors blind judges kept finding in woven replies that code c
   - a word that follows its noun in Japanese (前 後 中 上 下 間 代わりに くらい まで) put before an English word;
   - a Japanese word right next to a number;
   - in a sentence that stays English, a Japanese word that isn't a noun (or an adjective right before an English
-    noun), by the word's types in data/dictionary.tsv; a form the dictionary doesn't have (a conjugated verb) too;
+    noun, or an adverb the reader knows at a glance), by the word's types in data/dictionary.tsv; a form the
+    dictionary doesn't have (a conjugated verb) too;
   - Japanese outside <abbr> tags other than the structural particles (は が を に で の へ と ね よ) and です/ます: か, や, も,
     から, まで, より, なら, けど, ので, のに and a nominalising の after a verb or adjective carry meaning, so they need a gloss;
   - する on an English word (arrive します, use して, build しない);
@@ -46,6 +47,11 @@ GRAMMAR = sorted({'は', 'が', 'を', 'に', 'で', 'の', 'へ', 'と', 'ね',
                  key=len, reverse=True)
 NOUN_TYPES = ('n', 'n-adv', 'n-t', 'n-suf', 'n-pref', 'num', 'ctr', 'pn')
 ADJECTIVE_TYPES = ('adj-i', 'adj-na', 'adj-no', 'adj-pn', 'adj-f', 'adj-ix')
+ADVERB_TYPES = ('adv', 'adv-to')  # time words used as adverbs (今, 最初) are nouns by type (n-adv, n-t) already
+# Connectives stay out of English sentences even when they are adverbs by type: by spelling, or by the English they
+# stand in for (また as "again" may stay; as "and" it may not)
+CONNECTIVES = set(grammar.CONJUNCTIONS) | {'もし', 'もしも', 'でも', 'しかし', 'だから', 'けど', 'けれど', 'けれども'}
+CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though', 'although'}
 VERB_OR_ADJECTIVE = re.compile(r'^(v|adj-i)')
 SURU = re.compile(r'([A-Za-z][A-Za-z-]*)\s*((?:し[なまよてた]|さ[れせ]|す[るれ])[ぁ-ん]{0,6})')
 ARTICLE = re.compile(r'\b(a|an|the)\b', re.I)
@@ -120,10 +126,12 @@ def sentences(line):
     return final
 
 
-def sentence_problems(sent, types, english=False):
+def sentence_problems(sent, types, english=False, known=None):
     """[(what is wrong, the index of the glossed word it is about, or None)] for one sentence (a token list from
     sentences). english: the sentence is English whatever its share of Japanese (an English sentence of a reply with
-    twins, twins.py), so its words are held to the stays-English rules and it needs no translation."""
+    twins, twins.py), so its words are held to the stays-English rules and it needs no translation. known: whether a
+    glossed word's token is a swap of a word the reader knows at a glance (the weave's free swaps), whose adverbs
+    (ADVERB_TYPES) may stay in an English sentence too; None: no word is."""
     found = []
     add = lambda what, i=None: found.append((what, i))
     words = [t for t in sent if t[0] == 'w']
@@ -181,10 +189,11 @@ def sentence_problems(sent, types, english=False):
                 add(f'{ja} is a form the dictionary does not list (a conjugated verb or phrase) inside a '
                     'sentence that stays English', i)
             elif not any(p in NOUN_TYPES for p in pos) and not (
-                    attributive and any(p in ADJECTIVE_TYPES for p in pos)):
+                    attributive and any(p in ADJECTIVE_TYPES for p in pos)) and not (
+                    known is not None and known(t) and any(p in ADVERB_TYPES for p in pos) and ja not in CONNECTIVES):
                 kind = '/'.join(sorted(pos)) or 'not a noun'
-                add(f'{ja} ({kind}) in a sentence that stays English, where only nouns, and adjectives right '
-                    'before a noun, go', i)
+                add(f'{ja} ({kind}) in a sentence that stays English, where only nouns, adjectives right before a '
+                    'noun and adverbs known at a glance go', i)
     for t in sent:
         if t[0] == 't':
             for run in RUN.findall(t[1]):
@@ -595,8 +604,8 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     outside a twin and outside a gloss, a Japanese sentence outside <ja>). Otherwise it fixes what it can see: a twin
     that breaks the weave's limits (more than MAX_SENTENCES sentences, a sentence over the length limit, grammar not
     on the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left
-    English; a swap that breaks the stays-English rules (sentence_problems with english), or a content word's fifth
-    gloss, goes back to its English. Then it scores each twin (sentence_model.predict per sentence) and each swap (the
+    English; a swap that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right
+    before a noun and adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each twin (sentence_model.predict per sentence) and each swap (the
     weave's lookup chance), assigns thresholds and propensities (twins.assign, twins.propensities), writes the final
     markup, checks that it reads back to the same elements and thresholds and that every level renders clean, and
     keeps the plan (twins.remember_plan) for the hook's sentence record. Each kind is cut from its own part of each
@@ -644,9 +653,11 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     # English sentences: swaps that can't stay go back to English
     keep = [id(w) for w in words]
     reverted = {}
+    known = lambda t: t[2].startswith('#') and words[int(t[2][1:])]['free'] and str(
+        words[int(t[2][1:])]['en'] or '').strip().lower() not in CONNECTIVE_ENGLISH  # a known word, not "and" or "so"
     for number, line_text in _english_view(parts, keep).items():
         for sent in sentences(line_text):
-            for what, i in sentence_problems(sent, types, english=True):
+            for what, i in sentence_problems(sent, types, english=True, known=known):
                 if i is not None and sent[i][0] == 'w' and sent[i][2].startswith('#'):
                     k = int(sent[i][2][1:])
                     reverted.setdefault(k, (number, what))
