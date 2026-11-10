@@ -381,9 +381,10 @@ class Readers(tt.Home):
         self.assertEqual(twins.view(weave.last_reply(None, lines), (-3, 1)), twins.render(tt.FINAL, -3, 1))
         twins.remember_plan(grammar.fingerprint(twins.annotation_texts(tt.FINAL)),
                             {'view': -3, 'sview': 1, 'level': -3, 'sentences': 1})
-        self.assertEqual(twins.view(tt.FINAL, (0, 0)), twins.render(tt.FINAL, -3, 1))  # as shown when sent
+        plans = lambda: fwlib.read_json(fwlib.home() / twins.PLANS, {})  # as written (plans_now caches by mtime)
+        self.assertEqual(twins.view(tt.FINAL, (0, 0), plans()), twins.render(tt.FINAL, -3, 1))  # as shown when sent
         twins.remember_plan(grammar.fingerprint(twins.annotation_texts(tt.FINAL)), {'view': 1, 'level': 1})
-        self.assertEqual(twins.view(tt.FINAL, (0, 0)), twins.render(tt.FINAL, 1, 1))  # a plan from before: one dial
+        self.assertEqual(twins.view(tt.FINAL, (0, 0), plans()), twins.render(tt.FINAL, 1, 1))  # from before: one dial
         state = fwlib.new_state(known_top=10)
         state['prefs'] = {'intensity_sentences': intensity.at_level(2, 't3')}
         self.assertEqual(twins.levels_now(state), (0, 2))
