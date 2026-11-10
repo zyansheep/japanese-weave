@@ -732,7 +732,8 @@ def turned_dials(level, sentences=None):
 
 def draft_rules(stage, level, command, sentences=None):
     """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
-    return (f'Japanese Weave (Stage {stage}{turned_dials(level, sentences)}), draft and weave: the user is a native English speaker '
+    head = turned_dials(level, sentences)
+    return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the user is a native English speaker '
             'learning Japanese by reading, so your chat reply carries Japanese for every level the user can choose, '
             'and their app shows it at the level they set (they can change it after reading, or turn on English '
             'only). Code picks the Japanese words and decides what each level shows; you write the Japanese twins and '
@@ -760,7 +761,8 @@ def draft_rules(stage, level, command, sentences=None):
 
 def draft_digest(stage, level, command, sentences=None):
     """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
-    return (f'Japanese Weave (Stage {stage}{turned_dials(level, sentences)}), draft and weave: the steps earlier in this chat still '
+    head = turned_dials(level, sentences)
+    return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the steps earlier in this chat still '
             f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, write '
             'your English with the swaps that fit and a <ja> twin after each sentence that fits (limits and how many '
             f'on its first line), pass that to `{command} check-reply --level {level}`, and send everything below its '

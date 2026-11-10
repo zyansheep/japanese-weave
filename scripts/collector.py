@@ -209,8 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             source = body.get('source', 'unknown') if isinstance(body, dict) else None
             if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \
                     or isinstance(body.get('step'), bool) or not isinstance(source, str) or not 0 < len(source) <= 20:
-                return self.reply(400, {'ok': False, 'error': 'need {"surface": "chat"|"sentences"|"browser", "step": 1|-1|0, '
-                                        '"source"}'})
+                return self.reply(400, {'ok': False, 'error': 'need {"surface": "chat"|"sentences"|"browser", '
+                                        '"step": 1|-1|0, "source"}'})
             if not (fwlib.home() / 'state.json').exists():
                 return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
             with PRESSES:

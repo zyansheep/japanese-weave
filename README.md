@@ -332,11 +332,11 @@ and whole sentences only: the brief asks for as many per 100 words as spend abou
 sentence per 100 words, the one in five it asked for at Stage 3 before), at most one learning word in a sentence (two
 at heavier and much heavier), and the line on the last reply says whether it went over or under, and with which.
 
-**The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
-for 3 hours like the levels between (a press past either end stays there and restarts the clock);
+**The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each for
+3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|sentences|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In
-chat, off (both dials, in draft style) means the hook sends only a one-line note to reply in plain English, until the time runs out, you press the panel's
-up arrow, or you say "japanese back on" in any chat.
+chat, off (both dials, in draft style) means the hook sends only a one-line note to reply in plain English, until the time runs out, you press
+the panel's up arrow, or you say "japanese back on" in any chat.
 In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
 known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English
 (steps, code, commands, exact technical detail) swap in every known or learning word, with no cap per sentence. A

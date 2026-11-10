@@ -602,15 +602,16 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     """A reply written with <ja> twins (twins.py) checked and made into the final markup: a Checked whose text is what
     fw.py check-reply prints. Problems code can't fix stop it (a <ja> without its </ja> or English sentence, Japanese
     outside a twin and outside a gloss, a Japanese sentence outside <ja>). Otherwise it fixes what it can see: a twin
-    that breaks the weave's limits (more than MAX_SENTENCES sentences, a sentence over the length limit, grammar not
-    on the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left
-    English; a swap that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right
-    before a noun and adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each twin (sentence_model.predict per sentence) and each swap (the
-    weave's lookup chance), assigns thresholds and propensities (twins.assign, twins.propensities), writes the final
-    markup, checks that it reads back to the same elements and thresholds and that every level renders clean, and
-    keeps the plan (twins.remember_plan) for the hook's sentence record. Each kind is cut from its own part of each
-    level's budget (twins.assign: twins by the sentence level, words by the word level), and every level abbr, twin
-    and glossed word in a twin whose chance is known carries it as data-p (the tint)."""
+    that breaks the weave's limits (more than MAX_SENTENCES sentences, a sentence over the length limit, grammar not on
+    the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left English;
+    a swap that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right before a noun
+    and adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each
+    twin (sentence_model.predict per sentence) and each swap (the weave's lookup chance), assigns thresholds and
+    propensities (twins.assign, twins.propensities), writes the final markup, checks that it reads back to the same
+    elements and thresholds and that every level renders clean, and keeps the plan (twins.remember_plan) for the hook's
+    sentence record. Each kind is cut from its own part of each level's budget (twins.assign: twins by the sentence
+    level, words by the word level), and every level abbr, twin and glossed word in a twin whose chance is known carries
+    it as data-p (the tint)."""
     import knowledge
     import random
     import time

@@ -871,9 +871,9 @@ def load(path=None):
 
 def intensity_changes(path=None):
     """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface (chat: chat's word
-    level, sentences: its sentence level, browser), level, until, source}, from the ops applied here; every chat turned off or back on (threads.py) as {at, machine, surface:
-    "thread", session, off, source}; and every press of English only in chat as {at, machine, surface: "english", on,
-    until, source, contexts: [{view, context}]}."""
+    level, sentences: its sentence level, browser), level, until, source}, from the ops applied here; every chat turned
+    off or back on (threads.py) as {at, machine, surface: "thread", session, off, source}; and every press of English
+    only in chat as {at, machine, surface: "english", on, until, source, contexts: [{view, context}]}."""
     con = connect(path)
     try:
         ops = con.execute("SELECT at, machine, body FROM ops WHERE (kind = 'set' AND body LIKE '%intensity_%') "

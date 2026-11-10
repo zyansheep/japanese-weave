@@ -59,8 +59,8 @@ word's at a word level) is the chance it shows there under this randomization: t
 assign (each its own coin and place for every element, and its own rounding draws) in which its threshold is at most
 that level (a word in a twin's English: shown there while the twin is English), seeded by the reply so a re-check
 repeats it. With 1,000 draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose
-placement no draw can change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under the reply's
-fingerprint, and the hook's sentence record carries them (grammar.record): never text.
+placement no draw can change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under
+the reply's fingerprint, and the hook's sentence record carries them (grammar.record): never text.
 """
 import hashlib
 import html
@@ -320,13 +320,13 @@ def _repair(p):
 
 def tokens(text):
     """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
-    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None) for a Japanese
-    twin with an English one right after it (only whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
-    a broken message (_spans) ('hidden', N, japanese, never) for each Japanese twin (with what an unclosed one took in,
-    up to the next English twin of its threshold; never: it is paired, or left open, so it never shows), its English
-    twins unwrapped and every </span> dropped; broken tags as _repair reads them. A twin span
-    whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is raw; inline
-    code is text (no markup)."""
+    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None) for a Japanese twin
+    with an English one right after it (only whitespace between, the same threshold); ('ja', N, japanese) and ('en', N,
+    english) for a twin with no pair; and in a broken message (_spans) ('hidden', N, japanese, never) for each Japanese
+    twin (with what an unclosed one took in, up to the next English twin of its threshold; never: it is paired, or left
+    open, so it never shows), its English twins unwrapped and every </span> dropped; broken tags as _repair reads them.
+    A twin span whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is
+    raw; inline code is text (no markup)."""
     out = []
     for code, piece in _chunks(str(text)):
         if code:
@@ -588,7 +588,8 @@ def elements(text):
                 a = attrs(m.group(1))
                 on = _threshold(a)
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin, 'p': p_value(a.get('data-p'))})
+                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin,
+                            'p': p_value(a.get('data-p'))})
     return els, owners
 
 
@@ -1042,12 +1043,6 @@ def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_senten
     return [FULL if x is None else x for x in on], explored
 
 
-def shown_at(els, on, i, level, sentences=None):
-    """Whether element i shows at a word level and a sentence level (one level: both) under thresholds on (visible)."""
-    return visible([{'kind': e.kind, 'on': on[k], 'parent': e.parent} for k, e in enumerate(els)], i, level,
-                   sentences)
-
-
 def propensities(els, budgets, draws=DRAWS, seed=0, explore=EXPLORE):
     """[[chance element i is taken at each budgeted level of its own kind]]: the share of `draws` runs of assign in
     which its threshold is at most the level (module docstring), seeded: a twin's at each sentence level, a word's at
@@ -1168,12 +1163,12 @@ def levels_now(state=None):
 
 def view(text, level=None, plans=None, sentences=None):
     """What a reader of the transcript counts as shown (fwlib.read_replies, the hook's last reply and topical words):
-    the reply rendered at the levels it was shown at when sent (its plan's view and sview: the word and sentence
-    levels; a plan from before the sentence level has view alone, both dials at it), else at `level` and `sentences`
-    (the levels in force now; one level, or a pair as level: dials). A plan from a check under English only (view -3,
-    from before views were the chat level, or with both dials at off) counts at the levels given instead: the reply shows its Japanese once
-    English only is off. A reply without levels is unchanged unless both dials are off. Only rendered Japanese is an
-    exposure."""
+    the reply rendered at the levels it was shown at when sent (its plan's view and sview: the word and sentence levels;
+    a plan from before the sentence level has view alone, both dials at it), else at `level` and `sentences` (the levels
+    in force now; one level, or a pair as level: dials). A plan from a check under English only (view -3, from before
+    views were the chat level, or with both dials at off) counts at the levels given instead: the reply shows its
+    Japanese once English only is off. A reply without levels is unchanged unless both dials are off. Only rendered
+    Japanese is an exposure."""
     if level is not None:
         level, sentences = dials(level, sentences)
     if not has_levels(text):

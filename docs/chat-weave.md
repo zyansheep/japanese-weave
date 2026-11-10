@@ -139,12 +139,12 @@ tint on (a per-device setting, on by default), give each shown Japanese element 
 background from green (0) through yellow to red (0.5 and up), a twin's span lighter than its words'; an older message
 has none and gets no tint. The tint changes nothing in reports.
 
-**Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a
-noun and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as
-adverbs among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns, adverbs still being
-learned and connectives (もし, でも, そして and the rest, or a swap for "and", "but", "so", "if") stay out. The brief
-asks Claude to keep, where the English reads as naturally either way, a phrasing that leaves a swapped known noun or
-adjective in place.
+**Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a noun
+and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as adverbs
+among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns, adverbs
+still being learned and connectives (もし, でも, そして and the rest, or a swap for "and", "but", "so", "if") stay out. The
+brief asks Claude to keep, where the English reads as naturally either way, a phrasing that leaves a swapped known noun
+or adjective in place.
 
 **Exploration and propensities.** Each element's place in its order is, with chance 0.2 (`twins.EXPLORE`), a uniform
 random place instead of its rank. So every element has a known chance of showing at each level, never 0 or 1 by the
