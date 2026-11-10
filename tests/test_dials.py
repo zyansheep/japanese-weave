@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import re
 import sys
 import tempfile
@@ -389,6 +390,73 @@ class Readers(tt.Home):
         plan = check_reply.Plan(grammar.statuses({}), None, 1, sentences=-1)
         self.assertEqual((plan.view, plan.sview), (1, -1))
         self.assertEqual((tt.plan(1).view, tt.plan(1).sview), (1, 1))
+
+
+class Thresholds(unittest.TestCase):
+    """check-reply's thresholds with two dials: each kind from its own part of each level's budget."""
+
+    def test_each_kind_spends_its_own_part(self):
+        budgets = twins.budgets_for(200)
+        for level, (words_part, sentences_part) in budgets.items():
+            total = intensity.budget(level) * 2
+            self.assertAlmostEqual(sentences_part, intensity.SENTENCE_SHARE * total)
+            self.assertAlmostEqual(words_part + sentences_part, total)  # words no longer spend the whole budget
+        # a twin's costly words are part of its cost: a twin that fits the sentences' part alone no longer does
+        twin = twins.Element('s', cost_s=0.08, cost_w=0.3, opens=0.38, value=2.0)
+        word = twins.Element('w', cost_w=0.3, opens=0.3, value=1.0, sid=1)
+        els = twins.link([twin, word])
+        room = {lv: (0.3, 0.1) for lv in twins.BUDGETED}
+        on, _x = twins.assign(els, room, random.Random(0), explore=0)
+        self.assertEqual(on, [twins.FULL, -2])  # the twin is over its part; the word fits the words' part
+        room = {lv: (0.0, 0.4) for lv in twins.BUDGETED}
+        on, _x = twins.assign(els, room, random.Random(0), explore=0)
+        self.assertEqual(on, [-2, twins.FULL])  # and the reverse: neither kind spends the other's part
+
+    def test_words_never_depend_on_their_twin(self):
+        # a costly word in a twin's English takes its threshold from the words' order alone, not below its twin's
+        twin = twins.Element('s', cost_s=0.08, opens=0.08, value=3.0)
+        inside = twins.Element('w', cost_w=0.3, opens=0.3, value=1.0, parent=0, sid=('twin', 0))
+        els = twins.link([twin, inside])
+        on, _x = twins.assign(els, {lv: (0.3, 0.08) for lv in twins.BUDGETED}, random.Random(0), explore=0)
+        self.assertEqual(on, [-2, -2])  # both from -2: the word shows at any word level while its twin is English
+        props = twins.propensities(els, {lv: (0.3, 0.08) for lv in twins.BUDGETED}, draws=200, seed=1)
+        self.assertEqual(props[1], [1.0] * 5)  # at its own kind's levels, never hidden by the twin's
+
+    def test_the_final_markup_carries_each_chance(self):
+        checked = check_reply.finish(tt.AUTHORED, tt.plan(), tt.TYPES, seed=4, now_ms=NOW, remember=False)
+        final = checked.final
+        for m in re.finditer(r'<abbr[^>]*data-on="[^"]*"[^>]*>', final):  # every level abbr
+            self.assertRegex(m.group(), r' data-p="(0|0\.02|0\.3)"')
+        for m in re.finditer(r'<span data-jw="ja"[^>]*>', final):  # every twin's Japanese span
+            self.assertRegex(m.group(), r' data-p="0\.\d{1,2}"')
+        self.assertNotRegex(final, r'<span data-jw="en"[^>]*data-p')  # English spans have none
+        self.assertIn('<abbr title="もんだい · problem" data-p="0.02">問題</abbr>は', final)  # a twin's word with a chance
+        self.assertIn('<abbr title="ちいさい · small">小さい</abbr>', final)  # no chance known: none
+        self.assertNotRegex(final, r'data-p="[^"]*">[。？]<')  # a closing mark has none
+        back, _owners = twins.elements(final)
+        twin_ps = [x for x in checked.elements if x.kind == 's']
+        self.assertTrue(all(b['p'] is not None for b in back))
+        self.assertEqual([b['p'] for b in back if b['kind'] == 's'],  # one sentence each, no costly word
+                         [twins.p_value(twins.p_text(e.opens)) for e in twin_ps])
+        self.assertEqual(twins.twin_word_chances(final), [0.02, None] * 4)
+
+    def test_chances_as_written(self):
+        for p, text in ((0.07, '0.07'), (0.5, '0.5'), (1, '1'), (0, '0'), (0.0049, '0'), (1.7, '1'), (-1, '0'),
+                        (0.123, '0.12')):
+            self.assertEqual(twins.p_text(p), text)
+        for value, read in (('0.07', 0.07), ('1', 1.0), ('1.00', 1.0), ('0', 0.0), ('.5', None), ('0.071', None),
+                            ('1.5', None), ('-0.1', None), ('', None), (None, None), ('0.5 ', None)):
+            self.assertEqual(twins.p_value(value), read, value)
+        self.assertAlmostEqual(twins.twin_chance([0.1, 0.2]), 1 - 0.9 * 0.8)
+
+    def test_the_summary_says_which_dial_is_where(self):
+        checked = check_reply.finish(tt.AUTHORED, check_reply.Plan(grammar.statuses({}), None, 1, None, {}, tt.SWAPS,
+                                                                   0.08, sentences=-1), tt.TYPES, seed=4,
+                                     remember=False)
+        self.assertIn('+1 heavier (words now):', checked.text)
+        self.assertIn('-1 lighter (sentences now):', checked.text)
+        same = check_reply.finish(tt.AUTHORED, tt.plan(0), tt.TYPES, seed=4, remember=False)
+        self.assertIn(' 0 normal (now):', same.text)
 
 
 class Calibration(unittest.TestCase):

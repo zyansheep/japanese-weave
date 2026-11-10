@@ -316,9 +316,9 @@ def words_of(text):
 
 
 def sentence_budget(text, plan):
-    """The lookups the level lets the reply's sentences spend: its budget per 100 words times the reply's words, times
-    intensity.SENTENCE_SHARE; None at full (no budget)."""
-    budget = intensity.budget(plan.level, plan.normal)
+    """The lookups the sentence level lets the reply's sentences spend: its budget per 100 words times the reply's
+    words, times intensity.SENTENCE_SHARE; None at full (no budget)."""
+    budget = intensity.budget(plan.sentences, plan.normal)
     if budget is None:
         return None
     return budget * words_of(text) / 100 * intensity.SENTENCE_SHARE
@@ -341,7 +341,7 @@ def sentence_lines(text, plan):
         lines.append(head)
     expected = sum(s['p'] for s in scored)
     budget = sentence_budget(text, plan)
-    level = intensity.NAMES.get(plan.level, 'normal')
+    level = intensity.NAMES.get(plan.sentences, 'normal')
     if budget is None:
         lines.append(f'Expected sentence opens: {expected:.2f} for {len(scored)} sentences (no budget at {level}).')
     else:
@@ -559,6 +559,36 @@ def _twin_words(marked, costly):
     return out
 
 
+def _twin_chances(marked, plan, now_ms, known):
+    """[lookup chance or None] of each glossed word in a twin's Japanese (its closing marks left out), for data-p: a
+    word (or a form of one) the reply's swaps or the weave's swaps have a chance for (known, {ja: p}), else one of the
+    weave's list priced as the weave prices its swaps (weave_price), else None (grammar, a dictionary word, a word no
+    list has)."""
+    import inflection
+    import twins
+    lex = inflection.Lexicon([{'ja': ja} for ja in known]) if known else None
+    listed = inflection.lexicon([{'ja': w['ja'], 'kana': w.get('kana') or ''} for w in plan.words]) \
+        if plan.words else None
+    by_ja = {w['ja']: w for w in plan.words or ()}
+    out = []
+    for m in twins.ABBR.finditer(marked):
+        word = grammar.clean(m.group(2)).strip()
+        if word in twins.END_MARKS:
+            continue
+        ja = lex.entry(word) if lex is not None else None
+        if ja in known:
+            out.append(known[ja])
+            continue
+        if not CONTENT.search(word) and (word in GRAMMAR_WORDS or
+                                         all(x in grammar.UNITS for x in grammar._split(word, glossed=True))):
+            out.append(None)
+            continue
+        ja = listed.entry(word) if listed is not None else None
+        out.append(weave_price(by_ja[ja], plan.recency, now_ms)[0] if ja is not None and not by_ja[ja].get(
+            'dictionary') else None)
+    return out
+
+
 def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     """A reply written with <ja> twins (twins.py) checked and made into the final markup: a Checked whose text is what
     fw.py check-reply prints. Problems code can't fix stop it (a <ja> without its </ja> or English sentence, Japanese
@@ -569,7 +599,9 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     gloss, goes back to its English. Then it scores each twin (sentence_model.predict per sentence) and each swap (the
     weave's lookup chance), assigns thresholds and propensities (twins.assign, twins.propensities), writes the final
     markup, checks that it reads back to the same elements and thresholds and that every level renders clean, and
-    keeps the plan (twins.remember_plan) for the hook's sentence record."""
+    keeps the plan (twins.remember_plan) for the hook's sentence record. Each kind is cut from its own part of each
+    level's budget (twins.assign: twins by the sentence level, words by the word level), and every level abbr, twin
+    and glossed word in a twin whose chance is known carries it as data-p (the tint)."""
     import knowledge
     import random
     import time
@@ -669,13 +701,21 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             reverted[k] = (w['line'], f'{w["ja"]} glossed {REPEAT} times or more in this reply')
     for k, (number, what) in sorted(reverted.items()):
         fixed.append(f'- line {number}, swap put back in English: {what}')
+    # each twin's words' chances, for data-p
+    known = {s['ja']: float(s['p']) for s in plan.swaps if s.get('ja') and isinstance(s.get('p'), (int, float))}
+    known.update({w['ja']: w['p'] for w in words})
+    for t in kept:
+        t['chances'] = _twin_chances(t['marked'], plan, now_ms, known)
     # the elements, in document order (a twin before its English's words)
     els, owner = [], {}
     seen_costly = set()
     dictionary = {w['ja'] for w in words if w['dictionary']} | {
         x['ja'] for x in plan.swaps if x.get('dictionary') and x.get('ja')}
 
+    by_el, words_p = {}, {}  # a twin's part by its element, a word's chance by its element
+
     def word_element(w, parent):
+        words_p[len(els)] = w['p']
         free = w['free']
         fixed_on = -2 if free else (twins.FULL if w['dictionary'] or w['ja'] in seen_costly else None)
         if not free:
@@ -702,6 +742,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             p['p'] = ps
             twin = len(els)
             owner[id(p)] = twin
+            by_el[twin] = p
             # a dictionary word, a word not in the word list, or a learning word already used before it, shows only
             # at full: so does its twin
             late = outside or any(ja in dictionary or ja in seen_costly for ja, _x in held)
@@ -729,18 +770,23 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     on_part = {pid: on[i] for pid, i in owner.items()}
     final = _markup(parts, on_part, reverted, keep, kept_ids)
     back, owners = twins.elements(final)
-    expected = [(e.kind, on[i], e.parent) for i, e in enumerate(els)]
+    chance = {id(t): twins.twin_chance(t['p']) for t in kept}
+    written = lambda p: twins.p_value(twins.p_text(p))
+    expected = [(e.kind, on[i], e.parent, written(chance[id(by_el[i])] if e.kind == 's' else words_p[i]))
+                for i, e in enumerate(els)]
     error = None
-    if [(b['kind'], b['on'], b['parent']) for b in back] != expected:
-        error = 'the final markup does not read back to the thresholds assigned'
+    if [(b['kind'], b['on'], b['parent'], b['p']) for b in back] != expected:
+        error = 'the final markup does not read back to the thresholds and chances assigned'
+    if twins.twin_word_chances(final) != [None if x is None else written(x) for t in kept for x in t['chances']]:
+        error = "the final markup does not read back to the twins' words' chances"
     texts = twins.annotation_texts(final)
-    for level in (intensity.OFF,) + twins.SHOWING:
-        shown = twins.outside_code(twins.render(final, level))  # code may quote the markup
-        if 'data-on' in shown or 'data-jw' in shown or '<ja>' in shown:
-            error = f'level {level} does not render clean'
-        if twins.shown_texts(final, level) != [texts[j] for j, o in enumerate(owners)
-                                               if twins.visible(back, o, level)]:
-            error = f'level {level} shows other glossed words than its thresholds say'
+    paired = twins.pair_texts(final)
+    for pair in twins.PAIRS:  # every pair of a word level and a sentence level the reader can set
+        shown = twins.outside_code(twins.render(final, pair))  # code may quote the markup
+        if any(x in shown for x in ('data-on', 'data-jw', 'data-p', '<ja>')):
+            error = f'levels {pair} do not render clean'
+        if paired[pair] != [texts[j] for j, o in enumerate(owners) if twins.visible(back, o, pair)]:
+            error = f'levels {pair} show other glossed words than their thresholds say'
     if error:
         return Checked(f'jw-check: something went wrong in code ({error}). Send the English reply as you wrote it, '
                        'with the <ja> twins taken out.')
@@ -766,7 +812,8 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
 
 
 def _markup(parts, on, reverted, keep, kept_ids):
-    """twins.markup with the reverted swaps as their English and the dropped twins as their English alone."""
+    """The final markup: the reverted swaps as their English, the dropped twins as their English alone, and every kept
+    swap and twin with its threshold (on) and chance (data-p)."""
     import twins
     out = []
     for p in parts:
@@ -777,7 +824,9 @@ def _markup(parts, on, reverted, keep, kept_ids):
                        twins.word_markup(p, on.get(id(p), 0)))
         elif id(p) in kept_ids:
             n = on.get(id(p), 0)
-            out.append(f'<span data-jw="ja" data-on="{n}">{p["marked"]}</span>'
+            chance = f' data-p="{twins.p_text(twins.twin_chance(p["p"]))}"' if p.get('p') else ''
+            out.append(f'<span data-jw="ja" data-on="{n}"{chance}>'
+                       f'{twins.with_chances(p["marked"], p.get("chances") or ())}</span>'
                        f'<span data-jw="en" data-on="{n}">{_markup(p["english"], on, reverted, keep, kept_ids)}'
                        '</span>')
         else:
@@ -786,25 +835,28 @@ def _markup(parts, on, reverted, keep, kept_ids):
 
 
 def _summary(els, on, budgets, plan):
-    """{lines, levels: {level: {twins, sentence opens, words, word lookups}}}: what each level shows and its expected
-    opens against its budget's parts."""
+    """{lines, levels: {level: {twins, sentence opens, words, word lookups}}}: what each level of each dial shows and
+    its expected opens against its part of the budget: the twins at that sentence level (their sentences' and costly
+    words' opens) against the sentences' part, the costly words at that word level (as if every twin were English)
+    against the words' part."""
     import twins
-    levels, lines = {}, ['Per level, if read (sentences: their translations\' expected opens against the sentences\' '
-                         'part of the budget; costly words: their expected lookups against the words\' part):']
+    levels, lines = {}, ['Per level, if read (sentences: their expected opens and their costly words\' lookups at that '
+                         'sentence level, against the sentences\' part of the budget; costly words: their expected '
+                         'lookups at that word level, against the words\' part):']
     for level in twins.SHOWING:
-        shown = [i for i in range(len(els)) if twins.shown_at(els, on, i, level)]
-        t = [i for i in shown if els[i].kind == 's']
-        w = [i for i in shown if els[i].kind == 'w' and els[i].cost_w > 0]
-        opens_s = sum(els[i].opens - els[i].cost_w for i in t)
-        opens_w = sum(els[i].cost_w for i in shown)
+        t = [i for i, e in enumerate(els) if e.kind == 's' and on[i] <= level]
+        w = [i for i, e in enumerate(els) if e.kind == 'w' and on[i] <= level and e.cost_w > 0]
+        opens_s = sum(els[i].opens for i in t)
+        opens_w = sum(els[i].cost_w for i in w)
         levels[level] = {'twins': len(t), 'opens': round(opens_s, 4), 'words': len(w), 'lookups': round(opens_w, 4)}
-        now = ' (now)' if level == plan.level else ''
+        now = [name for name, at in (('words', plan.level), ('sentences', plan.sentences)) if at == level]
+        now = ' (now)' if len(now) == 2 else f' ({now[0]} now)' if now else ''
+        sentences = f'{len(t)} sentence{"s" if len(t) != 1 else ""} {opens_s:.2f}'
+        costly = f'{len(w)} costly word{"s" if len(w) != 1 else ""} {opens_w:.2f}'
         if level in budgets:
             words_part, sentences_part = budgets[level]
-            lines.append(f'  {LEVEL_NAMES[level]}{now}: {len(t)} sentence{"s" if len(t) != 1 else ""} '
-                         f'{opens_s:.2f} of {sentences_part:.2f}; {len(w)} costly word{"s" if len(w) != 1 else ""} '
-                         f'{opens_w:.2f} of {words_part:.2f}')
+            lines.append(f'  {LEVEL_NAMES[level]}{now}: {sentences} of {sentences_part:.2f}; {costly} of '
+                         f'{words_part:.2f}')
         else:
-            lines.append(f'  {LEVEL_NAMES[level]}{now}: {len(t)} sentence{"s" if len(t) != 1 else ""} {opens_s:.2f}; '
-                         f'{len(w)} costly word{"s" if len(w) != 1 else ""} {opens_w:.2f} (no budget)')
+            lines.append(f'  {LEVEL_NAMES[level]}{now}: {sentences}; {costly} (no budget)')
     return {'lines': lines, 'levels': levels}

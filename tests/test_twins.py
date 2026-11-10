@@ -114,7 +114,7 @@ class Thresholds(unittest.TestCase):
                element('w', 0.25, sid=3), element('w', 0.4, sid=4, fixed=twins.FULL)]
         return twins.link(els)
 
-    def test_nested_within_budget_and_sentences_peel_first(self):
+    def test_nested_within_budget_each_kind_on_its_own(self):
         els = self.elements()
         budgets = twins.budgets_for(300)
         for seed in range(200):
@@ -122,16 +122,13 @@ class Thresholds(unittest.TestCase):
             self.assertTrue(all(x in twins.SHOWING for x in on))
             for level in twins.BUDGETED:
                 words_part, sentences_part = budgets[level]
-                shown = [i for i in range(len(els)) if twins.shown_at(els, on, i, level)]
+                taken = [i for i in range(len(els)) if on[i] <= level]
                 below = [i for i in range(len(els)) if on[i] <= level - 1]
-                self.assertTrue(set(below) <= {i for i in range(len(els)) if on[i] <= level})  # nested
-                spent_s = sum(els[i].cost_s for i in shown)
-                spent_w = sum(els[i].cost_w for i in shown)
-                self.assertLessEqual(spent_s, sentences_part + max(e.cost_s for e in els))  # one at the edge at most
+                self.assertTrue(set(below) <= set(taken))  # nested
+                spent_s = sum(els[i].cost() for i in taken if els[i].kind == 's')  # twins: the sentences' part
+                spent_w = sum(els[i].cost_w for i in taken if els[i].kind == 'w')  # words, as if twins were English
+                self.assertLessEqual(spent_s, sentences_part + max(e.cost() for e in els))  # one at the edge at most
                 self.assertLessEqual(spent_w, words_part + max(e.cost_w for e in els))
-            for i, e in enumerate(els):
-                if e.parent is not None:  # a word in a twin's English never outlasts the twin going down
-                    self.assertLessEqual(on[i], on[e.parent])
             self.assertEqual(on[2], -2)  # known at a glance: from -2 (while its twin is English)
             self.assertEqual(on[8], twins.FULL)  # fixed at full: a dictionary word, a later use
         self.assertEqual(twins.assign(els, {lv: (0, 0) for lv in twins.BUDGETED}, random.Random(1))[0][0], twins.FULL)
@@ -479,7 +476,7 @@ class ReviewRound1(Home):
             on, _x = twins.assign(checked.elements, budgets, rng)
             for i in range(len(on)):
                 for k, level in enumerate(twins.BUDGETED):
-                    counts[i][k] += twins.shown_at(checked.elements, on, i, level)
+                    counts[i][k] += on[i] <= level  # at its own kind's level (two dials)
         for i, row in enumerate(counts):
             for k in range(5):
                 self.assertAlmostEqual(checked.props[i][k], row[k] / n, delta=0.05)

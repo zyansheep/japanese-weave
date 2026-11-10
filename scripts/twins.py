@@ -28,32 +28,38 @@ reader sees it at a pair of levels (one level: both dials at it), in the older m
 transcripts understands.
 
 Thresholds (assign). One priority order per reply and kind, cut at each budgeted level's lookup budget (-2..2, the
-level's intensity.budget per 100 of the reply's English words): twins spend the sentences' part, SENTENCE_SHARE of
-it, each Japanese sentence at its predicted open chance but never less than the price of a sentence (so no level asks
-for more Japanese sentences than the count before the sentence model did: the user's densities stay), and words the
-whole budget at their current lookup chance, as the weave's planner gives a chat reply's learning words (it has no
-sentence candidates there). Levels are filled from -2 up, each starting from the level below, so the sets are nested.
-At each level twins come first (a twin shown hides its English sentence's swaps, whose lookups it then charges to the
-words' part as the costly words in its Japanese), then words, at most intensity.per_sentence costly words in one
+level's intensity.budget per 100 of the reply's English words), each kind on its own, as the reader's two dials show
+them: twins spend the sentences' part of the sentence level's budget, SENTENCE_SHARE of it, each at its cost: each
+Japanese sentence at its predicted open chance but never less than the price of a sentence (so no level asks for more
+Japanese sentences than the count before the sentence model did), plus the costly words in its Japanese; words spend
+the rest of the word level's budget at their current lookup chance, a word in a twin's English counted as if its twin
+were English (what words show can't depend on the sentence level). Levels are filled from -2 up, each starting from
+the level below, so each kind's sets are nested. Words go in at most intensity.per_sentence costly words in one
 English sentence and one use of each learning word below full; the element at the edge of a part gets in with the
 chance (what is left) / (its cost), so short replies still get some on average and a level's expected spend is its
-part (assign: systematic rounding, one draw per reply and part). Words known at a glance
-cost nothing and show from -2 (in an English twin, while it is English); dictionary words the reader doesn't have
-yet (the weave's pool) and a learning word's later uses show only at full, as before; whatever no budgeted level took
-shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit TARGET_P|) (1 at
-the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in its Japanese plus
-PATTERN_VALUE when it uses this week's learning pattern, over its sentences' part.
+part (assign: systematic rounding, one draw per reply and part). Words known at a glance cost nothing and show from -2
+(in a twin's English, while it is English); dictionary words the reader doesn't have yet (the weave's pool) and a
+learning word's later uses show only at full, as before, and so does a twin holding one; whatever no budgeted level
+took shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit
+TARGET_P|) (1 at the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in
+its Japanese plus PATTERN_VALUE when it uses this week's learning pattern, over its cost.
+
+The tint. Each level abbr, each twin's Japanese span and each glossed word in a twin's Japanese whose chance check-reply
+has carries data-p, the predicted chance the reader looks it up (a word's lookup chance; a twin's chance its
+translation is opened, 1 - the product of its sentences' chances of staying closed), 0..1 with at most two decimals
+(p_text): the clients tint each shown Japanese element by it.
 
 Exploration. Each element's place in its order is, with chance EXPLORE, a uniform random place instead of its rank,
 drawn afresh for every reply (the element's x: 1 when explored). So every element has a known chance of showing at
 each level that is never 0 or 1 by the model's predictions alone, and the elements placed at random are a sample the
 model didn't choose: calibrate compares its expected opens with the seen ones there (sentence_model.exploration).
 
-Propensities (propensities). An element's propensity at a level is the chance it shows there under this
-randomization: the share of DRAWS independent runs of assign (each its own coin and place for every element, and its
-own rounding draws) in which it is visible at that level, seeded by the reply so a re-check repeats it. With 1,000
-draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose placement no draw can
-change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under the reply's
+Propensities (propensities). An element's propensity at a level of its own kind (a twin's at a sentence level, a
+word's at a word level) is the chance it shows there under this randomization: the share of DRAWS independent runs of
+assign (each its own coin and place for every element, and its own rounding draws) in which its threshold is at most
+that level (a word in a twin's English: shown there while the twin is English), seeded by the reply so a re-check
+repeats it. With 1,000 draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose
+placement no draw can change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under the reply's
 fingerprint, and the hook's sentence record carries them (grammar.record): never text.
 """
 import hashlib
@@ -211,9 +217,9 @@ def outside_code(text):
 
 class Span:
     """A twin span as the clients read it: kind 'ja' or 'en', its threshold as written (on: the number when it is one
-    of -2..3, else None: rendered as written), where its opening tag starts and ends, where its first </span> after
-    it starts and ends (None when it never closes), and its content."""
-    __slots__ = ('kind', 'on', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
+    of -2..3, else None: rendered as written), its data-p as written (p, or None), where its opening tag starts and
+    ends, where its first </span> after it starts and ends (None when it never closes), and its content."""
+    __slots__ = ('kind', 'on', 'p', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
 
 
 def _spans(p):
@@ -235,6 +241,7 @@ def _spans(p):
         sp = Span()
         sp.kind, sp.start, sp.open_end, sp.close, sp.close_end = a['data-jw'], m.start(), m.end(), None, None
         sp.on = int(a['data-on']) if THRESHOLD.fullmatch(a.get('data-on', '') or '') else None
+        sp.p = a.get('data-p')
         sp.nested = any(x is not None and x.on is not None for x in stack)
         stack.append(sp)
         found.append(sp)
@@ -313,8 +320,8 @@ def _repair(p):
 
 def tokens(text):
     """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
-    written); ('pair', N, japanese, english, between) for a Japanese twin with an English one right after it (only
-    whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
+    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None) for a Japanese
+    twin with an English one right after it (only whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
     a broken message (_spans) ('hidden', N, japanese, never) for each Japanese twin (with what an unclosed one took in,
     up to the next English twin of its threshold; never: it is paired, or left open, so it never shows), its English
     twins unwrapped and every </span> dropped; broken tags as _repair reads them. A twin span
@@ -350,7 +357,8 @@ def tokens(text):
                 continue
             if id(sp) in pairs:
                 en = pairs[id(sp)]
-                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start])))
+                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start]),
+                            sp.p))
                 at = en.close_end
             else:
                 out.append((sp.kind, sp.on, back(sp.content)))
@@ -543,30 +551,56 @@ def well_formed(text):
     return True
 
 
+P_TEXT = re.compile(r'0(?:\.\d{1,2})?|1(?:\.0{1,2})?')  # a data-p the contract allows: 0..1, at most two decimals
+
+
+def p_text(p):
+    """A chance as data-p writes it: 0..1 with at most two decimals, no trailing zeros ('0.07', '0.5', '1', '0')."""
+    return f'{min(1.0, max(0.0, float(p))):.2f}'.rstrip('0').rstrip('.')
+
+
+def p_value(value):
+    """A data-p as the clients read it: the number when it is one (P_TEXT), else None (no tint)."""
+    return float(value) if isinstance(value, str) and P_TEXT.fullmatch(value) else None
+
+
 def elements(text):
     """(elements, owners) of well-formed final markup (well_formed). elements in document order: {kind: 's' (a twin)
     or 'w' (a swapped word with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English
-    holds the word, or None}; owners: per glossed word of the reply in order (the Japanese of a twin before its
-    English), the index of the element it belongs to, or -1 (a word without data-on, shown at every level above off).
-    An abbr without data-on inside a twin's English shows while the English does: an element with threshold -2."""
+    holds the word, or None, p: its data-p (p_value) or None}; owners: per glossed word of the reply in order (the
+    Japanese of a twin before its English), the index of the element it belongs to, or -1 (a word without data-on,
+    shown unless both dials are off). An abbr without data-on inside a twin's English (not well-formed) would be an
+    element with threshold -2."""
     els, owners = [], []
     for t in tokens(text):
         if t[0] == 'abbr':
             on = _threshold(t[1])
             if on is not None:
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': on, 'parent': None})
+                els.append({'kind': 'w', 'on': on, 'parent': None, 'p': p_value(t[1].get('data-p'))})
             else:
                 owners.append(-1)
         elif t[0] == 'pair':
             twin = len(els)
-            els.append({'kind': 's', 'on': t[1], 'parent': None})
+            els.append({'kind': 's', 'on': t[1], 'parent': None, 'p': p_value(t[5])})
             owners += [twin] * sum(1 for _ in ABBR.finditer(t[2]))
             for m in ABBR.finditer(t[3]):
-                on = _threshold(attrs(m.group(1)))
+                a = attrs(m.group(1))
+                on = _threshold(a)
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin})
+                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin, 'p': p_value(a.get('data-p'))})
     return els, owners
+
+
+def twin_word_chances(text):
+    """[data-p (p_value) or None] of each glossed word in the twins' Japanese of well-formed final markup, in order,
+    the twins' closing marks left out."""
+    out = []
+    for t in tokens(text):
+        if t[0] == 'pair':
+            out += [p_value(attrs(m.group(1)).get('data-p')) for m in ABBR.finditer(t[2])
+                    if grammar.clean(m.group(2)).strip() not in END_MARKS]
+    return out
 
 
 def visible(els, i, level, sentences=None):
@@ -881,17 +915,41 @@ def japanese_twin(japanese, english):
 
 
 def word_markup(w, on):
-    return (f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}">{w["ja"]}</abbr>')
+    """A swapped word's level abbr, with its lookup chance (w['p']) as data-p when it has one."""
+    p = f' data-p="{p_text(w["p"])}"' if isinstance(w.get('p'), (int, float)) else ''
+    return f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}"{p}>{w["ja"]}</abbr>'
+
+
+def with_chances(marked, chances):
+    """A twin's Japanese with data-p on each glossed word (its closing marks left out) whose chance is known: chances
+    in the order of those words, None where unknown."""
+    words = iter(chances)
+
+    def add(m):
+        if grammar.clean(m.group(2)).strip() in END_MARKS:
+            return m.group()
+        p = next(words, None)
+        return m.group() if p is None else f'<abbr{m.group(1)} data-p="{p_text(p)}">{m.group(2)}</abbr>'
+    return ABBR.sub(add, marked)
+
+
+def twin_chance(ps):
+    """A twin's chance its translation is opened, from its sentences' open chances: 1 - the chance none is."""
+    closed = 1.0
+    for p in ps:
+        closed *= 1 - min(1.0, max(0.0, p))
+    return 1 - closed
 
 
 # ---- thresholds and propensities ----
 
 class Element:
-    """One thing a level can show: kind 's' (a twin) or 'w' (a swapped word). cost_s: what it spends of the
-    sentences' part; cost_w: of the words' part (a word's lookup chance unless it is free; a twin's costly words);
-    opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
-    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free
-    words -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
+    """One thing a level can show: kind 's' (a twin) or 'w' (a swapped word). cost_s: what a twin's sentences spend of
+    the sentences' part (each at its open chance, never less than the price of a sentence); cost_w: a word's lookup
+    chance unless it is free, or a twin's costly words (their chances, spent from the sentences' part with the twin:
+    cost); opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
+    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free words
+    -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
     __slots__ = ('kind', 'cost_s', 'cost_w', 'opens', 'value', 'parent', 'sid', 'fixed', 'children', 'ja')
 
     def __init__(self, kind, cost_s=0.0, cost_w=0.0, opens=0.0, value=0.0, parent=None, sid=None, fixed=None,
@@ -899,8 +957,12 @@ class Element:
         self.kind, self.cost_s, self.cost_w, self.opens, self.value = kind, cost_s, cost_w, opens, value
         self.parent, self.sid, self.fixed, self.children, self.ja = parent, sid, fixed, [], ja
 
+    def cost(self):
+        """What it spends of its kind's part: a twin its sentences and its costly words, a word its chance."""
+        return self.cost_s + self.cost_w if self.kind == 's' else self.cost_w
+
     def density(self):
-        cost = self.cost_s if self.kind == 's' else self.cost_w
+        cost = self.cost()
         return self.value / cost if cost > 0 else math.inf
 
 
@@ -938,87 +1000,77 @@ def _order(els, kind, on, rng, explore, explored):
 
 def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_sentence):
     """(thresholds, explored) for the elements (Element, linked) under one draw of the randomization (module
-    docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. An element is
-    taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform draw
-    per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same draw
-    at every level keeps the sets nested, and a level's expected spend is its part (systematic rounding). A twin's
-    costly words are held to the words' part the same way, with that part's draw. So an element can show at any level
-    where what came before it leaves its part unspent: the randomization never rules it out. What still depends on the
-    model's predictions is how likely it is: its cost (its predicted chances), and for the elements not explored, its
-    place by value per expected open; the propensities say by how much."""
-    n = len(els)
+    docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. The two kinds are
+    cut on their own, as the reader's two dials show them: twins from the sentences' part at each sentence level
+    (each at its cost: its sentences and the costly words in its Japanese), words from the words' part at each word
+    level (each at its chance, a word in a twin's English counted as if the twin were English, since what words show
+    can't depend on the sentence level), at most per_sentence(level) costly words in one English sentence. An element
+    is taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform
+    draw per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same
+    draw at every level keeps each kind's sets nested, and a level's expected spend is its part (systematic rounding).
+    So an element can show at any level where what came before it leaves its part unspent: the randomization never
+    rules it out. What still depends on the model's predictions is how likely it is: its cost (its predicted
+    chances), and for the elements not explored, its place by value per expected open; the propensities say by how
+    much."""
     on = [e.fixed for e in els]
-    explored = [False] * n
+    explored = [False] * len(els)
     twins = _order(els, 's', on, rng, explore, explored)
     words = _order(els, 'w', on, rng, explore, explored)
     u_s, u_w = rng.random(), rng.random()
-    shown = lambda i, level: on[i] is not None and on[i] <= level and (
-        els[i].parent is None or on[els[i].parent] is None or level < on[els[i].parent])
+    taken = lambda i, level: on[i] is not None and on[i] <= level
     for level in BUDGETED:
         words_part, sentences_part = budgets[level]
-        spent_s = sum(e.cost_s for i, e in enumerate(els) if e.kind == 's' and on[i] is not None and on[i] <= level)
-        spent_w = sum(e.cost_w for i, e in enumerate(els) if shown(i, level))
+        spent = sum(e.cost() for i, e in enumerate(els) if e.kind == 's' and taken(i, level))
         for i in twins:
-            if on[i] is not None:
-                continue
-            e = els[i]
-            freed = sum(els[c].cost_w for c in e.children if shown(c, level))
-            if spent_s + u_s * e.cost_s <= sentences_part + 1e-12 and \
-                    (e.cost_w <= freed or spent_w + u_w * (e.cost_w - freed) <= words_part + 1e-12):
+            if on[i] is None and spent + u_s * els[i].cost() <= sentences_part + 1e-12:
                 on[i] = level
-                spent_s += e.cost_s
-                spent_w += e.cost_w - freed
-        counts = {}
+                spent += els[i].cost()
+        spent, counts = 0.0, {}
         for i, e in enumerate(els):
-            if e.kind == 'w' and e.cost_w > 0 and shown(i, level):
-                counts[e.sid] = counts.get(e.sid, 0) + 1
+            if e.kind == 'w' and taken(i, level):
+                spent += e.cost_w
+                if e.cost_w > 0:
+                    counts[e.sid] = counts.get(e.sid, 0) + 1
         most = per_sentence(level)
-        hidden = lambda i: els[i].parent is not None and on[els[i].parent] is not None and on[els[i].parent] <= level
         for i in words:
-            if on[i] is not None or hidden(i) or counts.get(els[i].sid, 0) >= most:
+            if on[i] is not None or counts.get(els[i].sid, 0) >= most:
                 continue
-            if spent_w + u_w * els[i].cost_w <= words_part + 1e-12:
+            if spent + u_w * els[i].cost_w <= words_part + 1e-12:
                 on[i] = level
-                spent_w += els[i].cost_w
+                spent += els[i].cost_w
                 counts[els[i].sid] = counts.get(els[i].sid, 0) + 1
-    on = [FULL if x is None else x for x in on]
-    for i, e in enumerate(els):  # a word in a twin's English: never above the twin (it shows only below it)
-        if e.kind == 'w' and e.parent is not None:
-            on[i] = min(on[i], on[e.parent])
-    return on, explored
+    return [FULL if x is None else x for x in on], explored
 
 
-def shown_at(els, on, i, level):
-    """Whether element i shows at a level under thresholds on."""
-    if level <= OFF:
-        return False
-    if on[i] > level:
-        return False
-    parent = els[i].parent
-    return parent is None or level < on[parent]
+def shown_at(els, on, i, level, sentences=None):
+    """Whether element i shows at a word level and a sentence level (one level: both) under thresholds on (visible)."""
+    return visible([{'kind': e.kind, 'on': on[k], 'parent': e.parent} for k, e in enumerate(els)], i, level,
+                   sentences)
 
 
 def propensities(els, budgets, draws=DRAWS, seed=0, explore=EXPLORE):
-    """[[chance element i shows at each budgeted level]]: the share of `draws` runs of assign in which it does (module
-    docstring), seeded."""
+    """[[chance element i is taken at each budgeted level of its own kind]]: the share of `draws` runs of assign in
+    which its threshold is at most the level (module docstring), seeded: a twin's at each sentence level, a word's at
+    each word level (in a twin's English: shown there while the twin is English)."""
     rng = random.Random(seed)
     counts = [[0] * len(BUDGETED) for _ in els]
     for _ in range(draws):
         on, _x = assign(els, budgets, rng, explore)
         for i in range(len(els)):
             for k, level in enumerate(BUDGETED):
-                if shown_at(els, on, i, level):
+                if on[i] <= level:
                     counts[i][k] += 1
     return [[round(c / draws, 3) for c in row] for row in counts]
 
 
 def budgets_for(words, normal=None):
     """{level: (words' part, sentences' part)} in lookups for a reply of `words` English words: the level's budget per
-    100 words (intensity.budget, normal's the challenge when set) times words / 100, and SENTENCE_SHARE of it."""
+    100 words (intensity.budget, normal's the challenge when set) times words / 100, split: SENTENCE_SHARE of it for
+    the sentences at that sentence level and the rest for the words at that word level."""
     out = {}
     for level in BUDGETED:
         b = intensity.budget(level, normal) * words / 100
-        out[level] = (b, intensity.SENTENCE_SHARE * b)
+        out[level] = ((1 - intensity.SENTENCE_SHARE) * b, intensity.SENTENCE_SHARE * b)
     return out
 
 
