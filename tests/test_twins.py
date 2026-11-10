@@ -572,17 +572,17 @@ class ReviewRound2(Home):
     """Regression tests for the second adversarial review (scratchpad review-r2a, review-r2c)."""
     FILLER = ReviewRound1.FILLER
     TWIN = ReviewRound1.TWIN
-    AGAIN = '<abbr title="again / also">また</abbr>'
+    AGAIN = '<abbr title="again / once more">また</abbr>'  # "also" is a connective: it stays out (test_dials)
 
     def test_1_each_use_of_a_word_and_gloss_keeps_its_own_english(self):
-        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / once more', 'en': 'again', 'p': 0.02, 'free': True,
                           'before': 'Run the tests ', 'after': ' and check the result.'},
-                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                         {'ja': 'また', 'title': 'again / once more', 'en': 'once more', 'p': 0.02, 'free': True,
                           'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         text = f'Run the tests {self.AGAIN} and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, dict(TYPES, また={'n', 'adv'}), seed=1, remember=False).final
-        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'also'])
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'once more'])
 
     def test_2_a_twins_words_the_weave_did_not_offer(self):
         words = [{'ja': '小さい', 'kana': 'ちいさい', 'status': 'active'}, {'ja': '問題', 'kana': 'もんだい',
@@ -693,15 +693,15 @@ class ReviewRound3(Home):
         self.assertIsNone(twins.twin_trouble('x', 0, 'Use e.g. this or i.e. that one now.', ''))  # abbreviations
 
     def test_2_a_dropped_earlier_swap_leaves_the_later_ones_their_english(self):
-        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / once more', 'en': 'again', 'p': 0.02, 'free': True,
                           'before': 'Run the tests ', 'after': ' and check the result.'},
-                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                         {'ja': 'また', 'title': 'again / once more', 'en': 'once more', 'p': 0.02, 'free': True,
                           'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         types = dict(TYPES, また={'n', 'adv'})
         text = f'Run the tests again and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, types, seed=1, remember=False).final
-        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['also'])
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['once more'])
         unsure = [dict(x, before='', after='') for x in swaps]  # no context to tell: the gloss's first meaning
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, unsure, 0.08, None, None)
         final = check_reply.finish(text, own, types, seed=1, remember=False).final

@@ -41,8 +41,8 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null;
                           surface=chat adds English only: "english": {on, until (ms, 0 when off), at (ms of the last
                           change, 0 if never)}, and the sentence level: "sentences": {level, until, at}, so a client
-                          reads both dials in one request (a collector without it: the sentence level is the word
-                          level)
+                          reads both dials in one request (the word level's until the reader first sets the sentence
+                          level; a collector without it: the sentence level is the word level)
   POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of heavier or lighter (the arrows of T3
                           Code's panel, fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level,
                           until, at}}; level -3 (off) .. 3 (full), a press past either end stays there (intensity.py)

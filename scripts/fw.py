@@ -64,7 +64,8 @@
                                                      Japanese heavier or lighter for 3 hours: chat replies' words
                                                      (chat, the default), their Japanese sentences (sentences) or
                                                      web pages; off: none, full: every sentence that can be
-                                                     Japanese (each also for 3 hours); no step: show the level
+                                                     Japanese (each also for 3 hours); with no surface, off,
+                                                     normal and full set both chat dials; no step: show the level
                                                      (no surface either: both chat dials)
   fw.py intensity [off|normal] here [--session ID]   no Japanese in one chat until turned back on (normal); ID:
                                                      its session id (default $CLAUDE_CODE_SESSION_ID)
@@ -839,10 +840,19 @@ def read_input(path):
     return sys.stdin.read() if path in (None, '-') else Path(path).read_text(encoding='utf-8')
 
 
-def weave_cmd(args):
+def command_levels(args):
+    """(word level, sentence level) for fw.py weave and check-reply: --level and --sentences as the hook passed them
+    (--level alone: both dials at it, as briefs from before the sentence level say), else this machine's state."""
     prefs = fwlib.load_state().get('prefs')
-    level = args.level if args.level is not None else intensity.current(prefs, 'chat')['level']
-    if intensity.is_off(level) and intensity.is_off(intensity.current(prefs, intensity.SENTENCES)['level']):
+    level = args.level if args.level is not None else intensity.current(prefs, intensity.WORDS)['level']
+    sentences = args.sentences if args.sentences is not None else args.level if args.level is not None else \
+        intensity.current(prefs, intensity.SENTENCES)['level']
+    return level, sentences
+
+
+def weave_cmd(args):
+    level, sentences = command_levels(args)
+    if intensity.is_off(level) and intensity.is_off(sentences):
         sys.exit('Japanese is off in chat: send the draft as it is.')  # both dials (the twins show at the other)
     try:  # English only too: the reply carries its Japanese, shown once English only is off (twins.py)
         print(chatweave.weave(read_input(args.file), level))
@@ -853,7 +863,7 @@ def weave_cmd(args):
 def check_reply_cmd(args):
     text = read_input(args.file)
     try:
-        plan = check_reply.Plan.load(args.level)
+        plan = check_reply.Plan.load(*command_levels(args))
     except Exception as error:  # no state here: no levels, so nothing to send with twins
         print(f'jw-check: the check could not run here ({error.__class__.__name__}), so there is no final markup. '
               'Send your English reply as it is, with the <ja> twins taken out.')
@@ -1009,6 +1019,13 @@ def intensity_cmd(args):
     if step is None:  # without a surface: both chat dials
         for shown in ([surface] if surfaces else ['chat', intensity.SENTENCES]):
             print(f'{names[shown]}: {intensity.describe(hub.live_intensity(shown, timeout=hub.TIMEOUT))}.')
+        return
+    if not surfaces and step in ('off', 'normal', 'full'):  # chat as a whole: both dials (hub.set_chat)
+        words, sentences, error = hub.set_chat({'off': intensity.OFF, 'normal': 0, 'full': intensity.FULL}[step],
+                                               'command')
+        if error:
+            print(f'Note: {error}.')
+        print(f'{names["chat"]}: {intensity.describe(words)}.\n{names["sentences"]}: {intensity.describe(sentences)}.')
         return
     if step in ('off', 'full'):  # set outright, not a step from the level in effect
         value, error = hub.set_intensity(surface, intensity.OFF if step == 'off' else intensity.FULL, 'command')
@@ -1166,10 +1183,12 @@ def main(argv=None):
     p.set_defaults(run=chat_style)
     p = sub.add_parser('weave')
     p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
+    p.add_argument('--sentences', type=int, choices=list(intensity.LEVELS))
     p.add_argument('file', nargs='?')
     p.set_defaults(run=weave_cmd)
     p = sub.add_parser('check-reply')
     p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
+    p.add_argument('--sentences', type=int, choices=list(intensity.LEVELS))
     p.add_argument('file', nargs='?')
     p.set_defaults(run=check_reply_cmd)
     p = sub.add_parser('glosses')

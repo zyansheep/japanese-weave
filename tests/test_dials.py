@@ -131,6 +131,21 @@ class Collector(Server):
         live, _thread, english, sentences = hub.live_chat_dials('s1')
         self.assertEqual((live['level'], sentences['level'], english['on']), (-1, 0, False))
 
+    def test_the_sentence_level_follows_the_words_until_set_apart(self):
+        self.assertEqual(self.press(-1, 'chat')['intensity']['level'], -1)
+        chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+        self.assertEqual(chat['sentences'], chat['intensity'])  # one dial: no sentences pref yet
+        self.assertEqual(feedback.request(self.url + '/v1/intensity?surface=sentences')['intensity'],
+                         chat['intensity'])
+        self.assertEqual(hub.live_chat_dials('s1')[3]['level'], -1)
+        self.assertEqual(self.press(1, 'sentences')['intensity']['level'], 0)  # a step from where it followed
+        self.assertEqual(self.press(-1, 'chat')['intensity']['level'], -2)
+        chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+        self.assertEqual((chat['intensity']['level'], chat['sentences']['level']), (-2, 0))  # apart now
+        prefs = {'intensity_chat': intensity.at_level(-3, 't3', NOW)}  # an off spell from before the deploy
+        self.assertEqual(intensity.chat_levels(prefs, NOW + 1), (-3, -3))
+        self.assertFalse(intensity.apart(prefs))
+
     def test_a_collector_without_the_sentence_level_means_one_dial(self):
         older = {'ok': True, 'intensity': {'level': 2, 'until': NOW, 'at': NOW - 1}, 'english': intensity.ENGLISH_OFF}
         with mock.patch.object(feedback, 'request', return_value=older):
@@ -160,23 +175,54 @@ class Hook(Server):
 
     def test_words_off_still_writes_the_twins_in_draft_style(self):
         hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
+        self.fw('intensity', 'sentences', 'normal')  # the sentence dial set apart: it no longer follows the words
         self.fw('intensity', 'chat', 'off')
         with mock.patch.object(weave, 't3_host', return_value=True), \
                 mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
             context = self.hook('What is a monad?')
             self.assertIn('<ja>...</ja>', context)  # the sentences still show: the twins are written
             self.assertIn('words turned off and sentences turned normal for now by the user', context)
+            self.assertIn("weave --level -3 --sentences 0 <<'DRAFT'", context)  # the live levels, for the commands
+            self.assertIn("check-reply --level -3 --sentences 0 <<'REPLY'", context)
             with mock.patch.object(chatweave, 'weave', return_value='jw-weave: woven'), \
                     mock.patch('sys.stdin', new=io.StringIO('The draft.')):
-                self.assertIn('jw-weave: woven', self.fw('weave', '--level', '-3'))
+                self.assertIn('jw-weave: woven', self.fw('weave', '--level', '-3', '--sentences', '0'))
             self.fw('intensity', 'sentences', 'off')
             off = self.hook('And a functor?')
         briefs = feedback.chat_briefs(self.db)
         self.assertEqual([(r['level'], r['intensity']) for r in briefs], [(intensity.OFF, 0.0)])  # recorded
         self.assertTrue(off.startswith('Japanese Weave'), off)
         self.assertNotIn('<ja>', off)  # both dials off: plain English
-        with mock.patch('sys.stdin', new=io.StringIO('The draft.')), self.assertRaises(SystemExit):
-            fw.main(['weave'])
+        for args in (['weave'], ['weave', '--level', '-3'], ['weave', '--level', '-3', '--sentences', '-3']):
+            with mock.patch('sys.stdin', new=io.StringIO('The draft.')), self.assertRaises(SystemExit):
+                fw.main(args)  # both off (--level alone: both dials at it, as older briefs say)
+
+    def test_off_means_no_japanese_and_back_on_means_both(self):
+        hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
+        with mock.patch.object(weave, 't3_host', return_value=True), \
+                mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
+            out = self.fw('intensity', 'off')  # one dial so far: the sentences follow the words
+            self.assertIn('Chat words: off until', out)
+            self.assertIn('Chat sentences: off until', out)
+            self.assertFalse(intensity.apart(feedback.request(self.url + '/v1/state')['state'].get('prefs')))
+            self.assertTrue(self.hook('What is a monad?').startswith('Japanese Weave: the user turned Japanese off'))
+            self.hook('japanese back on')
+            chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+            self.assertEqual((chat['intensity']['level'], chat['sentences']['level']), (0, 0))
+            self.fw('intensity', 'sentences', 'up')  # set apart now
+            out = self.fw('intensity', 'off')  # off is both dials, whichever way they stand
+            self.assertIn('Chat sentences: off until', out)
+            chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+            self.assertEqual((chat['intensity']['level'], chat['sentences']['level']), (-3, -3))
+            self.hook('japanese back on')
+            chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+            self.assertEqual((chat['intensity']['level'], chat['sentences']['level']), (0, 0))
+        self.assertIn('Chat words: full', self.fw('intensity', 'full'))
+        self.assertIn('Chat sentences: full', self.fw('intensity'))
+        self.assertIn('Chat sentences: normal', self.fw('intensity', 'normal'))
+        self.fw('intensity', 'chat', 'off')  # a words-only off stays available
+        chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+        self.assertEqual((chat['intensity']['level'], chat['sentences']['level']), (-3, 0))
 
     def test_the_classic_brief_follows_the_word_level(self):
         self.fw('intensity', 'chat', 'off')
@@ -185,6 +231,28 @@ class Hook(Server):
         self.assertEqual(weave.turned_dials(-1, -1), weave.turned(-1))
         self.assertEqual(weave.turned_dials(0, 3), ', words turned normal and sentences turned to full for now by '
                                                    'the user')
+
+
+class Commands(Home):
+    """fw.py weave and check-reply take the live levels the hook passes (--level W --sentences S)."""
+
+    def test_the_levels_the_commands_use(self):
+        fwlib.save_state(dict(fwlib.new_state(known_top=10), prefs={'intensity_chat': intensity.at_level(2, 't3')}))
+        args = lambda **kw: __import__('argparse').Namespace(**dict({'level': None, 'sentences': None}, **kw))
+        self.assertEqual(fw.command_levels(args()), (2, 2))  # the cache: the sentence level following the words
+        self.assertEqual(fw.command_levels(args(level=1)), (1, 1))  # --level alone: both dials, as older briefs
+        self.assertEqual(fw.command_levels(args(level=-3, sentences=1)), (-3, 1))
+        plan = check_reply.Plan.load(-1, 2)
+        self.assertEqual((plan.level, plan.sentences, plan.view, plan.sview), (-1, 2, -1, 2))
+        plan = check_reply.Plan.load(1)
+        self.assertEqual((plan.sentences, plan.sview), (1, 1))
+        self.assertEqual(weave.level_flags(1), '--level 1')
+        self.assertEqual(weave.level_flags(1, 1), '--level 1')
+        self.assertEqual(weave.level_flags(-3, 0), '--level -3 --sentences 0')
+        with mock.patch.object(check_reply, 'finish', return_value=check_reply.Checked('ok')) as finish, \
+                mock.patch('sys.stdin', new=io.StringIO('A reply.')):
+            self.fw('check-reply', '--level', '0', '--sentences', '-2')
+        self.assertEqual((finish.call_args[0][1].level, finish.call_args[0][1].sentences), (0, -2))
 
 
 class Reports(Home):
@@ -493,6 +561,26 @@ class KnownAdverbs(unittest.TestCase):
         sent = check_reply.sentences(f'It is {a("もう", "#0")} done.')[0]
         self.assertTrue(check_reply.sentence_problems(sent, self.TYPES, english=True))
         self.assertFalse(check_reply.sentence_problems(sent, self.TYPES, english=True, known=lambda t: True))
+
+    def test_connectives_and_question_words_stay_out_whatever_their_types(self):
+        types = check_reply.word_types()  # the real dictionary: most of these are nouns or adverbs by type too
+        cases = [('さらに', 'moreover'), ('さらに', 'also'), ('あるいは', 'alternatively'), ('なお', 'furthermore'),
+                 ('ただ', 'however'), ('どう', 'how'), ('なぜ', 'why'), ('かつ', 'moreover'), ('もしも', 'in case'),
+                 ('つまり', 'in other words'), ('また', 'also'), ('もし', 'if'), ('でも', 'but')]
+        kept = [('また', 'again'), ('もう', 'already'), ('とても', 'so')]  # とても: an intensifier, typed adv only
+        swaps = [{'ja': ja, 'title': en, 'en': en, 'kana': ja, 'p': 0.02, 'free': True} for ja, en in cases + kept]
+        a = lambda ja, en: f'<abbr title="{en}">{ja}</abbr>'
+        text = ' '.join(f'Line {i}: {a(ja, en)}, we run the tests now.' for i, (ja, en) in enumerate(cases + kept))
+        plan = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08)
+        final = check_reply.finish(text, plan, types, seed=1, remember=False).final
+        for ja, en in cases:
+            self.assertNotIn(f'data-en="{en}"', final, (ja, en))
+        for ja, en in kept:
+            self.assertIn(f'data-en="{en}"', final, (ja, en))
+        self.assertTrue(check_reply.connective('どこ', {'pn'}))  # a question word by spelling, English unknown
+        self.assertTrue(check_reply.connective('ただ', {'adv', 'conj', 'n'}))  # conj-typed, English unknown
+        self.assertFalse(check_reply.connective('また', {'adv', 'conj'}, 'Again'))
+        self.assertTrue(check_reply.connective('とても', {'adv', 'conj'}, 'so'))  # "so" with a conj type: the connective
 
     def test_the_brief_says_so(self):
         self.assertIn('adverbs among the known-word swaps', weave.DRAFT_RULES)

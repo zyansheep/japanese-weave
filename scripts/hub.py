@@ -700,6 +700,18 @@ def set_intensity(surface, level, source):
     return intensity.current({intensity.pref(surface): value}, surface), error
 
 
+def set_chat(level, source, timeout=TIMEOUT):
+    """Both chat dials set to a level (fw.py intensity off|normal|full with no surface, "japanese back on"): the word
+    level, and the sentence level when it is set apart and not there already (one that follows the word level follows
+    it there, and stays one dial). Returns (words {level, until, at}, sentences {level, until, at}, error or None)."""
+    words, error = set_intensity(intensity.WORDS, level, source)
+    sentences = live_intensity(intensity.SENTENCES, timeout=timeout)
+    if sentences['level'] != level:
+        sentences, more = set_intensity(intensity.SENTENCES, level, source)
+        error = error or more
+    return words, sentences, error
+
+
 def live_intensity(surface, timeout=LIVE_TIMEOUT):
     """The level in effect now. With a collector, asked of it first (a press in T3 Code reaches the collector, not this
     machine's cache), briefly, so a prompt never waits long; else, or when it doesn't answer, the cache."""

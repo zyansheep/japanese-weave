@@ -730,9 +730,15 @@ def turned_dials(level, sentences=None):
     return f', words turned {name(level)} and sentences turned {name(sentences)} for now by the user'
 
 
+def level_flags(level, sentences=None):
+    """The levels the brief's commands take: '--level W', and ' --sentences S' when the sentence level isn't the word
+    level (fw.py weave and check-reply: --level alone means both dials at it, as in briefs from before)."""
+    return f'--level {level}' + (f' --sentences {sentences}' if sentences is not None and sentences != level else '')
+
+
 def draft_rules(stage, level, command, sentences=None):
     """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
-    head = turned_dials(level, sentences)
+    head, flags = turned_dials(level, sentences), level_flags(level, sentences)
     return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the user is a native English speaker '
             'learning Japanese by reading, so your chat reply carries Japanese for every level the user can choose, '
             'and their app shows it at the level they set (they can change it after reading, or turn on English '
@@ -742,13 +748,13 @@ def draft_rules(stage, level, command, sentences=None):
             'sentence or two. Japanese goes only in your chat reply: never in files, code, configs, commit or PR '
             'text, messages to other agents, subagent prompts, or drafts and documents meant to be shared.\n'
             '1. Write your whole reply in plain English, as you normally would, with no Japanese, and pass it to the '
-            f'weave on stdin, in one Bash call:\n{command} weave --level {level} <<\'DRAFT\'\n(your English reply)\nDRAFT\n'
+            f'weave on stdin, in one Bash call:\n{command} weave {flags} <<\'DRAFT\'\n(your English reply)\nDRAFT\n'
             '   It swaps in every Japanese word that could go there, each wrapped as <abbr title="reading · meaning">'
             'Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. Its '
             'first line says how many twins to write and within which limits.\n'
             '2. Write the reply from its output: your English sentences with the swaps that fit, and a Japanese twin '
             'after each sentence that fits:\n' + DRAFT_RULES + '\n'
-            f'3. Check it in one Bash call:\n{command} check-reply --level {level} <<\'REPLY\'\n(your reply)\nREPLY\n'
+            f'3. Check it in one Bash call:\n{command} check-reply {flags} <<\'REPLY\'\n(your reply)\nREPLY\n'
             '   It drops a twin that breaks a limit or rule (its sentence stays English), puts back the swaps that '
             'can\'t stay, chooses what each level shows, and prints the final markup under a line of =====. If it '
             'lists things to fix before there is anything to send, fix them and run it again; if it dropped a twin you '
@@ -761,11 +767,11 @@ def draft_rules(stage, level, command, sentences=None):
 
 def draft_digest(stage, level, command, sentences=None):
     """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
-    head = turned_dials(level, sentences)
+    head, flags = turned_dials(level, sentences), level_flags(level, sentences)
     return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the steps earlier in this chat still '
-            f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, write '
+            f'hold. Write the reply in plain English, pass it to `{command} weave {flags}` on stdin, write '
             'your English with the swaps that fit and a <ja> twin after each sentence that fits (limits and how many '
-            f'on its first line), pass that to `{command} check-reply --level {level}`, and send everything below its '
+            f'on its first line), pass that to `{command} check-reply {flags}`, and send everything below its '
             '===== line exactly as it is (at most two checks). '
             'Plain English with no Japanese for health, medication, legal, money, safety or urgent topics, and for a '
             'reply of a sentence or two.')
@@ -1250,12 +1256,11 @@ def main(argv):
     if session:
         thread = switch(session, data.get('prompt'), thread)
     if hook and intensity.is_off(level) and (threads.request(data.get('prompt')) or (True,))[0] is False:
-        try:  # "japanese back on" also ends an off spell in all chats, on this very turn
-            live = hub.set_intensity('chat', 0, 'chat')[0]
-            if intensity.is_off(sentences):
-                sentences = hub.set_intensity(intensity.SENTENCES, 0, 'chat')[0]['level']
+        try:  # "japanese back on" also ends an off spell in all chats, on this very turn: both dials (hub.set_chat)
+            live, held, _error = hub.set_chat(0, 'chat', timeout=hub.LIVE_TIMEOUT)
+            sentences = held['level']
         except Exception:
-            live, sentences = dict(intensity.NORMAL), 0 if intensity.is_off(sentences) else sentences
+            live, sentences = dict(intensity.NORMAL), 0
         level = live['level']
     codex = 'turn_id' in data
     markup = hook and abbr_glosses(state)

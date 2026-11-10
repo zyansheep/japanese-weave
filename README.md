@@ -317,7 +317,8 @@ screen while you were reading.
 the browser (a toast on the page and the toolbar badge show the level); in chat, the arrows of T3 Code's Japanese Weave
 panel do the same (T3 Code's shortcut toggles English only, below); also the popup's Less/More buttons and
 `fw.py intensity [chat|sentences|browser] up|down|normal`. In chat there are two dials: the words (`chat`) and the
-Japanese sentences (`sentences`), each with its own level and its own 3 hours. Each press is
+Japanese sentences (`sentences`), each with its own level and its own 3 hours; the sentences follow the words until you
+set them yourself, and off (or normal, or full) with no dial named sets both. Each press is
 logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a glance, so
 `fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed and opens by
 how much Japanese a passage had, and how often you turned it down or up. It also checks the model, per surface and class
@@ -335,7 +336,7 @@ at heavier and much heavier), and the line on the last reply says whether it wen
 **The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each for
 3 hours like the levels between (a press past either end stays there and restarts the clock);
 `fw.py intensity [chat|sentences|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In
-chat, off (both dials, in draft style) means the hook sends only a one-line note to reply in plain English, until the time runs out, you press
+chat, off (both dials) means the hook sends only a one-line note to reply in plain English, until the time runs out, you press
 the panel's up arrow, or you say "japanese back on" in any chat.
 In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
 known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English

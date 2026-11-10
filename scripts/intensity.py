@@ -5,8 +5,9 @@ only.
 
 Chat has two dials (docs/chat-weave.md, "Two dials"): the word level ('chat', the chat level from before there were
 two), which decides the swapped words of a reply with render-time levels (twins.py), and the sentence level
-('sentences'), which decides its Japanese twins. Each is a surface of its own with the same levels, steps and expiry;
-a collector from before the sentence level has none, and a client then reads the sentence level as the word level.
+('sentences'), which decides its Japanese twins. Each is a surface of its own with the same levels, steps and expiry,
+but the sentence level follows the word level until the reader first sets it (apart): one dial until they diverge. A
+collector from before the sentence level has none, and a client then reads the sentence level as the word level.
 
 A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 are lookup budgets;
 the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow: the
@@ -83,8 +84,17 @@ def is_current(value):
     return isinstance(value, dict) and set(value) == {'level', 'until', 'at'} and valid(value)
 
 
+def apart(prefs):
+    """Whether the reader has set chat's sentence level apart from the word level (an intensity_sentences pref): until
+    then the sentence level follows the word level (current), one dial, as before there were two."""
+    return valid((prefs or {}).get(pref(SENTENCES)))
+
+
 def current(prefs, surface, now=None):
-    """{level, until, at} in effect now: an expired or missing one is normal."""
+    """{level, until, at} in effect now: an expired or missing one is normal. Chat's sentence level follows the word
+    level until it is set apart (apart), so an off spell from before the sentence level keeps the sentences off too."""
+    if surface == SENTENCES and not apart(prefs):
+        return current(prefs, WORDS, now)
     value = (prefs or {}).get(pref(surface))
     if not valid(value):
         return dict(NORMAL)

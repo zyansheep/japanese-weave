@@ -48,10 +48,17 @@ GRAMMAR = sorted({'は', 'が', 'を', 'に', 'で', 'の', 'へ', 'と', 'ね',
 NOUN_TYPES = ('n', 'n-adv', 'n-t', 'n-suf', 'n-pref', 'num', 'ctr', 'pn')
 ADJECTIVE_TYPES = ('adj-i', 'adj-na', 'adj-no', 'adj-pn', 'adj-f', 'adj-ix')
 ADVERB_TYPES = ('adv', 'adv-to')  # time words used as adverbs (今) are nouns by type (n-adv, n-t) already
-# Connectives stay out of English sentences even when they are adverbs by type: by spelling, or by the English they
-# stand in for (また as "again" may stay; as "and" it may not)
-CONNECTIVES = set(grammar.CONJUNCTIONS) | {'もし', 'でも', 'しかし', 'だから', 'けど'}
-CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though', 'although'}
+# Connectives and question words stay out of English sentences, whatever else their types allow (a noun, an adverb):
+# a spelling listed here, any spelling the dictionary types as a conjunction (conj) unless the English it stands in for
+# is on KEEP_ENGLISH (また as "again"), a question word (the kosoado series' ど- words), or a swap whose English is a
+# connective or a question word. "so" alone is also an intensifier: an adverb with no conj type (とても) may keep it.
+CONNECTIVES = set(grammar.WHOLE) | {'もし', 'けど'}
+QUESTION_WORDS = {w for w in grammar.KOSOADO if w.startswith('ど')}
+CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though', 'although', 'however', 'moreover',
+                      'furthermore', 'also', 'alternatively', 'therefore', 'then', 'instead', 'otherwise', 'unless',
+                      'in case', 'in other words', 'how', 'why', 'what', 'when', 'where', 'who', 'which'}
+KEEP_ENGLISH = {'again'}
+DEGREE_ENGLISH = {'so'}
 VERB_OR_ADJECTIVE = re.compile(r'^(v|adj-i)')
 SURU = re.compile(r'([A-Za-z][A-Za-z-]*)\s*((?:し[なまよてた]|さ[れせ]|す[るれ])[ぁ-ん]{0,6})')
 ARTICLE = re.compile(r'\b(a|an|the)\b', re.I)
@@ -126,12 +133,24 @@ def sentences(line):
     return final
 
 
-def sentence_problems(sent, types, english=False, known=None):
+def connective(ja, pos, en=None):
+    """Whether a swap stands in for a connective or a question word, which stays out of an English sentence (see
+    CONNECTIVES): ja its spelling, pos its dictionary types, en the English it stands in for (None: unknown)."""
+    en = None if en is None else re.sub(r'[^a-z ]', '', str(en).lower()).strip()
+    if ja in CONNECTIVES or ja in QUESTION_WORDS:
+        return True
+    if 'conj' in pos and en not in KEEP_ENGLISH:
+        return True
+    return en in CONNECTIVE_ENGLISH and not (en in DEGREE_ENGLISH and 'conj' not in pos)
+
+
+def sentence_problems(sent, types, english=False, known=None, english_of=None):
     """[(what is wrong, the index of the glossed word it is about, or None)] for one sentence (a token list from
     sentences). english: the sentence is English whatever its share of Japanese (an English sentence of a reply with
     twins, twins.py), so its words are held to the stays-English rules and it needs no translation. known: whether a
     glossed word's token is a swap of a word the reader knows at a glance (the weave's free swaps), whose adverbs
-    (ADVERB_TYPES) may stay in an English sentence too; None: no word is."""
+    (ADVERB_TYPES) may stay in an English sentence too; None: no word is. english_of: the English a glossed word's
+    token stands in for, or None: a connective or question word (connective) never stays in an English sentence."""
     found = []
     add = lambda what, i=None: found.append((what, i))
     words = [t for t in sent if t[0] == 'w']
@@ -188,9 +207,12 @@ def sentence_problems(sent, types, english=False, known=None):
             if pos is None:
                 add(f'{ja} is a form the dictionary does not list (a conjugated verb or phrase) inside a '
                     'sentence that stays English', i)
+            elif connective(ja, pos, english_of(t) if english_of is not None else None):
+                add(f'{ja} is a connective or a question word in a sentence that stays English: keep it English, or '
+                    'use it in a twin', i)
             elif not any(p in NOUN_TYPES for p in pos) and not (
                     attributive and any(p in ADJECTIVE_TYPES for p in pos)) and not (
-                    known is not None and known(t) and any(p in ADVERB_TYPES for p in pos) and ja not in CONNECTIVES):
+                    known is not None and known(t) and any(p in ADVERB_TYPES for p in pos)):
                 kind = '/'.join(sorted(pos)) or 'not a noun'
                 add(f'{ja} ({kind}) in a sentence that stays English, where only nouns, adjectives right before a '
                     'noun and adverbs known at a glance go', i)
@@ -253,16 +275,18 @@ class Plan:
         self.recency = recency  # and the fit's recency, as the weave has it (fw_host.adaptive)
 
     @classmethod
-    def load(cls, level=None, session=None, sentences=None):
+    def load(cls, level=None, sentences=None, session=None):
         """From this machine's state and knowledge.json (the cache, with a collector), at the chat's word level and
-        sentence level in effect unless given."""
+        sentence level given (the hook's live levels, fw.py check-reply --level and --sentences; a level alone: both
+        dials at it), else in effect in the cache."""
         import fwlib
         import knowledge
         import twins
         state, know = fwlib.load_state(), knowledge.load()
-        level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
         if sentences is None:
-            sentences = intensity.current(state.get('prefs'), intensity.SENTENCES)['level']
+            sentences = level if level is not None else intensity.current(state.get('prefs'), intensity.SENTENCES)[
+                'level']
+        level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
         model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
         learning = grammar.learning(state)[0]
         try:  # the words the weave weaves from, with their estimates, as it prices them
@@ -654,11 +678,12 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     # English sentences: swaps that can't stay go back to English
     keep = [id(w) for w in words]
     reverted = {}
-    known = lambda t: t[2].startswith('#') and words[int(t[2][1:])]['free'] and str(
-        words[int(t[2][1:])]['en'] or '').strip().lower() not in CONNECTIVE_ENGLISH  # a known word, not "and" or "so"
+    swap = lambda t: words[int(t[2][1:])] if t[2].startswith('#') else None
+    known = lambda t: bool(swap(t) and swap(t)['free'])
+    english_of = lambda t: swap(t)['en'] if swap(t) else None
     for number, line_text in _english_view(parts, keep).items():
         for sent in sentences(line_text):
-            for what, i in sentence_problems(sent, types, english=True, known=known):
+            for what, i in sentence_problems(sent, types, english=True, known=known, english_of=english_of):
                 if i is not None and sent[i][0] == 'w' and sent[i][2].startswith('#'):
                     k = int(sent[i][2][1:])
                     reverted.setdefault(k, (number, what))

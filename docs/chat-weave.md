@@ -9,7 +9,8 @@ for the Japanese sentences.
 
 ## The steps
 
-1. Claude writes the reply in plain English and passes it to `fw.py weave --level N` on stdin.
+1. Claude writes the reply in plain English and passes it to `fw.py weave --level N` on stdin (with `--sentences S`
+   when the sentence level differs: below).
 2. The weave runs the extension's pipeline on it, with no model call (`chatweave.mjs`, under node or bun):
    - `matcher.js` finds every place one of the words in use could go;
    - `senses.js` says which options are flagged safe;
@@ -44,7 +45,7 @@ for the Japanese sentences.
 
        This is a problem.<ja><abbr title="this">これ</abbr>は<abbr title="もんだい · problem">問題</abbr>です。</ja>
 
-4. Claude passes it to `fw.py check-reply --level N`, which:
+4. Claude passes it to `fw.py check-reply --level N` (and `--sentences S`), which:
    - stops only on what code can't fix: a `<ja>` without its `</ja>` or its English sentence, Japanese outside twins
      and glosses, a Japanese sentence outside `<ja>`;
    - drops a twin that breaks a limit (more than two sentences, too long, grammar not on the list, two learning
@@ -110,8 +111,16 @@ before) decides every level abbr, and the *sentence level* (surface `sentences`)
 without it means the sentence level is the word level (one dial). The two are independent: what words show doesn't
 depend on the sentence level, nor the reverse; a glossed word inside a shown twin's Japanese is part of the twin, and a
 swap in a twin's English shows by the word level while the twin is English. At -3 a dial's kind shows no Japanese;
-English only stays one switch over both, rendering both as -3. `fw.py intensity sentences up` and the like step the
-sentence level, and `fw.py intensity` shows both. The hook still writes twins while only the word level is off. Why:
+English only stays one switch over both, rendering both as -3. Until the reader first sets the sentence level (no
+`intensity_sentences` pref yet), it follows the word level, in the collector's answers and in the hook alike: the
+first experience is one dial, and an off spell from before the sentence level keeps the sentences off too. Off still
+means no Japanese: `fw.py intensity off` (and the skill's off), `normal` and `full` without a dial named, and saying
+"japanese back on", set both dials (a dial that follows the words just follows them, so it stays one dial), while
+`fw.py intensity chat off` or `sentences off` turns one kind off. `fw.py intensity sentences up` and the like step the
+sentence level, and `fw.py intensity` shows both. The hook passes the live levels to the commands it asks Claude to
+run (`--level W --sentences S`; `--level` alone, as in older briefs, means both dials at it), so the weave and the
+check don't read the levels from a cache that may lag the collector; the hook still writes twins while only the word
+level is off, and the weave refuses only with both off. Why:
 with one dial the sentences took the whole sentences' part at every level while the stays-English rules kept most
 known words out (27 known words offered in one reply, 4 kept; normal spent 0.07 of a 0.64 word budget), so a reader
 saw too many Japanese sentences and too few known words.
@@ -139,12 +148,16 @@ tint on (a per-device setting, on by default), give each shown Japanese element 
 background from green (0) through yellow to red (0.5 and up), a twin's span lighter than its words'; an older message
 has none and gets no tint. The tint changes nothing in reports.
 
-**Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a noun
-and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as adverbs
-among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns, adverbs
-still being learned and connectives (もし, でも, そして and the rest, or a swap for "and", "but", "so", "if") stay out. The
-brief asks Claude to keep, where the English reads as naturally either way, a phrasing that leaves a swapped known noun
-or adjective in place.
+**Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a
+noun and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as adverbs
+among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns and
+adverbs still being learned stay out, and so do connectives and question words whatever else the dictionary types them
+as (`check_reply.connective`): a few spellings (もし, でも, そして and the like), any word typed as a conjunction unless
+the English it stands in for is "again" (また), the question words of the ど- series, and any swap for "and", "but",
+"so", "if", "however", "moreover", "also", "therefore", "then", "instead", "otherwise", "unless", "in case", "in other
+words", "how", "why", "what", "when", "where" and the like ("so" stays as an intensifier for an adverb with no
+conjunction type, as とても). The brief asks Claude to keep, where the English reads as naturally either way, a phrasing
+that leaves a swapped known noun or adjective in place.
 
 **Exploration and propensities.** Each element's place in its order is, with chance 0.2 (`twins.EXPLORE`), a uniform
 random place instead of its rank. So every element has a known chance of showing at each level, never 0 or 1 by the
