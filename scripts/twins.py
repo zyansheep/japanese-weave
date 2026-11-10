@@ -198,6 +198,11 @@ def _code_out(piece):
     return CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), piece), saved
 
 
+def outside_code(text):
+    """text without its code (fenced, indented and inline), as the clients show it as text."""
+    return ''.join(_code_out(piece)[0] for code, piece in _chunks(str(text)) if not code)
+
+
 class Span:
     """A twin span as the clients read it: kind 'ja' or 'en', its threshold as written (on: the number when it is one
     of -2..3, else None: rendered as written), where its opening tag starts and ends, where its first </span> after
@@ -467,7 +472,7 @@ def english_only(text):
             res += p[at:m.start()]
             at = m.end()
             token = m.group()
-            if not token.lower().startswith('<abbr'):
+            if m.group(2) is None:  # any other tag, an <abbr> left open among them
                 res += token
                 floor = len(res)
                 continue

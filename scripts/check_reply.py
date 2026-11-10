@@ -730,7 +730,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         error = 'the final markup does not read back to the thresholds assigned'
     texts = twins.annotation_texts(final)
     for level in (intensity.OFF,) + twins.SHOWING:
-        shown = twins.render(final, level)
+        shown = twins.outside_code(twins.render(final, level))  # code may quote the markup
         if 'data-on' in shown or 'data-jw' in shown or '<ja>' in shown:
             error = f'level {level} does not render clean'
         if twins.shown_texts(final, level) != [texts[j] for j, o in enumerate(owners)

@@ -894,6 +894,9 @@ def sentence_records(text, day, records):
     except Exception as error:
         print(f'Japanese Weave: sentences not read ({error.__class__.__name__}: {error})', file=sys.stderr)
         return
+    if found and not grammar.valid_record(found):  # over a record's limits (a very long reply): left out, since the
+        print('Japanese Weave: sentences not sent (the reply is past what a record holds)', file=sys.stderr)
+        return                                     # collector refuses a batch holding one and the scan would stall
     if found:
         records.append(found)
 

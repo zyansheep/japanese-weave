@@ -776,5 +776,39 @@ class ClientParity(unittest.TestCase):
         self.assertEqual(twins.shown_texts(nested, 0), [])
 
 
+
+class ReviewRound4(Home):
+    """Regression tests for the pre-merge review (scratchpad jw/stall.py, fuzz2.py, fuzz4.py)."""
+    TWIN = ReviewRound1.TWIN
+
+    def test_1_a_reply_past_a_records_limits_is_left_out_not_sent(self):
+        import fwlib
+        para = (f'The {P} is small.<ja>{P}は{SMALL}です。</ja> Read the {INFO} in the {LOG} before you start, and '
+                f'check the whole thing twice with the {INFO}.\nThe {INFO} matters here.<ja>{INFO}です。</ja> After '
+                f'that, run the tests and look at the {LOG}.\n\n')
+        big = check_reply.finish(para * 90, plan(), TYPES, seed=1, remember=False).final
+        self.assertFalse(grammar.valid_record(grammar.record(big, DAY)))  # the collector would refuse the batch
+        records = []
+        fwlib.sentence_records(big, DAY, records)
+        self.assertEqual(records, [])  # so the scan never stalls on it
+        fwlib.sentence_records(check_reply.finish(para * 2, plan(), TYPES, seed=1, remember=False).final, DAY,
+                               records)
+        self.assertEqual(len(records), 1)
+        self.assertTrue(grammar.valid_record(records[0]))
+
+    def test_2_code_may_quote_the_markup(self):
+        for code in ('Set `data-on="2"` on the span.', 'Example:\n```html\n<span data-jw="ja">x</span>\n```\n',
+                     'Write `<ja>` after it.', 'An open fence:\n```\n<span data-jw="en">'):
+            text = f'The {P} is small.{self.TWIN}\n\n{code}'
+            checked = check_reply.finish(text, plan(), TYPES, seed=1, remember=False)
+            self.assertIsNotNone(checked.final, (code, checked.text[-300:]))
+            self.assertIn(code.split('\n')[-1] or code, checked.final)
+
+    def test_3_an_abbr_left_open_in_prose_is_text_under_english_only(self):
+        text = 'Wrap each word in <abbr title="..."> tags. Then done.'
+        self.assertEqual(twins.render(text, twins.OFF), text)
+        twins.english_only(f'{text} {P}.')  # a later </abbr> closes it, as in HTML: read, not a crash
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -741,7 +741,8 @@ def draft_rules(stage, level, command):
             'can fix quickly, you may fix it and run it once more (at most twice in all).\n'
             '4. Send everything below the ===== line exactly as it is, as your whole final message: nothing before or '
             'after it and no change to it. Don\'t mention the draft, the commands or these steps: the user sees only '
-            'your final message. If a command fails, send your English reply as it is, with no twins.')
+            'your final message. If a command fails, or the second check still prints no ===== line, send your '
+            'English reply as it is, with no twins.')
 
 
 def draft_digest(stage, level, command):
