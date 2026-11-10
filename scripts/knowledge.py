@@ -181,8 +181,10 @@ def read_commands():
 def is_showing(context):
     """A browser passage with a shown record, or a T3 message with a word count (from its shown record, or backfilled
     from its transcript): replayed whole, opened or not (showings)."""
-    if context['surface'] == 't3':  # a message shown at -3 (English only) showed no Japanese: a word count only
-        return context.get('words') is not None and (context.get('level') is None or context['level'] > intensity.OFF)
+    if context['surface'] == 't3':  # a message shown at (-3, -3) (English only) showed no Japanese: a word count only
+        return context.get('words') is not None and (
+            context.get('level') is None or context['level'] > intensity.OFF
+            or (context.get('sentences') is not None and context['sentences'] > intensity.OFF))
     return context['surface'] == 'browser' and context.get('shown_at') is not None
 
 
@@ -772,6 +774,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
     return {'at': at, 'shown': shown, 'surface': surface, 'words': words, 'level': context.get('level'),
+            'sentences': context.get('sentences'),
             'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
@@ -2618,10 +2621,19 @@ def chat_level(changes, at):
     return level
 
 
-def chat_budget(changes, at, challenge=0, level=None):
-    """The chat's lookup budget per 100 words at `at`: its level then (chat_level), or the level a message reports it
-    was shown at (render-time levels), with normal's budget the challenge when set. None at full (no budget)."""
-    return intensity.budget(chat_level(changes, at) if level is None else level, challenge or None)
+def chat_budget(changes, at, challenge=0, level=None, sentences=None):
+    """The chat's lookup budget per 100 words at `at`: its level then (chat_level), or the levels a message reports it
+    was shown at (render-time levels), with normal's budget the challenge when set. None at full (no budget). With two
+    dials (a sentence level other than the word level), the words' part of the word level's budget and the sentences'
+    part (intensity.SENTENCE_SHARE) of the sentence level's, None when either is full."""
+    level = chat_level(changes, at) if level is None else level
+    words = intensity.budget(level, challenge or None)
+    if sentences is None or sentences == level:
+        return words
+    part = intensity.budget(sentences, challenge or None)
+    if words is None or part is None:
+        return None
+    return (1 - intensity.SENTENCE_SHARE) * words + intensity.SENTENCE_SHARE * part
 
 
 def day_interval(days, statistic, level=0.9, draws=BOOT_DRAWS, seed=1):
@@ -2665,7 +2677,7 @@ def day_totals(records, changes=(), challenge=0):
             t['classes'][name][0] += expected
             t['classes'][name][1] += seen
         budget = r['budget'] if r['surface'] == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge,
-                                                                             r.get('level'))
+                                                                             r.get('level'), r.get('sentences'))
         if budget is not None:
             t['budget'][0] += budget * r['read']
             t['budget'][1] += r['read']

@@ -136,6 +136,71 @@ class Collector(Home):
         self.assertEqual([c['level'] for c in changes], [1, intensity.OFF, 0])
 
 
+class Reports(Home):
+    """T3's report items with a sentenceLevel: a showing per (word level, sentence level)."""
+
+    def item(self, kind, at, level=None, sentences=None, context='m1', **extra):
+        base = {'kind': kind, 'view': 'v1', 'context': context, 'at': at, 'box': [0, 0, 400, 60],
+                'annotations': [['問題', 10, 0]]}
+        if level is not None:
+            base['level'] = level
+        if sentences is not None:
+            base['sentenceLevel'] = sentences
+        return dict(base, **extra)
+
+    def test_a_showing_per_pair_of_levels(self):
+        db = self.home / 'log.sqlite'
+        now = intensity.now_ms()
+        visible = dict(y=0, height=24, ms=4000, wall=4000, away=0, media=0, idle=0)
+        pin = dict(word='問題', position=0, dwellMs=900)
+        result = feedback.record([
+            self.item('shown', now - 9000, 1, 1, words=40),           # equal: stored as one dial is
+            self.item('pin', now - 8500, 1, None, **pin),              # no sentenceLevel: the same pair
+            self.item('pin', now - 8000, 1, 2, **pin),                 # another pair: its own showing
+            self.item('visible', now - 7000, -3, 2, **visible),        # words off, sentences shown: kept
+            self.item('visible', now - 6000, 2, -3, **visible),        # and the other way round
+            self.item('visible', now - 5000, -3, -3, **visible),       # nothing Japanese: dropped
+            self.item('shown', now - 4000, -3, -3, words=40, context='m2'),  # a word count only
+            self.item('visible', now - 3000, 1, 4, **visible),         # not a level: malformed
+            self.item('shown', now - 2000, None, 2, words=30, context='m3'),  # no level: as before
+        ], 't3', db, now=now)
+        self.assertEqual((result['stored'], result['rejected']), (7, 2))
+        self.assertEqual([r['item'] for r in result['reasons']], [5, 7])
+        self.assertIn('no Japanese on screen', result['reasons'][0]['error'])
+        rows, contexts = feedback.load(db)
+        keys = sorted(k[2] for k in contexts)
+        self.assertEqual(keys, ['m1@-3/2', 'm1@1', 'm1@1/2', 'm1@2/-3', 'm2@-3', 'm3'])
+        self.assertEqual(sorted(r['context'] for r in rows), ['m1@1', 'm1@1/2'])
+        pair = contexts[('t3', 'v1', 'm1@1/2')]
+        self.assertEqual((pair['message'], pair['level'], pair['sentences'], pair['words']), ('m1', 1, 2, 40))
+        self.assertEqual(contexts[('t3', 'v1', 'm1@1')]['sentences'], 1)
+        self.assertEqual((contexts[('t3', 'v1', 'm3')]['level'], contexts[('t3', 'v1', 'm3')]['sentences']),
+                         (None, None))
+        english = contexts[('t3', 'v1', 'm2@-3')]
+        self.assertEqual((english['annotations'], english['words']), ([], 40))
+        self.assertFalse(knowledge.is_showing(english))
+        self.assertTrue(all(knowledge.is_showing(contexts[('t3', 'v1', k)])
+                            for k in ('m1@-3/2', 'm1@2/-3', 'm1@1/2', 'm1@1')))
+        self.assertEqual(len(knowledge.showings(rows, contexts, now + knowledge.SETTLE_MS + 1)), 5)  # m2 aside
+
+    def test_context_ids(self):
+        self.assertEqual(feedback.level_context('m1', 2), 'm1@2')
+        self.assertEqual(feedback.level_context('m1', 2, 2), 'm1@2')
+        self.assertEqual(feedback.level_context('m1', -1, 3), 'm1@-1/3')
+        for context, split in (('m1@-1/3', ('m1', -1, 3)), ('m1@2', ('m1', 2, 2)), ('m1', ('m1', None, None)),
+                               ('m1@2/9', ('m1@2/9', None, None)), ('m1@x', ('m1@x', None, None)),
+                               ('m1@-3/-3', ('m1', -3, -3))):
+            self.assertEqual(feedback.split_levels(context), split, context)
+        self.assertEqual(feedback.split_context('m1@-1/3'), ('m1', -1))
+
+    def test_a_messages_budget_at_a_pair(self):
+        self.assertEqual(knowledge.chat_budget([], NOW, level=1), intensity.BUDGETS[1])
+        self.assertEqual(knowledge.chat_budget([], NOW, level=1, sentences=1), intensity.BUDGETS[1])
+        both = (1 - intensity.SENTENCE_SHARE) * intensity.BUDGETS[-1] + intensity.SENTENCE_SHARE * intensity.BUDGETS[2]
+        self.assertAlmostEqual(knowledge.chat_budget([], NOW, level=-1, sentences=2), both)
+        self.assertIsNone(knowledge.chat_budget([], NOW, level=0, sentences=intensity.FULL))
+
+
 class Calibration(unittest.TestCase):
     def test_sentence_presses_are_counted_on_their_own(self):
         changes = [{'at': NOW - 7_200_000, 'surface': 'sentences', 'level': -1, 'until': NOW + 3_600_000,

@@ -15,8 +15,9 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           "error"}]}  (see feedback.py; T3 also sends review items, what happened to a review card,
                           with its grade when given; reasons, from T3: why each rejected item was, by index, such as a
                           shownMs over a day; and an optional "level" on
-                          the others: the level the message was rendered at, -3..3, which makes each level a message
-                          was shown at a showing of its own)
+                          the others: the word level the message was rendered at, -3..3, with an optional
+                          "sentenceLevel", the sentence level (absent: the same), which makes each pair of levels a
+                          message was shown at a showing of its own)
   POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool, "peek"?: bool,
                           "release"?: [card ids]}: the next review card, in Anki's order (review.py; more: past today's
                           new-card limit; peek: the counts alone, for a badge: card null, nothing served or recorded;
