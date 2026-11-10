@@ -275,6 +275,9 @@ writes a Japanese twin after each sentence that fits, code gives each twin and s
 value per expected open, within each level's budget, a fifth of the places drawn at random so each element's chance of
 showing is known), and T3 Code shows the message at the reader's level, so the arrows and English only change what is
 on screen after the fact; the model counts only what was shown, at the level it was shown at (docs/chat-weave.md).
+Then two dials: the reader sets the words' level and the sentences' level apart, each kind cut from its own part of
+the budget, known adverbs may stay in English sentences, and each Japanese element carries its predicted chance of a
+lookup for a faint tint in T3 Code (docs/chat-weave.md, "Two dials").
 
 ## 7. Experiments
 

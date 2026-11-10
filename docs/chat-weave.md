@@ -4,7 +4,8 @@ How chat replies in T3 Code get their Japanese since 2026-10-22, and the experim
 `scripts/chatweave.py` and `scripts/chatweave.mjs` (the weave), `scripts/check_reply.py` (the check),
 `scripts/twins.py` (the levels) and `weave.compose_draft` (the brief). Since 2026-11 the Japanese sentences are also
 held to the grammar the reader knows and to a length the log supports ([grammar.md](grammar.md)), and a reply carries
-every level at once, so the reader's level is applied when it is shown (below).
+every level at once, so the reader's levels are applied when it is shown (below): one for the swapped words and one
+for the Japanese sentences.
 
 ## The steps
 
@@ -49,8 +50,8 @@ every level at once, so the reader's level is applied when it is shown (below).
    - drops a twin that breaks a limit (more than two sentences, too long, grammar not on the list, two learning
      patterns in a sentence) or any rule of the old check (a pronoun, もし with no conditional, bare particles that
      carry meaning, する on an English word and the rest): its sentence stays English;
-   - puts back in English a swap that breaks the stays-English rules (only nouns, and adjectives right before a noun),
-     and a content word's fifth gloss;
+   - puts back in English a swap that breaks the stays-English rules (only nouns, adjectives right before a noun, and
+     adverbs the reader knows at a glance, below), and a content word's fifth gloss;
    - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave;
      each kept swap is the draft's swap of the same word and gloss whose English around it, kept by the weave,
      overlaps most with the reply's, so a word offered for two senses keeps each sense's English even when Claude puts
@@ -58,11 +59,12 @@ every level at once, so the reader's level is applied when it is shown (below).
      are priced as the weave prices its swaps, from the same word list and on the same scale, while a content word not
      on that list or flagged a dictionary word, like a dictionary word or a learning word's later use, makes the twin
      show only at full; glossed grammar costs nothing. It then
-     decides what each level shows (thresholds and propensities, below), writes the final markup, checks that it reads
-     back to the same elements and thresholds and that every level renders clean, and keeps the plan in
+     decides what each level of each dial shows (thresholds and propensities, below), writes the final markup with
+     each element's predicted chance (`data-p`, the tint), checks that it reads back to the same elements, thresholds
+     and chances and that every pair of a word level and a sentence level renders clean, and keeps the plan in
      `reply-plans.json` for the hook's sentence record;
-   - prints what it dropped and put back, each level's expected opens against its budget, and the final markup under
-     a line of `=====`.
+   - prints what it dropped and put back, each level's expected sentence opens and word lookups against its two parts
+     of the budget (saying where each dial is now), and the final markup under a line of `=====`.
 
    Claude may fix a dropped twin and check once more (at most twice in all), then sends everything below the `=====`
    line exactly as it is.
@@ -70,7 +72,8 @@ every level at once, so the reader's level is applied when it is shown (below).
 The full steps go out on a chat's first turn and every 20 turns or after a compaction (and once to a chat that had the
 steps from before twins); other turns carry a short digest. While English only is on (T3 Code, an hour) the hook
 keeps the steps, with a line that the reply shows English until English only is off (below); while chat intensity is
-off, or in a chat with Japanese off, it sends a one-line note to reply in plain English and `fw.py weave` refuses at
+off (in draft style both dials: with only the word level off the twins still show at the sentence level), or in a
+chat with Japanese off, it sends a one-line note to reply in plain English and `fw.py weave` refuses with both dials at
 off. Draft and weave needs `<abbr>` glosses (T3 Code with `fw.py glosses abbr`) and node or bun. It is off in Codex
 and terminals, and with `fw.py chat-style classic`, which bring back the brief in which Claude weaves as it writes
 (and the plain-English note under English only). The calibration line and topical words belong to the classic brief:
@@ -79,61 +82,95 @@ in draft style the weave and the check set the amounts. Brief records carry `mod
 ## Levels after the fact
 
 The contract with the T3 clients (desktop and phone) is the markup: a swapped word in English text is `<abbr
-title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>`, shown as that gloss at levels N and
-up and as its English below; a twinned sentence is `<span data-jw="ja" data-on="N">...</span><span data-jw="en"
-data-on="N">...</span>`, the Japanese from N up and the English below. N is in -2..3 (3: full only); at -3 (off, and
-English only) nothing is Japanese. Anything without `data-on` or `data-jw` renders as before, so older messages are
-unchanged. Malformed markup renders by one rule on both clients, which `twins.render` mirrors so the fingerprints agree:
-a Japanese span pairs with an English one right after it (whitespace between allowed) of the same threshold; a lone
-English span always shows; a lone Japanese one shows from its threshold and below it is its last sentence mark's
-translation; in a broken message (a twin span left open, split by a blank line, or inside another) every pair shows its
-English, and a Japanese twin left open never shows; a `data-on` that isn't exactly -2..3 (`4`, `01`, a Unicode minus)
-renders as written; an empty `data-en` is the gloss's first meaning; a self-closing `<abbr/>` or level `<span/>` is
-dropped; a level abbr whose own `</abbr>` (abbrs nest as in HTML) doesn't come before the end of its block is its
-English at every level, in place of its tag and the run of Japanese (Han, kana, the long-vowel mark) its text starts
-with, the rest of the block as it is; English only (and off) renders everything as written below every threshold and
-then as the clients' English-only view reads older markup: each glossed sentence its translation, back to the previous
-mark, an English sentence's end, code, a tag or a line break, and each glossed word its meaning; markup in code (inline,
-fenced or indented) is text. On the review's corpus of malformed and edge cases the Python rendering's glosses match the
-clients' in every rendering where the two clients agree (code shown literally aside). A sentence record is made only for
-well-formed markup. Each report item T3 sends carries the level the message was rendered at, and the annotations and
-words it reports come from the screen, so a hidden word is never reported as shown.
+title="reading · meaning" data-en="original English" data-on="N" data-p="P">JAPANESE</abbr>`, shown as that gloss at
+word levels N and up and as its English below; a twinned sentence is `<span data-jw="ja" data-on="N"
+data-p="P">...</span><span data-jw="en" data-on="N">...</span>`, the Japanese from sentence level N up and the English
+below. N is in -2..3 (3: full only). Anything without `data-on` or `data-jw` renders as before, so older messages are
+unchanged. Malformed markup renders by one rule on both clients, each element compared to its own kind's dial, which
+`twins.render` mirrors so the fingerprints agree: a Japanese span pairs with an English one right after it (whitespace
+between allowed) of the same threshold; a lone English span always shows; a lone Japanese one shows from its threshold
+and below it is its last sentence mark's translation; in a broken message (a twin span left open, split by a blank
+line, or inside another) every pair shows its English, and a Japanese twin left open never shows; a `data-on` that
+isn't exactly -2..3 (`4`, `01`, a Unicode minus) renders as written; an empty `data-en` is the gloss's first meaning; a
+self-closing `<abbr/>` or level `<span/>` is dropped; a level abbr whose own `</abbr>` (abbrs nest as in HTML) doesn't
+come before the end of its block is its English at every level, in place of its tag and the run of Japanese (Han,
+kana, the long-vowel mark) its text starts with, the rest of the block as it is; English only (and both dials off)
+renders everything as written below every threshold and then as the clients' English-only view reads older markup:
+each glossed sentence its translation, back to the previous mark, an English sentence's end, code, a tag or a line
+break, and each glossed word its meaning; markup in code (inline, fenced or indented) is text. On the review's corpus
+of malformed and edge cases the Python rendering's glosses match the clients' in every rendering where the two clients
+agree (code shown literally aside). A sentence record is made only for well-formed markup (which also means every
+gloss in a twin's English has a threshold). Each report item T3 sends carries the levels the message was rendered at,
+and the annotations and words it reports come from the screen, so a hidden word is never reported as shown.
+
+**Two dials.** The reader sets two levels, each -3..3 with the same steps, the same 3-hour expiry back to normal and
+presses logged the same way (`intensity.py`): the *word level* (the collector's surface `chat`, the chat level from
+before) decides every level abbr, and the *sentence level* (surface `sentences`) every twin. `GET
+/v1/intensity?surface=chat` returns the sentence level as `sentences` next to `intensity` and `english`; a collector
+without it means the sentence level is the word level (one dial). The two are independent: what words show doesn't
+depend on the sentence level, nor the reverse; a glossed word inside a shown twin's Japanese is part of the twin, and a
+swap in a twin's English shows by the word level while the twin is English. At -3 a dial's kind shows no Japanese;
+English only stays one switch over both, rendering both as -3. `fw.py intensity sentences up` and the like step the
+sentence level, and `fw.py intensity` shows both. The hook still writes twins while only the word level is off. Why:
+with one dial the sentences took the whole sentences' part at every level while the stays-English rules kept most
+known words out (27 known words offered in one reply, 4 kept; normal spent 0.07 of a 0.64 word budget), so a reader
+saw too many Japanese sentences and too few known words.
 
 **Thresholds.** One order per reply and kind, cut at each budgeted level's lookup budget (`intensity.budget` per 100 of
-the reply's English words). Twins spend the sentences' share of it (`SENTENCE_SHARE`), each Japanese sentence at its
-predicted open chance but never less than the price of a sentence, so no level asks for more Japanese sentences than
-the count before the sentence model did and normal's and much heavier's densities stay as they were; words spend the
-whole budget at their current lookup chance, as the weave gave a chat reply's learning words before. Levels are filled
-from -2 up, each starting from the level below, so the sets are nested. At each level twins come first (a twin shown
-hides its English sentence's swaps, and charges the costly words in its Japanese to the words' part), then words, at
-most the level's costly words in one English sentence and one use of each learning word below full. The element at
-the edge of a part gets in with the chance (what is left) / (its cost), one uniform draw per reply and part, so a
-level's expected spend is its part and the sets stay nested. Words known at a glance show from -2; dictionary words
-and a learning word's later uses only at full; a twin's English swaps never above the twin, so as the level goes down
-a sentence turns English before its words do. The order is by value per expected open: for a twin its own value, the
-learning values of the costly words in its Japanese and this week's pattern, over its sentences' part; for a word its
-learning value (1 at the target chance of 25%) over its chance.
+the reply's English words), each kind from its own part of it: twins from the sentences' part (`SENTENCE_SHARE`) at
+each sentence level, each at its cost: each Japanese sentence at its predicted open chance but never less than the
+price of a sentence (so no level asks for more Japanese sentences than the count before the sentence model did), plus
+the costly words in its Japanese; words from the rest at each word level, at their current lookup chance, a word in a
+twin's English counted as if its twin were English. Levels are filled from -2 up, each starting from the level below,
+so each kind's sets are nested; at most the level's costly words in one English sentence and one use of each learning
+word below full. The element at the edge of a part gets in with the chance (what is left) / (its cost), one uniform
+draw per reply and part, so a level's expected spend is its part and the sets stay nested. Words known at a glance
+show from -2; dictionary words and a learning word's later uses only at full, and so does a twin holding one. The
+order is by value per expected open: for a twin its own value, the learning values of the costly words in its
+Japanese and this week's pattern, over its cost; for a word its learning value (1 at the target chance of 25%) over
+its chance. The rules that only made sense with one dial are gone: a twin shown no longer hides its English's swaps
+from the budget, and those swaps are no longer held at or below the twin's threshold.
+
+**The tint.** check-reply writes `data-p`, the predicted chance the reader looks it up (0..1, at most two decimals), on
+every level abbr (the weave's lookup chance), on each twin's Japanese span (the chance its translation is opened: 1 -
+the chance none of its sentences' is) and on the glossed words in a twin's Japanese whose chance it has (the reply's
+or the weave's swaps, or the weave's word list); never on a closing mark or an English span. The clients, with the
+tint on (a per-device setting, on by default), give each shown Japanese element with a valid `data-p` a faint
+background from green (0) through yellow to red (0.5 and up), a twin's span lighter than its words'; an older message
+has none and gets no tint. The tint changes nothing in reports.
+
+**Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a
+noun and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as
+adverbs among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns, adverbs still being
+learned and connectives (もし, でも, そして and the rest, or a swap for "and", "but", "so", "if") stay out. The brief
+asks Claude to keep, where the English reads as naturally either way, a phrasing that leaves a swapped known noun or
+adjective in place.
 
 **Exploration and propensities.** Each element's place in its order is, with chance 0.2 (`twins.EXPLORE`), a uniform
 random place instead of its rank. So every element has a known chance of showing at each level, never 0 or 1 by the
 model's predictions alone, and the elements placed at random are a sample the model didn't choose. An element's
-propensity at a level is the share of 1,000 seeded runs of the same randomization in which it shows there (within
-about 0.03 of the exact chance), kept with its threshold, its prediction and whether its place was random.
+propensity at a level of its own kind (a twin's at a sentence level, a word's at a word level, a word in a twin's
+English while the twin is English) is the share of 1,000 seeded runs of the same randomization in which it shows
+there (within about 0.03 of the exact chance), kept with its threshold, its prediction and whether its place was
+random.
 
 **What the reading model sees.** Only what was rendered is evidence:
 - *Exposure.* T3 reports what is on screen, and the word model reads only a showing's annotations. The transcript
-  readers on each machine count a reply with levels at the level it is read at (its plan's level, else the chat level
-  in force now; English only doesn't count, since the reply shows its Japanese once that is off), never its full
-  markup: the exposure scan's words and reading entries
-  (`fwlib.read_replies`), the hook's last reply and its topical turns (`twins.view`).
+  readers on each machine count a reply with levels at the levels it is read at (its plan's word and sentence levels,
+  else the chat's two levels in force now; English only doesn't count, since the reply shows its Japanese once that is
+  off), never its full markup: the exposure scan's words and reading entries (`fwlib.read_replies`), the hook's last
+  reply and its topical turns (`twins.view`).
 - *The join.* The hook's sentence record of a reply with levels keeps, never text, every element with its threshold
-  and propensities, which element each glossed word belongs to, and the fingerprint of what each level shows
-  (`grammar.record_levels`). The collector keeps each level a message was shown at as a showing of its own (its items
-  carry the level; feedback.py stores them under `<message>@<level>`), and the join matches a showing's annotations
-  against the fingerprint at its level, so it knows which sentences were on screen and where (`sentence_model`).
-  When the reader opens a twin's translation, only that twin's own words count as read in English
-  (`knowledge._in_english`, from the record's elements): the English sentences around it, and their swaps, were read
-  as they are.
+  and propensities, which element each glossed word belongs to, and the fingerprint of what each of the 49 pairs of a
+  word level and a sentence level (-3..3 each) shows (`grammar.record_levels`, `pf`; a record from before the two dials
+  has `fps`, each level -2..3 with both dials at it, and joins those equal pairs; the scanner's version went up, so the
+  scan sends every reply's record again with the pairs). The collector keeps each pair a message was shown at as a
+  showing of its own (its items carry `level`, the word level, and `sentenceLevel`; feedback.py stores them under
+  `<message>@<level>` when the two are equal, else `<message>@<level>/<sentenceLevel>`), and the join matches a
+  showing's annotations against the fingerprint at its pair, so it knows which sentences were on screen and where
+  (`sentence_model`); a sentence unit keeps the sentence level, its twin's threshold and propensity there. When the
+  reader opens a twin's translation, only that twin's own words count as read in English (`knowledge._in_english`,
+  from the record's elements): the English sentences around it, and their swaps, were read as they are.
 - *Selection.* Thresholds depend on the model's predictions, so without exploration the model would only see what it
   already predicts to be easy. `fw.py calibrate` compares expected and seen opens on the twins placed at random against
   those the model ranked, and gives the open chance over every twin written by inverse propensity. The fit itself stays
@@ -141,25 +178,30 @@ about 0.03 of the exact chance), kept with its threshold, its prediction and whe
   likelihood of the opens given the features is unchanged by it. If the random and the ranked twins disagree, the fit
   can weight each sentence by 1 / its propensity at its level (clipped, normalized), which makes it estimate the open
   chance over every twin written; or be fitted on the random ones alone as a check.
-- *Another level.* A message read again at another level is another showing, not a duplicate, and a level change while
-  it is on screen splits its reports (the client's later items carry the new level). The client sends a shown record
-  for each level a message with level markup is shown at, with that level's word count; a level's first report that
-  isn't its shown record starts that showing with the word count of another level until it comes.
+- *Another level.* A message read again at another pair of levels is another showing, not a duplicate, and a change of
+  either dial while it is on screen splits its reports (the client's later items carry the new levels). The client
+  sends a shown record for each pair a message with level markup is shown at, with that pair's word count; a pair's
+  first report that isn't its shown record starts that showing with the word count of another pair until it comes.
 - *Presses.* The panel's arrows and English only now change what is on screen at once; they are logged as before, and
-  calibrate counts them as before (English only on as a lighter press). A press of English only names the messages on
-  screen, read as shown at the chat level then; their Japanese sentences are weak opens.
-- *English only* is level -3 at render time: items at -3 show no Japanese and are dropped, but for a shown record,
-  kept with no annotations and never a showing, so a message first shown in English gets its word count for the
-  levels it is read at later. In draft style the hook
-  keeps writing twins while it is on, so turning it off (or its hour running out) shows those replies' Japanese at the
-  level then, like every other message, and English only is a view, as the arrows are; at off (-3 from the arrows) or
-  in a chat with Japanese off, the hook still has replies written in plain English: those mean no Japanese work.
-- *Older messages* (no thresholds) are read as before: clients send a level only for messages with level markup, and
+  calibrate counts each dial's presses on its own line (English only on as a lighter press of the words). A press of
+  English only names the messages on screen, read as shown at the chat's two levels then (before the sentence level's
+  first change in the log, at the word level with both dials at it); their Japanese sentences are weak opens.
+- *English only* is both dials at -3 at render time: items at (-3, -3) show no Japanese and are dropped, but for a
+  shown record, kept with no annotations and never a showing, so a message first shown in English gets its word count
+  for the pairs it is read at later; an item with one dial at -3 still showed the other kind's Japanese and is kept. In
+  draft style the hook keeps writing twins while English only is on, so turning it off (or its hour running out) shows
+  those replies' Japanese at the levels then, like every other message, and English only is a view, as the arrows are;
+  with both dials off, or in a chat with Japanese off, the hook still has replies written in plain English: those mean
+  no Japanese work. A message's budget in calibrate's lookups is the words' part of its word level's budget and the
+  sentences' part of its sentence level's.
+- *Older messages* (no thresholds) are read as before: clients send levels only for messages with level markup, and
   an item without one is stored as it always was, one showing per message.
 
-**Deploying.** The collector first (it takes the level and the new record fields; an older one rejects the records and
-keeps every level of a message in one row), then the T3 builds that render levels (an older build shows both twins),
-then the hook.
+**Deploying.** The collector first (it takes `sentenceLevel`, the `sentences` surface and the records with pair
+fingerprints; older clients are unaffected), then the T3 builds with two dials, the tint and the new reports (with an
+older collector they read the sentence level as the word level), then the hook (`data-p`, budgets per kind, the
+relaxed rule). Each step works with the others still on the old version: an older client shows a message with `data-p`
+as before, and an older hook's replies have no tint.
 
 ## The experiment
 
@@ -178,8 +220,8 @@ and unlabelled.
 
 What the judges kept finding, and what now handles it:
 - **Wrong senses on basic words:** the trap list in `DRAFT_RULES`.
-- **Japanese words in English grammar slots:** nouns only in English sentences, checked with the dictionary's word
-  types.
+- **Japanese words in English grammar slots:** nouns only in English sentences (and adjectives right before a noun;
+  since the two dials also adverbs the reader knows at a glance), checked with the dictionary's word types.
 - **Words that follow their noun used as English prepositions, pronouns, "if" with no conditional ending, and
   English verbs with する:** all in `check_reply.py`.
 

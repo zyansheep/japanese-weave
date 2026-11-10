@@ -47,10 +47,10 @@ GRAMMAR = sorted({'は', 'が', 'を', 'に', 'で', 'の', 'へ', 'と', 'ね',
                  key=len, reverse=True)
 NOUN_TYPES = ('n', 'n-adv', 'n-t', 'n-suf', 'n-pref', 'num', 'ctr', 'pn')
 ADJECTIVE_TYPES = ('adj-i', 'adj-na', 'adj-no', 'adj-pn', 'adj-f', 'adj-ix')
-ADVERB_TYPES = ('adv', 'adv-to')  # time words used as adverbs (今, 最初) are nouns by type (n-adv, n-t) already
+ADVERB_TYPES = ('adv', 'adv-to')  # time words used as adverbs (今) are nouns by type (n-adv, n-t) already
 # Connectives stay out of English sentences even when they are adverbs by type: by spelling, or by the English they
 # stand in for (また as "again" may stay; as "and" it may not)
-CONNECTIVES = set(grammar.CONJUNCTIONS) | {'もし', 'もしも', 'でも', 'しかし', 'だから', 'けど', 'けれど', 'けれども'}
+CONNECTIVES = set(grammar.CONJUNCTIONS) | {'もし', 'でも', 'しかし', 'だから', 'けど'}
 CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though', 'although'}
 VERB_OR_ADJECTIVE = re.compile(r'^(v|adj-i)')
 SURU = re.compile(r'([A-Za-z][A-Za-z-]*)\s*((?:し[なまよてた]|さ[れせ]|す[るれ])[ぁ-ん]{0,6})')

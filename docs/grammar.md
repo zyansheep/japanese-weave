@@ -144,14 +144,17 @@ after an update reads every transcript on the machine once more for these record
 refresh`).
 
 A reply with render-time levels ([chat-weave.md](chat-weave.md), "Levels after the fact") shows a different subset of
-its glossed words at each level, so its record also has, still never text: each element (a twin or a swapped word)
-with its threshold, the twin holding a word, its propensities at -2..2, its expected opens and whether its place was
-drawn at random, from check-reply's plan when it is on the machine; which element each glossed word belongs to; the
-fingerprint of what each level -2..3 shows; the level the reply was shown at when sent; each sentence's predicted open
-chance; and the patterns of the twins check-reply dropped. Its sentences are numbered among all its glossed words. T3
-reports the level a message was rendered at, the collector keeps each level a message was shown at as a showing of its
-own, and the join matches a showing's annotations against the fingerprint at its level, so a sentence counts only where
-it was on screen, and where.
+its glossed words at each pair of a word level and a sentence level (the reader's two dials), so its record also has,
+still never text: each element (a twin or a swapped word) with its threshold, the twin holding a word, its
+propensities at -2..2 (a twin's at the sentence levels, a word's at the word levels), its expected opens and whether
+its place was drawn at random, from check-reply's plan when it is on the machine; which element each glossed word
+belongs to; the fingerprint of what each of the 49 pairs of levels -3..3 shows (`pf`; records from before the two
+dials have `fps`, each level -2..3 with both dials at it); the levels the reply was shown at when sent (`lv`, `ls`);
+each sentence's predicted open chance; and the patterns of the twins check-reply dropped. Its sentences are numbered
+among all its glossed words. T3 reports the levels a message was rendered at, the collector keeps each pair a message
+was shown at as a showing of its own, and the join matches a showing's annotations against the fingerprint at its
+pair, so a sentence counts only where it was on screen, and where. The records' version is 2 since the pairs came, so
+the scan sends every reply's record again once.
 
 ## The model
 
@@ -188,8 +191,9 @@ to use on purpose in a twin or two. Other grammar stays out: the sentence is rep
 
 **check-reply** (`fw.py check-reply --level N`) scores each twin's sentences: their Japanese characters, their patterns
 and their predicted open chance. It drops a twin with a sentence over the limit, a new pattern or two learning ones (its
-sentence stays English), and decides which twins each level shows: the sentences' share of each level's budget (18%)
-pays for them at their predicted open chance but never less than the price, so no level shows more Japanese sentences
+sentence stays English), and decides which twins each sentence level shows: the sentences' share of each level's
+budget (18%) pays for them at their predicted open chance but never less than the price, with the costly words in
+their Japanese, so no level shows more Japanese sentences
 than the count before the model asked for (on the live log a typical allowed sentence's chance, 3.4%, is under the
 price, 8%, so the counts stay what they were and the sentences only get shorter and simpler), the twins with this
 week's pattern or learning words first. It ends with each level's expected sentence opens against that share.
@@ -225,8 +229,9 @@ as at off. The heavier and lighter levels are set from the arrows of T3 Code's J
   hour again); off sets it to 0. Each press is an `english` op with its contexts.
 - `fw.py intensity english on|off` does the same from a terminal.
 
-In the model: a T3 message's items at -3 are dropped (no Japanese was on screen), its shown record kept only for its
-word count; from a client that sends no level,
+In the model: a T3 message's items with both dials at -3 are dropped (no Japanese was on screen), its shown record
+kept only for its word count (an item with one dial at -3 is kept: the other kind's Japanese was on screen); from a
+client that sends no level,
 messages shown during an English spell don't count (the collector drops their shown records and the refresh leaves them
 out); each press turning it on counts as a lighter press in `fw.py calibrate`; and the Japanese sentences of the
-messages it names, as shown at the chat level then, are weak opens, as above.
+messages it names, as shown at the chat's two levels then, are weak opens, as above.

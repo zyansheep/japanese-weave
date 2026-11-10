@@ -1251,7 +1251,9 @@ the usual amount; the ends are modes of their own, -3 off (no Japanese) and 3 fu
 press past either end stays there and restarts the clock. Keys Alt+Shift+Period (heavier) and Alt+Shift+Comma
 (lighter) in the browser, the arrows of T3 Code's Japanese Weave panel for chat (T3 Code's own shortcut toggles English
 only for an hour: docs/grammar.md), the popup's Less/More buttons, or
-`fw.py intensity [chat|browser] up|down|normal|off|full`. On both surfaces -2..2 are lookup budgets of 0.15, 0.3,
+`fw.py intensity [chat|sentences|browser] up|down|normal|off|full` (chat has two dials since 2026-11: its words,
+`chat`, and its Japanese sentences, `sentences`, each with its own level; docs/chat-weave.md). On both surfaces -2..2
+are lookup budgets of 0.15, 0.3,
 0.5, 0.8 and 1.2 per 100 words (intensity.BUDGETS; scaled with normal's when a challenge is set), spent only on words
 not known at a glance and on whole sentences in Japanese, which may take up to 18% (SENTENCE_SHARE): known words are
 free everywhere but off. On web pages (see Choosing words) a lighter level picks from each passage's cached
