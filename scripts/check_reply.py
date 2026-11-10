@@ -227,28 +227,33 @@ class Plan:
     the levels (finish): knowledge.json (know, for a word the weave didn't offer), the weave's swaps (twins.swaps_for),
     the price of a sentence, this week's learning pattern (its id, or None), the level the reply is read at (view:
     the chat level, also while English only is on, since the reply shows its Japanese once that is off), the weave's
-    word list and recency (words, recency; words None: the twins' words the weave didn't offer go unpriced)."""
+    word list and recency (words, recency; words None: the twins' words the weave didn't offer go unpriced), and the
+    chat's sentence level (sentences: the level its twins are read at, sview; None: the word level, one dial)."""
 
     def __init__(self, statuses, model=None, level=0, normal=None, know=None, swaps=(), price=None, learning=None,
-                 view=None, words=None, recency=None):
+                 view=None, words=None, recency=None, sentences=None):
         self.statuses, self.model, self.level, self.normal = statuses, model, level, normal
+        self.sentences = level if sentences is None else sentences
         self.ready = bool(model and model.get('ready'))
         self.limit = sentence_model.max_chars(model)
         self.know, self.swaps, self.learning = know or {}, list(swaps or ()), learning
         self.price = price if price is not None else intensity.sentence_price(know)
         self.view = level if view is None else view
+        self.sview = self.sentences if view is None or sentences is not None else self.view
         self.words = words  # the weave's word list (chatweave.words_for), for the twins' words it didn't offer
         self.recency = recency  # and the fit's recency, as the weave has it (fw_host.adaptive)
 
     @classmethod
-    def load(cls, level=None, session=None):
-        """From this machine's state and knowledge.json (the cache, with a collector), at the chat level in effect
-        unless one is given."""
+    def load(cls, level=None, session=None, sentences=None):
+        """From this machine's state and knowledge.json (the cache, with a collector), at the chat's word level and
+        sentence level in effect unless given."""
         import fwlib
         import knowledge
         import twins
         state, know = fwlib.load_state(), knowledge.load()
         level = intensity.current(state.get('prefs'), 'chat')['level'] if level is None else level
+        if sentences is None:
+            sentences = intensity.current(state.get('prefs'), intensity.SENTENCES)['level']
         model = know.get('grammar') if isinstance(know.get('grammar'), dict) else None
         learning = grammar.learning(state)[0]
         try:  # the words the weave weaves from, with their estimates, as it prices them
@@ -259,7 +264,7 @@ class Plan:
             words, recency = fwlib.public_state(state)['words'], None
         return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None, know,
                    twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level,
-                   words, recency)
+                   words, recency, sentences)
 
 
 def score(text, plan):
@@ -743,7 +748,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     if remember and els:
         sentence_ps = [round(x, 4) for t in kept for x in t['p']]
         twins.remember_plan(grammar.fingerprint(texts), {
-            'level': plan.level, 'view': plan.view,
+            'level': plan.level, 'view': plan.view, 'sentences': plan.sentences, 'sview': plan.sview,
             'e': [[e.kind, on[i], props[i], round(e.opens, 4), int(explored[i])] for i, e in enumerate(els)],
             's': sentence_ps,
             'd': [sorted({i for _c, ids in t.get('sentences') or () for i in ids}) for t in dropped]}, now_ms)

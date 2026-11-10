@@ -924,8 +924,8 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
     `start`, with words empty). sentences: a list that gets each new reply's Japanese sentences from `start` on
     (sentence_records), from the whole reply: a record holds every element with its threshold, and the join reads the
     level each showing was at. The words and entries count only what the reader saw: a reply with render-time levels
-    as it was shown when sent (twins.view: its plan's level, else `level`, the level in force), never its hidden
-    twins; the digest is the whole reply's."""
+    as it was shown when sent (twins.view: its plan's levels, else `level`, the levels in force: one level or a pair
+    of a word level and a sentence level), never its hidden twins; the digest is the whole reply's."""
     since = start if since is None else since
     words = [w if isinstance(w, dict) else {'ja': w} for w in words]
     written = {w['ja']: forms(w['ja'], w.get('kana', '')) for w in words}
@@ -1069,7 +1069,7 @@ def refresh_exposure():
         import twins
         records = []
         backfill = cursor.get('sentences') != grammar.VERSION
-        level = twins.level_now(state)
+        level = twins.levels_now(state)  # both dials: (word level, sentence level)
         try:
             found = read_replies(state['words'], cursor['offsets'], start=start, tally=tally, since=since,
                                  sentences=None if backfill else records, level=level)

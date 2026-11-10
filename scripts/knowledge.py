@@ -2612,13 +2612,21 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
                                       {day: t for day, t in (totals or {}).items() if day >= day_of(since)})}
 
 
-def chat_level(changes, at):
-    """The chat's level at `at`: the last chat intensity change before it, while it lasted; else normal."""
+def chat_level(changes, at, surface='chat'):
+    """The chat's (word) level at `at`: the last chat intensity change before it, while it lasted; else normal.
+    surface 'sentences': its sentence level."""
     level = 0
     for c in changes:
-        if c['surface'] == 'chat' and c['at'] <= at:
+        if c['surface'] == surface and c['at'] <= at:
             level = c['level'] if c['level'] and c['until'] > at else 0
     return level
+
+
+def chat_levels(changes, at):
+    """(word level, sentence level) of chat at `at` (chat_level); the sentence level None before its first change in
+    the log (a client then may have had one dial, the sentence level the word level, or two, it at normal)."""
+    known = any(c['surface'] == 'sentences' and c['at'] <= at for c in changes)
+    return chat_level(changes, at), chat_level(changes, at, 'sentences') if known else None
 
 
 def chat_budget(changes, at, challenge=0, level=None, sentences=None):

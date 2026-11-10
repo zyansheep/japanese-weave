@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import threading
@@ -12,18 +13,26 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path.insert(0, str(ROOT / 'tests'))
 os.environ['JAPANESE_WEAVE_NO_REFRESH'] = '1'
 for name in ('CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED', 'JAPANESE_WEAVE_FORCE', 'JAPANESE_WEAVE_OFF',
              'CLAUDE_CODE_SESSION_ID'):
     os.environ.pop(name, None)  # tests set these explicitly
 
+import chatweave  # noqa: E402
+import check_reply  # noqa: E402
 import collector  # noqa: E402
 import feedback  # noqa: E402
 import fw  # noqa: E402
 import fwlib  # noqa: E402
+import grammar  # noqa: E402
 import hub  # noqa: E402
 import intensity  # noqa: E402
 import knowledge  # noqa: E402
+import sentence_model  # noqa: E402
+import twins  # noqa: E402
+import weave  # noqa: E402
+import test_twins as tt  # noqa: E402  (its reply, swaps and word types)
 
 NOW = 1_800_000_000_000
 
@@ -64,7 +73,7 @@ class Surface(unittest.TestCase):
         self.assertIsNotNone(hub.validate(op({'level': 4})))
 
 
-class Collector(Home):
+class Server(Home):
     """The word state on a collector (its own state dir, on a local port), as in test_ends."""
 
     def setUp(self):
@@ -90,6 +99,9 @@ class Collector(Home):
 
     def press(self, step, surface):
         return feedback.request(self.url + '/v1/intensity', {'surface': surface, 'step': step, 'source': 't3'})
+
+
+class Collector(Server):
 
     def test_the_sentence_level_on_the_collector(self):
         chat = feedback.request(self.url + '/v1/intensity?surface=chat')
@@ -134,6 +146,44 @@ class Collector(Home):
         self.assertEqual(self.fw('intensity', 'chat').strip(), 'Chat words: normal.')
         changes = [c for c in feedback.intensity_changes(self.db) if c['surface'] == 'sentences']
         self.assertEqual([c['level'] for c in changes], [1, intensity.OFF, 0])
+
+
+class Hook(Server):
+    def hook(self, prompt, session='s1'):
+        payload = {'session_id': session, 'prompt': prompt, 'transcript_path': str(self.home / 'missing.jsonl')}
+        with mock.patch.dict(os.environ, {'JAPANESE_WEAVE_FORCE': '1'}), \
+                mock.patch('sys.stdin', new=io.StringIO(json.dumps(payload))), \
+                mock.patch('sys.stdout', new=io.StringIO()) as out:
+            self.assertEqual(weave.main(['--hook']), 0)
+        return json.loads(out.getvalue())['hookSpecificOutput']['additionalContext']
+
+    def test_words_off_still_writes_the_twins_in_draft_style(self):
+        hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
+        self.fw('intensity', 'chat', 'off')
+        with mock.patch.object(weave, 't3_host', return_value=True), \
+                mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
+            context = self.hook('What is a monad?')
+            self.assertIn('<ja>...</ja>', context)  # the sentences still show: the twins are written
+            self.assertIn('words turned off and sentences turned normal for now by the user', context)
+            with mock.patch.object(chatweave, 'weave', return_value='jw-weave: woven'), \
+                    mock.patch('sys.stdin', new=io.StringIO('The draft.')):
+                self.assertIn('jw-weave: woven', self.fw('weave', '--level', '-3'))
+            self.fw('intensity', 'sentences', 'off')
+            off = self.hook('And a functor?')
+        briefs = feedback.chat_briefs(self.db)
+        self.assertEqual([(r['level'], r['intensity']) for r in briefs], [(intensity.OFF, 0.0)])  # recorded
+        self.assertTrue(off.startswith('Japanese Weave'), off)
+        self.assertNotIn('<ja>', off)  # both dials off: plain English
+        with mock.patch('sys.stdin', new=io.StringIO('The draft.')), self.assertRaises(SystemExit):
+            fw.main(['weave'])
+
+    def test_the_classic_brief_follows_the_word_level(self):
+        self.fw('intensity', 'chat', 'off')
+        self.assertNotIn('<ja>', self.hook('What is a monad?'))
+        self.assertEqual(weave.turned_dials(1), weave.turned(1))
+        self.assertEqual(weave.turned_dials(-1, -1), weave.turned(-1))
+        self.assertEqual(weave.turned_dials(0, 3), ', words turned normal and sentences turned to full for now by '
+                                                   'the user')
 
 
 class Reports(Home):
@@ -199,6 +249,146 @@ class Reports(Home):
         both = (1 - intensity.SENTENCE_SHARE) * intensity.BUDGETS[-1] + intensity.SENTENCE_SHARE * intensity.BUDGETS[2]
         self.assertAlmostEqual(knowledge.chat_budget([], NOW, level=-1, sentences=2), both)
         self.assertIsNone(knowledge.chat_budget([], NOW, level=0, sentences=intensity.FULL))
+
+
+def strip(text):
+    return re.sub(r'<[^>]+>', '', text)
+
+
+class Rendering(unittest.TestCase):
+    """Every level abbr by the word level, every twin by the sentence level (tt.FINAL: a twin from +1, a free word in
+    its English from -2, a learning word from 0)."""
+
+    def test_each_kind_by_its_own_dial(self):
+        self.assertEqual(twins.render(tt.FINAL, 1), twins.render(tt.FINAL, 1, 1))  # one level: both dials
+        self.assertEqual(twins.render(tt.FINAL, (1, -1)), twins.render(tt.FINAL, 1, -1))  # or a pair
+        words_only = twins.render(tt.FINAL, 0, -3)  # the twin English, the words Japanese
+        self.assertIn('The <abbr title="もんだい · problem">問題</abbr> is small.', words_only)
+        self.assertIn('Read the <abbr title="じょうほう · information">情報</abbr>', words_only)
+        sentences_only = twins.render(tt.FINAL, -3, 1)  # the twin Japanese, the words English
+        self.assertIn('です<abbr title="The problem is small.">。</abbr>', sentences_only)
+        self.assertIn('Read the information below', sentences_only)
+        self.assertNotIn('is small', strip(sentences_only))
+        self.assertEqual(twins.render(tt.FINAL, -3, -3), twins.render(tt.FINAL, -3))  # English only: as before
+        self.assertFalse(re.search('[぀-ヿ一-鿿]', twins.render(tt.FINAL, -3, -3)))
+        # what words show doesn't depend on the sentence level, and the reverse
+        for words in (-2, 0, 2):
+            shown = {re.sub(r'.*?Read', 'Read', twins.render(tt.FINAL, words, s), flags=re.S)
+                     for s in intensity.LEVELS if s > -3}
+            self.assertEqual(len(shown), 1, words)
+        for sentences in (-2, 1, 3):
+            twin = {('です' in twins.render(tt.FINAL, w, sentences)) for w in intensity.LEVELS}
+            self.assertEqual(twin, {sentences >= 1})
+
+    def test_an_older_message_renders_as_before(self):
+        old = 'No levels <abbr title="x · meaning">今</abbr>.'
+        for pair in ((0, 0), (-3, 2), (2, -3), (3, 3)):
+            self.assertEqual(twins.render(old, pair), old)
+        self.assertEqual(twins.render(old, -3, -3), 'No levels meaning.')  # English only
+
+    def test_a_gloss_without_a_threshold_in_a_twins_english_is_not_well_formed(self):
+        self.assertTrue(twins.well_formed(tt.FINAL))
+        loose = tt.FINAL.replace(' data-en="problem" data-on="-2"', '')
+        self.assertFalse(twins.well_formed(loose))
+        self.assertIsNone(grammar.record(loose, tt.DAY))  # no record for it
+
+    def test_visible_agrees_with_render_at_every_pair(self):
+        checked = check_reply.finish(tt.AUTHORED, tt.plan(), tt.TYPES, seed=4, now_ms=NOW, remember=False)
+        back, owners = twins.elements(checked.final)
+        texts = twins.annotation_texts(checked.final)
+        for pair in twins.PAIRS:
+            self.assertEqual(twins.shown_texts(checked.final, pair),
+                             [texts[j] for j, o in enumerate(owners) if twins.visible(back, o, pair)], pair)
+
+
+class Join(tt.Home):
+    """The sentence record's pair fingerprints and the join at any pair of levels."""
+
+    def contexts(self, final, pairs, message='m1'):
+        out = {}
+        for k, (words, sentences) in enumerate(pairs):
+            shown = grammar.annotation_texts(twins.render(final, words, sentences))
+            notes = [[w, 10, 24 * i] for i, w in enumerate(shown)]
+            key = ('t3', 'v1', feedback.level_context(message, words, sentences))
+            out[key] = {'surface': 't3', 'view': 'v1', 'context': key[2], 'annotations': notes, 'words': 80,
+                        'shown_at': NOW - 3_600_000 + k, 'height': 24 * len(notes), 'plan': None,
+                        'active': 60_000, 'seen_until': NOW - 3_500_000, 'message': message, 'level': words,
+                        'sentences': sentences,
+                        'stays': [{'y': 0, 'height': 24 * max(1, len(notes)), 'ms': 60_000, 'words': 80}]}
+        return out
+
+    def test_every_pair_joins_the_sentences_it_shows(self):
+        checked = check_reply.finish(tt.AUTHORED, tt.plan(), tt.TYPES, seed=4, now_ms=NOW)
+        record = grammar.record(checked.final, tt.DAY)
+        self.assertTrue(grammar.valid_record(record))
+        self.assertEqual(len(record['pf']), 49)
+        self.assertNotIn('fps', record)
+        by_fp = sentence_model.records_by_fp([record])
+        pairs = [p for p in twins.PAIRS if p != (-3, -3)]
+        contexts = self.contexts(checked.final, pairs)
+        twin_props = [p for e, p in zip(checked.elements, checked.props) if e.kind == 's']
+        for context in contexts.values():
+            pair = (context['level'], context['sentences'])
+            shown = twins.render(checked.final, pair)
+            expected = [(s['index'], s['jchars']) for s in grammar.sentences(shown)]
+            found = sentence_model.message_sentences(context, by_fp)
+            self.assertEqual([(i, chars) for i, chars, _ids, _meta in found], expected, pair)
+            for _i, _c, _ids, meta in found:
+                self.assertEqual(meta[0], pair[1])  # a twin's level is the sentence level
+                self.assertLessEqual(meta[1], pair[1])
+                if pair[1] in twins.BUDGETED:
+                    self.assertIn(meta[2], [p[twins.BUDGETED.index(pair[1])] for p in twin_props])
+        units = sentence_model.units(knowledge.showings([], contexts, NOW), by_fp)
+        self.assertEqual(len(units), sum(len(grammar.sentences(twins.render(checked.final, p))) for p in pairs))
+        self.assertTrue(any(u.level == twins.FULL for u in units))
+
+    def test_a_record_from_before_joins_its_equal_pairs(self):
+        checked = check_reply.finish(tt.AUTHORED, tt.plan(), tt.TYPES, seed=4, now_ms=NOW)
+        record = grammar.record(checked.final, tt.DAY)
+        before = {k: v for k, v in record.items() if k not in ('pf', 'ls')}
+        before['fps'] = [record['pf'][twins.PAIRS.index((lv, lv))] for lv in twins.SHOWING]
+        by_fp = sentence_model.records_by_fp([before])
+        for level in twins.SHOWING:
+            context = list(self.contexts(checked.final, [(level, level)]).values())[0]
+            expected = [s['index'] for s in grammar.sentences(twins.render(checked.final, level))]
+            self.assertEqual([i for i, *_rest in sentence_model.message_sentences(context, by_fp)], expected)
+
+    def test_a_press_names_the_message_as_shown_at_both_levels_then(self):
+        checked = check_reply.finish(tt.AUTHORED, tt.plan(), tt.TYPES, seed=4, now_ms=NOW)
+        by_fp = sentence_model.records_by_fp([grammar.record(checked.final, tt.DAY)])
+        contexts = self.contexts(checked.final, ((3, -2), (3, 3), (-2, -2)))
+        press = {'at': NOW - 1_800_000, 'on': True, 'contexts': [{'view': 'v1', 'context': 'm1'}]}
+        words_full = [{'at': NOW - 7_200_000, 'surface': 'chat', 'level': 3, 'until': NOW + 3_600_000}]
+        both = words_full + [{'at': NOW - 7_000_000, 'surface': 'sentences', 'level': -2, 'until': NOW + 3_600_000}]
+        found = sentence_model.units([], by_fp, presses=[press], contexts=contexts, changes=both)
+        self.assertEqual(len(found), len(grammar.sentences(twins.render(checked.final, 3, -2))))
+        self.assertTrue(all(u.pseudo and u.level == -2 for u in found))
+        found = sentence_model.units([], by_fp, presses=[press], contexts=contexts, changes=words_full)
+        self.assertEqual(len(found), 4)  # no sentence level in the log yet: one dial, at full
+        self.assertEqual(knowledge.chat_levels(both, NOW), (3, -2))
+        self.assertEqual(knowledge.chat_levels(words_full, NOW), (3, None))
+
+
+class Readers(tt.Home):
+    def test_the_readers_count_what_each_dial_showed(self):
+        lines = tt.Readers.transcript(self, tt.FINAL)
+        words = tt.Readers.WORDS
+        found = fwlib.read_replies(words, {}, start='0000-00-00', level=(0, -3))
+        self.assertEqual(found[0]['words'], ['問題', '情報'])
+        found = fwlib.read_replies(words, {}, start='0000-00-00', level=(-3, 1))
+        self.assertEqual(found[0]['words'], ['問題', '小さい'])  # the twin's Japanese, no word swaps
+        self.assertEqual(twins.view(weave.last_reply(None, lines), (-3, 1)), twins.render(tt.FINAL, -3, 1))
+        twins.remember_plan(grammar.fingerprint(twins.annotation_texts(tt.FINAL)),
+                            {'view': -3, 'sview': 1, 'level': -3, 'sentences': 1})
+        self.assertEqual(twins.view(tt.FINAL, (0, 0)), twins.render(tt.FINAL, -3, 1))  # as shown when sent
+        twins.remember_plan(grammar.fingerprint(twins.annotation_texts(tt.FINAL)), {'view': 1, 'level': 1})
+        self.assertEqual(twins.view(tt.FINAL, (0, 0)), twins.render(tt.FINAL, 1, 1))  # a plan from before: one dial
+        state = fwlib.new_state(known_top=10)
+        state['prefs'] = {'intensity_sentences': intensity.at_level(2, 't3')}
+        self.assertEqual(twins.levels_now(state), (0, 2))
+        plan = check_reply.Plan(grammar.statuses({}), None, 1, sentences=-1)
+        self.assertEqual((plan.view, plan.sview), (1, -1))
+        self.assertEqual((tt.plan(1).view, tt.plan(1).sview), (1, 1))
 
 
 class Calibration(unittest.TestCase):

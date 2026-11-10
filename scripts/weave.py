@@ -717,9 +717,18 @@ def fw_command():
     return f'sh "{root / "scripts" / "run"}" "{root / "scripts" / "fw.py"}"'
 
 
-def draft_rules(stage, level, command):
+def turned_dials(level, sentences=None):
+    """turned(level) when the sentence level is the word level (or not given), else both dials: ', words turned
+    lighter and sentences turned to full for now by the user' and the like."""
+    if sentences is None or sentences == level:
+        return turned(level)
+    name = lambda x: 'to full' if intensity.is_full(x) else intensity.NAMES[x] if x else 'normal'
+    return f', words turned {name(level)} and sentences turned {name(sentences)} for now by the user'
+
+
+def draft_rules(stage, level, command, sentences=None):
     """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
-    return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the user is a native English speaker '
+    return (f'Japanese Weave (Stage {stage}{turned_dials(level, sentences)}), draft and weave: the user is a native English speaker '
             'learning Japanese by reading, so your chat reply carries Japanese for every level the user can choose, '
             'and their app shows it at the level they set (they can change it after reading, or turn on English '
             'only). Code picks the Japanese words and decides what each level shows; you write the Japanese twins and '
@@ -745,9 +754,9 @@ def draft_rules(stage, level, command):
             'English reply as it is, with no twins.')
 
 
-def draft_digest(stage, level, command):
+def draft_digest(stage, level, command, sentences=None):
     """The draft-and-weave steps on a chat's later turns: a pointer to the whole brief and this reply's level."""
-    return (f'Japanese Weave (Stage {stage}{turned(level)}), draft and weave: the steps earlier in this chat still '
+    return (f'Japanese Weave (Stage {stage}{turned_dials(level, sentences)}), draft and weave: the steps earlier in this chat still '
             f'hold. Write the reply in plain English, pass it to `{command} weave --level {level}` on stdin, write '
             'your English with the swaps that fit and a <ja> twin after each sentence that fits (limits and how many '
             f'on its first line), pass that to `{command} check-reply --level {level}`, and send everything below its '
@@ -762,15 +771,16 @@ def english_line(until):
             'with its twins as usual, and its Japanese shows once English only is off.')
 
 
-def compose_draft(state, level, had=None, command=None, plan=None, english=None):
+def compose_draft(state, level, had=None, command=None, plan=None, english=None, sentences=None):
     """(brief, what the chat has after it, plan) in draft style, as compose returns them: the steps in full on a
     chat's first turn (had None) or when the chat last had another brief (the classic one, or the steps from before
     twins), else the digest. plan: the classic brief's plan (compose), recorded with mode draft, so the log says what
-    the lists were. english: when English only is on, until when (english_line)."""
+    the lists were. english: when English only is on, until when (english_line). sentences: the sentence level, when
+    it isn't the word level (level)."""
     command = command or fw_command()
     stage = fwlib.stage_for(state)
     whole = had is None or had.get('rules') != RULES
-    text = draft_rules(stage, level, command) if whole else draft_digest(stage, level, command)
+    text = draft_rules(stage, level, command, sentences) if whole else draft_digest(stage, level, command, sentences)
     if english:
         text += english_line(english)
     after = {'known': list(had.get('known') or []) if had else [], 'rules': RULES}
@@ -1226,17 +1236,20 @@ def main(argv):
         return 0
     session = data.get('session_id') if threads.valid_session(data.get('session_id')) else None
     try:
-        live, thread, english = hub.live_chat_all(session, state)
+        live, thread, english, held = hub.live_chat_dials(session, state)
     except Exception:
-        live, thread, english = dict(intensity.NORMAL), None, dict(intensity.ENGLISH_OFF)
-    level = live['level']
+        live, thread, english, held = (dict(intensity.NORMAL), None, dict(intensity.ENGLISH_OFF),
+                                       dict(intensity.NORMAL))
+    level, sentences = live['level'], held['level']  # the two dials: words, and the Japanese sentences (twins)
     if session:
         thread = switch(session, data.get('prompt'), thread)
     if hook and intensity.is_off(level) and (threads.request(data.get('prompt')) or (True,))[0] is False:
         try:  # "japanese back on" also ends an off spell in all chats, on this very turn
             live = hub.set_intensity('chat', 0, 'chat')[0]
+            if intensity.is_off(sentences):
+                sentences = hub.set_intensity(intensity.SENTENCES, 0, 'chat')[0]['level']
         except Exception:
-            live = dict(intensity.NORMAL)
+            live, sentences = dict(intensity.NORMAL), 0 if intensity.is_off(sentences) else sentences
         level = live['level']
     codex = 'turn_id' in data
     markup = hook and abbr_glosses(state)
@@ -1247,20 +1260,23 @@ def main(argv):
     # English only for now (unless the reply carries its levels: draft style writes the twins all the same), Japanese
     # off in this chat (at any level), or in all chats for now: one line instead of the brief and its extras
     english_on = bool(english.get('on'))
+    # off: in draft style both dials (a reply with its words off still shows its twins at the sentence level)
+    off = intensity.is_off(level) and (style != 'draft' or intensity.is_off(sentences))
     note = (english_note(english['until'], codex) if english_on and style != 'draft' else
             threads.note(codex=codex) if threads.is_off(thread) else
-            off_note(live['until'], codex) if intensity.is_off(level) else None)
+            off_note(live['until'], codex) if off else None)
     if note:
         print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': note}},
                          ensure_ascii=False))
         return 0
     (seen, days), know = exposure(), knowledge.load()
     reply = mark = lines = None
+    views = (intensity.OFF, intensity.OFF) if english_on else (level, sentences)  # what a reply with levels shows now
     if hook:
         try:
             lines = tail_lines(data['transcript_path'])
             reply, mark = last_reply(None, lines), compaction(lines)
-            reply = twins.view(reply, intensity.OFF if english_on else level) if reply else reply
+            reply = twins.view(reply, views) if reply else reply
         except Exception:
             pass  # no transcript yet or unreadable: the brief alone still helps
     try:  # in draft style the weave sets the amounts, so the reply needs no correction toward them
@@ -1272,7 +1288,7 @@ def main(argv):
     if hook and style == 'classic':
         try:  # never block a prompt because of them: without the reading index (not built yet) there are none
             topical = topical_words(state, know, days, recent_turns(lines, data.get('prompt'),
-                                                                    level=intensity.OFF if english_on else level))
+                                                                    level=views))
         except Exception as error:
             print(f'Japanese Weave: no topical words ({error.__class__.__name__})', file=sys.stderr)
     build = lambda had: compose(state, seen, markup=markup, know=know, level=level, had=had, tail=tail,
@@ -1280,7 +1296,7 @@ def main(argv):
     if style == 'draft':
         classic = build
         build = lambda had: compose_draft(state, level, had, plan=classic(None)[2],
-                                          english=english['until'] if english_on else None)
+                                          english=english['until'] if english_on else None, sentences=sentences)
     try:
         if hook and session:
             text, plan = chat_turn(state, session, build, mark)

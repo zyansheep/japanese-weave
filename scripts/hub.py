@@ -30,12 +30,14 @@ Ops (each also carries uid, day, at and machine; see stamp):
   grammar   {"set": [[pattern id, "known"|"learning"|"new"]], "source"}   the reader's grammar patterns (grammar.py):
                                                        intake's choice, or a command
   sentences {"replies": [{"fp", "day", "v", "s": [[mark index, Japanese characters, English words, [pattern ids],
-             predicted open chance?]], "e"?, "a"?, "fps"?, "lv"?, "d"?}]}
+             predicted open chance?]], "e"?, "a"?, "pf"? or "fps"?, "lv"?, "ls"?, "d"?}]}
                                                        the Japanese sentences of chat replies scanned on some machine,
                                                        never their text (grammar.record); a reply with render-time
                                                        levels also has its elements with thresholds and propensities,
-                                                       each glossed word's element and each level's fingerprint
-                                                       (grammar.record_levels); a record only
+                                                       each glossed word's element and the fingerprint of what
+                                                       each pair of a word and a sentence level shows (pf; fps:
+                                                       each level, from before two dials; grammar.record_levels);
+                                                       a record only
   labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
@@ -199,7 +201,7 @@ def validate(op):
         if set(op) - {'uid', 'day', 'at', 'machine', 'kind', 'replies'} or not isinstance(replies, list) \
                 or not 0 < len(replies) <= SENTENCE_REPLIES or not all(grammar.valid_record(r) for r in replies):
             return ('sentences: {"replies": [{"fp", "day", "v", "s": [[index, chars, english words, [pattern ids]]], '
-                    '"e"?, "a"?, "fps"?, "lv"?, "d"?}]} (grammar.valid_record)')
+                    '"e"?, "a"?, "pf"? or "fps"?, "lv"?, "ls"?, "d"?}]} (grammar.valid_record)')
     elif kind == 'labels':
         return labels_error(op)
     elif kind == 'brief':
@@ -224,7 +226,8 @@ def brief_error(op):
     100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
     a web plan; briefs from before sentences were priced have none. topical: the topical words offered with their
     lookup chances (weave.topical_words), like offered. mode: draft when the reply was drafted and woven by code
-    (weave.compose_draft), whose plan is the classic brief's lists."""
+    (weave.compose_draft), whose plan is the classic brief's lists; level off (intensity 0) only there, the word level
+    off with the sentence level on."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
@@ -234,7 +237,8 @@ def brief_error(op):
         isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1 for o in xs)
     good = (set(op) <= BRIEF_FIELDS and threads.valid_session(op.get('session'))
             and isinstance(op.get('level'), int) and not isinstance(op['level'], bool) and op['level'] in intensity.LEVELS
-            and number(op.get('intensity')) and 0 < op['intensity'] <= 5
+            and number(op.get('intensity')) and 0 <= op['intensity'] <= 5
+            and (op['intensity'] > 0 or op['level'] == intensity.OFF)  # off: the words, with the twins still asked
             and pairs(offered) and ('topical' not in op or pairs(op['topical']))
             and isinstance(arms, dict) and len(arms) <= 200
             and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())

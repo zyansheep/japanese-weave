@@ -842,8 +842,8 @@ def read_input(path):
 def weave_cmd(args):
     prefs = fwlib.load_state().get('prefs')
     level = args.level if args.level is not None else intensity.current(prefs, 'chat')['level']
-    if intensity.is_off(level):
-        sys.exit('Japanese is off in chat: send the draft as it is.')
+    if intensity.is_off(level) and intensity.is_off(intensity.current(prefs, intensity.SENTENCES)['level']):
+        sys.exit('Japanese is off in chat: send the draft as it is.')  # both dials (the twins show at the other)
     try:  # English only too: the reply carries its Japanese, shown once English only is off (twins.py)
         print(chatweave.weave(read_input(args.file), level))
     except Exception as error:
@@ -1165,7 +1165,7 @@ def main(argv=None):
     p.add_argument('style', choices=['draft', 'classic'])
     p.set_defaults(run=chat_style)
     p = sub.add_parser('weave')
-    p.add_argument('--level', type=int, choices=[lv for lv in intensity.LEVELS if not intensity.is_off(lv)])
+    p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
     p.add_argument('file', nargs='?')
     p.set_defaults(run=weave_cmd)
     p = sub.add_parser('check-reply')

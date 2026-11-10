@@ -14,15 +14,18 @@ written once, and adds a closing mark the twin lacks.
 
 What Claude sends (the final markup, written by code: markup; the contract with the T3 clients):
   - a swapped word in English text:
-    <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>, the gloss at levels >= N
-    and the plain English of data-en below;
+    <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>, the gloss at word levels
+    >= N and the plain English of data-en below;
   - a twinned sentence: <span data-jw="ja" data-on="N">JAPANESE</span><span data-jw="en" data-on="N">ENGLISH</span>,
-    the Japanese at levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on (it shows
-    or hides whole), the English keeps its own swaps, whose thresholds are at most N (a sentence turns English before
-    its words do as the level goes down);
+    the Japanese at sentence levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on
+    (they show and hide with it), the English keeps its own swaps, each shown by the word level while the twin is
+    English;
   - anything without data-on or data-jw renders as before, so older messages are unchanged.
-A threshold is in -2..3 (3: full only). At -3 (off, and English only) nothing is Japanese. render(text, level) is the
-reply as the reader sees it at a level, in the older markup every other reader of transcripts understands.
+A threshold is in -2..3 (3: full only). The reader has two dials (docs/chat-weave.md, "Two dials"): the word level
+decides every level abbr and the sentence level every twin, each on its own. At -3 a dial's kind shows no Japanese,
+and with both at -3 (off, and English only) nothing is Japanese. render(text, level, sentences) is the reply as the
+reader sees it at a pair of levels (one level: both dials at it), in the older markup every other reader of
+transcripts understands.
 
 Thresholds (assign). One priority order per reply and kind, cut at each budgeted level's lookup budget (-2..2, the
 level's intensity.budget per 100 of the reply's English words): twins spend the sentences' part, SENTENCE_SHARE of
@@ -67,6 +70,9 @@ import intensity
 OFF, FULL = intensity.OFF, intensity.FULL
 BUDGETED = (-2, -1, 0, 1, 2)          # the levels with a lookup budget, filled in this order
 SHOWING = BUDGETED + (FULL,)          # the levels with Japanese; an element's threshold is one of them
+# Every (word level, sentence level) a client can render at, word level first, -3..3 each (the order of a sentence
+# record's pair fingerprints, grammar.record_levels)
+PAIRS = tuple((w, s) for w in intensity.LEVELS for s in intensity.LEVELS)
 EXPLORE = 0.2                         # the chance an element's place in its order is drawn at random
 DRAWS = 1000                          # runs of assign for the propensities
 MAX_SENTENCES = 2                     # Japanese sentences in one twin (a long English sentence split in two)
@@ -388,8 +394,8 @@ def _threshold(a):
 
 
 def _word(t, level):
-    """One glossed word at a level: one with a threshold shows from it (else its data-en, else its meaning, else as
-    written); one with a data-on that isn't one, or with none, as written (at off, english_only then reads it)."""
+    """One glossed word at a (word) level: one with a threshold shows from it (else its data-en, else its meaning, else
+    as written); one with a data-on that isn't one, or with none, as written (at off, english_only then reads it)."""
     a, inner, raw = t[1], t[2], t[3]
     on = _threshold(a)
     if on is not None:
@@ -408,45 +414,57 @@ def esc_text(text):
 
 
 def _inside(content, level, japanese):
-    """A twin's content at a level: the Japanese one's glosses plain, the English one's words by their thresholds."""
+    """A twin's content at a word level: the Japanese one's glosses plain (they show with the twin), the English one's
+    words by their thresholds."""
     if japanese:
         return ''.join(x[1] if x[0] == 'raw' else f'<abbr title="{esc(x[1].get("title", ""))}">{x[2]}</abbr>'
                        for x in _abbrs(content))
     return ''.join(x[1] if x[0] == 'raw' else _word(x, level) for x in _abbrs(content))
 
 
-def render(text, level):
-    """The reply as the reader sees it at a level (-3..3), in the markup from before levels, by the rule the clients
-    share: a pair (a Japanese twin right before an English one of the same threshold, only whitespace between) shows
-    its Japanese from its threshold and its English below; an English twin with no pair always shows; a Japanese one
-    with no pair shows from its threshold and below it is its last sentence mark's translation, or nothing; in a
-    broken message (_spans) every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in
-    inline code is text. A reply without levels is unchanged above off. At off (and English only) everything is
+def dials(level, sentences=None):
+    """(word level, sentence level) from a level and an optional sentence level, or from a pair as level: a single
+    level means both dials at it (one dial, as before the sentence level)."""
+    if isinstance(level, (tuple, list)):
+        level, sentences = level
+    return level, level if sentences is None else sentences
+
+
+def render(text, level, sentences=None):
+    """The reply as the reader sees it at a word level and a sentence level (each -3..3; one level: both dials at it,
+    or a (word, sentence) pair as level), in the markup from before levels, by the rule the clients share: every level
+    abbr by the word level, every twin by the sentence level. A pair (a Japanese twin right before an English one of
+    the same threshold, only whitespace between) shows its Japanese from its threshold and its English below, the
+    glossed words in its Japanese with it; an English twin with no pair always shows; a Japanese one with no pair shows
+    from its threshold and below it is its last sentence mark's translation, or nothing; in a broken message (_spans)
+    every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in inline code is text. A
+    reply without levels is unchanged unless both dials are off. With both at off (and English only) everything is
     rendered as written below every threshold, then read as English only shows it (english_only): its glossed
-    sentences their translations, its glossed words their meanings."""
+    sentences their translations, its glossed words their meanings. With one dial at off, that kind shows no Japanese
+    and the other shows its own."""
     text = str(text)
-    if not has_levels(text) and level > OFF:
+    words, sentences = dials(level, sentences)
+    off = words <= OFF and sentences <= OFF
+    if not has_levels(text) and not off:
         return text
+    shows = lambda on: sentences > OFF and sentences >= on  # a twin's Japanese
     out = []
     for t in tokens(text):
         kind = t[0]
         if kind == 'raw':
             out.append(t[1])
         elif kind == 'abbr':
-            out.append(_word(t, level))
+            out.append(_word(t, words))
         elif kind == 'pair':
-            out.append(_inside(t[2], level, True) + t[4] if level > OFF and level >= t[1] else
-                       t[4] + _inside(t[3], level, False))
+            out.append(_inside(t[2], words, True) + t[4] if shows(t[1]) else t[4] + _inside(t[3], words, False))
         elif kind == 'en':
-            out.append(_inside(t[2], level, False))
+            out.append(_inside(t[2], words, False))
         elif kind == 'ja':
-            out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
-                       esc_text(_last_translation(t[2])))
+            out.append(_inside(t[2], words, True) if shows(t[1]) else esc_text(_last_translation(t[2])))
         elif kind == 'hidden':  # a broken message: a pair's or an open one's Japanese never, a lone one's as such
             if not t[3]:
-                out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
-                           esc_text(_last_translation(t[2])))
-    return english_only(''.join(out)) if level <= OFF else ''.join(out)
+                out.append(_inside(t[2], words, True) if shows(t[1]) else esc_text(_last_translation(t[2])))
+    return english_only(''.join(out)) if off else ''.join(out)
 
 
 SENTENCE_MARK = re.compile(r'[。？！?!]+')
@@ -503,8 +521,9 @@ def english_only(text):
 
 
 def well_formed(text):
-    """Whether every twin span is a pair with a threshold, in a message that isn't broken, and every swapped word's
-    data-on is a threshold: what check-reply writes, and the only markup a sentence record is made for."""
+    """Whether every twin span is a pair with a threshold, in a message that isn't broken, every swapped word's
+    data-on is a threshold and every gloss in a twin's English has one: what check-reply writes, and the only markup a
+    sentence record is made for."""
     for code, piece in _chunks(str(text)):
         if code:
             continue
@@ -513,8 +532,11 @@ def well_formed(text):
             return False
         valid, broken = _spans(p)
         jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in ('ja', 'en'))
-        if broken or jw != len(valid) or 2 * len(_pairs(p, valid)) != len(valid):
+        pairs = _pairs(p, valid)
+        if broken or jw != len(valid) or 2 * len(pairs) != len(valid):
             return False
+        if any('data-on' not in attrs(m.group(1)) for en in pairs.values() for m in ABBR.finditer(en.content)):
+            return False  # a gloss in a twin's English with no threshold: as written whatever the word level
         if any(('data-on' in attrs(m.group(1)) and _threshold(attrs(m.group(1))) is None)
                or not attrs(m.group(1)).get('title', '').strip() for m in ABBR.finditer(p)):
             return False
@@ -547,17 +569,19 @@ def elements(text):
     return els, owners
 
 
-def visible(els, i, level):
-    """Whether element i shows at a level: a twin from its threshold; a word from its threshold, and in a twin's
-    English only below the twin's; i -1 (no element) above off."""
-    if level <= OFF:
-        return False
+def visible(els, i, level, sentences=None):
+    """Whether element i shows at a word level and a sentence level (one level: both dials at it; dials): a twin from
+    its threshold at the sentence level; a word from its threshold at the word level, and in a twin's English only
+    while the twin is English (the sentence level below the twin's threshold); i -1 (no element) unless both dials
+    are off."""
+    words, sentences = dials(level, sentences)
     if i < 0:
-        return True
+        return words > OFF or sentences > OFF
     e = els[i]
     if e['kind'] == 's':
-        return level >= e['on']
-    return level >= e['on'] and (e['parent'] is None or level < els[e['parent']]['on'])
+        return sentences > OFF and sentences >= e['on']
+    return words > OFF and words >= e['on'] and (e['parent'] is None or sentences <= OFF
+                                                 or sentences < els[e['parent']]['on'])
 
 
 def annotation_texts(text):
@@ -583,17 +607,29 @@ def inert_code(text):
     return ''.join(out)
 
 
-def shown_texts(text, level):
-    """The glossed words a client shows at a level, in order: the abbrs with a title of render's output, code inert
-    (an abbr with no title is no gloss)."""
-    return [inner for kind, _s, _e, inner, title in grammar.pieces(inert_code(render(text, level)))[1]
+def shown_texts(text, level, sentences=None):
+    """The glossed words a client shows at a word level and a sentence level (one level: both), in order: the abbrs
+    with a title of render's output, code inert (an abbr with no title is no gloss)."""
+    return [inner for kind, _s, _e, inner, title in grammar.pieces(inert_code(render(text, level, sentences)))[1]
             if kind == 'w' and (title or '').strip()]
 
 
 def fingerprints(text):
-    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (shown_texts), what T3
-    reports from its screen."""
+    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (shown_texts), both
+    dials at it."""
     return {level: grammar.fingerprint(shown_texts(text, level)) for level in SHOWING}
+
+
+def pair_texts(text):
+    """{(word level, sentence level): shown_texts there} for every pair of PAIRS."""
+    return {pair: shown_texts(text, pair) for pair in PAIRS}
+
+
+def pair_fingerprints(text, texts=None):
+    """[the fingerprint of the reply's glossed words as shown at each pair of PAIRS] (shown_texts; texts: pair_texts
+    when already made), what T3 reports from its screen at a word level and a sentence level."""
+    texts = texts if texts is not None else pair_texts(text)
+    return [grammar.fingerprint(texts[pair]) for pair in PAIRS]
 
 
 # ---- what Claude writes: English with <ja> twins ----
@@ -1025,7 +1061,8 @@ def swaps_for(session=None):
 
 def remember_plan(fp, plan, now_ms=None):
     """Keeps a checked reply's plan under its fingerprint (grammar.fingerprint of annotation_texts): {at, level (the
-    chat level it was checked at), view (the level it is read at: the chat level, English only aside), e: [[kind,
+    chat's word level it was checked at), view (the word level it is read at: the chat level, English only aside),
+    sentences and sview (the same for the sentence level), e: [[kind,
     on, propensities, p, x]] per element in document order, d: [[pattern ids]] per dropped twin, s: [p] per Japanese
     sentence}, the last PLANS_KEPT."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -1066,25 +1103,36 @@ def plan_for(text, plans=None):
 
 
 def level_now(state=None):
-    """The chat level on this machine's state: the level a reply is read at once any English-only spell is over (a
-    reply written during one shows its Japanese then)."""
+    """The chat's word level on this machine's state (levels_now's first)."""
+    return levels_now(state)[0]
+
+
+def levels_now(state=None):
+    """(word level, sentence level) of chat on this machine's state: the levels a reply is read at once any
+    English-only spell is over (a reply written during one shows its Japanese then)."""
     state = state if state is not None else fwlib.load_state()
-    return intensity.current((state or {}).get('prefs'), 'chat')['level']
+    return intensity.chat_levels((state or {}).get('prefs'))
 
 
-def view(text, level=None, plans=None):
+def view(text, level=None, plans=None, sentences=None):
     """What a reader of the transcript counts as shown (fwlib.read_replies, the hook's last reply and topical words):
-    the reply rendered at the level it was shown at when sent (its plan's view), else at `level` (the chat level in
-    force now). A plan from a check under English only (view -3, from before views were the chat level) counts at
-    `level` instead: the reply shows its Japanese once English only is off. A reply without levels is unchanged above
-    off. Only rendered Japanese is an exposure."""
+    the reply rendered at the levels it was shown at when sent (its plan's view and sview: the word and sentence
+    levels; a plan from before the sentence level has view alone, both dials at it), else at `level` and `sentences`
+    (the levels in force now; one level, or a pair as level: dials). A plan from a check under English only (view -3,
+    from before views were the chat level, or with both dials at off) counts at the levels given instead: the reply shows its Japanese once
+    English only is off. A reply without levels is unchanged unless both dials are off. Only rendered Japanese is an
+    exposure."""
+    if level is not None:
+        level, sentences = dials(level, sentences)
     if not has_levels(text):
-        return text if level is None or level > OFF else render(text, level)
+        return text if level is None or level > OFF or sentences > OFF else render(text, level, sentences)
     plan = plan_for(text, plans)
-    shown = plan.get('view') if plan and isinstance(plan.get('view'), int) else None
-    if shown is None or shown <= OFF:
-        shown = level
-    return render(text, 0 if shown is None else shown)
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool)
+    shown = plan.get('view') if plan and whole(plan.get('view')) else None
+    held = plan['sview'] if shown is not None and whole(plan.get('sview')) else shown
+    if shown is not None and (shown > OFF or held > OFF):
+        return render(text, shown, held)
+    return render(text, 0 if level is None else level, 0 if level is None else sentences)
 
 
 def seed_of(text):

@@ -283,9 +283,13 @@ class Join(Home):
         found = sentence_model.message_sentences(context, by_fp)
         self.assertEqual(len(found), 4)
         self.assertTrue(all(meta[0] is None for *_rest, meta in found))
-        for bad in (dict(record, e=record['e'] + [['x', 0, -1, [], None, None]]), dict(record, fps=record['fps'][:5]),
-                    dict(record, lv=7), dict(old, lv=0), dict(record, a=[len(record['e'])])):
-            self.assertFalse(grammar.valid_record(bad))
+        for bad in (dict(record, e=record['e'] + [['x', 0, -1, [], None, None]]), dict(record, pf=record['pf'][:48]),
+                    dict(record, lv=7), dict(old, lv=0), dict(record, a=[len(record['e'])]),
+                    dict(record, fps=record['pf'][:6]), dict(record, ls=1, lv=None), dict(old, ls=0)):
+            self.assertFalse(grammar.valid_record({k: v for k, v in bad.items() if v is not None}))
+        before = {k: v for k, v in record.items() if k not in ('pf', 'ls')}
+        before['fps'] = [record['pf'][twins.PAIRS.index((lv, lv))] for lv in twins.SHOWING]
+        self.assertTrue(grammar.valid_record(before))  # a record from before the sentence level
 
     def test_frequency_counts_the_written_twins_and_the_dropped_ones(self):
         checked = check_reply.finish(AUTHORED, plan(), TYPES, seed=4, now_ms=NOW)
@@ -398,7 +402,7 @@ class Readers(Home):
         self.transcript(checked.final)
         records = fwlib.read_sentences(str(self.home / 'chats'))
         self.assertEqual(len(records), 1)
-        self.assertIn('fps', records[0])
+        self.assertIn('pf', records[0])
         self.assertEqual(records[0]['lv'], 0)
 
 
