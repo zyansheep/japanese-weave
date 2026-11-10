@@ -12,7 +12,9 @@ Ops (each also carries uid, day, at and machine; see stamp):
                                                        nothing counts days any more (fwlib.apply_event)
   mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands: the label at once
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
-             "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
+             "intensity_chat"?, "intensity_sentences"?, "intensity_browser"?: {level -3..3, until, at, source}}}
+                                                       (intensity.py; chat: the word level, sentences: chat's
+                                                       sentence level)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
@@ -28,12 +30,14 @@ Ops (each also carries uid, day, at and machine; see stamp):
   grammar   {"set": [[pattern id, "known"|"learning"|"new"]], "source"}   the reader's grammar patterns (grammar.py):
                                                        intake's choice, or a command
   sentences {"replies": [{"fp", "day", "v", "s": [[mark index, Japanese characters, English words, [pattern ids],
-             predicted open chance?]], "e"?, "a"?, "fps"?, "lv"?, "d"?}]}
+             predicted open chance?]], "e"?, "a"?, "pf"? or "fps"?, "lv"?, "ls"?, "d"?}]}
                                                        the Japanese sentences of chat replies scanned on some machine,
                                                        never their text (grammar.record); a reply with render-time
                                                        levels also has its elements with thresholds and propensities,
-                                                       each glossed word's element and each level's fingerprint
-                                                       (grammar.record_levels); a record only
+                                                       each glossed word's element and the fingerprint of what
+                                                       each pair of a word and a sentence level shows (pf; fps:
+                                                       each level, from before two dials; grammar.record_levels);
+                                                       a record only
   labels    {"labels": [[ja, from, to]], "intake": [[ja, arm|null, draw|null, entry id?]], "probes": [[ja, outcome]],
              "experiment"?: {"seed"}}                a refresh's state edit where the state lives (knowledge.decide):
                                                        labels from the model, the words taken in with their
@@ -108,7 +112,8 @@ def is_day(value):
     return True
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'chat_style': lambda v: v in ('draft', 'classic'),
          'challenge': knowledge.valid_challenge, 'extension_sites': lambda v: v in ('all', 'ask'),
-         'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid}
+         'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid,
+         'intensity_sentences': intensity.valid}
 LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 
@@ -196,7 +201,7 @@ def validate(op):
         if set(op) - {'uid', 'day', 'at', 'machine', 'kind', 'replies'} or not isinstance(replies, list) \
                 or not 0 < len(replies) <= SENTENCE_REPLIES or not all(grammar.valid_record(r) for r in replies):
             return ('sentences: {"replies": [{"fp", "day", "v", "s": [[index, chars, english words, [pattern ids]]], '
-                    '"e"?, "a"?, "fps"?, "lv"?, "d"?}]} (grammar.valid_record)')
+                    '"e"?, "a"?, "pf"? or "fps"?, "lv"?, "ls"?, "d"?}]} (grammar.valid_record)')
     elif kind == 'labels':
         return labels_error(op)
     elif kind == 'brief':
@@ -221,7 +226,8 @@ def brief_error(op):
     100 words; full has no budget, ask, sentences or expected. sentencePrice: the lookups a whole sentence costs, as in
     a web plan; briefs from before sentences were priced have none. topical: the topical words offered with their
     lookup chances (weave.topical_words), like offered. mode: draft when the reply was drafted and woven by code
-    (weave.compose_draft), whose plan is the classic brief's lists."""
+    (weave.compose_draft), whose plan is the classic brief's lists; level off (intensity 0) only there, the word level
+    off with the sentence level on."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
     count = lambda x, top: isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top
     amount = lambda key: key not in op or (number(op[key]) and 0 <= op[key] <= 1000)
@@ -231,7 +237,8 @@ def brief_error(op):
         isinstance(o, list) and len(o) == 2 and word(o[0]) and number(o[1]) and 0 <= o[1] <= 1 for o in xs)
     good = (set(op) <= BRIEF_FIELDS and threads.valid_session(op.get('session'))
             and isinstance(op.get('level'), int) and not isinstance(op['level'], bool) and op['level'] in intensity.LEVELS
-            and number(op.get('intensity')) and 0 < op['intensity'] <= 5
+            and number(op.get('intensity')) and 0 <= op['intensity'] <= 5
+            and (op['intensity'] > 0 or op['level'] == intensity.OFF)  # off: the words, with the twins still asked
             and pairs(offered) and ('topical' not in op or pairs(op['topical']))
             and isinstance(arms, dict) and len(arms) <= 200
             and all(word(k) and isinstance(v, str) and 0 < len(v) <= 20 for k, v in arms.items())
@@ -693,6 +700,18 @@ def set_intensity(surface, level, source):
     return intensity.current({intensity.pref(surface): value}, surface), error
 
 
+def set_chat(level, source, timeout=TIMEOUT):
+    """Both chat dials set to a level (fw.py intensity off|normal|full with no surface, "japanese back on"): the word
+    level, and the sentence level when it is set apart and not there already (one that follows the word level follows
+    it there, and stays one dial). Returns (words {level, until, at}, sentences {level, until, at}, error or None)."""
+    words, error = set_intensity(intensity.WORDS, level, source)
+    sentences = live_intensity(intensity.SENTENCES, timeout=timeout)
+    if sentences['level'] != level:
+        sentences, more = set_intensity(intensity.SENTENCES, level, source)
+        error = error or more
+    return words, sentences, error
+
+
 def live_intensity(surface, timeout=LIVE_TIMEOUT):
     """The level in effect now. With a collector, asked of it first (a press in T3 Code reaches the collector, not this
     machine's cache), briefly, so a prompt never waits long; else, or when it doesn't answer, the cache."""
@@ -721,9 +740,16 @@ def live_chat(session=None, state=None, timeout=LIVE_TIMEOUT):
 
 
 def live_chat_all(session=None, state=None, timeout=LIVE_TIMEOUT):
-    """(chat intensity in effect, this chat's switch or None, English only {on, until, at}) for the hook: one brief
-    question to the collector, as in live_intensity, else the cache. A change made here that the collector doesn't
-    have yet is the later one, so it wins."""
+    """(chat intensity in effect, this chat's switch or None, English only {on, until, at}) for the hook
+    (live_chat_dials without the sentence level)."""
+    return live_chat_dials(session, state, timeout)[:3]
+
+
+def live_chat_dials(session=None, state=None, timeout=LIVE_TIMEOUT):
+    """(chat's word level in effect, this chat's switch or None, English only {on, until, at}, chat's sentence level in
+    effect) for the hook, the levels as {level, until, at}: one brief question to the collector, as in live_intensity,
+    else the cache. A change made here that the collector doesn't have yet is the later one, so it wins. A collector
+    from before the sentence level sends none: the sentence level is then the word level, as the clients read it."""
     state = state if state is not None else fwlib.load_state()
     mine = threads.entry(state, session)
     english = intensity.english_current(state.get('prefs'))
@@ -735,8 +761,11 @@ def live_chat_all(session=None, state=None, timeout=LIVE_TIMEOUT):
             theirs = reply.get('english')
             if intensity.is_english(theirs) and theirs['at'] >= english['at']:
                 english = theirs
-            return reply['intensity'], threads.later(mine, reply.get('thread')), english
-    return intensity.current(state.get('prefs'), 'chat'), mine, english
+            sentences = reply.get('sentences')
+            sentences = sentences if intensity.is_current(sentences) else dict(reply['intensity'])
+            return reply['intensity'], threads.later(mine, reply.get('thread')), english, sentences
+    return (intensity.current(state.get('prefs'), 'chat'), mine, english,
+            intensity.current(state.get('prefs'), intensity.SENTENCES))
 
 
 # ---- English only in chat (intensity.py) ----

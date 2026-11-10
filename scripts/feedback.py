@@ -21,9 +21,10 @@ Stored in <state dir>/interactions.sqlite (schema 8):
                 painting of code's sure swaps, the model's answer not in, else 'final', and dictionary: dictionary
                 words kept, at +1 and +2, when any}); seq orders changes for export. A sentence's
                 closing mark (。) among the glossed words stands for its translation (in the browser since then too).
-                A T3 message whose items carry the level it was rendered at (render-time levels, twins.py) has a row
-                per level it was shown at, its context "<message id>@<level>" (level_context), each a showing of its
-                own with the annotations that level showed
+                A T3 message whose items carry the levels it was rendered at (render-time levels, twins.py) has a row
+                per pair of levels it was shown at, its context "<message id>@<level>" when its word and sentence
+                levels are equal, else "<message id>@<level>/<sentence level>" (level_context), each a showing of
+                its own with the annotations that pair showed
   interactions  one row per peek (gloss opened by hovering), pin (opened by a click or tap, T3) or flip (word turned
                 back to English, browser): when (ms since the epoch), how long the gloss was open, which word, its
                 index among the passage's glossed words, and a client id (uid) so a resend is stored once
@@ -59,7 +60,8 @@ Stored in <state dir>/interactions.sqlite (schema 8):
                 schedule (review.py, srs.py)
 
 Items are interactions, or {"kind": "shown", "words": N, ...} records that only describe a context (the denominator of
-the peek rate); from T3, any of them may carry "level": -3..3, the level the message was rendered at (record); or
+the peek rate); from T3, any of them may carry "level": -3..3, the word level the message was rendered at, and with it
+"sentenceLevel": -3..3, the sentence level (absent: the same; record); or
 (T3 only) what happened to a review card: {"kind": "review", "at": ms when it was shown, "card": its id, "word": the
 word it showed, "revealMs": ms to the reveal or null, "shownMs": ms on screen, "source": "desktop" | "mobile",
 "uid"?, "grade"?: 1 | 2 | 3 | 4, "gradeMs"?: ms from shown to the grade}. A grade needs a reveal and its gradeMs,
@@ -86,6 +88,7 @@ import fwlib
 import intensity
 
 LEVEL_MARK = '@'  # a T3 message shown at a level is stored as <its context id>@<level> (level_context)
+PAIR_MARK = '/'   # and at a word level and another sentence level as <its context id>@<level>/<sentence level>
 DB_NAME = 'interactions.sqlite'
 MIRROR_NAME = 'mirror.sqlite'
 SCHEMA_VERSION = 8
@@ -271,11 +274,17 @@ def _clean(item, now):
         return None
     if not all(isinstance(a, list) and len(a) == 3 and word(a[0]) and num(a[1]) and num(a[2]) for a in notes):
         return None
-    level = item.get('level')
-    if level is not None and (not isinstance(level, int) or isinstance(level, bool) or level not in intensity.LEVELS):
+    level, sentences = item.get('level'), item.get('sentenceLevel')
+    dial = lambda x: x is None or (isinstance(x, int) and not isinstance(x, bool) and x in intensity.LEVELS)
+    if not dial(level) or not dial(sentences):
         return None
+    if level is None:  # an older message (no level markup): no dials, whatever else it says
+        sentences = None
+    elif sentences is None:  # a client with one dial: the sentence level is the word level
+        sentences = level
     clean = {'kind': item['kind'], 'view': item['view'], 'context': item['context'], 'at': int(at), 'box': box,
-             'annotations': [[a[0], round(a[1]), round(a[2])] for a in notes], 'level': level}
+             'annotations': [[a[0], round(a[1]), round(a[2])] for a in notes], 'level': level,
+             'sentences': sentences}
     if item['kind'] == SHOWN:
         words = item.get('words')
         if not isinstance(words, int) or isinstance(words, bool) or not 0 < words <= 10_000:
@@ -430,18 +439,37 @@ def _complete(con, c):
                                     c['word'])).rowcount > 0
 
 
-def level_context(context, level):
-    """The context id a T3 message shown at a level is stored under: a message shown at another level, or re-rendered
-    at one while on screen, is another showing, with its own annotations and items (render-time levels, twins.py)."""
-    return f'{context}{LEVEL_MARK}{level}'
+def level_context(context, level, sentences=None):
+    """The context id a T3 message shown at a pair of levels (the word level, and the sentence level: None or the same
+    for one dial) is stored under: <message>@<level> when the two are equal, else <message>@<level>/<sentences>. A
+    message shown at another pair, or re-rendered at one while on screen, is another showing, with its own
+    annotations and items (render-time levels, twins.py)."""
+    if sentences is None or sentences == level:
+        return f'{context}{LEVEL_MARK}{level}'
+    return f'{context}{LEVEL_MARK}{level}{PAIR_MARK}{sentences}'
+
+
+def split_levels(context):
+    """(message id, word level or None, sentence level or None) of a stored T3 context id (level_context): a context
+    stored at one level has its sentence level equal to it; one without levels has neither."""
+    base, mark, levels = str(context).rpartition(LEVEL_MARK)
+    level = lambda x: int(x) if x.lstrip('-').isdigit() and int(x) in intensity.LEVELS else None
+    words, pair, sentences = levels.partition(PAIR_MARK)
+    if mark and base and level(words) is not None and (not pair or level(sentences) is not None):
+        return base, level(words), level(sentences) if pair else level(words)
+    return context, None, None
 
 
 def split_context(context):
-    """(message id, level or None) of a stored T3 context id (level_context)."""
-    base, mark, level = str(context).rpartition(LEVEL_MARK)
-    if mark and base and level.lstrip('-').isdigit() and int(level) in intensity.LEVELS:
-        return base, int(level)
-    return context, None
+    """(message id, word level or None) of a stored T3 context id (level_context, split_levels)."""
+    return split_levels(context)[:2]
+
+
+def english_pair(c):
+    """Whether a T3 item with levels was rendered with no Japanese: both dials at -3 (off, English only). An item with
+    one dial at -3 still showed the other kind's Japanese."""
+    return c.get('level') is not None and c['level'] <= intensity.OFF and (c.get('sentences') if c.get('sentences')
+                                                                          is not None else c['level']) <= intensity.OFF
 
 
 SIBLING_WORDS = ('SELECT words FROM contexts WHERE surface = ? AND view = ? AND words IS NOT NULL AND '
@@ -458,14 +486,16 @@ def record(items, surface, path=None, now=None, hide=None):
     end) of an English-only spell in chat (intensity.py): a T3 message's shown record from then is dropped (counted as
     rejected), since its Japanese wasn't on screen.
 
-    A T3 item with a level (the level the message was rendered at, -3..3: render-time levels; the client sends one
-    only for a message with level markup, so an older message stays one showing, as before) is stored under
-    level_context, so each level a message was shown at is a showing of its own, with its shown record (one per
-    message and level) giving its own word count. An item at -3 (off, English only) showed no Japanese: it is dropped
-    (rejected), but for a shown record, kept with no annotations (never a showing: knowledge.is_showing) so its word
-    count is there for the levels that follow; hide leaves items with a level alone (they say what was shown). A
-    level's first item that isn't its shown record starts the showing: its word count from the message's showing at
-    another level, shown when that item came, until the level's own shown record brings its own."""
+    A T3 item with a level (the word level the message was rendered at, -3..3: render-time levels; the client sends
+    one only for a message with level markup, so an older message stays one showing, as before) and its sentenceLevel
+    (the sentence level, -3..3; absent: the same, a client with one dial; ignored without a level) is stored under
+    level_context, so each pair of levels a message was shown at is a showing of its own, with its shown record (one
+    per message and pair) giving its own word count. An item at (-3, -3) (off, English only) showed no Japanese: it
+    is dropped (rejected), but for a shown record, kept with no annotations (never a showing: knowledge.is_showing) so
+    its word count is there for the pairs that follow; an item with one dial at -3 showed the other kind's Japanese
+    and is kept; hide leaves items with a level alone (they say what was shown). A pair's first item that isn't its
+    shown record starts the showing: its word count from the message's showing at another pair, shown when that item
+    came, until the pair's own shown record brings its own."""
     if surface not in SURFACES or not isinstance(items, list):
         return {'stored': 0, 'duplicates': 0, 'rejected': len(items) if isinstance(items, list) else 0}
     now = now if now is not None else int(time.time() * 1000)
@@ -478,15 +508,15 @@ def record(items, surface, path=None, now=None, hide=None):
             why = c if isinstance(c, str) else 'malformed or too old' if not c else \
                 'review items come from T3 (surface t3)'
             reasons.append({'item': index, 'error': why})
-        elif c['kind'] not in (REVIEW, SHOWN) and surface == 't3' and c.get('level') is not None \
-                and c['level'] <= intensity.OFF:  # a shown record at -3 is kept for its word count (below)
+        elif c['kind'] not in (REVIEW, SHOWN) and surface == 't3' and english_pair(c):
+            # a shown record at (-3, -3) is kept for its word count (below)
             reasons.append({'item': index, 'error': 'at -3 (off or English only): no Japanese on screen'})
         elif hide and surface == 't3' and c['kind'] == SHOWN and c.get('level') is None \
                 and hide[0] <= c['at'] < hide[1]:
             reasons.append({'item': index, 'error': 'shown while English only was on'})
         else:
             if c['kind'] != REVIEW and surface != 't3':
-                c['level'] = None  # levels are chat's
+                c['level'] = c['sentences'] = None  # levels are chat's
             c['index'] = index
             cleaned.append(c)
     stored = duplicates = refused = 0
@@ -519,8 +549,8 @@ def record(items, surface, path=None, now=None, hide=None):
                     words, shown_at = (c['words'], c['at']) if shown else (None, None)
                     if c.get('level') is not None:
                         base = c['context']
-                        c = dict(c, context=level_context(base, c['level']))
-                        if c['level'] <= intensity.OFF:  # shown in English: its words, for the levels that follow
+                        c = dict(c, context=level_context(base, c['level'], c['sentences']))
+                        if english_pair(c):  # shown in English: its words, for the levels that follow
                             c['annotations'] = []
                         if not shown and not con.execute('SELECT 1 FROM contexts WHERE surface = ? AND view = ? AND '
                                                          'context = ?', (surface, c['view'], c['context'])).fetchone():
@@ -804,8 +834,8 @@ def load(path=None):
     each with its plan (None when not recorded), its time on screen when a reader could have been reading it
     ("active", the ms of its visible stays, 0 without any) and when its last stay began ("seen_until"). T3 messages
     also keep their stays one by one, oldest first ("stays": [{y, height, ms, words}], words None when not sent): each
-    is one paragraph's band; and the message they are and the level they were shown at ("message", "level": None for
-    a client that sends no level; split_context)."""
+    is one paragraph's band; and the message they are and the levels they were shown at ("message", "level": the word
+    level, "sentences": the sentence level, both None for a client that sends no level; split_levels)."""
     con = connect(path)
     try:
         rows = [dict(zip(INTERACTION_COLUMNS, r)) for r in con.execute(
@@ -818,7 +848,7 @@ def load(path=None):
             c['active'], c['seen_until'] = 0, None
             if c['surface'] == 't3':
                 c['stays'] = []
-                c['message'], c['level'] = split_context(c['context'])
+                c['message'], c['level'], c['sentences'] = split_levels(c['context'])
             contexts[(c['surface'], c['view'], c['context'])] = c
         for surface, view, context, ms, last in con.execute(
                 "SELECT surface, view, context, coalesce(sum(ms), 0), max(at) FROM reading WHERE kind = 'visible' "
@@ -840,10 +870,10 @@ def load(path=None):
 
 
 def intensity_changes(path=None):
-    """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface, level, until,
-    source}, from the ops applied here; every chat turned off or back on (threads.py) as {at, machine, surface:
-    "thread", session, off, source}; and every press of English only in chat as {at, machine, surface: "english", on,
-    until, source, contexts: [{view, context}]}."""
+    """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface (chat: chat's word
+    level, sentences: its sentence level, browser), level, until, source}, from the ops applied here; every chat turned
+    off or back on (threads.py) as {at, machine, surface: "thread", session, off, source}; and every press of English
+    only in chat as {at, machine, surface: "english", on, until, source, contexts: [{view, context}]}."""
     con = connect(path)
     try:
         ops = con.execute("SELECT at, machine, body FROM ops WHERE (kind = 'set' AND body LIKE '%intensity_%') "
@@ -866,7 +896,7 @@ def intensity_changes(path=None):
                         'off': op.get('off') is True, 'source': op.get('source') or ''})
             continue
         prefs = op.get('prefs') or {}
-        for surface in ('chat', 'browser'):
+        for surface in intensity.SURFACES:
             value = prefs.get(f'intensity_{surface}')
             if isinstance(value, dict) and value.get('level') in intensity.LEVELS:
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],

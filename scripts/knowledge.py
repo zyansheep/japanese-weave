@@ -181,8 +181,10 @@ def read_commands():
 def is_showing(context):
     """A browser passage with a shown record, or a T3 message with a word count (from its shown record, or backfilled
     from its transcript): replayed whole, opened or not (showings)."""
-    if context['surface'] == 't3':  # a message shown at -3 (English only) showed no Japanese: a word count only
-        return context.get('words') is not None and (context.get('level') is None or context['level'] > intensity.OFF)
+    if context['surface'] == 't3':  # a message shown at (-3, -3) (English only) showed no Japanese: a word count only
+        return context.get('words') is not None and (
+            context.get('level') is None or context['level'] > intensity.OFF
+            or (context.get('sentences') is not None and context['sentences'] > intensity.OFF))
     return context['surface'] == 'browser' and context.get('shown_at') is not None
 
 
@@ -772,6 +774,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
     return {'at': at, 'shown': shown, 'surface': surface, 'words': words, 'level': context.get('level'),
+            'sentences': context.get('sentences'),
             'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
@@ -2524,8 +2527,9 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     both groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how
     much one more point of Japanese known at a glance slows reading, once the gap is over THIN_MIN_GAP. jitterBefore:
     the same for the passages planned before, when thinning scaled the budget too.
-    presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
-    heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
+    presses: the reader's heavier/lighter presses per surface (intensity.py; chat: chat's word level, sentences: its
+    sentence level, browser; one into off is lighter, into full heavier) and the share of the time spent at each
+    level, from the ops log. A chat with Japanese turned off
     (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats), and so does
     each press turning English only on in chat (intensity.py, the "english" changes; englishOn: how many).
     classes: the model against what happened, from shown records (fitted_records; replay's for the model it replaced)
@@ -2583,7 +2587,7 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     presses = {}
     threads_off = len({c['session'] for c in changes if c['surface'] == 'thread' and c['off'] and c['at'] >= since})
     english_on = sum(1 for c in changes if c['surface'] == 'english' and c['on'] and c['at'] >= since)
-    for surface in ('chat', 'browser'):
+    for surface in ('chat', 'browser', 'sentences'):
         mine = [c for c in changes if c['surface'] == surface]
         recent = [c for c in mine if c['at'] >= since]
         time_at = {}
@@ -2608,19 +2612,36 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
                                       {day: t for day, t in (totals or {}).items() if day >= day_of(since)})}
 
 
-def chat_level(changes, at):
-    """The chat's level at `at`: the last chat intensity change before it, while it lasted; else normal."""
+def chat_level(changes, at, surface='chat'):
+    """The chat's (word) level at `at`: the last chat intensity change before it, while it lasted; else normal.
+    surface 'sentences': its sentence level."""
     level = 0
     for c in changes:
-        if c['surface'] == 'chat' and c['at'] <= at:
+        if c['surface'] == surface and c['at'] <= at:
             level = c['level'] if c['level'] and c['until'] > at else 0
     return level
 
 
-def chat_budget(changes, at, challenge=0, level=None):
-    """The chat's lookup budget per 100 words at `at`: its level then (chat_level), or the level a message reports it
-    was shown at (render-time levels), with normal's budget the challenge when set. None at full (no budget)."""
-    return intensity.budget(chat_level(changes, at) if level is None else level, challenge or None)
+def chat_levels(changes, at):
+    """(word level, sentence level) of chat at `at` (chat_level); the sentence level None before its first change in
+    the log (a client then may have had one dial, the sentence level the word level, or two, it at normal)."""
+    known = any(c['surface'] == 'sentences' and c['at'] <= at for c in changes)
+    return chat_level(changes, at), chat_level(changes, at, 'sentences') if known else None
+
+
+def chat_budget(changes, at, challenge=0, level=None, sentences=None):
+    """The chat's lookup budget per 100 words at `at`: its level then (chat_level), or the levels a message reports it
+    was shown at (render-time levels), with normal's budget the challenge when set. None at full (no budget). With two
+    dials (a sentence level other than the word level), the words' part of the word level's budget and the sentences'
+    part (intensity.SENTENCE_SHARE) of the sentence level's, None when either is full."""
+    level = chat_level(changes, at) if level is None else level
+    words = intensity.budget(level, challenge or None)
+    if sentences is None or sentences == level:
+        return words
+    part = intensity.budget(sentences, challenge or None)
+    if words is None or part is None:
+        return None
+    return (1 - intensity.SENTENCE_SHARE) * words + intensity.SENTENCE_SHARE * part
 
 
 def day_interval(days, statistic, level=0.9, draws=BOOT_DRAWS, seed=1):
@@ -2664,7 +2685,7 @@ def day_totals(records, changes=(), challenge=0):
             t['classes'][name][0] += expected
             t['classes'][name][1] += seen
         budget = r['budget'] if r['surface'] == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge,
-                                                                             r.get('level'))
+                                                                             r.get('level'), r.get('sentences'))
         if budget is not None:
             t['budget'][0] += budget * r['read']
             t['budget'][1] += r['read']
@@ -2711,8 +2732,10 @@ def calibration_text(report):
                          f'{b["msPerWord"]:4d} ms on screen per word, {b["opensPer100"]:.2f} opens per 100 words')
     lines += thinning_text(report['jitter'], report.get('jitterBefore'))
     lines += classes_text(report.get('classes'), report['days'])  # knowledge.json from before has none
-    for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
-        p = report['presses'][surface]
+    for surface, name in (('chat', 'Chat words'), ('sentences', 'Chat sentences'), ('browser', 'Web pages')):
+        p = report['presses'].get(surface)
+        if p is None:  # knowledge.json from before the sentence level
+            continue
         at = lambda k: {str(intensity.OFF): 'off', str(intensity.FULL): 'at full'}.get(k, f'at {int(k):+d}')
         hours = ', '.join(f'{h} h {at(k)}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
         verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''

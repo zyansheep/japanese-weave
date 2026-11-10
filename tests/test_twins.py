@@ -114,7 +114,7 @@ class Thresholds(unittest.TestCase):
                element('w', 0.25, sid=3), element('w', 0.4, sid=4, fixed=twins.FULL)]
         return twins.link(els)
 
-    def test_nested_within_budget_and_sentences_peel_first(self):
+    def test_nested_within_budget_each_kind_on_its_own(self):
         els = self.elements()
         budgets = twins.budgets_for(300)
         for seed in range(200):
@@ -122,16 +122,13 @@ class Thresholds(unittest.TestCase):
             self.assertTrue(all(x in twins.SHOWING for x in on))
             for level in twins.BUDGETED:
                 words_part, sentences_part = budgets[level]
-                shown = [i for i in range(len(els)) if twins.shown_at(els, on, i, level)]
+                taken = [i for i in range(len(els)) if on[i] <= level]
                 below = [i for i in range(len(els)) if on[i] <= level - 1]
-                self.assertTrue(set(below) <= {i for i in range(len(els)) if on[i] <= level})  # nested
-                spent_s = sum(els[i].cost_s for i in shown)
-                spent_w = sum(els[i].cost_w for i in shown)
-                self.assertLessEqual(spent_s, sentences_part + max(e.cost_s for e in els))  # one at the edge at most
+                self.assertTrue(set(below) <= set(taken))  # nested
+                spent_s = sum(els[i].cost() for i in taken if els[i].kind == 's')  # twins: the sentences' part
+                spent_w = sum(els[i].cost_w for i in taken if els[i].kind == 'w')  # words, as if twins were English
+                self.assertLessEqual(spent_s, sentences_part + max(e.cost() for e in els))  # one at the edge at most
                 self.assertLessEqual(spent_w, words_part + max(e.cost_w for e in els))
-            for i, e in enumerate(els):
-                if e.parent is not None:  # a word in a twin's English never outlasts the twin going down
-                    self.assertLessEqual(on[i], on[e.parent])
             self.assertEqual(on[2], -2)  # known at a glance: from -2 (while its twin is English)
             self.assertEqual(on[8], twins.FULL)  # fixed at full: a dictionary word, a later use
         self.assertEqual(twins.assign(els, {lv: (0, 0) for lv in twins.BUDGETED}, random.Random(1))[0][0], twins.FULL)
@@ -283,9 +280,13 @@ class Join(Home):
         found = sentence_model.message_sentences(context, by_fp)
         self.assertEqual(len(found), 4)
         self.assertTrue(all(meta[0] is None for *_rest, meta in found))
-        for bad in (dict(record, e=record['e'] + [['x', 0, -1, [], None, None]]), dict(record, fps=record['fps'][:5]),
-                    dict(record, lv=7), dict(old, lv=0), dict(record, a=[len(record['e'])])):
-            self.assertFalse(grammar.valid_record(bad))
+        for bad in (dict(record, e=record['e'] + [['x', 0, -1, [], None, None]]), dict(record, pf=record['pf'][:48]),
+                    dict(record, lv=7), dict(old, lv=0), dict(record, a=[len(record['e'])]),
+                    dict(record, fps=record['pf'][:6]), dict(record, ls=1, lv=None), dict(old, ls=0)):
+            self.assertFalse(grammar.valid_record({k: v for k, v in bad.items() if v is not None}))
+        before = {k: v for k, v in record.items() if k not in ('pf', 'ls')}
+        before['fps'] = [record['pf'][twins.PAIRS.index((lv, lv))] for lv in twins.SHOWING]
+        self.assertTrue(grammar.valid_record(before))  # a record from before the sentence level
 
     def test_frequency_counts_the_written_twins_and_the_dropped_ones(self):
         checked = check_reply.finish(AUTHORED, plan(), TYPES, seed=4, now_ms=NOW)
@@ -398,7 +399,7 @@ class Readers(Home):
         self.transcript(checked.final)
         records = fwlib.read_sentences(str(self.home / 'chats'))
         self.assertEqual(len(records), 1)
-        self.assertIn('fps', records[0])
+        self.assertIn('pf', records[0])
         self.assertEqual(records[0]['lv'], 0)
 
 
@@ -475,7 +476,7 @@ class ReviewRound1(Home):
             on, _x = twins.assign(checked.elements, budgets, rng)
             for i in range(len(on)):
                 for k, level in enumerate(twins.BUDGETED):
-                    counts[i][k] += twins.shown_at(checked.elements, on, i, level)
+                    counts[i][k] += on[i] <= level  # at its own kind's level (two dials)
         for i, row in enumerate(counts):
             for k in range(5):
                 self.assertAlmostEqual(checked.props[i][k], row[k] / n, delta=0.05)
@@ -571,17 +572,17 @@ class ReviewRound2(Home):
     """Regression tests for the second adversarial review (scratchpad review-r2a, review-r2c)."""
     FILLER = ReviewRound1.FILLER
     TWIN = ReviewRound1.TWIN
-    AGAIN = '<abbr title="again / also">また</abbr>'
+    AGAIN = '<abbr title="again / once more">また</abbr>'  # "also" is a connective: it stays out (test_dials)
 
     def test_1_each_use_of_a_word_and_gloss_keeps_its_own_english(self):
-        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / once more', 'en': 'again', 'p': 0.02, 'free': True,
                           'before': 'Run the tests ', 'after': ' and check the result.'},
-                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                         {'ja': 'また', 'title': 'again / once more', 'en': 'once more', 'p': 0.02, 'free': True,
                           'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         text = f'Run the tests {self.AGAIN} and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, dict(TYPES, また={'n', 'adv'}), seed=1, remember=False).final
-        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'also'])
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'once more'])
 
     def test_2_a_twins_words_the_weave_did_not_offer(self):
         words = [{'ja': '小さい', 'kana': 'ちいさい', 'status': 'active'}, {'ja': '問題', 'kana': 'もんだい',
@@ -692,15 +693,15 @@ class ReviewRound3(Home):
         self.assertIsNone(twins.twin_trouble('x', 0, 'Use e.g. this or i.e. that one now.', ''))  # abbreviations
 
     def test_2_a_dropped_earlier_swap_leaves_the_later_ones_their_english(self):
-        swaps = SWAPS + [{'ja': 'また', 'title': 'again / also', 'en': 'again', 'p': 0.02, 'free': True,
+        swaps = SWAPS + [{'ja': 'また', 'title': 'again / once more', 'en': 'again', 'p': 0.02, 'free': True,
                           'before': 'Run the tests ', 'after': ' and check the result.'},
-                         {'ja': 'また', 'title': 'again / also', 'en': 'also', 'p': 0.02, 'free': True,
+                         {'ja': 'また', 'title': 'again / once more', 'en': 'once more', 'p': 0.02, 'free': True,
                           'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         types = dict(TYPES, また={'n', 'adv'})
         text = f'Run the tests again and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, types, seed=1, remember=False).final
-        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['also'])
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['once more'])
         unsure = [dict(x, before='', after='') for x in swaps]  # no context to tell: the gloss's first meaning
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, unsure, 0.08, None, None)
         final = check_reply.finish(text, own, types, seed=1, remember=False).final

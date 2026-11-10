@@ -14,44 +14,53 @@ written once, and adds a closing mark the twin lacks.
 
 What Claude sends (the final markup, written by code: markup; the contract with the T3 clients):
   - a swapped word in English text:
-    <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>, the gloss at levels >= N
-    and the plain English of data-en below;
+    <abbr title="reading · meaning" data-en="original English" data-on="N">JAPANESE</abbr>, the gloss at word levels
+    >= N and the plain English of data-en below;
   - a twinned sentence: <span data-jw="ja" data-on="N">JAPANESE</span><span data-jw="en" data-on="N">ENGLISH</span>,
-    the Japanese at levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on (it shows
-    or hides whole), the English keeps its own swaps, whose thresholds are at most N (a sentence turns English before
-    its words do as the level goes down);
+    the Japanese at sentence levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on
+    (they show and hide with it), the English keeps its own swaps, each shown by the word level while the twin is
+    English;
   - anything without data-on or data-jw renders as before, so older messages are unchanged.
-A threshold is in -2..3 (3: full only). At -3 (off, and English only) nothing is Japanese. render(text, level) is the
-reply as the reader sees it at a level, in the older markup every other reader of transcripts understands.
+A threshold is in -2..3 (3: full only). The reader has two dials (docs/chat-weave.md, "Two dials"): the word level
+decides every level abbr and the sentence level every twin, each on its own. At -3 a dial's kind shows no Japanese,
+and with both at -3 (off, and English only) nothing is Japanese. render(text, level, sentences) is the reply as the
+reader sees it at a pair of levels (one level: both dials at it), in the older markup every other reader of
+transcripts understands.
 
 Thresholds (assign). One priority order per reply and kind, cut at each budgeted level's lookup budget (-2..2, the
-level's intensity.budget per 100 of the reply's English words): twins spend the sentences' part, SENTENCE_SHARE of
-it, each Japanese sentence at its predicted open chance but never less than the price of a sentence (so no level asks
-for more Japanese sentences than the count before the sentence model did: the user's densities stay), and words the
-whole budget at their current lookup chance, as the weave's planner gives a chat reply's learning words (it has no
-sentence candidates there). Levels are filled from -2 up, each starting from the level below, so the sets are nested.
-At each level twins come first (a twin shown hides its English sentence's swaps, whose lookups it then charges to the
-words' part as the costly words in its Japanese), then words, at most intensity.per_sentence costly words in one
+level's intensity.budget per 100 of the reply's English words), each kind on its own, as the reader's two dials show
+them: twins spend the sentences' part of the sentence level's budget, SENTENCE_SHARE of it, each at its cost: each
+Japanese sentence at its predicted open chance but never less than the price of a sentence (so no level asks for more
+Japanese sentences than the count before the sentence model did), plus the costly words in its Japanese; words spend
+the rest of the word level's budget at their current lookup chance, a word in a twin's English counted as if its twin
+were English (what words show can't depend on the sentence level). Levels are filled from -2 up, each starting from
+the level below, so each kind's sets are nested. Words go in at most intensity.per_sentence costly words in one
 English sentence and one use of each learning word below full; the element at the edge of a part gets in with the
 chance (what is left) / (its cost), so short replies still get some on average and a level's expected spend is its
-part (assign: systematic rounding, one draw per reply and part). Words known at a glance
-cost nothing and show from -2 (in an English twin, while it is English); dictionary words the reader doesn't have
-yet (the weave's pool) and a learning word's later uses show only at full, as before; whatever no budgeted level took
-shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit TARGET_P|) (1 at
-the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in its Japanese plus
-PATTERN_VALUE when it uses this week's learning pattern, over its sentences' part.
+part (assign: systematic rounding, one draw per reply and part). Words known at a glance cost nothing and show from -2
+(in a twin's English, while it is English); dictionary words the reader doesn't have yet (the weave's pool) and a
+learning word's later uses show only at full, as before, and so does a twin holding one; whatever no budgeted level
+took shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit
+TARGET_P|) (1 at the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in
+its Japanese plus PATTERN_VALUE when it uses this week's learning pattern, over its cost.
+
+The tint. Each level abbr, each twin's Japanese span and each glossed word in a twin's Japanese whose chance check-reply
+has carries data-p, the predicted chance the reader looks it up (a word's lookup chance; a twin's chance its
+translation is opened, 1 - the product of its sentences' chances of staying closed), 0..1 with at most two decimals
+(p_text): the clients tint each shown Japanese element by it.
 
 Exploration. Each element's place in its order is, with chance EXPLORE, a uniform random place instead of its rank,
 drawn afresh for every reply (the element's x: 1 when explored). So every element has a known chance of showing at
 each level that is never 0 or 1 by the model's predictions alone, and the elements placed at random are a sample the
 model didn't choose: calibrate compares its expected opens with the seen ones there (sentence_model.exploration).
 
-Propensities (propensities). An element's propensity at a level is the chance it shows there under this
-randomization: the share of DRAWS independent runs of assign (each its own coin and place for every element, and its
-own rounding draws) in which it is visible at that level, seeded by the reply so a re-check repeats it. With 1,000
-draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose placement no draw can
-change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under the reply's
-fingerprint, and the hook's sentence record carries them (grammar.record): never text.
+Propensities (propensities). An element's propensity at a level of its own kind (a twin's at a sentence level, a
+word's at a word level) is the chance it shows there under this randomization: the share of DRAWS independent runs of
+assign (each its own coin and place for every element, and its own rounding draws) in which its threshold is at most
+that level (a word in a twin's English: shown there while the twin is English), seeded by the reply so a re-check
+repeats it. With 1,000 draws a propensity is within about 0.03 of the exact chance (95%), exact for the elements whose
+placement no draw can change (0 or 1). check-reply keeps them with the thresholds in a local file (remember_plan) under
+the reply's fingerprint, and the hook's sentence record carries them (grammar.record): never text.
 """
 import hashlib
 import html
@@ -67,6 +76,9 @@ import intensity
 OFF, FULL = intensity.OFF, intensity.FULL
 BUDGETED = (-2, -1, 0, 1, 2)          # the levels with a lookup budget, filled in this order
 SHOWING = BUDGETED + (FULL,)          # the levels with Japanese; an element's threshold is one of them
+# Every (word level, sentence level) a client can render at, word level first, -3..3 each (the order of a sentence
+# record's pair fingerprints, grammar.record_levels)
+PAIRS = tuple((w, s) for w in intensity.LEVELS for s in intensity.LEVELS)
 EXPLORE = 0.2                         # the chance an element's place in its order is drawn at random
 DRAWS = 1000                          # runs of assign for the propensities
 MAX_SENTENCES = 2                     # Japanese sentences in one twin (a long English sentence split in two)
@@ -205,9 +217,9 @@ def outside_code(text):
 
 class Span:
     """A twin span as the clients read it: kind 'ja' or 'en', its threshold as written (on: the number when it is one
-    of -2..3, else None: rendered as written), where its opening tag starts and ends, where its first </span> after
-    it starts and ends (None when it never closes), and its content."""
-    __slots__ = ('kind', 'on', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
+    of -2..3, else None: rendered as written), its data-p as written (p, or None), where its opening tag starts and
+    ends, where its first </span> after it starts and ends (None when it never closes), and its content."""
+    __slots__ = ('kind', 'on', 'p', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
 
 
 def _spans(p):
@@ -229,6 +241,7 @@ def _spans(p):
         sp = Span()
         sp.kind, sp.start, sp.open_end, sp.close, sp.close_end = a['data-jw'], m.start(), m.end(), None, None
         sp.on = int(a['data-on']) if THRESHOLD.fullmatch(a.get('data-on', '') or '') else None
+        sp.p = a.get('data-p')
         sp.nested = any(x is not None and x.on is not None for x in stack)
         stack.append(sp)
         found.append(sp)
@@ -307,13 +320,13 @@ def _repair(p):
 
 def tokens(text):
     """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
-    written); ('pair', N, japanese, english, between) for a Japanese twin with an English one right after it (only
-    whitespace between, the same threshold); ('ja', N, japanese) and ('en', N, english) for a twin with no pair; and in
-    a broken message (_spans) ('hidden', N, japanese, never) for each Japanese twin (with what an unclosed one took in,
-    up to the next English twin of its threshold; never: it is paired, or left open, so it never shows), its English
-    twins unwrapped and every </span> dropped; broken tags as _repair reads them. A twin span
-    whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is raw; inline
-    code is text (no markup)."""
+    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None) for a Japanese twin
+    with an English one right after it (only whitespace between, the same threshold); ('ja', N, japanese) and ('en', N,
+    english) for a twin with no pair; and in a broken message (_spans) ('hidden', N, japanese, never) for each Japanese
+    twin (with what an unclosed one took in, up to the next English twin of its threshold; never: it is paired, or left
+    open, so it never shows), its English twins unwrapped and every </span> dropped; broken tags as _repair reads them.
+    A twin span whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is
+    raw; inline code is text (no markup)."""
     out = []
     for code, piece in _chunks(str(text)):
         if code:
@@ -344,7 +357,8 @@ def tokens(text):
                 continue
             if id(sp) in pairs:
                 en = pairs[id(sp)]
-                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start])))
+                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start]),
+                            sp.p))
                 at = en.close_end
             else:
                 out.append((sp.kind, sp.on, back(sp.content)))
@@ -388,8 +402,8 @@ def _threshold(a):
 
 
 def _word(t, level):
-    """One glossed word at a level: one with a threshold shows from it (else its data-en, else its meaning, else as
-    written); one with a data-on that isn't one, or with none, as written (at off, english_only then reads it)."""
+    """One glossed word at a (word) level: one with a threshold shows from it (else its data-en, else its meaning, else
+    as written); one with a data-on that isn't one, or with none, as written (at off, english_only then reads it)."""
     a, inner, raw = t[1], t[2], t[3]
     on = _threshold(a)
     if on is not None:
@@ -408,45 +422,57 @@ def esc_text(text):
 
 
 def _inside(content, level, japanese):
-    """A twin's content at a level: the Japanese one's glosses plain, the English one's words by their thresholds."""
+    """A twin's content at a word level: the Japanese one's glosses plain (they show with the twin), the English one's
+    words by their thresholds."""
     if japanese:
         return ''.join(x[1] if x[0] == 'raw' else f'<abbr title="{esc(x[1].get("title", ""))}">{x[2]}</abbr>'
                        for x in _abbrs(content))
     return ''.join(x[1] if x[0] == 'raw' else _word(x, level) for x in _abbrs(content))
 
 
-def render(text, level):
-    """The reply as the reader sees it at a level (-3..3), in the markup from before levels, by the rule the clients
-    share: a pair (a Japanese twin right before an English one of the same threshold, only whitespace between) shows
-    its Japanese from its threshold and its English below; an English twin with no pair always shows; a Japanese one
-    with no pair shows from its threshold and below it is its last sentence mark's translation, or nothing; in a
-    broken message (_spans) every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in
-    inline code is text. A reply without levels is unchanged above off. At off (and English only) everything is
+def dials(level, sentences=None):
+    """(word level, sentence level) from a level and an optional sentence level, or from a pair as level: a single
+    level means both dials at it (one dial, as before the sentence level)."""
+    if isinstance(level, (tuple, list)):
+        level, sentences = level
+    return level, level if sentences is None else sentences
+
+
+def render(text, level, sentences=None):
+    """The reply as the reader sees it at a word level and a sentence level (each -3..3; one level: both dials at it,
+    or a (word, sentence) pair as level), in the markup from before levels, by the rule the clients share: every level
+    abbr by the word level, every twin by the sentence level. A pair (a Japanese twin right before an English one of
+    the same threshold, only whitespace between) shows its Japanese from its threshold and its English below, the
+    glossed words in its Japanese with it; an English twin with no pair always shows; a Japanese one with no pair shows
+    from its threshold and below it is its last sentence mark's translation, or nothing; in a broken message (_spans)
+    every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in inline code is text. A
+    reply without levels is unchanged unless both dials are off. With both at off (and English only) everything is
     rendered as written below every threshold, then read as English only shows it (english_only): its glossed
-    sentences their translations, its glossed words their meanings."""
+    sentences their translations, its glossed words their meanings. With one dial at off, that kind shows no Japanese
+    and the other shows its own."""
     text = str(text)
-    if not has_levels(text) and level > OFF:
+    words, sentences = dials(level, sentences)
+    off = words <= OFF and sentences <= OFF
+    if not has_levels(text) and not off:
         return text
+    shows = lambda on: sentences > OFF and sentences >= on  # a twin's Japanese
     out = []
     for t in tokens(text):
         kind = t[0]
         if kind == 'raw':
             out.append(t[1])
         elif kind == 'abbr':
-            out.append(_word(t, level))
+            out.append(_word(t, words))
         elif kind == 'pair':
-            out.append(_inside(t[2], level, True) + t[4] if level > OFF and level >= t[1] else
-                       t[4] + _inside(t[3], level, False))
+            out.append(_inside(t[2], words, True) + t[4] if shows(t[1]) else t[4] + _inside(t[3], words, False))
         elif kind == 'en':
-            out.append(_inside(t[2], level, False))
+            out.append(_inside(t[2], words, False))
         elif kind == 'ja':
-            out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
-                       esc_text(_last_translation(t[2])))
+            out.append(_inside(t[2], words, True) if shows(t[1]) else esc_text(_last_translation(t[2])))
         elif kind == 'hidden':  # a broken message: a pair's or an open one's Japanese never, a lone one's as such
             if not t[3]:
-                out.append(_inside(t[2], level, True) if level > OFF and level >= t[1] else
-                           esc_text(_last_translation(t[2])))
-    return english_only(''.join(out)) if level <= OFF else ''.join(out)
+                out.append(_inside(t[2], words, True) if shows(t[1]) else esc_text(_last_translation(t[2])))
+    return english_only(''.join(out)) if off else ''.join(out)
 
 
 SENTENCE_MARK = re.compile(r'[。？！?!]+')
@@ -503,8 +529,9 @@ def english_only(text):
 
 
 def well_formed(text):
-    """Whether every twin span is a pair with a threshold, in a message that isn't broken, and every swapped word's
-    data-on is a threshold: what check-reply writes, and the only markup a sentence record is made for."""
+    """Whether every twin span is a pair with a threshold, in a message that isn't broken, every swapped word's
+    data-on is a threshold and every gloss in a twin's English has one: what check-reply writes, and the only markup a
+    sentence record is made for."""
     for code, piece in _chunks(str(text)):
         if code:
             continue
@@ -513,51 +540,83 @@ def well_formed(text):
             return False
         valid, broken = _spans(p)
         jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in ('ja', 'en'))
-        if broken or jw != len(valid) or 2 * len(_pairs(p, valid)) != len(valid):
+        pairs = _pairs(p, valid)
+        if broken or jw != len(valid) or 2 * len(pairs) != len(valid):
             return False
+        if any('data-on' not in attrs(m.group(1)) for en in pairs.values() for m in ABBR.finditer(en.content)):
+            return False  # a gloss in a twin's English with no threshold: as written whatever the word level
         if any(('data-on' in attrs(m.group(1)) and _threshold(attrs(m.group(1))) is None)
                or not attrs(m.group(1)).get('title', '').strip() for m in ABBR.finditer(p)):
             return False
     return True
 
 
+P_TEXT = re.compile(r'0(?:\.\d{1,2})?|1(?:\.0{1,2})?')  # a data-p the contract allows: 0..1, at most two decimals
+
+
+def p_text(p):
+    """A chance as data-p writes it: 0..1 with at most two decimals, no trailing zeros ('0.07', '0.5', '1', '0')."""
+    return f'{min(1.0, max(0.0, float(p))):.2f}'.rstrip('0').rstrip('.')
+
+
+def p_value(value):
+    """A data-p as the clients read it: the number when it is one (P_TEXT), else None (no tint)."""
+    return float(value) if isinstance(value, str) and P_TEXT.fullmatch(value) else None
+
+
 def elements(text):
     """(elements, owners) of well-formed final markup (well_formed). elements in document order: {kind: 's' (a twin)
     or 'w' (a swapped word with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English
-    holds the word, or None}; owners: per glossed word of the reply in order (the Japanese of a twin before its
-    English), the index of the element it belongs to, or -1 (a word without data-on, shown at every level above off).
-    An abbr without data-on inside a twin's English shows while the English does: an element with threshold -2."""
+    holds the word, or None, p: its data-p (p_value) or None}; owners: per glossed word of the reply in order (the
+    Japanese of a twin before its English), the index of the element it belongs to, or -1 (a word without data-on,
+    shown unless both dials are off). An abbr without data-on inside a twin's English (not well-formed) would be an
+    element with threshold -2."""
     els, owners = [], []
     for t in tokens(text):
         if t[0] == 'abbr':
             on = _threshold(t[1])
             if on is not None:
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': on, 'parent': None})
+                els.append({'kind': 'w', 'on': on, 'parent': None, 'p': p_value(t[1].get('data-p'))})
             else:
                 owners.append(-1)
         elif t[0] == 'pair':
             twin = len(els)
-            els.append({'kind': 's', 'on': t[1], 'parent': None})
+            els.append({'kind': 's', 'on': t[1], 'parent': None, 'p': p_value(t[5])})
             owners += [twin] * sum(1 for _ in ABBR.finditer(t[2]))
             for m in ABBR.finditer(t[3]):
-                on = _threshold(attrs(m.group(1)))
+                a = attrs(m.group(1))
+                on = _threshold(a)
                 owners.append(len(els))
-                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin})
+                els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin,
+                            'p': p_value(a.get('data-p'))})
     return els, owners
 
 
-def visible(els, i, level):
-    """Whether element i shows at a level: a twin from its threshold; a word from its threshold, and in a twin's
-    English only below the twin's; i -1 (no element) above off."""
-    if level <= OFF:
-        return False
+def twin_word_chances(text):
+    """[data-p (p_value) or None] of each glossed word in the twins' Japanese of well-formed final markup, in order,
+    the twins' closing marks left out."""
+    out = []
+    for t in tokens(text):
+        if t[0] == 'pair':
+            out += [p_value(attrs(m.group(1)).get('data-p')) for m in ABBR.finditer(t[2])
+                    if grammar.clean(m.group(2)).strip() not in END_MARKS]
+    return out
+
+
+def visible(els, i, level, sentences=None):
+    """Whether element i shows at a word level and a sentence level (one level: both dials at it; dials): a twin from
+    its threshold at the sentence level; a word from its threshold at the word level, and in a twin's English only
+    while the twin is English (the sentence level below the twin's threshold); i -1 (no element) unless both dials
+    are off."""
+    words, sentences = dials(level, sentences)
     if i < 0:
-        return True
+        return words > OFF or sentences > OFF
     e = els[i]
     if e['kind'] == 's':
-        return level >= e['on']
-    return level >= e['on'] and (e['parent'] is None or level < els[e['parent']]['on'])
+        return sentences > OFF and sentences >= e['on']
+    return words > OFF and words >= e['on'] and (e['parent'] is None or sentences <= OFF
+                                                 or sentences < els[e['parent']]['on'])
 
 
 def annotation_texts(text):
@@ -583,17 +642,29 @@ def inert_code(text):
     return ''.join(out)
 
 
-def shown_texts(text, level):
-    """The glossed words a client shows at a level, in order: the abbrs with a title of render's output, code inert
-    (an abbr with no title is no gloss)."""
-    return [inner for kind, _s, _e, inner, title in grammar.pieces(inert_code(render(text, level)))[1]
+def shown_texts(text, level, sentences=None):
+    """The glossed words a client shows at a word level and a sentence level (one level: both), in order: the abbrs
+    with a title of render's output, code inert (an abbr with no title is no gloss)."""
+    return [inner for kind, _s, _e, inner, title in grammar.pieces(inert_code(render(text, level, sentences)))[1]
             if kind == 'w' and (title or '').strip()]
 
 
 def fingerprints(text):
-    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (shown_texts), what T3
-    reports from its screen."""
+    """{level: the fingerprint of the reply's glossed words as shown at that level} for -2..3 (shown_texts), both
+    dials at it."""
     return {level: grammar.fingerprint(shown_texts(text, level)) for level in SHOWING}
+
+
+def pair_texts(text):
+    """{(word level, sentence level): shown_texts there} for every pair of PAIRS."""
+    return {pair: shown_texts(text, pair) for pair in PAIRS}
+
+
+def pair_fingerprints(text, texts=None):
+    """[the fingerprint of the reply's glossed words as shown at each pair of PAIRS] (shown_texts; texts: pair_texts
+    when already made), what T3 reports from its screen at a word level and a sentence level."""
+    texts = texts if texts is not None else pair_texts(text)
+    return [grammar.fingerprint(texts[pair]) for pair in PAIRS]
 
 
 # ---- what Claude writes: English with <ja> twins ----
@@ -845,17 +916,41 @@ def japanese_twin(japanese, english):
 
 
 def word_markup(w, on):
-    return (f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}">{w["ja"]}</abbr>')
+    """A swapped word's level abbr, with its lookup chance (w['p']) as data-p when it has one."""
+    p = f' data-p="{p_text(w["p"])}"' if isinstance(w.get('p'), (int, float)) else ''
+    return f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}"{p}>{w["ja"]}</abbr>'
+
+
+def with_chances(marked, chances):
+    """A twin's Japanese with data-p on each glossed word (its closing marks left out) whose chance is known: chances
+    in the order of those words, None where unknown."""
+    words = iter(chances)
+
+    def add(m):
+        if grammar.clean(m.group(2)).strip() in END_MARKS:
+            return m.group()
+        p = next(words, None)
+        return m.group() if p is None else f'<abbr{m.group(1)} data-p="{p_text(p)}">{m.group(2)}</abbr>'
+    return ABBR.sub(add, marked)
+
+
+def twin_chance(ps):
+    """A twin's chance its translation is opened, from its sentences' open chances: 1 - the chance none is."""
+    closed = 1.0
+    for p in ps:
+        closed *= 1 - min(1.0, max(0.0, p))
+    return 1 - closed
 
 
 # ---- thresholds and propensities ----
 
 class Element:
-    """One thing a level can show: kind 's' (a twin) or 'w' (a swapped word). cost_s: what it spends of the
-    sentences' part; cost_w: of the words' part (a word's lookup chance unless it is free; a twin's costly words);
-    opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
-    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free
-    words -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
+    """One thing a level can show: kind 's' (a twin) or 'w' (a swapped word). cost_s: what a twin's sentences spend of
+    the sentences' part (each at its open chance, never less than the price of a sentence); cost_w: a word's lookup
+    chance unless it is free, or a twin's costly words (their chances, spent from the sentences' part with the twin:
+    cost); opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
+    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free words
+    -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
     __slots__ = ('kind', 'cost_s', 'cost_w', 'opens', 'value', 'parent', 'sid', 'fixed', 'children', 'ja')
 
     def __init__(self, kind, cost_s=0.0, cost_w=0.0, opens=0.0, value=0.0, parent=None, sid=None, fixed=None,
@@ -863,8 +958,12 @@ class Element:
         self.kind, self.cost_s, self.cost_w, self.opens, self.value = kind, cost_s, cost_w, opens, value
         self.parent, self.sid, self.fixed, self.children, self.ja = parent, sid, fixed, [], ja
 
+    def cost(self):
+        """What it spends of its kind's part: a twin its sentences and its costly words, a word its chance."""
+        return self.cost_s + self.cost_w if self.kind == 's' else self.cost_w
+
     def density(self):
-        cost = self.cost_s if self.kind == 's' else self.cost_w
+        cost = self.cost()
         return self.value / cost if cost > 0 else math.inf
 
 
@@ -902,87 +1001,71 @@ def _order(els, kind, on, rng, explore, explored):
 
 def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_sentence):
     """(thresholds, explored) for the elements (Element, linked) under one draw of the randomization (module
-    docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. An element is
-    taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform draw
-    per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same draw
-    at every level keeps the sets nested, and a level's expected spend is its part (systematic rounding). A twin's
-    costly words are held to the words' part the same way, with that part's draw. So an element can show at any level
-    where what came before it leaves its part unspent: the randomization never rules it out. What still depends on the
-    model's predictions is how likely it is: its cost (its predicted chances), and for the elements not explored, its
-    place by value per expected open; the propensities say by how much."""
-    n = len(els)
+    docstring). budgets: {level: (words' part, sentences' part)} in lookups for each budgeted level. The two kinds are
+    cut on their own, as the reader's two dials show them: twins from the sentences' part at each sentence level
+    (each at its cost: its sentences and the costly words in its Japanese), words from the words' part at each word
+    level (each at its chance, a word in a twin's English counted as if the twin were English, since what words show
+    can't depend on the sentence level), at most per_sentence(level) costly words in one English sentence. An element
+    is taken at a level when what its part has spent there plus u times its cost is within the part, u one uniform
+    draw per reply and part: so the element at the edge gets in with the chance (what is left) / (its cost), the same
+    draw at every level keeps each kind's sets nested, and a level's expected spend is its part (systematic rounding).
+    So an element can show at any level where what came before it leaves its part unspent: the randomization never
+    rules it out. What still depends on the model's predictions is how likely it is: its cost (its predicted
+    chances), and for the elements not explored, its place by value per expected open; the propensities say by how
+    much."""
     on = [e.fixed for e in els]
-    explored = [False] * n
+    explored = [False] * len(els)
     twins = _order(els, 's', on, rng, explore, explored)
     words = _order(els, 'w', on, rng, explore, explored)
     u_s, u_w = rng.random(), rng.random()
-    shown = lambda i, level: on[i] is not None and on[i] <= level and (
-        els[i].parent is None or on[els[i].parent] is None or level < on[els[i].parent])
+    taken = lambda i, level: on[i] is not None and on[i] <= level
     for level in BUDGETED:
         words_part, sentences_part = budgets[level]
-        spent_s = sum(e.cost_s for i, e in enumerate(els) if e.kind == 's' and on[i] is not None and on[i] <= level)
-        spent_w = sum(e.cost_w for i, e in enumerate(els) if shown(i, level))
+        spent = sum(e.cost() for i, e in enumerate(els) if e.kind == 's' and taken(i, level))
         for i in twins:
-            if on[i] is not None:
-                continue
-            e = els[i]
-            freed = sum(els[c].cost_w for c in e.children if shown(c, level))
-            if spent_s + u_s * e.cost_s <= sentences_part + 1e-12 and \
-                    (e.cost_w <= freed or spent_w + u_w * (e.cost_w - freed) <= words_part + 1e-12):
+            if on[i] is None and spent + u_s * els[i].cost() <= sentences_part + 1e-12:
                 on[i] = level
-                spent_s += e.cost_s
-                spent_w += e.cost_w - freed
-        counts = {}
+                spent += els[i].cost()
+        spent, counts = 0.0, {}
         for i, e in enumerate(els):
-            if e.kind == 'w' and e.cost_w > 0 and shown(i, level):
-                counts[e.sid] = counts.get(e.sid, 0) + 1
+            if e.kind == 'w' and taken(i, level):
+                spent += e.cost_w
+                if e.cost_w > 0:
+                    counts[e.sid] = counts.get(e.sid, 0) + 1
         most = per_sentence(level)
-        hidden = lambda i: els[i].parent is not None and on[els[i].parent] is not None and on[els[i].parent] <= level
         for i in words:
-            if on[i] is not None or hidden(i) or counts.get(els[i].sid, 0) >= most:
+            if on[i] is not None or counts.get(els[i].sid, 0) >= most:
                 continue
-            if spent_w + u_w * els[i].cost_w <= words_part + 1e-12:
+            if spent + u_w * els[i].cost_w <= words_part + 1e-12:
                 on[i] = level
-                spent_w += els[i].cost_w
+                spent += els[i].cost_w
                 counts[els[i].sid] = counts.get(els[i].sid, 0) + 1
-    on = [FULL if x is None else x for x in on]
-    for i, e in enumerate(els):  # a word in a twin's English: never above the twin (it shows only below it)
-        if e.kind == 'w' and e.parent is not None:
-            on[i] = min(on[i], on[e.parent])
-    return on, explored
-
-
-def shown_at(els, on, i, level):
-    """Whether element i shows at a level under thresholds on."""
-    if level <= OFF:
-        return False
-    if on[i] > level:
-        return False
-    parent = els[i].parent
-    return parent is None or level < on[parent]
+    return [FULL if x is None else x for x in on], explored
 
 
 def propensities(els, budgets, draws=DRAWS, seed=0, explore=EXPLORE):
-    """[[chance element i shows at each budgeted level]]: the share of `draws` runs of assign in which it does (module
-    docstring), seeded."""
+    """[[chance element i is taken at each budgeted level of its own kind]]: the share of `draws` runs of assign in
+    which its threshold is at most the level (module docstring), seeded: a twin's at each sentence level, a word's at
+    each word level (in a twin's English: shown there while the twin is English)."""
     rng = random.Random(seed)
     counts = [[0] * len(BUDGETED) for _ in els]
     for _ in range(draws):
         on, _x = assign(els, budgets, rng, explore)
         for i in range(len(els)):
             for k, level in enumerate(BUDGETED):
-                if shown_at(els, on, i, level):
+                if on[i] <= level:
                     counts[i][k] += 1
     return [[round(c / draws, 3) for c in row] for row in counts]
 
 
 def budgets_for(words, normal=None):
     """{level: (words' part, sentences' part)} in lookups for a reply of `words` English words: the level's budget per
-    100 words (intensity.budget, normal's the challenge when set) times words / 100, and SENTENCE_SHARE of it."""
+    100 words (intensity.budget, normal's the challenge when set) times words / 100, split: SENTENCE_SHARE of it for
+    the sentences at that sentence level and the rest for the words at that word level."""
     out = {}
     for level in BUDGETED:
         b = intensity.budget(level, normal) * words / 100
-        out[level] = (b, intensity.SENTENCE_SHARE * b)
+        out[level] = ((1 - intensity.SENTENCE_SHARE) * b, intensity.SENTENCE_SHARE * b)
     return out
 
 
@@ -1025,7 +1108,8 @@ def swaps_for(session=None):
 
 def remember_plan(fp, plan, now_ms=None):
     """Keeps a checked reply's plan under its fingerprint (grammar.fingerprint of annotation_texts): {at, level (the
-    chat level it was checked at), view (the level it is read at: the chat level, English only aside), e: [[kind,
+    chat's word level it was checked at), view (the word level it is read at: the chat level, English only aside),
+    sentences and sview (the same for the sentence level), e: [[kind,
     on, propensities, p, x]] per element in document order, d: [[pattern ids]] per dropped twin, s: [p] per Japanese
     sentence}, the last PLANS_KEPT."""
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -1066,25 +1150,36 @@ def plan_for(text, plans=None):
 
 
 def level_now(state=None):
-    """The chat level on this machine's state: the level a reply is read at once any English-only spell is over (a
-    reply written during one shows its Japanese then)."""
+    """The chat's word level on this machine's state (levels_now's first)."""
+    return levels_now(state)[0]
+
+
+def levels_now(state=None):
+    """(word level, sentence level) of chat on this machine's state: the levels a reply is read at once any
+    English-only spell is over (a reply written during one shows its Japanese then)."""
     state = state if state is not None else fwlib.load_state()
-    return intensity.current((state or {}).get('prefs'), 'chat')['level']
+    return intensity.chat_levels((state or {}).get('prefs'))
 
 
-def view(text, level=None, plans=None):
+def view(text, level=None, plans=None, sentences=None):
     """What a reader of the transcript counts as shown (fwlib.read_replies, the hook's last reply and topical words):
-    the reply rendered at the level it was shown at when sent (its plan's view), else at `level` (the chat level in
-    force now). A plan from a check under English only (view -3, from before views were the chat level) counts at
-    `level` instead: the reply shows its Japanese once English only is off. A reply without levels is unchanged above
-    off. Only rendered Japanese is an exposure."""
+    the reply rendered at the levels it was shown at when sent (its plan's view and sview: the word and sentence levels;
+    a plan from before the sentence level has view alone, both dials at it), else at `level` and `sentences` (the levels
+    in force now; one level, or a pair as level: dials). A plan from a check under English only (view -3, from before
+    views were the chat level, or with both dials at off) counts at the levels given instead: the reply shows its
+    Japanese once English only is off. A reply without levels is unchanged unless both dials are off. Only rendered
+    Japanese is an exposure."""
+    if level is not None:
+        level, sentences = dials(level, sentences)
     if not has_levels(text):
-        return text if level is None or level > OFF else render(text, level)
+        return text if level is None or level > OFF or sentences > OFF else render(text, level, sentences)
     plan = plan_for(text, plans)
-    shown = plan.get('view') if plan and isinstance(plan.get('view'), int) else None
-    if shown is None or shown <= OFF:
-        shown = level
-    return render(text, 0 if shown is None else shown)
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool)
+    shown = plan.get('view') if plan and whole(plan.get('view')) else None
+    held = plan['sview'] if shown is not None and whole(plan.get('sview')) else shown
+    if shown is not None and (shown > OFF or held > OFF):
+        return render(text, shown, held)
+    return render(text, 0 if level is None else level, 0 if level is None else sentences)
 
 
 def seed_of(text):

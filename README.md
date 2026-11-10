@@ -69,9 +69,11 @@ level from [blocks/](blocks/level-01.md).
   which the weave names with an example so Claude uses it on purpose ([docs/grammar.md](docs/grammar.md)). Finally
   `fw.py check-reply` drops what code can see is wrong (an "if" with no conditional ending, pronouns, する on an
   English verb, unglossed grammar, a sentence too long or with grammar you don't know yet), decides which twins and
-  words each level shows by your word model, the sentence model and the level's budget, and prints the reply to send.
-  So each reply carries every level at once, and T3 Code shows it at your level: the panel's arrows and English only
-  change every message on screen, after the fact ([docs/chat-weave.md](docs/chat-weave.md), "Levels after the fact").
+  words each level shows by your word model, the sentence model and the level's budget, marks each with its predicted
+  chance of a lookup (a faint tint in T3 Code), and prints the reply to send. So each reply carries every level at
+  once, and T3 Code shows it at your levels, two dials: one for the swapped words and one for the Japanese sentences;
+  the panel's arrows and English only change every message on screen, after the fact
+  ([docs/chat-weave.md](docs/chat-weave.md), "Levels after the fact").
   In four rounds of blind-judged replies drafting and weaving beat Claude weaving as it writes on every question, with
   fewer errors and more Japanese grammar, in about half the time. At full it also brings in a few dictionary words you
   haven't met. `fw.py chat-style classic` goes back to the brief above; terminals and Codex always use it.
@@ -124,7 +126,7 @@ way round.
 | `/japanese-weave:learn <word>` | Put a word back into the learning set |
 | `/japanese-weave:stage 1-4\|auto` | Pin your stage, or let it follow your known words |
 | `/japanese-weave:challenge off\|0.5-3` | Set normal's lookup budget per 100 words (the other levels scale with it) |
-| `/japanese-weave:intensity [chat\|browser] up\|down\|normal\|off\|full` | More or less Japanese, none (off) or all you can follow (full), for the next 3 hours |
+| `/japanese-weave:intensity [chat\|sentences\|browser] up\|down\|normal\|off\|full` | More or less Japanese (chat's words, chat's sentences or web pages), none (off) or all you can follow (full), for the next 3 hours |
 | `/japanese-weave:intensity off\|normal here` | No Japanese in this chat until you turn it back on |
 | `/japanese-weave:intensity english on\|off` | Chat replies in plain English for an hour (T3 Code's shortcut), or back |
 | `/japanese-weave:anki <collection>` | Put your Anki review words at the front of the list |
@@ -314,7 +316,9 @@ screen while you were reading.
 **For now: heavier or lighter.** Alt+Shift+Period gives more Japanese and Alt+Shift+Comma less, for the next 3 hours, in
 the browser (a toast on the page and the toolbar badge show the level); in chat, the arrows of T3 Code's Japanese Weave
 panel do the same (T3 Code's shortcut toggles English only, below); also the popup's Less/More buttons and
-`fw.py intensity [chat|browser] up|down|normal`. Each press is
+`fw.py intensity [chat|sentences|browser] up|down|normal`. In chat there are two dials: the words (`chat`) and the
+Japanese sentences (`sentences`), each with its own level and its own 3 hours; the sentences follow the words until you
+set them yourself, and off (or normal, or full) with no dial named sets both. Each press is
 logged, and half of the web passages keep only a random share (20% to 100%) of their words you know at a glance, so
 `fw.py calibrate` can tell what those words cost you and whether the default amount is right: reading speed and opens by
 how much Japanese a passage had, and how often you turned it down or up. It also checks the model, per surface and class
@@ -329,11 +333,11 @@ and whole sentences only: the brief asks for as many per 100 words as spend abou
 sentence per 100 words, the one in five it asked for at Stage 3 before), at most one learning word in a sentence (two
 at heavier and much heavier), and the line on the last reply says whether it went over or under, and with which.
 
-**The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each
-for 3 hours like the levels between (a press past either end stays there and restarts the clock);
-`fw.py intensity [chat|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In chat, off
-means the hook sends only a one-line note to reply in plain English, until the time runs out, you press the panel's
-up arrow, or you say "japanese back on" in any chat.
+**The ends: off and full.** Three presses lighter from normal turn Japanese off, and three heavier reach full, each for
+3 hours like the levels between (a press past either end stays there and restarts the clock);
+`fw.py intensity [chat|sentences|browser] off|full` or `/japanese-weave:intensity off|full` sets them directly. In
+chat, off (both dials) means the hook sends only a one-line note to reply in plain English, until the time runs out, you press
+the panel's up arrow, or you say "japanese back on" in any chat.
 In chat, full is the normal brief with the budget lifted: every sentence you could follow in plain Japanese (your
 known and learning words plus common grammar) is written in Japanese, and the sentences that must stay English
 (steps, code, commands, exact technical detail) swap in every known or learning word, with no cap per sentence. A

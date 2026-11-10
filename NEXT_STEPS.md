@@ -218,6 +218,13 @@ are opened clearly more than predicted, weight the sentence fit by 1 / propensit
 raise `twins.EXPLORE`. Also watch how many twins a reply carries and how long replies take to write: the cap
 (`chatweave.TWIN_SLACK`) is the knob.
 
+**Two dials and the tint** (docs/chat-weave.md, "Two dials"): update the collector first (the `sentences` surface,
+`sentenceLevel` on report items and sentence records with pair fingerprints; older clients are unaffected), then the
+T3 Code builds with two dials and the tint, then the hook (`data-p`, budgets per kind, known adverbs in English
+sentences). The first refresh on each machine with chats sends every reply's sentence record again (version 2). Then
+watch `fw.py calibrate`'s presses per dial (Chat words, Chat sentences) for whether normal suits each, and check-reply's
+per-level lines: the words' part should now be spent near its share at normal, where it was a tenth of it.
+
 **Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
 entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
 

@@ -199,7 +199,7 @@ class Hook(Home):
         self.log.write_text(line(ENGLISH) + '\n')
 
     def test_off_sends_one_line_and_none_of_the_extras(self):
-        self.assertIn('Chat replies: off until', self.fw('intensity', 'off'))
+        self.assertIn('Chat words: off until', self.fw('intensity', 'off'))
         until = fwlib.load_state()['prefs']['intensity_chat']['until']
         context, out = self.hook('Prove that the square root of 2 is irrational.', transcript_path=str(self.log))
         self.assertEqual(context, weave.off_note(until))  # no brief or calibration line
@@ -214,7 +214,7 @@ class Hook(Home):
         self.assertIn('systemMessage', out)
 
     def test_full_drops_the_calibration_line(self):
-        self.assertIn('Chat replies: full (+3) until', self.fw('intensity', 'full'))
+        self.assertIn('Chat words: full (+3) until', self.fw('intensity', 'full'))
         context, out = self.hook('What is a monad?', transcript_path=str(self.log))
         self.assertIn(', turned to full for now by the user): ', context)
         self.assertNotIn('Recall:', context)
@@ -235,14 +235,14 @@ class Hook(Home):
         self.assertNotIn('turned', self.hook('Next.', session='s2')[0])  # in all chats
 
     def test_off_and_full_are_set_outright_and_steps_still_step(self):
-        self.assertIn('Chat replies: full (+3) until', self.fw('intensity', 'chat', 'full'))
-        self.assertIn('Chat replies: much heavier (+2) until', self.fw('intensity', 'down'))
+        self.assertIn('Chat words: full (+3) until', self.fw('intensity', 'chat', 'full'))
+        self.assertIn('Chat words: much heavier (+2) until', self.fw('intensity', 'down'))
         self.assertIn('Web pages: off until', self.fw('intensity', 'browser', 'off'))
         value = fwlib.load_state()['prefs']['intensity_browser']
         self.assertEqual((value['level'], value['source'], value['until'] - value['at']),
                          (-3, 'command', intensity.DURATION_MS))
         self.assertIn('Web pages: much lighter (-2) until', self.fw('intensity', 'browser', 'up'))
-        self.assertIn('Chat replies: normal.', self.fw('intensity', 'normal'))
+        self.assertIn('Chat words: normal.', self.fw('intensity', 'normal'))
         self.assertEqual(self.levels(), [('chat', 3, 'command'), ('chat', 2, 'command'), ('browser', -3, 'command'),
                                          ('browser', -2, 'command'), ('chat', 0, 'command')])
         with mock.patch('sys.stderr', new=io.StringIO()):
@@ -318,7 +318,7 @@ class Collector(Home):
 
     def test_off_and_full_from_fw_go_to_the_collector(self):
         self.assertIn('Web pages: full (+3) until', self.fw('intensity', 'browser', 'full'))
-        self.assertIn('Chat replies: off until', self.fw('intensity', 'off'))
+        self.assertIn('Chat words: off until', self.fw('intensity', 'off'))
         self.assertEqual(hub.pending(), [])  # sent at once, not queued
         with fwlib.using_home(self.server_home):
             prefs = fwlib.load_state(create=False)['prefs']
@@ -338,7 +338,7 @@ class Calibration(unittest.TestCase):
         report = knowledge.calibrate([], {}, changes, self.NOW)
         self.assertEqual({k: report['presses']['chat'][k] for k in ('lighter', 'heavier', 'hoursAt')},
                          {'lighter': 1, 'heavier': 1, 'hoursAt': {'-3': 3.0, '3': 3.0}})
-        self.assertIn('Chat replies: 1 lighter and 1 heavier presses (3.0 h off, 3.0 h at full).',
+        self.assertIn('Chat words: 1 lighter and 1 heavier presses (3.0 h off, 3.0 h at full).',
                       knowledge.calibration_text(report))
         burst = [chat(self.NOW - 2 * hour + i * second, level) for i, level in enumerate([-1, -2, -3])]
         report = knowledge.calibrate([], {}, burst, self.NOW)

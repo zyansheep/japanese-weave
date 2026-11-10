@@ -27,7 +27,8 @@ from pathlib import Path
 
 import inflection
 
-VERSION = 1  # of the scanner and the sentence records; a new one makes the refresh read every transcript again
+VERSION = 2  # of the scanner and the sentence records; a new one makes the refresh read every transcript again
+# (2: a record with levels has the fingerprint of every pair of word and sentence levels, pf, for two dials)
 DICTIONARY = Path(__file__).resolve().parent.parent / 'data' / 'dictionary.tsv'
 STATUSES = ('known', 'learning', 'new')
 MARKS = ('。', '？')
@@ -651,10 +652,12 @@ def record_levels(text, day, lex=None, plans=None):
     open chance check-reply predicted for it, when its plan is here; e, its elements in order ([kind 's' a twin or 'w'
     a swapped word, threshold, the twin whose English holds the word or -1, propensities at -2..2 or [], expected opens
     or None, explored 1/0 or None]: twins.elements, with the plan's numbers); a, per glossed word the element it
-    belongs to (-1: none, shown above off); fps, the fingerprint of what each level -2..3 shows (twins.fingerprints),
-    which the collector matches a T3 message's annotations against, with the level the message reports; lv, the level
-    it was shown at when sent (the plan's view), and d, the pattern ids of each twin check-reply dropped, when its plan
-    is here (twins.plan_for). None when it has no Japanese sentence."""
+    belongs to (-1: none, shown unless both dials are off); pf, the fingerprint of what each pair of a word level and
+    a sentence level shows (twins.PAIRS, twins.pair_fingerprints), which the collector matches a T3 message's
+    annotations against, with the levels the message reports (records from before the sentence level have fps instead,
+    the fingerprint of what each level -2..3 shows with both dials at it); lv and ls, the word and sentence levels it
+    was shown at when sent (the plan's view and sview), and d, the pattern ids of each twin check-reply dropped, when
+    its plan is here (twins.plan_for). None when it has no Japanese sentence."""
     import twins
     if not twins.well_formed(text):
         return None  # markup check-reply didn't write (edited, cut short): what each level shows can't be trusted
@@ -665,8 +668,9 @@ def record_levels(text, day, lex=None, plans=None):
         return None
     full = [j for j, o in enumerate(owners) if twins.visible(els, o, twins.FULL)]
     texts = twins.annotation_texts(text)
-    for level in twins.SHOWING:
-        if twins.shown_texts(text, level) != [texts[j] for j, o in enumerate(owners) if twins.visible(els, o, level)]:
+    paired = twins.pair_texts(text)
+    for pair in twins.PAIRS:
+        if paired[pair] != [texts[j] for j, o in enumerate(owners) if twins.visible(els, o, pair)]:
             return None  # glossed words the elements don't account for (one in code a level reads): no join to trust
     if len(full) != len(annotation_texts(shown)):
         return None
@@ -682,10 +686,12 @@ def record_levels(text, day, lex=None, plans=None):
            'e': [[e['kind'], e['on'], -1 if e['parent'] is None else e['parent']]
                  + (list(planned[i][2:]) if planned else [[], None, None]) for i, e in enumerate(els)],
            'a': owners}
-    fps = twins.fingerprints(text)
-    out['fps'] = [fps[level] for level in twins.SHOWING]
-    if isinstance(plan.get('view'), int):
+    out['pf'] = twins.pair_fingerprints(text, paired)
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool) and -3 <= x <= 3
+    if whole(plan.get('view')):
         out['lv'] = plan['view']
+        if whole(plan.get('sview')):
+            out['ls'] = plan['sview']
     if isinstance(plan.get('d'), list) and plan['d']:
         out['d'] = [list(ids) for ids in plan['d'] if isinstance(ids, list)][:50]
     return out
@@ -698,16 +704,19 @@ def valid_record(r):
     share = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x <= 1
     ids = lambda x: isinstance(x, list) and len(x) <= len(IDS) and all(isinstance(i, str) and 0 < len(i) <= 20 for i in x)
     hexed = lambda x: isinstance(x, str) and re.fullmatch('[0-9a-f]{16}', x) is not None
-    if not (isinstance(r, dict) and set(r) <= {'fp', 'day', 'v', 's', 'e', 'a', 'fps', 'lv', 'd'} and hexed(r.get('fp'))
+    if not (isinstance(r, dict) and set(r) <= {'fp', 'day', 'v', 's', 'e', 'a', 'fps', 'pf', 'lv', 'ls', 'd'}
+            and hexed(r.get('fp'))
             and isinstance(r.get('day'), str) and count(r.get('v', 0), 1000) and isinstance(r.get('s'), list)
             and 0 < len(r['s']) <= 200
             and all(isinstance(s, list) and len(s) in (4, 5) and count(s[0], 1000) and count(s[1], 10_000)
                     and count(s[2], 10_000) and ids(s[3]) and (len(s) == 4 or share(s[4])) for s in r['s'])):
         return False
-    levels = {'e', 'a', 'fps'} & set(r)
+    levels = {'e', 'a', 'fps', 'pf'} & set(r)
     if not levels:
-        return not {'lv', 'd'} & set(r) and all(len(s) == 4 for s in r['s'])
-    e, a, fps = r.get('e'), r.get('a'), r.get('fps')
+        return not {'lv', 'ls', 'd'} & set(r) and all(len(s) == 4 for s in r['s'])
+    import twins
+    e, a = r.get('e'), r.get('a')
+    fps, size = (r['pf'], len(twins.PAIRS)) if 'pf' in r else (r.get('fps'), 6)  # pairs, or levels -2..3 (before)
     level = lambda x, low: isinstance(x, int) and not isinstance(x, bool) and low <= x <= 3
     element = lambda x: (isinstance(x, list) and len(x) == 6 and x[0] in ('s', 'w') and level(x[1], -2)
                          and isinstance(x[2], int) and not isinstance(x[2], bool) and -1 <= x[2] < len(e)
@@ -715,12 +724,12 @@ def valid_record(r):
                          and (x[4] is None or (isinstance(x[4], (int, float)) and not isinstance(x[4], bool)
                                                and 0 <= x[4] <= 100))
                          and x[5] in (None, 0, 1) and not isinstance(x[5], bool))
-    return (levels == {'e', 'a', 'fps'} and isinstance(e, list) and len(e) <= 500 and all(element(x) for x in e)
-            and isinstance(a, list) and len(a) <= 2000
+    return (levels in ({'e', 'a', 'fps'}, {'e', 'a', 'pf'}) and isinstance(e, list) and len(e) <= 500
+            and all(element(x) for x in e) and isinstance(a, list) and len(a) <= 2000
             and all(isinstance(x, int) and not isinstance(x, bool) and -1 <= x < len(e) for x in a)
             and all(s[0] < len(a) for s in r['s'])
-            and isinstance(fps, list) and len(fps) == 6 and all(hexed(x) for x in fps)
-            and ('lv' not in r or level(r['lv'], -3))
+            and isinstance(fps, list) and len(fps) == size and all(hexed(x) for x in fps)
+            and ('lv' not in r or level(r['lv'], -3)) and ('ls' not in r or ('lv' in r and level(r['ls'], -3)))
             and ('d' not in r or (isinstance(r['d'], list) and len(r['d']) <= 50 and all(ids(x) for x in r['d']))))
 
 

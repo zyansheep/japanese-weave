@@ -15,8 +15,9 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           "error"}]}  (see feedback.py; T3 also sends review items, what happened to a review card,
                           with its grade when given; reasons, from T3: why each rejected item was, by index, such as a
                           shownMs over a day; and an optional "level" on
-                          the others: the level the message was rendered at, -3..3, which makes each level a message
-                          was shown at a showing of its own)
+                          the others: the word level the message was rendered at, -3..3, with an optional
+                          "sentenceLevel", the sentence level (absent: the same), which makes each pair of levels a
+                          message was shown at a showing of its own)
   POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool, "peek"?: bool,
                           "release"?: [card ids]}: the next review card, in Anki's order (review.py; more: past today's
                           new-card limit; peek: the counts alone, for a badge: card null, nothing served or recorded;
@@ -35,10 +36,13 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           review cards, for a mirror (feedback.py)
   GET  /v1/recent?limit=N                                           -> {"ok": true, "items": [...]}
   GET  /v1/health                                -> {"ok": true, "interactions": n, "host", "home", "state": bool}
-  GET  /v1/intensity?surface=chat|browser        the level in effect -> {"ok": true, "intensity": {level, until, at}}
+  GET  /v1/intensity?surface=chat|sentences|browser   the level in effect -> {"ok": true, "intensity": {level, until,
+                          at}}; chat is chat's word level, sentences its sentence level (intensity.py: two dials)
                           &session=ID adds that chat's switch (threads.py): "thread": {off, at, source} or null;
                           surface=chat adds English only: "english": {on, until (ms, 0 when off), at (ms of the last
-                          change, 0 if never)}
+                          change, 0 if never)}, and the sentence level: "sentences": {level, until, at}, so a client
+                          reads both dials in one request (the word level's until the reader first sets the sentence
+                          level; a collector without it: the sentence level is the word level)
   POST /v1/intensity      {"surface", "step": 1|-1|0, "source"}: one press of heavier or lighter (the arrows of T3
                           Code's panel, fw.py intensity), recorded as a set op -> {"ok": true, "intensity": {level,
                           until, at}}; level -3 (off) .. 3 (full), a press past either end stays there (intensity.py)
@@ -139,11 +143,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/v1/intensity':
             surface = query.get('surface', [''])[0]
             if surface not in intensity.SURFACES:
-                return self.reply(400, {'ok': False, 'error': 'surface is chat or browser'})
+                return self.reply(400, {'ok': False, 'error': 'surface is chat, sentences or browser'})
             state = fwlib.load_state() if (fwlib.home() / 'state.json').exists() else {}
             body = {'ok': True, 'intensity': intensity.current(state.get('prefs'), surface)}
             if surface == 'chat':
                 body['english'] = intensity.english_current(state.get('prefs'))
+                body['sentences'] = intensity.current(state.get('prefs'), intensity.SENTENCES)
             if 'session' in query:  # the hook asks for its chat's switch in the same request
                 body['thread'] = threads.entry(state, query['session'][0])
             return self.reply(200, body)
@@ -204,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             source = body.get('source', 'unknown') if isinstance(body, dict) else None
             if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \
                     or isinstance(body.get('step'), bool) or not isinstance(source, str) or not 0 < len(source) <= 20:
-                return self.reply(400, {'ok': False, 'error': 'need {"surface": "chat"|"browser", "step": 1|-1|0, "source"}'})
+                return self.reply(400, {'ok': False, 'error': 'need {"surface": "chat"|"sentences"|"browser", '
+                                        '"step": 1|-1|0, "source"}'})
             if not (fwlib.home() / 'state.json').exists():
                 return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
             with PRESSES:
