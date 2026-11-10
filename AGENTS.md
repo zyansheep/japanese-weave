@@ -5,6 +5,12 @@ This checkout's `main` is the user's live chat hook (a directory plugin marketpl
 (`~/Repos/japanese-weave` there) is its own live hook. Do new work on a branch in a worktree and merge to `main` only
 with the user's OK.
 
+## Pull requests
+Changes reach `main` through a pull request on GitHub, `zyansheep/japanese-weave` (always pass
+`-R zyansheep/japanese-weave` to `gh pr create`: `upstream` is someone else's repository). CI's `check` must pass, and
+PRs are squash-merged, so the PR title becomes the commit's title and its commits' messages its body. After a merge,
+fast-forward the local `main` (the live hook) to `origin/main` before deploying.
+
 ## Tests
 - Python: `sh scripts/run -m unittest discover -s tests -q` (or `python3 -m unittest ...` where python3 is on PATH;
   `scripts/run` finds a Python where it isn't, as on functor).
