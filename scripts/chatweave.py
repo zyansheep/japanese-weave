@@ -1,8 +1,11 @@
 """Chat replies woven by code (README "Chat replies"; fw.py weave). Claude writes a reply in plain English and passes it
-here; the extension's own pipeline (chatweave.mjs, under node or bun) swaps in Japanese by the word model and the
-chat's level, and Claude rewrites the result into Japanese and mixed sentences and checks it (check_reply.py) before
-sending it. At full, the words come from the dictionary too: every entry with a sense flagged safe that isn't in the
-word list yet, priced by its fitted prior (knowledge.prior_estimate), loanwords and sensitive fields left out.
+here; the extension's own pipeline (chatweave.mjs, under node or bun) swaps in every Japanese word that could go there,
+as at full, since a reply now carries every level at once (twins.py): the words known at a glance, the learning words,
+and a few dictionary words: entries with a sense flagged safe that aren't in the word list yet, priced by their fitted
+prior (knowledge.prior_estimate), loanwords and sensitive fields left out, which show only at full. The first line asks
+for a Japanese twin of each sentence that fits the length and grammar limits, up to a cap (twin_cap), and the swaps
+are kept for the check step (twins.remember_swaps), which fills in each one's English. Claude writes the reply with
+its twins and passes it to check_reply.py, which decides what each level shows and prints the markup to send.
 Python 3.9+ standard library only."""
 import hashlib
 import json
@@ -24,6 +27,13 @@ SCRIPT = Path(__file__).resolve().parent / 'chatweave.mjs'
 EXTENSION = Path(__file__).resolve().parent.parent / 'extension' / 'src'
 SENSES = Path(__file__).resolve().parent.parent / 'data' / 'senses.tsv'
 TIMEOUT = 30
+# The most twins the first line asks for: TWIN_SLACK times the sentences much heavier (+2, the heaviest level with a
+# budget) can show in the reply at the price of a sentence, at least TWIN_MIN. Full shows every twin, but full costs
+# more reading than it teaches (docs/chat-weave.md, round 4) and is rarely read, so twins past what +2 uses mostly
+# serve it; the slack leaves the ranking a choice (and room for its random places, twins.EXPLORE) and covers the twins
+# the check drops, while bounding the writing a reply takes.
+TWIN_SLACK = 1.5
+TWIN_MIN = 3
 POOL = 'weave-pool.json'  # the dictionary words full adds, kept in the state folder until the word list or fit changes
 SENSITIVE = ('med', 'pharm', 'dent', 'vet', 'psy', 'anat', 'physiol', 'embryo', 'law', 'finc', 'econ', 'bus')
 
@@ -105,23 +115,58 @@ def sentence_plan(state, know):
                         if learning else None}}
 
 
-def weave(draft, level=0, state=None):
-    """The draft woven at the level (intensity.LEVELS above off): the weave's first line, -----, then the text."""
+def twin_cap(words, normal=None, price=intensity.SENTENCE_PRICE):
+    """(the most twins to ask for in a reply of `words` English words, the sentences +2 shows at the price): see
+    TWIN_SLACK."""
+    heaviest = intensity.SENTENCE_SHARE * intensity.budget(2, normal) * words / 100 / max(price, 1e-6)
+    return max(TWIN_MIN, math.ceil(TWIN_SLACK * heaviest)), heaviest
+
+
+def first_line(woven, plan, cap, heaviest):
+    """The weave's first line: the swaps (known, learning by name, dictionary words by name, unsure ones), then the
+    twins to write, their limits and grammar (sentence_plan) and this week's learning pattern."""
+    swaps = woven['swaps']
+    known = [s for s in swaps if s['free']]
+    learning = [s for s in swaps if not s['free'] and not s.get('dictionary')]
+    pool = [s for s in swaps if s.get('dictionary')]
+    names = lambda group: ', '.join(dict.fromkeys(s['ja'] for s in group))
+    g = plan.get('grammar') or {}
+    l = g.get('learning')
+    line = (f'jw-weave: {len(known)} known-word swaps and {len(learning)} learning-word swaps'
+            + (f' ({names(learning)}: keep each whose sense fits)' if learning else '')
+            + (f', and {len(pool)} dictionary words that show only at full ({names(pool)})' if pool else '')
+            + f'. {sum(1 for s in swaps if s.get("unsure"))} swaps are marked {{{{English→Japanese}}}}: the code '
+            'wasn\'t sure of the sense. '
+            f'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
+            f'<ja>...</ja>, up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
+            'code chooses which show at each level). '
+            f'Each Japanese sentence at most {plan.get("maxChars") or 14} Japanese characters (a twin may be two short '
+            f'sentences), using only these grammar patterns: {", ".join(g.get("known") or ())}; plus at most one '
+            'learning pattern in a sentence. '
+            + (f'This week\'s learning pattern is {l["name"]}: {l["explain"]}, as in {l["example"]}; use it in a twin '
+               'or two. ' if l else 'No learning pattern this week. ')
+            + 'Any other grammar stays out: rephrase, or leave that sentence without a twin.')
+    return line
+
+
+def weave(draft, level=0, state=None, session=None):
+    """The draft woven with every candidate swap: the weave's first line, -----, then the text. The swaps are kept for
+    the check step (twins.remember_swaps). level: the chat's level now (the first line doesn't depend on it)."""
     js = runtime()
     if js is None:
         raise RuntimeError('no node or bun to run the weave')
     state = state or hub.current(fw_host.STATE_MAX_AGE, wait=False)[0]
     know = knowledge.load()
     words, adaptive = words_for(state)
-    full = intensity.is_full(level)
-    if full:
-        words = words + pool(words, state, know)
-    budget = intensity.budget(level, knowledge.challenge_of(state) or None) if not full else 0
-    payload = {'draft': draft, 'words': words, 'intensity': 3 if full else level,
-               'budgetPer100': budget if math.isfinite(budget) else 0, 'recency': adaptive.get('recency'),
-               'sentencePrice': intensity.sentence_price(know), **sentence_plan(state, know)}
+    words = words + [dict(w, dictionary=True) for w in pool(words, state, know)]
+    payload = {'draft': draft, 'words': words, 'intensity': intensity.FULL, 'recency': adaptive.get('recency')}
     run = subprocess.run([js, str(SCRIPT)], input=json.dumps(payload, ensure_ascii=False), capture_output=True,
                          text=True, timeout=TIMEOUT)
     if run.returncode != 0:
         raise RuntimeError((run.stderr or 'the weave failed').strip().splitlines()[-1][:300])
-    return run.stdout.rstrip('\n')
+    woven = json.loads(run.stdout)
+    import twins
+    twins.remember_swaps(woven['swaps'], level, session)
+    price = intensity.sentence_price(know)
+    cap, heaviest = twin_cap(woven['words'], knowledge.challenge_of(state) or None, price)
+    return first_line(woven, sentence_plan(state, know), cap, heaviest) + '\n-----\n' + woven['text']

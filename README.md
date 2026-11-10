@@ -62,21 +62,22 @@ level from [blocks/](blocks/level-01.md).
   for a `t3 serve` parent and weaves there.
 - **Chat replies in T3 Code: draft and weave** (the default where the chat shows hover glosses and node or bun is
   installed). The brief has Claude write each reply in plain English first and pass it to `fw.py weave`, which weaves
-  in Japanese with the extension's own code: every place one of your words could go, picked by your word model and the
-  chat's level. Claude then rewrites the result, keeping the swaps whose sense fits and turning about as many sentences
-  as the level allows into Japanese or mixed Japanese and English, each with its translation on the closing 。. Each
-  such sentence is short (at most as many Japanese characters as your log says you read without opening the
-  translation, 9 on 2026-11-04) and uses only grammar you know, plus at most one pattern you are learning, one at a
-  time, which the weave names with an example so Claude uses it on purpose ([docs/grammar.md](docs/grammar.md)).
-  Finally it runs `fw.py check-reply`, which lists what code can see is wrong (an "if" with no conditional ending,
-  pronouns, する on an English verb, unglossed grammar and the like), scores each Japanese sentence (length, grammar,
-  the chance you open its translation), and Claude fixes what it flags and sends the reply. In four rounds of blind-judged
-  replies this beat Claude weaving as it writes on every question, with fewer errors and more Japanese grammar, in
-  about half the time ([docs/chat-weave.md](docs/chat-weave.md)). At full it also brings in dictionary words you
+  in Japanese with the extension's own code: every place one of your words could go, as at full. Claude then writes
+  the reply with the swaps whose sense fits and, right after each sentence it can say in Japanese within the limits,
+  its Japanese twin: short (at most as many Japanese characters as your log says you read without opening the
+  translation, 9 on 2026-11-04), using only grammar you know plus at most one pattern you are learning, one at a time,
+  which the weave names with an example so Claude uses it on purpose ([docs/grammar.md](docs/grammar.md)). Finally
+  `fw.py check-reply` drops what code can see is wrong (an "if" with no conditional ending, pronouns, する on an
+  English verb, unglossed grammar, a sentence too long or with grammar you don't know yet), decides which twins and
+  words each level shows by your word model, the sentence model and the level's budget, and prints the reply to send.
+  So each reply carries every level at once, and T3 Code shows it at your level: the panel's arrows and English only
+  change every message on screen, after the fact ([docs/chat-weave.md](docs/chat-weave.md), "Levels after the fact").
+  In four rounds of blind-judged replies drafting and weaving beat Claude weaving as it writes on every question, with
+  fewer errors and more Japanese grammar, in about half the time. At full it also brings in a few dictionary words you
   haven't met. `fw.py chat-style classic` goes back to the brief above; terminals and Codex always use it.
-- **English only in T3 Code**: one keyboard shortcut shows every chat message on screen in English (words as their
-  meanings, Japanese sentences as their translations) and has new replies written in plain English, for an hour or
-  until you press it again. The arrows of T3 Code's Japanese Weave panel set the level (heavier, lighter).
+- **English only in T3 Code**: one keyboard shortcut shows every chat message on screen in English (twins in English,
+  words as their English) for an hour or until you press it again; turning it off shows the Japanese again, the
+  replies written meanwhile included. The arrows of T3 Code's Japanese Weave panel set the level (heavier, lighter).
 - **Any website** (extension): some English on the page becomes Japanese: single words, short phrases in Japanese word
   order ("before bed" -> 寝る前), and short sentences written fully in Japanese, as many as your lookup budget pays for,
   all built only from your words plus particles and endings. A passage is English prose of at least 6 words: a
@@ -340,10 +341,11 @@ chat turned off with `off here` stays off at any level.
 `fw.py calibrate` counts a press into off as lighter and into full as heavier.
 
 **English only, for an hour (T3 Code).** T3 Code's keyboard shortcut turns chat to English only: every message on
-screen shows English at once, and the hook has new replies written in plain English, as at off, until the hour runs
-out or you press it again (or `fw.py intensity english on|off`). Messages shown meanwhile don't count as reading, and
-each time you turn it on counts as a lighter press in `fw.py calibrate`; the Japanese sentences that were on screen
-count as weak evidence that they were too hard (docs/grammar.md).
+screen shows English at once, until the hour runs out or you press it again (or `fw.py intensity english on|off`).
+New replies still carry their Japanese twins (in the draft style; the classic brief has them written in plain
+English), shown once English only is off. Messages shown meanwhile don't count as reading, and each time you turn it
+on counts as a lighter press in `fw.py calibrate`; the Japanese sentences that were on screen count as weak evidence
+that they were too hard (docs/grammar.md).
 
 **Just this chat: off.** Ask in the chat ("no japanese for this thread please", "english only from now on", "write no
 Japanese in what you say to me") or run `/japanese-weave:intensity off here`, and that chat gets no Japanese from

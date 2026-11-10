@@ -9,8 +9,8 @@ allowed-tools: Bash(sh:*)
 all, or every sentence you can follow in plain Japanese written in Japanese and every known or learning word swapped
 into the rest. `normal` brings back the usual amount.
 
-`english on` writes chat replies in plain English for an hour (T3 Code's shortcut toggles the same switch, and also
-shows the messages on screen in English); `english off` ends it.
+`english on` shows chat in English for an hour (T3 Code's shortcut toggles the same switch): the messages on screen
+show their English, and new replies keep their Japanese twins, shown once it ends; `english off` ends it.
 
 `off here` turns Japanese off in this chat only, until `normal here` turns it back on (no 3-hour limit); saying "no
 japanese here" or "japanese back on" in the chat does the same.

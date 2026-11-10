@@ -14,6 +14,27 @@ table); the collector joins them to T3 messages shown by the same fingerprint of
 "English only" in T3 Code (POST /v1/english, on) names the messages on screen: each Japanese sentence in them counts as
 an open of weight PRESS_WEIGHT, weak evidence that it was too hard.
 
+Replies with render-time levels (twins.py) carry every level at once and T3 shows each message at the reader's level,
+so a message's annotations are a subset of the reply's glossed words, a different one at each level. Their records
+(grammar.record_levels) hold every element with its threshold and propensities and the fingerprint of what each level
+shows; the collector keeps each level a message was shown at as a showing of its own (feedback.py: its items carry
+the level, and a level change splits them), so the join (records_by_fp, message_sentences) matches a showing's
+annotations against the fingerprint at the level it reports and reads off which sentences it showed and where: only
+what was rendered is evidence, and a message read again at another level is another showing. Each unit keeps the
+level, its twin's threshold and propensity there, the open chance check-reply predicted and whether its place was
+drawn at random (explored), for exploration.
+
+Selection. Which twins show at a level depends on the model's own predictions (twins.assign ranks by value per
+expected open), so without randomness the fit would see only the sentences it already expects to be easy, and a
+misspecified model could never learn it was wrong about the others. A share of each reply's places is random
+(twins.EXPLORE): exploration compares the expected and seen opens of the twins placed at random, a sample the model
+didn't choose, against those it chose. The fit itself is unweighted: when selection depends only on the features the
+model has (length and patterns, and the learning words' value), the likelihood of the opens given the features is the
+same with or without it, so the estimates stay consistent if the model is right. If exploration shows the chosen and
+the random twins disagreeing, the fit can weight each unit by 1 / its propensity at its level (clipped, say at 20, and
+normalized to the units' count), which makes it estimate the open chance over every twin written rather than over the
+ones shown; or it can be fitted on the explored units alone as a check.
+
 Uses: the longest sentence of known patterns that stays at the target open chance (max_chars, the weave's limit), the
 open chance of a typical allowed sentence (typical, which prices a sentence in the weave once the fit is ready),
 check-reply's prediction per sentence (predict), and intake: one pattern learned at a time, known once its difficulty
@@ -49,19 +70,104 @@ Z90 = 1.6449
 
 
 class Unit:
-    """One sentence read (or pressed away): when, its Japanese characters, its patterns, opened (y, 0..1), weight."""
-    __slots__ = ('at', 'chars', 'ids', 'y', 'w', 'pseudo')
+    """One sentence read (or pressed away): when, its Japanese characters, its patterns, opened (y, 0..1), weight; and
+    for a reply with levels (Meta): the level it was shown at, its twin's threshold, its propensity there, the open
+    chance predicted when it was written (p) and whether its place was drawn at random (x), each None when unknown."""
+    __slots__ = ('at', 'chars', 'ids', 'y', 'w', 'pseudo', 'level', 'on', 'prop', 'p', 'x')
 
-    def __init__(self, at, chars, ids, y, w, pseudo=False):
+    def __init__(self, at, chars, ids, y, w, pseudo=False, meta=None):
         self.at, self.chars, self.ids, self.y, self.w, self.pseudo = at, chars, tuple(ids), y, w, pseudo
+        self.level, self.on, self.prop, self.p, self.x = meta if meta is not None else (None,) * 5
 
 
 # ---- the join ----
 
+class Leveled:
+    """A sentences record of a reply with render-time levels (grammar.record_levels), as the join reads it: which of
+    its sentences each level shows, and where."""
+
+    def __init__(self, r):
+        import twins
+        self.r, self.twins = r, twins
+        self.els = [{'kind': e[0], 'on': e[1], 'parent': None if e[2] < 0 else e[2]} for e in r['e']]
+
+    def _shown(self, level):
+        owners = self.r['a']
+        return list(range(len(owners))) if level is None else [
+            j for j, o in enumerate(owners) if self.twins.visible(self.els, o, level)]
+
+    def twin_groups(self, level):
+        """{index of a sentence mark among the annotations shown at level: the indexes there of every annotation of
+        the same twin's Japanese}."""
+        owners, shown = self.r['a'], self._shown(level)
+        by_twin = {}
+        for k, j in enumerate(shown):
+            o = owners[j]
+            if o >= 0 and self.els[o]['kind'] == 's':
+                by_twin.setdefault(o, []).append(k)
+        marks = {s[0] for s in self.r['s']}
+        return {k: set(by_twin[owners[j]]) for k, j in enumerate(shown)
+                if j in marks and owners[j] >= 0 and owners[j] in by_twin}
+
+    def sentences(self, level):
+        """[(index among the annotations shown at level, chars, en, ids, meta)] for the sentences shown at level;
+        level None: as if every glossed word showed (a client that doesn't know levels). meta: (level, threshold,
+        propensity there, predicted p, explored) of the twin the sentence is in (Unit)."""
+        owners = self.r['a']
+        if level is None:
+            shown = list(range(len(owners)))
+        else:
+            shown = [j for j, o in enumerate(owners) if self.twins.visible(self.els, o, level)]
+        place = {j: k for k, j in enumerate(shown)}
+        out = []
+        for s in self.r['s']:
+            if s[0] not in place:
+                continue
+            o = owners[s[0]]
+            e = self.r['e'][o] if o >= 0 else None
+            prop = None
+            if e is not None and level is not None:
+                if level in self.twins.BUDGETED and e[3]:
+                    prop = e[3][self.twins.BUDGETED.index(level)]
+                elif level == self.twins.FULL:
+                    prop = 1.0
+            meta = (level, e[1] if e else None, prop, s[4] if len(s) > 4 else None, e[5] if e else None)
+            out.append((place[s[0]], s[1], s[2], tuple(i for i in s[3] if i in grammar.BY_ID), meta))
+        return out
+
+
+def mark_twins(contexts, by_fp):
+    """Gives each T3 message joined to a record with levels its twins: context "twins", {index of a sentence mark: the
+    indexes of every annotation of the same twin's Japanese}, at the level it reports (message_level), for
+    knowledge._in_english. Returns how many it marked."""
+    marked = 0
+    for c in contexts.values():
+        if c.get('surface') != 't3':
+            continue
+        found = by_fp.get(context_fp(c))
+        if not isinstance(found, tuple):
+            continue
+        entry, levels = found
+        groups = entry.twin_groups(message_level(c, levels))
+        if groups:
+            c['twins'] = groups
+            marked += 1
+    return marked
+
+
+def message_level(context, levels):
+    """The level a message joined to a record with levels is read at: the level it reports when its annotations match
+    the record's there, else the highest level they match (None: every glossed word, a client without levels)."""
+    return context.get('level') if context.get('level') in levels else max(
+        levels, key=lambda x: -9 if x is None else x)
+
+
 def records_by_fp(records):
     """{fingerprint: {mark index: (Japanese characters, English words, pattern ids)}} from sentences records (oldest
-    first): the newest scanner version wins, then the latest."""
-    out, versions = {}, {}
+    first): the newest scanner version wins, then the latest. A record with levels (Leveled) comes under the fingerprint
+    of what each level -2..3 shows that shows a sentence, as (Leveled, [those levels]), and under its own fingerprint
+    (every glossed word) as (Leveled, [None])."""
+    out, versions, chosen = {}, {}, {}
     for r in records:
         if not grammar.valid_record(r):
             continue
@@ -69,7 +175,21 @@ def records_by_fp(records):
         if v < versions.get(r['fp'], -1):
             continue
         versions[r['fp']] = v
-        out[r['fp']] = {s[0]: (s[1], s[2], tuple(i for i in s[3] if i in grammar.BY_ID)) for s in r['s']}
+        chosen.pop(r['fp'], None)
+        chosen[r['fp']] = r
+    import twins
+    for fp, r in chosen.items():
+        if 'e' not in r:
+            out[fp] = {s[0]: (s[1], s[2], tuple(i for i in s[3] if i in grammar.BY_ID)) for s in r['s']}
+            continue
+        entry = Leveled(r)
+        out[fp] = (entry, [None])
+        levels = {}
+        for level, shown in zip(twins.SHOWING, r['fps']):
+            if entry.sentences(level):
+                levels.setdefault(shown, []).append(level)
+        for shown, at in levels.items():
+            out[shown] = (entry, at)
     return out
 
 
@@ -80,22 +200,47 @@ def context_fp(context):
 
 def message_sentences(context, by_fp):
     """[(annotation index, chars, ids)] of a T3 message's Japanese sentences that its record names, each checked to
-    be a closing mark in the message; [] without a record."""
+    be a closing mark in the message; [] without a record. For a reply with levels each also has its meta (Leveled):
+    the sentences shown at the level the message reports (context "level", feedback.load), or when it reports none or
+    another, at the highest level its annotations match."""
     found = by_fp.get(context_fp(context))
     if not found:
         return []
     notes = context['annotations']
+    if isinstance(found, tuple):
+        entry, levels = found
+        level = message_level(context, levels)
+        return [(i, chars, ids, meta) for i, chars, _en, ids, meta in entry.sentences(level)
+                if i < len(notes) and notes[i][0] in grammar.MARKS]
     return [(i, chars, ids) for i, (chars, _en, ids) in sorted(found.items())
             if i < len(notes) and notes[i][0] in grammar.MARKS]
 
 
-def units(showings, by_fp, pace=knowledge.PACE_MS, top=knowledge.READ_MAX, presses=(), contexts=None):
+def press_context(contexts, ref, at, level, messages=None):
+    """The T3 message a press of English only named ({view, context}), as shown when it was pressed: its showing at
+    the chat level then (feedback.level_context), else its own (a client that sends no level), else its latest
+    showing at any level that began by then; None when the log has none."""
+    import feedback
+    view, context = ref.get('view'), ref.get('context')
+    found = contexts.get(('t3', view, feedback.level_context(context, level))) if level is not None else None
+    found = found or contexts.get(('t3', view, context))
+    if found is None:
+        mine = (messages or {}).get((view, context)) or [
+            c for (surface, v, _c), c in contexts.items()
+            if surface == 't3' and v == view and c.get('message') == context]
+        before = [c for c in mine if (c.get('shown_at') or 0) <= at]
+        found = max(before, key=lambda c: c.get('shown_at') or 0) if before else None
+    return found
+
+
+def units(showings, by_fp, pace=knowledge.PACE_MS, top=knowledge.READ_MAX, presses=(), contexts=None, changes=()):
     """The sentences read, joined: [Unit]. showings: knowledge.showings' [(at, key, context, items)] (T3 messages
-    only count). An open is a peek or pin on the closing mark (knowledge._opened: y 1, GLANCE_Y for a glance); an
-    unopened sentence weighs its read chance: 1 down to the lowest open in the message, halving per line below it, or
-    its paragraph's time on screen (knowledge.stay_chance) when higher. presses: "English only" turned on
-    ({at, contexts: [{view, context}]}), each Japanese sentence of the named messages (in contexts, every T3 message
-    by key) an open of PRESS_WEIGHT."""
+    only count; a message shown at several levels is a showing at each). An open is a peek or pin on the closing mark
+    (knowledge._opened: y 1, GLANCE_Y for a glance); an unopened sentence weighs its read chance: 1 down to the lowest
+    open in the message, halving per line below it, or its paragraph's time on screen (knowledge.stay_chance) when
+    higher. presses: "English only" turned on ({at, contexts: [{view, context}]}), each Japanese sentence of the named
+    messages (in contexts, every T3 message by key, as shown at the chat level at the press: press_context, changes the
+    intensity changes) an open of PRESS_WEIGHT."""
     out = []
     for at, key, context, items in showings:
         if key[0] != 't3':
@@ -108,10 +253,11 @@ def units(showings, by_fp, pace=knowledge.PACE_MS, top=knowledge.READ_MAX, press
         line = knowledge._line_height([n[2] for n in notes])
         lowest = max(notes[i][2] for i in opened) if opened else None
         read = knowledge.reader('t3', context, pace, top)
-        for index, chars, ids in found:
+        for index, chars, ids, *meta in found:
+            meta = meta[0] if meta else None
             y_pos = notes[index][2]
             if index in opened:
-                out.append(Unit(at, chars, ids, opened[index], 1.0))
+                out.append(Unit(at, chars, ids, opened[index], 1.0, meta=meta))
                 continue
             near = 0.0
             if lowest is not None:
@@ -119,15 +265,56 @@ def units(showings, by_fp, pace=knowledge.PACE_MS, top=knowledge.READ_MAX, press
                 near = 1.0 if below <= line / 2 else 0.5 ** math.ceil(below / line)
             weight = max(near, read(y_pos, line))
             if weight >= READ_MIN:
-                out.append(Unit(at, chars, ids, 0.0, weight))
+                out.append(Unit(at, chars, ids, 0.0, weight, meta=meta))
+    messages = {}
+    for (surface, view, _c), c in (contexts or {}).items():
+        if surface == 't3' and c.get('message') is not None:
+            messages.setdefault((view, c['message']), []).append(c)
     for press in presses:
+        level = knowledge.chat_level(changes, press['at']) if changes else None
         for ref in press.get('contexts') or ():
-            context = (contexts or {}).get(('t3', ref.get('view'), ref.get('context')))
+            context = press_context(contexts or {}, ref, press['at'], level, messages)
             if context is None:
                 continue
-            for _index, chars, ids in message_sentences(context, by_fp):
-                out.append(Unit(press['at'], chars, ids, 1.0, PRESS_WEIGHT, pseudo=True))
+            for _index, chars, ids, *meta in message_sentences(context, by_fp):
+                out.append(Unit(press['at'], chars, ids, 1.0, PRESS_WEIGHT, pseudo=True,
+                                meta=meta[0] if meta else None))
     return out
+
+
+def exploration(found):
+    """What calibrate says about the twins (knowledge.json calibration "twins"): over the read units of replies with
+    levels whose prediction is known, {explored, ranked}: each {units, read (weighted), expected (the opens predicted
+    when written, each times its read weight), seen}; explored: the twins placed at random (twins.EXPLORE), a sample
+    the model didn't choose; ranked: those it ranked. And weighted: the open chance over every twin written, estimated
+    from the read units each weighted by 1 / its propensity at its level (clipped at 20), against the predicted.
+    None when no unit has a prediction."""
+    rows = [u for u in found if not u.pseudo and u.p is not None and u.x is not None]
+    if not rows:
+        return None
+    out = {}
+    for name, group in (('explored', [u for u in rows if u.x]), ('ranked', [u for u in rows if not u.x])):
+        out[name] = {'units': len(group), 'read': round(sum(u.w for u in group), 2),
+                     'expected': round(sum(u.w * u.p for u in group), 3), 'seen': round(sum(u.y for u in group), 2)}
+    weighted = [(u, 1 / max(u.prop, 0.05)) for u in rows if u.prop]
+    read = sum(u.w * k for u, k in weighted)
+    out['weighted'] = {'seen': round(sum(u.y * k for u, k in weighted) / read, 4) if read else None,
+                       'expected': round(sum(u.w * u.p * k for u, k in weighted) / read, 4) if read else None}
+    return out
+
+
+def exploration_text(report):
+    """calibrate's line on the twins (exploration), or None."""
+    if not isinstance(report, dict) or not report.get('explored'):
+        return None
+    part = lambda g: (f'{g["expected"]:.2f} opens expected and {g["seen"]:g} seen over {g["read"]:g} read sentences'
+                      f' ({g["units"]} showings)')
+    w = report.get('weighted') or {}
+    weighted = (f'; over every twin written (by inverse propensity) {w["expected"]:.1%} expected, {w["seen"]:.1%} '
+                'seen' if w.get('seen') is not None else '')
+    import twins
+    return (f'Chat twins placed at random ({twins.EXPLORE:.0%} of places): {part(report["explored"])}; ranked by the '
+            f'model: {part(report["ranked"])}{weighted}.')
 
 
 # ---- the fit ----
@@ -257,15 +444,17 @@ def recent_rate(found, now_ms, days=INTAKE_DAYS):
 
 
 def frequency(records, now_ms, days=FREQUENCY_DAYS):
-    """{pattern id: sentences using it} in the replies of the last `days` days (sentences records, each reply once)."""
+    """{pattern id: sentences using it} in the replies of the last `days` days (sentences records, each reply once):
+    what the writing uses, so a reply with levels counts every twin it carries, shown at some level or not, and the
+    twins check-reply dropped (its record's d: Claude wrote them, but they broke the limits, as a new pattern does)."""
     first = time.strftime('%Y-%m-%d', time.localtime((now_ms - days * DAY_MS) / 1000))
     out, seen = {}, set()
     for r in reversed(list(records)):
         if not grammar.valid_record(r) or r['fp'] in seen or r['day'] < first:
             continue
         seen.add(r['fp'])
-        for s in r['s']:
-            for pid in set(s[3]):
+        for ids in [s[3] for s in r['s']] + list(r.get('d') or ()):
+            for pid in set(ids):
                 out[pid] = out.get(pid, 0) + 1
     return out
 

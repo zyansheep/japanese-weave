@@ -209,6 +209,15 @@ the background). Then watch `fw.py status` for the learning pattern and the sent
 is 5% or more), `fw.py knowledge` for the length slope and the hardest patterns, and check-reply's flags in replies:
 if the 9-character limit leaves too few Japanese sentences, the target (`sentence_model.TARGET`) is the knob.
 
+**Render-time levels in chat** (docs/chat-weave.md, "Levels after the fact"): update the collector first (it takes the
+report items' `level` and the sentence records' new fields; an older one rejects those records and keeps every level of
+a message in one row), then the T3 Code builds that render `data-on` and `data-jw` (an older build shows both twins of
+a sentence), then the hook. Then watch `fw.py calibrate`'s line on the twins: the opens of the twins placed at random
+against those the model ranked, and the open chance over every twin written by inverse propensity. If the random ones
+are opened clearly more than predicted, weight the sentence fit by 1 / propensity (sentence_model.py says how), or
+raise `twins.EXPLORE`. Also watch how many twins a reply carries and how long replies take to write: the cap
+(`chatweave.TWIN_SLACK`) is the knob.
+
 **Deploying, in this order** (each newer piece sends records an older one rejects or drops: briefs, probes, labels,
 entry counts, and plan fields such as `sentencePrice`, `spent` and `arms`):
 

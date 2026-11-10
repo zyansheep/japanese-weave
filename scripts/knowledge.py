@@ -181,8 +181,8 @@ def read_commands():
 def is_showing(context):
     """A browser passage with a shown record, or a T3 message with a word count (from its shown record, or backfilled
     from its transcript): replayed whole, opened or not (showings)."""
-    if context['surface'] == 't3':
-        return context.get('words') is not None
+    if context['surface'] == 't3':  # a message shown at -3 (English only) showed no Japanese: a word count only
+        return context.get('words') is not None and (context.get('level') is None or context['level'] > intensity.OFF)
     return context['surface'] == 'browser' and context.get('shown_at') is not None
 
 
@@ -378,12 +378,16 @@ def _opened(surface, notes, items):
     return opened
 
 
-def _in_english(notes, opened):
+def _in_english(notes, opened, twins=None):
     """The indexes of the annotations read in English: those of a sentence whose whole-sentence translation (its end,
-    a PUNCTUATION annotation) was opened, back to the previous sentence end."""
+    a PUNCTUATION annotation) was opened, back to the previous sentence end. In a message with levels (twins: {mark
+    index: the indexes of its twin's Japanese}, sentence_model.mark_twins), the opened mark's twin's own words only:
+    the English sentences around it, with their own swaps, were read as they are."""
     excluded = set()
     for index in opened:
-        if notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
+        if twins is not None and index in twins:
+            excluded.update(i for i in twins[index] if i != index)
+        elif notes[index][0] in PUNCTUATION:  # a sentence translation: skip back to the previous sentence end
             start = max((i for i in range(index) if notes[i][0] in PUNCTUATION), default=-1)
             excluded.update(range(start + 1, index))
     return excluded
@@ -410,7 +414,7 @@ def observed(surface, context, items, listed, read=None):
     opened = _opened(surface, notes, items)
     if not opened and read is None:
         return []
-    excluded = _in_english(notes, opened)
+    excluded = _in_english(notes, opened, context.get('twins'))
     line = _line_height([n[2] for n in notes])
     lowest = max(notes[i][2] for i in opened) if opened else None
     best = {}
@@ -722,7 +726,8 @@ class Offers:
 
 def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=READ_MAX, offers=None):
     """One passage or message for calibrate, as the model stood before it: {at, shown (when it was shown: its shown
-    record, else at), surface, words (shown), japanese (its annotations: none in a blank passage), read (words_read),
+    record, else at), surface, words (shown), level (the level a T3 message reports it was shown at, else None),
+    japanese (its annotations: none in a blank passage), read (words_read),
     lookups (its opens; T3 peeks under T3_NOISE_MS left out), budget (a browser plan's, per 100 words; else None),
     classes: {class: [expected, seen]}}. Expected is the read chance from time on screen times P(peek), each word at
     its best annotation, and seen its opens (a glance counts GLANCE_Y): listed words are free when the model says so
@@ -766,7 +771,7 @@ def shown_record(at, surface, context, items, model, match, pace=PACE_MS, top=RE
     plan = context.get('plan') or {}
     budget = plan.get('budget') if surface == 'browser' else None
     noise = lambda r: surface == 't3' and r['kind'] == 'peek' and r['dwell_ms'] < T3_NOISE_MS
-    return {'at': at, 'shown': shown, 'surface': surface, 'words': words,
+    return {'at': at, 'shown': shown, 'surface': surface, 'words': words, 'level': context.get('level'),
             'japanese': len(notes),
             'read': words_read(surface, context, pace, top),
             'lookups': sum(1 for r in items if not noise(r)),
@@ -2603,14 +2608,19 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
                                       {day: t for day, t in (totals or {}).items() if day >= day_of(since)})}
 
 
-def chat_budget(changes, at, challenge=0):
-    """The chat's lookup budget per 100 words at `at`: its level then (the last chat intensity change before it, while
-    it lasted; else normal), with normal's budget the challenge when set. None at full (no budget)."""
+def chat_level(changes, at):
+    """The chat's level at `at`: the last chat intensity change before it, while it lasted; else normal."""
     level = 0
     for c in changes:
         if c['surface'] == 'chat' and c['at'] <= at:
             level = c['level'] if c['level'] and c['until'] > at else 0
-    return intensity.budget(level, challenge or None)
+    return level
+
+
+def chat_budget(changes, at, challenge=0, level=None):
+    """The chat's lookup budget per 100 words at `at`: its level then (chat_level), or the level a message reports it
+    was shown at (render-time levels), with normal's budget the challenge when set. None at full (no budget)."""
+    return intensity.budget(chat_level(changes, at) if level is None else level, challenge or None)
 
 
 def day_interval(days, statistic, level=0.9, draws=BOOT_DRAWS, seed=1):
@@ -2653,7 +2663,8 @@ def day_totals(records, changes=(), challenge=0):
         for name, (expected, seen) in r['classes'].items():
             t['classes'][name][0] += expected
             t['classes'][name][1] += seen
-        budget = r['budget'] if r['surface'] == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge)
+        budget = r['budget'] if r['surface'] == 'browser' else chat_budget(changes, r.get('shown', r['at']), challenge,
+                                                                             r.get('level'))
         if budget is not None:
             t['budget'][0] += budget * r['read']
             t['budget'][1] += r['read']
@@ -2709,6 +2720,10 @@ def calibration_text(report):
         chats = f', counting {n} chat{"s" if n != 1 else ""} with Japanese turned off' if n else ''
         chats += (f'{" and" if n else ", counting"} {on} press{"es" if on != 1 else ""} of English only' if on else '')
         lines.append(f'{name}: {p["lighter"]} lighter and {p["heavier"]} heavier presses ({hours}){chats}{verdict}.')
+    import sentence_model  # here: it imports this module
+    twins = sentence_model.exploration_text(report.get('twins'))
+    if twins:
+        lines.append(twins)
     return '\n'.join(lines)
 
 
@@ -3016,6 +3031,12 @@ def refresh(now=None):
         changes = feedback.intensity_changes(feedback.default_path())
         english = [c for c in changes if c['surface'] == 'english']
         contexts = without_english(everything, english, now_ms)
+        try:  # a message with levels: an opened translation stands for its twin's words alone (_in_english)
+            import sentence_model
+            sentence_model.mark_twins(contexts, sentence_model.records_by_fp(
+                feedback.sentence_records(feedback.default_path())))
+        except Exception as error:
+            print(f'Japanese Weave: twins not marked ({error.__class__.__name__}: {error})', file=sys.stderr)
         reviews = feedback.reviews(feedback.default_path())
         state = fwlib.load_state()
         previous = load()
@@ -3110,7 +3131,7 @@ def refresh(now=None):
                 print(f'Japanese Weave: labels not changed: {result.get("error")}', file=sys.stderr)
             applied = [{'day': today, 'word': ja, 'from': a, 'to': b} for ja, a, b in result.get('labels') or []]
         grammar_report = sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pace, top, today,
-                                               previous.get('grammar'), apply=not shrank)
+                                               previous.get('grammar'), apply=not shrank, changes=changes)
         history = [m for m in previous.get('moves', []) if isinstance(m, dict)]
         knowledge = {
             'updated': now, 'rows': len(rows),
@@ -3126,7 +3147,8 @@ def refresh(now=None):
                         'days': LONG_DAYS, 'softMin': SOFT_MIN, 'spacing': SPACING_P},
             'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
             'challenge': challenge, 'spend': spend, 'moves': (history + applied)[-200:], 'reading': reading,
-            'calibration': calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
+            'calibration': dict(calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
+                                twins=(grammar_report or {}).get('exploration')),
             'daily': daily, 'dailyFree': daily_free,
             'unlisted': unlisted(rows, match, now_ms),
             'review': review_report(fit, log.reviews, now_ms),
@@ -3139,26 +3161,32 @@ def refresh(now=None):
 
 def without_english(contexts, english, now_ms):
     """The contexts with every T3 message shown during an English-only spell (intensity.english_windows) left out:
-    its Japanese wasn't on screen, so it says nothing about the words (nor its opens: they had no message)."""
+    its Japanese wasn't on screen, so it says nothing about the words (nor its opens: they had no message). A message
+    that reports the level it was shown at (render-time levels) says itself what was on screen: the collector drops
+    its items at -3, and it stays."""
     windows = intensity.english_windows(english, now_ms)
     if not windows:
         return contexts
-    hidden = lambda c: c['surface'] == 't3' and c.get('shown_at') and any(a <= c['shown_at'] < b for a, b in windows)
+    hidden = lambda c: c['surface'] == 't3' and c.get('level') is None and c.get('shown_at') and any(
+        a <= c['shown_at'] < b for a, b in windows)
     return {key: c for key, c in contexts.items() if not hidden(c)}
 
 
-def sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pace, top, today, before, apply=True):
+def sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pace, top, today, before, apply=True,
+                          changes=()):
     """knowledge.json "grammar" (sentence_model.summary): the sentence-open model fitted to the chat replies' sentences
-    (sentence records joined to the T3 messages shown; the Japanese sentences of the messages named by each press of
-    English only as weak opens), and with apply, the grammar op intake makes (hub.run), with the statuses it leaves
-    (statuses). A failure keeps the last report (before): the refresh stands without it."""
+    (sentence records joined to the T3 messages shown, each at the level it was shown at; the Japanese sentences of the
+    messages named by each press of English only as weak opens, as shown at the chat level then: changes, the
+    intensity changes), and with apply, the grammar op intake makes (hub.run), with the statuses it leaves (statuses),
+    and exploration (sentence_model.exploration: the twins placed at random against those the model ranked). A
+    failure keeps the last report (before): the refresh stands without it."""
     try:
         import grammar
         import sentence_model
         records = feedback.sentence_records(feedback.default_path())
         presses = [c for c in english if c['on']]
         found = sentence_model.units(showings(rows, contexts, now_ms), sentence_model.records_by_fp(records), pace,
-                                     top, presses, everything)
+                                     top, presses, everything, changes)
         statuses = grammar.statuses(state)
         model = sentence_model.fit(found, statuses, now_ms)
         counts = sentence_model.frequency(records, now_ms)
@@ -3171,7 +3199,8 @@ def sentences_and_grammar(state, rows, contexts, everything, english, now_ms, pa
                 statuses = grammar.statuses(state)
             else:
                 print(f'Japanese Weave: grammar not changed: {result.get("error")}', file=sys.stderr)
-        return dict(sentence_model.summary(model, found, counts, now_ms, state), statuses=statuses)
+        return dict(sentence_model.summary(model, found, counts, now_ms, state), statuses=statuses,
+                    exploration=sentence_model.exploration(found))
     except Exception as error:
         print(f'Japanese Weave: no sentence model ({error.__class__.__name__}: {error})', file=sys.stderr)
         return before if isinstance(before, dict) else None

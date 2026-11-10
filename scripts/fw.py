@@ -49,15 +49,17 @@
   fw.py chat-style draft|classic                     T3 Code chats: draft and weave (the default: Claude writes
                                                      in English, code weaves the Japanese in, Claude rewrites
                                                      and checks it) or classic (Claude weaves as it writes)
-  fw.py weave [--level N] [FILE]                     weave an English draft (FILE, else stdin) at chat level N
-                                                     (-2 to 3, 3 full; default: the chat's level now)
-  fw.py check-reply [--level N] [FILE]               list what code can see is wrong in a woven reply, and score
-                                                     its Japanese and mixed sentences: length, grammar patterns,
-                                                     chance of an open, expected opens against the level's budget
+  fw.py weave [--level N] [FILE]                     weave an English draft (FILE, else stdin) with every swap
+                                                     that could go in it, as at full, and ask for its Japanese
+                                                     twins (N: the chat level now, -2 to 3)
+  fw.py check-reply [--level N] [FILE]               check a reply written with <ja> twins, drop what breaks the
+                                                     limits, choose what each level shows (thresholds and
+                                                     propensities) and print the final markup to send
   fw.py grammar [known|learning|new PATTERN]         the grammar patterns with your status and fitted difficulty
                                                      (docs/grammar.md), or set one pattern's status
-  fw.py intensity english [on|off]                   chat replies in plain English for an hour (T3 Code's shortcut
-                                                     does the same), or back to Japanese
+  fw.py intensity english [on|off]                   chat shown in English for an hour (T3 Code's shortcut does
+                                                     the same; replies keep their twins, shown once it is off),
+                                                     or back to Japanese
   fw.py intensity [chat|browser] [up|down|normal|off|full]
                                                      Japanese heavier or lighter for 3 hours, in chat replies
                                                      (default) or on web pages; off: none, full: every sentence
@@ -841,9 +843,7 @@ def weave_cmd(args):
     level = args.level if args.level is not None else intensity.current(prefs, 'chat')['level']
     if intensity.is_off(level):
         sys.exit('Japanese is off in chat: send the draft as it is.')
-    if hub.live_chat_all()[2]['on']:
-        sys.exit('English only is on in chat: send the draft as it is, in plain English.')
-    try:
+    try:  # English only too: the reply carries its Japanese, shown once English only is off (twins.py)
         print(chatweave.weave(read_input(args.file), level))
     except Exception as error:
         sys.exit(f'The weave failed ({error}): send the English draft as it is.')
@@ -853,10 +853,15 @@ def check_reply_cmd(args):
     text = read_input(args.file)
     try:
         plan = check_reply.Plan.load(args.level)
-    except Exception as error:  # no state here: the problems alone
-        print(f'(No sentence scores: {error.__class__.__name__}.)', file=sys.stderr)
-        plan = None
-    print(check_reply.report(text, plan=plan))
+    except Exception as error:  # no state here: no levels, so nothing to send with twins
+        print(f'jw-check: the check could not run here ({error.__class__.__name__}), so there is no final markup. '
+              'Send your English reply as it is, with the <ja> twins taken out.')
+        return
+    try:
+        print(check_reply.finish(text, plan).text)
+    except Exception as error:
+        print(f'jw-check: the check failed ({error.__class__.__name__}: {error}), so there is no final markup. '
+              'Send your English reply as it is, with the <ja> twins taken out.')
 
 
 def glosses(args):

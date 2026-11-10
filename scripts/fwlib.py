@@ -894,6 +894,9 @@ def sentence_records(text, day, records):
     except Exception as error:
         print(f'Japanese Weave: sentences not read ({error.__class__.__name__}: {error})', file=sys.stderr)
         return
+    if found and not grammar.valid_record(found):  # over a record's limits (a very long reply): left out, since the
+        print('Japanese Weave: sentences not sent (the reply is past what a record holds)', file=sys.stderr)
+        return                                     # collector refuses a batch holding one and the scan would stall
     if found:
         records.append(found)
 
@@ -913,13 +916,16 @@ def read_sentences(roots=None, start='0000-00-00'):
     return records
 
 
-def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, since=None, sentences=None):
+def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, since=None, sentences=None, level=None):
     """New transcript lines since offsets (path -> byte offset, mutated): [{d: digest, day, words: [ja]}] for the
     main-thread replies from `start` on that use any of the words. Code, links and replies about the plugin itself
     don't count. With a tally (reading.Tally), each reply from `since` on (default start) also carries the dictionary
     entries it shows, {entries: {id: times}}, and comes with them even when it uses none of the words (then from before
     `start`, with words empty). sentences: a list that gets each new reply's Japanese sentences from `start` on
-    (sentence_records)."""
+    (sentence_records), from the whole reply: a record holds every element with its threshold, and the join reads the
+    level each showing was at. The words and entries count only what the reader saw: a reply with render-time levels
+    as it was shown when sent (twins.view: its plan's level, else `level`, the level in force), never its hidden
+    twins; the digest is the whole reply's."""
     since = start if since is None else since
     words = [w if isinstance(w, dict) else {'ja': w} for w in words]
     written = {w['ja']: forms(w['ja'], w.get('kana', '')) for w in words}
@@ -934,6 +940,8 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
 
     first = min(start, since) if tally is not None else start
     oldest = time.mktime(time.strptime(first, '%Y-%m-%d')) if first > '0000-00-00' else 0
+    import twins
+    plans = None
     out = []
     for path in transcripts(roots):
         name = str(path)
@@ -952,9 +960,13 @@ def read_replies(words, offsets, roots=None, start='0000-00-00', tally=None, sin
                 continue
             if sentences is not None and day >= start:
                 sentence_records(text, day, sentences)
-            prose = norm(CODE.sub(' ', text))
+            shown = text
+            if twins.has_levels(text):
+                plans = twins.plans_now() if plans is None else plans
+                shown = twins.view(text, level, plans)
+            prose = norm(CODE.sub(' ', shown))
             used = [w['ja'] for w in words if uses(w, prose)]
-            entries = tally.count(text, used) if counted else {}
+            entries = tally.count(shown, used) if counted else {}
             if (used and day >= start) or entries:
                 reply = {'d': hashlib.sha1(text.encode()).hexdigest()[:16], 'day': day,
                          'words': used if day >= start else []}
@@ -1054,18 +1066,20 @@ def refresh_exposure():
             cursor = dict(cursor, offsets={}, reading=1)
             start = max(start, add_days(today(), 1 - DEDUPE_DAYS))  # older replies' digests are gone
         import grammar
+        import twins
         records = []
         backfill = cursor.get('sentences') != grammar.VERSION
+        level = twins.level_now(state)
         try:
             found = read_replies(state['words'], cursor['offsets'], start=start, tally=tally, since=since,
-                                 sentences=None if backfill else records)
+                                 sentences=None if backfill else records, level=level)
         except Exception as error:  # the entries can't be counted: the words still are, next time from here
             if tally is None:
                 raise
             print(f'Japanese Weave: reading not counted ({error.__class__.__name__}: {error})', file=sys.stderr)
             cursor = scan_cursor()
             found = read_replies(state['words'], cursor['offsets'], start=state.get('created', '0000-00-00'),
-                                 sentences=None if backfill else records)
+                                 sentences=None if backfill else records, level=level)
         finally:
             if tally is not None:
                 tally.close()

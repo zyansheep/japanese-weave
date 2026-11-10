@@ -2,6 +2,7 @@
 asks for them (weave.compose_draft) and the style choice (weave.chat_style)."""
 import io
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -17,6 +18,7 @@ import chatweave  # noqa: E402
 import check_reply  # noqa: E402
 import fw  # noqa: E402
 import hub  # noqa: E402
+import intensity  # noqa: E402
 import weave  # noqa: E402
 
 RUNTIME = chatweave.runtime()
@@ -43,47 +45,69 @@ def run_mjs(payload):
     run = subprocess.run([RUNTIME, str(chatweave.SCRIPT)], input=json.dumps(payload, ensure_ascii=False),
                          capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr
-    return run.stdout
+    return json.loads(run.stdout)
 
 
 @unittest.skipUnless(RUNTIME, 'no node or bun')
 class Weave(unittest.TestCase):
-    def test_known_words_learning_words_and_unsure_marks(self):
-        out = run_mjs({'draft': DRAFT, 'words': WORDS, 'budgetPer100': 1.2, 'intensity': 2, 'sentencePrice': 0.08})
-        head, rest = out.split('\n-----\n', 1)
-        self.assertTrue(head.startswith('jw-weave: '))
-        self.assertIn('Make about', head)
+    def test_every_candidate_with_its_price_and_unsure_marks(self):
+        out = run_mjs({'draft': DRAFT, 'words': WORDS})
+        rest, swaps = out['text'], out['swaps']
         self.assertIn('<abbr title="もんだい · problem">問題</abbr>', rest)  # safe: placed outright
         self.assertIn('{{now→<abbr title="いま · now">今</abbr>}}', rest)  # no safe sense: marked for the writer
-        self.assertIn('情報', rest)  # a learning word, from the budget
-        self.assertIn('情報: keep each whose sense fits', head)  # and the writer is told to keep it
-        self.assertIn('Learning words. The weave\'s first line names them', weave.DRAFT_RULES)
+        self.assertIn('情報', rest)  # a learning word, at every level's candidates
+        self.assertEqual(rest.count('<abbr title="じょうほう · information">情報</abbr>'), 2)  # as at full: each place
         self.assertIn('problem = now()  # code stays as it is', rest)  # code fences untouched
         self.assertIn('`fix problem`', rest)  # inline code too
+        info = next(s for s in swaps if s['ja'] == '情報')
+        self.assertEqual((info['en'], info['title'], info['free'], info['dictionary']),
+                         ('information', 'じょうほう · information', False, False))
+        self.assertAlmostEqual(info['p'], 1 / (1 + math.exp(1.2)), places=3)  # its chance from k, as costOf prices it
+        self.assertTrue(next(s for s in swaps if s['ja'] == '今')['unsure'])
+        self.assertEqual((info['before'][-9:], info['after'][:6]), ('Read the ', ' below'))  # its context
+        self.assertTrue(next(s for s in swaps if s['ja'] == '問題')['free'])
+        self.assertTrue(30 < out['words'] < len(DRAFT.split()))  # the prose's words, the fence's left out
+        self.assertIn('Twins. After an English sentence', weave.DRAFT_RULES)
 
-    def test_no_budget_no_learning_words_but_known_ones(self):
-        out = run_mjs({'draft': DRAFT, 'words': WORDS, 'budgetPer100': 0, 'intensity': 0, 'sentencePrice': 0.08})
-        self.assertNotIn('情報', out.split('\n-----\n', 1)[1])
-        self.assertIn('問題', out)
-
-    def test_full_has_no_limit(self):
-        out = run_mjs({'draft': DRAFT, 'words': WORDS, 'budgetPer100': 0, 'intensity': 3, 'sentencePrice': 0.08})
-        self.assertIn('No limit', out.split('\n', 1)[0])
-        self.assertIn('情報', out)
+    def test_dictionary_words_are_few_and_flagged(self):
+        pool = [dict(word(ja, kana, gloss, False, k, status='active'), dictionary=True)
+                for ja, kana, gloss, k in (('記録', 'きろく', 'log', 0.8), ('読む', 'よむ', 'read', 1.1),
+                                           ('始める', 'はじめる', 'start', 1.0), ('下', 'した', 'below', 1.3),
+                                           ('必要', 'ひつよう', 'need', 0.9), ('直す', 'なおす', 'fix', 1.2),
+                                           ('前', 'まえ', 'before', 1.4), ('行く', 'いく', 'go', 2.0))]
+        out = run_mjs({'draft': DRAFT * 3, 'words': WORDS + pool})
+        found = [s for s in out['swaps'] if s['dictionary']]
+        self.assertTrue(found)
+        self.assertLessEqual(len(found), 6)  # DICTIONARY_MAX: they show only at full
 
     def test_levels_from_python(self):
         state = {'version': 'v1', 'prefs': {}, 'words': []}
-        with mock.patch.object(chatweave, 'words_for', return_value=([dict(w) for w in WORDS], {'recency': None})), \
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': home}), \
+                mock.patch.object(chatweave, 'words_for', return_value=([dict(w) for w in WORDS], {'recency': None})), \
                 mock.patch.object(chatweave.knowledge, 'load', return_value={}), \
                 mock.patch.object(chatweave, 'pool', return_value=[]) as pool:
-            long = '\n\n'.join([DRAFT.split('```')[0].strip()] * 12)  # long enough for more than one sentence
-            normal = chatweave.weave(long, 0, state)
-            heavy = chatweave.weave(long, 2, state)
-            full = chatweave.weave(DRAFT, 3, state)
-        count = lambda out: int(out.split('Make about ')[1].split(' ')[0])
-        self.assertLess(count(normal), count(heavy))  # more sentences asked for at much heavier
-        self.assertIn('No limit', full)
-        self.assertEqual(pool.call_count, 1)  # the dictionary words: at full only
+            short = chatweave.weave(DRAFT, 0, state, session='s1')
+            long = chatweave.weave('\n\n'.join([DRAFT.split('```')[0].strip()] * 12), 2, state, session='s2')
+            import twins
+            kept = twins.swaps_for('s1')
+        head, rest = short.split('\n-----\n', 1)
+        self.assertTrue(head.startswith('jw-weave: '))
+        self.assertIn('情報: keep each whose sense fits', head)  # the learning words named
+        self.assertIn('Twins: right after each sentence you can say in Japanese', head)
+        self.assertIn(f'up to {chatweave.TWIN_MIN} twins', head)  # a short reply: the least
+        cap = lambda out: int(out.split('up to ')[1].split(' ')[0])
+        self.assertGreater(cap(long), cap(short))  # the cap grows with the reply
+        self.assertIn('<abbr title="じょうほう · information">情報</abbr>', rest)
+        self.assertEqual(pool.call_count, 2)  # the dictionary words: on every weave now
+        self.assertIn('情報', [s['ja'] for s in kept])  # kept for the check step, per session
+        self.assertEqual(next(s for s in kept if s['ja'] == '情報')['en'], 'information')
+
+    def test_the_cap_follows_the_heaviest_budgeted_level(self):
+        cap, heaviest = chatweave.twin_cap(300)
+        self.assertAlmostEqual(heaviest, intensity.SENTENCE_SHARE * intensity.BUDGETS[2] * 3 / 0.08)
+        self.assertEqual(cap, math.ceil(chatweave.TWIN_SLACK * heaviest))
+        self.assertEqual(chatweave.twin_cap(20)[0], chatweave.TWIN_MIN)
+        self.assertGreater(chatweave.twin_cap(300, normal=1.0)[0], cap)  # a higher challenge pays for more
 
 
 class Check(unittest.TestCase):
@@ -137,7 +161,9 @@ class Check(unittest.TestCase):
                 mock.patch.object(sys, 'stdin', io.StringIO('Plain English.')), \
                 mock.patch.object(sys, 'stdout', new_callable=io.StringIO) as out:
             fw.main(['check-reply'])  # never this machine's own state
-        self.assertIn('no problems', out.getvalue())
+        head, final = out.getvalue().split('\n' + check_reply.SEPARATOR + '\n')
+        self.assertTrue(head.startswith('jw-check: 0 twins and 0 word swaps'), head)
+        self.assertEqual(final.strip(), 'Plain English.')
 
 
 class Brief(unittest.TestCase):
@@ -157,13 +183,21 @@ class Brief(unittest.TestCase):
         self.assertIn("fw weave --level 2 <<'DRAFT'", text)
         self.assertIn("fw check-reply --level 2 <<'REPLY'", text)
         self.assertIn('穏やか', text)  # the trap list
-        self.assertEqual((after['rules'], record['mode'], record['whole']), ('draft', 'draft', True))
+        self.assertIn('<ja>...</ja>', text)
+        self.assertIn('Send everything below the ===== line exactly as it is', text)
+        self.assertLess(len(text), weave.BRIEF_MAX)
+        self.assertEqual((after['rules'], record['mode'], record['whole']), (weave.RULES, 'draft', True))
         later, after2, record2 = weave.compose_draft(self.STATE, 0, dict(after, known=[]), 'fw', plan)
         self.assertIn('fw weave --level 0', later)
         self.assertLess(len(later), len(text) / 5)
         self.assertFalse(record2['whole'])
         switched, _, _ = weave.compose_draft(self.STATE, 0, {'rules': 'classic', 'known': ['今']}, 'fw', plan)
         self.assertIn("<<'DRAFT'", switched)  # the steps in full after a classic turn
+        before, _, _ = weave.compose_draft(self.STATE, 0, {'rules': 'draft', 'known': []}, 'fw', plan)
+        self.assertIn('<ja>...</ja>', before)  # and after the steps from before twins
+        english, _, _ = weave.compose_draft(self.STATE, 0, dict(after, known=[]), 'fw', plan, english=2_000_000_000_000)
+        self.assertTrue(english.startswith(later))
+        self.assertIn('English only is on until', english)  # the twins all the same
 
     def test_record_and_pref_are_valid(self):
         good = hub.stamp({'kind': 'brief', 'session': 's1', 'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {},
