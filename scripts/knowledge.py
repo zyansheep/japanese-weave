@@ -2524,8 +2524,9 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     both groups have THIN_MIN_PASSAGES; effect: change in log ms per word per unit of share, which approximates how
     much one more point of Japanese known at a glance slows reading, once the gap is over THIN_MIN_GAP. jitterBefore:
     the same for the passages planned before, when thinning scaled the budget too.
-    presses: the reader's heavier/lighter presses per surface (intensity.py; one into off is lighter, into full
-    heavier) and the share of the time spent at each level, from the ops log. A chat with Japanese turned off
+    presses: the reader's heavier/lighter presses per surface (intensity.py; chat: chat's word level, sentences: its
+    sentence level, browser; one into off is lighter, into full heavier) and the share of the time spent at each
+    level, from the ops log. A chat with Japanese turned off
     (threads.py, the "thread" changes) counts as one more chat lighter press (threadsOff: how many chats), and so does
     each press turning English only on in chat (intensity.py, the "english" changes; englishOn: how many).
     classes: the model against what happened, from shown records (fitted_records; replay's for the model it replaced)
@@ -2583,7 +2584,7 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     presses = {}
     threads_off = len({c['session'] for c in changes if c['surface'] == 'thread' and c['off'] and c['at'] >= since})
     english_on = sum(1 for c in changes if c['surface'] == 'english' and c['on'] and c['at'] >= since)
-    for surface in ('chat', 'browser'):
+    for surface in ('chat', 'browser', 'sentences'):
         mine = [c for c in changes if c['surface'] == surface]
         recent = [c for c in mine if c['at'] >= since]
         time_at = {}
@@ -2711,8 +2712,10 @@ def calibration_text(report):
                          f'{b["msPerWord"]:4d} ms on screen per word, {b["opensPer100"]:.2f} opens per 100 words')
     lines += thinning_text(report['jitter'], report.get('jitterBefore'))
     lines += classes_text(report.get('classes'), report['days'])  # knowledge.json from before has none
-    for surface, name in (('chat', 'Chat replies'), ('browser', 'Web pages')):
-        p = report['presses'][surface]
+    for surface, name in (('chat', 'Chat words'), ('sentences', 'Chat sentences'), ('browser', 'Web pages')):
+        p = report['presses'].get(surface)
+        if p is None:  # knowledge.json from before the sentence level
+            continue
         at = lambda k: {str(intensity.OFF): 'off', str(intensity.FULL): 'at full'}.get(k, f'at {int(k):+d}')
         hours = ', '.join(f'{h} h {at(k)}' for k, h in p['hoursAt'].items()) or 'no time away from normal'
         verdict = f'; the default looks {p["verdict"]}' if p['verdict'] else ''

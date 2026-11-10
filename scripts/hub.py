@@ -12,7 +12,9 @@ Ops (each also carries uid, day, at and machine; see stamp):
                                                        nothing counts days any more (fwlib.apply_event)
   mark      {"words": [...], "as": "known"|"asked"}    the known and learn commands: the label at once
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
-             "intensity_chat"?, "intensity_browser"?: {level -3..3, until, at, source}}}   (intensity.py)
+             "intensity_chat"?, "intensity_sentences"?, "intensity_browser"?: {level -3..3, until, at, source}}}
+                                                       (intensity.py; chat: the word level, sentences: chat's
+                                                       sentence level)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
@@ -108,7 +110,8 @@ def is_day(value):
     return True
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'chat_style': lambda v: v in ('draft', 'classic'),
          'challenge': knowledge.valid_challenge, 'extension_sites': lambda v: v in ('all', 'ask'),
-         'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid}
+         'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid,
+         'intensity_sentences': intensity.valid}
 LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 
@@ -721,9 +724,16 @@ def live_chat(session=None, state=None, timeout=LIVE_TIMEOUT):
 
 
 def live_chat_all(session=None, state=None, timeout=LIVE_TIMEOUT):
-    """(chat intensity in effect, this chat's switch or None, English only {on, until, at}) for the hook: one brief
-    question to the collector, as in live_intensity, else the cache. A change made here that the collector doesn't
-    have yet is the later one, so it wins."""
+    """(chat intensity in effect, this chat's switch or None, English only {on, until, at}) for the hook
+    (live_chat_dials without the sentence level)."""
+    return live_chat_dials(session, state, timeout)[:3]
+
+
+def live_chat_dials(session=None, state=None, timeout=LIVE_TIMEOUT):
+    """(chat's word level in effect, this chat's switch or None, English only {on, until, at}, chat's sentence level in
+    effect) for the hook, the levels as {level, until, at}: one brief question to the collector, as in live_intensity,
+    else the cache. A change made here that the collector doesn't have yet is the later one, so it wins. A collector
+    from before the sentence level sends none: the sentence level is then the word level, as the clients read it."""
     state = state if state is not None else fwlib.load_state()
     mine = threads.entry(state, session)
     english = intensity.english_current(state.get('prefs'))
@@ -735,8 +745,11 @@ def live_chat_all(session=None, state=None, timeout=LIVE_TIMEOUT):
             theirs = reply.get('english')
             if intensity.is_english(theirs) and theirs['at'] >= english['at']:
                 english = theirs
-            return reply['intensity'], threads.later(mine, reply.get('thread')), english
-    return intensity.current(state.get('prefs'), 'chat'), mine, english
+            sentences = reply.get('sentences')
+            sentences = sentences if intensity.is_current(sentences) else dict(reply['intensity'])
+            return reply['intensity'], threads.later(mine, reply.get('thread')), english, sentences
+    return (intensity.current(state.get('prefs'), 'chat'), mine, english,
+            intensity.current(state.get('prefs'), intensity.SENTENCES))
 
 
 # ---- English only in chat (intensity.py) ----

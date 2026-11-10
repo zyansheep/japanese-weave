@@ -840,8 +840,8 @@ def load(path=None):
 
 
 def intensity_changes(path=None):
-    """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface, level, until,
-    source}, from the ops applied here; every chat turned off or back on (threads.py) as {at, machine, surface:
+    """Every change of the reader's intensity (intensity.py), oldest first: {at, machine, surface (chat: chat's word
+    level, sentences: its sentence level, browser), level, until, source}, from the ops applied here; every chat turned off or back on (threads.py) as {at, machine, surface:
     "thread", session, off, source}; and every press of English only in chat as {at, machine, surface: "english", on,
     until, source, contexts: [{view, context}]}."""
     con = connect(path)
@@ -866,7 +866,7 @@ def intensity_changes(path=None):
                         'off': op.get('off') is True, 'source': op.get('source') or ''})
             continue
         prefs = op.get('prefs') or {}
-        for surface in ('chat', 'browser'):
+        for surface in intensity.SURFACES:
             value = prefs.get(f'intensity_{surface}')
             if isinstance(value, dict) and value.get('level') in intensity.LEVELS:
                 out.append({'at': at, 'machine': machine, 'surface': surface, 'level': value['level'],

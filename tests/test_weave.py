@@ -1075,7 +1075,7 @@ class Hub(Home):
         with mock.patch('sys.stdout', new=io.StringIO()) as out:
             fw.main(['intensity', 'normal'])
             fw.main(['intensity', 'browser', 'down'])
-        self.assertIn('Chat replies: normal.', out.getvalue())
+        self.assertIn('Chat words: normal.', out.getvalue())
         self.assertIn('Web pages: lighter (-1) until', out.getvalue())
         changes = feedback.intensity_changes(self.server_home / 'interactions.sqlite')
         self.assertEqual([(c['surface'], c['level'], c['source']) for c in changes],

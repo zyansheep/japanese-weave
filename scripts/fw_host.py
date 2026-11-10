@@ -29,7 +29,7 @@ Messages (JSON, 4-byte native-endian length prefix, one per line of conversation
                                             "blankPassages", "readingMs", "last"}: what the log holds, on the collector
                                             when one is set
   {"type": "prefs", "challenge": n}     -> {"ok": true, "challenge": n}  (normal's lookup budget, knowledge.py)
-  {"type": "intensity", "surface": "browser"|"chat", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
+  {"type": "intensity", "surface": "browser"|"chat"|"sentences", "set"?: {level, until, at, source} | "step"?: 1|-1|0}
                                         -> {"ok": true, "intensity": {level, until, at}}  (intensity.py; neither:
                                             read); level -3 is off, 3 full
 

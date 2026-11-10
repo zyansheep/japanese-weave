@@ -1,17 +1,23 @@
-"""Intensity: the reader turns the Japanese heavier or lighter for a while, separately in chat replies ('chat') and on
-web pages ('browser'): in chat with the arrows of T3 Code's Japanese Weave panel, on the web with the extension's
-shortcut (Alt+Shift+Period and Alt+Shift+Comma) or its popup, and anywhere with `fw.py intensity`. Python 3.9+,
-standard library only.
+"""Intensity: the reader turns the Japanese heavier or lighter for a while, separately in chat replies and on web pages
+('browser'): in chat with the arrows of T3 Code's Japanese Weave panel, on the web with the extension's shortcut
+(Alt+Shift+Period and Alt+Shift+Comma) or its popup, and anywhere with `fw.py intensity`. Python 3.9+, standard library
+only.
+
+Chat has two dials (docs/chat-weave.md, "Two dials"): the word level ('chat', the chat level from before there were
+two), which decides the swapped words of a reply with render-time levels (twins.py), and the sentence level
+('sentences'), which decides its Japanese twins. Each is a surface of its own with the same levels, steps and expiry;
+a collector from before the sentence level has none, and a client then reads the sentence level as the word level.
 
 A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 are lookup budgets;
 the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow: the
-same choices with no budget). Each change is a `set` op on the pref intensity_chat or
+same choices with no budget). Each change is a `set` op on the pref intensity_chat, intensity_sentences or
 intensity_browser ({level, until, at, source}), so the collector's ops table keeps every press: how often and when the
 reader turns it down or up is the evidence for whether the default amount is right (knowledge.py calibration).
 
-English only (chat): T3 Code's keyboard shortcut toggles it. While it is on, every chat message on screen shows English:
-a reply with render-time levels (twins.py) as at OFF, its English twins and its swaps' English; an older one its words
-as their meanings and its Japanese and mixed sentences as their translations. In draft style the hook keeps having new
+English only (chat): T3 Code's keyboard shortcut toggles it, one switch over both dials. While it is on, every chat
+message on screen shows English (both dials render as -3): a reply with render-time levels (twins.py) as at OFF, its
+English twins and its swaps' English; an older one its words as their meanings and its Japanese and mixed sentences as
+their translations. In draft style the hook keeps having new
 replies written with their twins (they show once English only is off); the classic brief has them written in plain
 English, as at off. It lasts ENGLISH_MS unless turned off sooner. Each press is an `english` op ({on, until,
 source, contexts: the messages on screen}, hub.py) and its value the pref english_chat ({on, until, at, source}). A
@@ -19,7 +25,8 @@ press turning it on counts as a lighter press in calibration, and the Japanese s
 weak evidence of an open (sentence_model.py)."""
 import time
 
-SURFACES = ('chat', 'browser')
+SURFACES = ('chat', 'browser', 'sentences')  # chat: the word level; sentences: chat's sentence level
+WORDS, SENTENCES = 'chat', 'sentences'
 OFF, FULL = -3, 3  # the ends: no Japanese, and all the Japanese the reader can follow
 LEVELS = (OFF, -2, -1, 0, 1, 2, FULL)
 # Times the stage's (or the popup's) amount of Japanese. Full is a mode, not an amount: as heavy as 2 where a factor
@@ -84,6 +91,11 @@ def current(prefs, surface, now=None):
     if not value['level'] or value['until'] <= (now if now is not None else now_ms()):
         return dict(NORMAL, at=value['at'])
     return {'level': value['level'], 'until': value['until'], 'at': value['at']}
+
+
+def chat_levels(prefs, now=None):
+    """(word level, sentence level) in effect in chat now: the two dials (current of 'chat' and 'sentences')."""
+    return current(prefs, WORDS, now)['level'], current(prefs, SENTENCES, now)['level']
 
 
 def at_level(level, source, now=None):

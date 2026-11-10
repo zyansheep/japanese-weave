@@ -345,7 +345,7 @@ class Calibration(unittest.TestCase):
         self.assertEqual(report['presses']['browser']['lighter'], 0)
         self.assertNotIn('threadsOff', report['presses']['browser'])
         text = knowledge.calibration_text(report)
-        self.assertIn('Chat replies: 3 lighter and 0 heavier presses (3.0 h at -1), counting 2 chats with Japanese '
+        self.assertIn('Chat words: 3 lighter and 0 heavier presses (3.0 h at -1), counting 2 chats with Japanese '
                       'turned off.', text)
         self.assertNotIn('turned off', text.split('Web pages')[1])
 
