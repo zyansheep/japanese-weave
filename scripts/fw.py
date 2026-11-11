@@ -20,11 +20,12 @@
                                                      (Floorp first), which asks to add it: one click to update
                                                      an unsigned install; Chrome: reload it in
                                                      chrome://extensions
-  fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--dry-run]
+  fw.py anki COLLECTION [--deck NAME] [--mature-days N] [--no-known] [--learning] [--dry-run]
                                                      put the words on your Anki cards under review (learning
                                                      or review, not new or suspended) at the front of the
                                                      list; mature cards (interval >= N days, default 21)
-                                                     become known unless --no-known
+                                                     become known unless --no-known; --learning: the others
+                                                     become learning words now, if not introduced yet
   fw.py status                                       stage, labels (from the model), learning words, new words
                                                      today, whether the budget goes unspent, the probe's
                                                      estimate from the review cards of the last 30 days, and the
@@ -419,7 +420,7 @@ def setup(args):
     collector = fwlib.collector_url()
     if args.anki:  # first, so your Anki words are the first learning words
         anki_sync(argparse.Namespace(collection=args.anki, deck=None, mature_days=anki.MATURE_DAYS, no_known=False,
-                                     dry_run=False))
+                                     learning=False, dry_run=False))
     if args.known_top or not collector:  # here, the first run creates the state; later runs add new lexicon words
         hub.submit({'kind': 'seed', 'n': args.known_top})  # seeds only words not yet introduced
     if args.sites:
@@ -508,13 +509,18 @@ def anki_sync(args):
             print(f'  {w["ja"]} = {w["en"]}, "{w["hint"]}"{"  (mature)" if w["mature"] else ""}')
         return
     known = [] if args.no_known else [w['ja'] for w in mature]
-    result = hub.submit({'kind': 'anki', 'words': words, 'known': known})
+    op = {'kind': 'anki', 'words': words, 'known': known}
+    if getattr(args, 'learning', False):  # only when asked: a hub from before --learning ignores it
+        op['learning'] = [w['ja'] for w in words if not w['mature']]
+    result = hub.submit(op)
     if result.get('queued'):
         print(f'{len(words)} Anki words are saved here and go to the front of the list once {fwlib.collector_url()} '
               'can be reached (the next sync sends them).')
         return
-    print(f'Front of the list: {len(words)} Anki words; {result.get("known", 0)} mature ones known. '
-          f'Rerun `fw.py anki` whenever you like; it never resets progress.')
+    print(f'Front of the list: {len(words)} Anki words; {result.get("known", 0)} mature ones known'
+          + (f', {result["learning"]} others learning' if 'learning' in op and 'learning' in result else
+             ' (the hub is too old to make the others learning)' if 'learning' in op else '')
+          + '. Rerun `fw.py anki` whenever you like; it never resets progress.')
 
 
 def check(_args):
@@ -1119,6 +1125,8 @@ def main(argv=None):
     p.add_argument('--deck', help='only decks whose name contains this')
     p.add_argument('--mature-days', type=int, default=anki.MATURE_DAYS)
     p.add_argument('--no-known', action='store_true', help="don't mark mature cards known")
+    p.add_argument('--learning', action='store_true',
+                   help='make the words of cards that are not mature learning words now, if not introduced yet')
     p.add_argument('--dry-run', action='store_true')
     p.set_defaults(run=anki_sync)
     p = sub.add_parser('uninstall')

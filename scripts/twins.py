@@ -828,8 +828,9 @@ def parse_authored(text):
 
 def _english(text, number, sid, parent):
     """English text (with the weave's swaps) as parts: ('raw', text) and words {k: 'w', title, ja, en?, line, sid,
-    twin}; sid counts the line's sentences (a list, shared along the line), its ends found with code and glosses as
-    placeholders, so a sentence that ends right after a gloss ends there."""
+    twin, back}; sid counts the line's sentences (a list, shared along the line), its ends found with code and glosses
+    as placeholders, so a sentence that ends right after a gloss ends there. back: the place in the weave's swaps of a
+    swap check-reply put back (data-back, check_reply.put_back), else None."""
     out, saved = [], []
     s = CODE_SPAN.sub(lambda m: saved.append(m.group()) or chr(0xE000 + len(saved) - 1), text)
     found = list(ABBR.finditer(s))
@@ -846,7 +847,8 @@ def _english(text, number, sid, parent):
         a = attrs(m.group(1))
         n = sid[0] + sum(1 for e in ends if e <= place)
         out.append({'k': 'w', 'title': a.get('title', ''), 'ja': m.group(2), 'en': a.get('data-en'), 'line': number,
-                    'sid': ('twin', parent) if parent is not None else (number, n), 'twin': parent})
+                    'sid': ('twin', parent) if parent is not None else (number, n), 'twin': parent,
+                    'back': int(a['data-back']) if a.get('data-back', '').isdigit() else None})
         at = m.end()
     if at < len(s):
         out.append(('raw', _restore(s[at:], saved)))

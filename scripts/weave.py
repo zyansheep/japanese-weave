@@ -636,8 +636,8 @@ def digest(stage, level, markup, n, m):
 # and prints the final markup (twins.py), and Claude sends that. Four rounds of blind-judged replies
 # (docs/chat-weave.md) chose these steps and the rules in DRAFT_RULES; the twins came with render-time levels.
 STYLES = ('draft', 'classic')
-RULES = 'dials'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (twins:
-                 # before known adverbs could stay in English sentences)
+RULES = 'offers'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (dials:
+                  # before the weave offered only what may stay in English and the looser sense standard)
 DRAFT_RULES = """\
    - Twins. After an English sentence that carries the content (the advice, the explanation, the conclusion) and \
 that you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
@@ -662,26 +662,26 @@ twin into two short sentences, or give that sentence no twin. Grammar the line d
 like 〜た, 〜ない and だ, quoting with と思う or という, から and ので clauses, のは clefts, stacked particles like には, and \
 the rest). Use this week's learning pattern on purpose in a twin or two. Code drops a twin that breaks a limit or a \
 rule here, and its sentence stays English.
-   - The English, every sentence of it, keeps only the swaps whose sense fits that are nouns, adjectives right \
-before an English noun, or adverbs among the known-word swaps (the words the first line doesn't name; time words used \
-as adverbs too: now, already, soon, still, first); code puts any other swap back in English (verbs, adverbs the user \
-is still learning, connectives like もし, そして and でも for "if", "and" and "but", and pronouns): those words go only \
-in twins. Where the English reads as naturally either way, choose the phrasing that keeps a swapped known noun or \
+   - The English. The weave's text holds only swaps that may stay in an English sentence (nouns, adjectives right \
+before an English noun, adverbs among the known-word swaps, time words like now and already too); its first line \
+lists the rest for twins only (verbs, adverbs still being learned, connectives like もし, そして and でも, question \
+words). Where the English reads as naturally either way, choose the phrasing that keeps a swapped known noun or \
 adjective in place rather than one that drops the swap.
    - Learning words. The weave's first line names them, and they are what the reply teaches: keep each one whose \
 sense fits. When one isn't a noun or an adjective before a noun, use it in its sentence's twin.
-   - Senses. Each {{English→Japanese}}: keep the Japanese only if it means exactly what the English means there; \
-otherwise put the English back. Undo any other swap whose sense doesn't fit. Known traps: いつも is "always", never \
-"usually"; 穏やか is "calm" or "mild", never "quiet" or "uncrowded"; 高い is "pricey" or "tall", never "costly to \
-compute"; 簡単 is "easy", not "simple" in structure; 遅い is "slow" or "late", not "slow-paced" or "tedious"; 仕事 is a \
-job or task, not work on one's own project; つまり is "in other words", not "so"; 本当 is "true", not "correct"; 週間 \
-counts spans of weeks and isn't the noun "week"; 終わる is "to end" (nothing is ended by someone), so "finish \
-something" stays English; 古い is "old" as opposed to new, never an age; 動く is to move physically or to run, not to \
-shift in the abstract; 素晴らしい is "wonderful", not "great for" or "well suited"; 痛い is physical pain, not \
-"painful" as in costly or annoying; 約束 is a promise between people, not a protocol's guarantee; 変更 is a deliberate \
-change of plans or settings, not something changing by itself; 大切 is "precious" or "dear", so a technical \
-"important" stays English; 戦略 is a strategy, not a strategy game; 幾度 is literary, so leave it out. Don't translate \
-English idioms word for word: a project doesn't 死ぬ, ideas don't 来る, and "at the same time" isn't 同じ time.
+   - Senses. Keep the weave's swaps wherever the meaning still gets across (a {{English→Japanese}} one as its <abbr> \
+alone); a near synonym is fine (仕事 for "task"). Undo one only where the Japanese would obscure or change the meaning, \
+writing its English as {{works}} (code puts back a sure swap you drop whose English it finds unchanged). Such cases: \
+a Japanese noun for an English verb ("it works", "store it"); いつも is "always", never "usually"; 穏やか is "calm" or \
+"mild", never "quiet" or "uncrowded"; 高い is "pricey" or "tall", never "costly to compute"; 簡単 is "easy", not \
+"simple" in structure; 遅い is "slow" or "late", not "tedious"; 仕事 is a job or task, not work on one's own project; \
+つまり is "in other words", not "so"; 本当 is "true", not "correct"; 週間 counts weeks, not the noun "week"; 終わる is \
+"to end", not "finish something"; 古い is "old" as opposed to new, never an age; 動く is to move physically or to run, \
+not to shift in the abstract; 素晴らしい is "wonderful", not "well suited"; 痛い is physical pain, not "costly"; 約束 \
+is a promise between people, not a protocol's guarantee; 変更 is a deliberate change, not something changing by \
+itself; 大切 is "precious", not a technical "important"; 戦略 is a strategy, not a strategy game; 幾度 is literary, so \
+leave it out. Don't translate English idioms word for word: a project doesn't 死ぬ, ideas don't 来る, and "at the \
+same time" isn't 同じ time.
    - Grammar. もし only with a conditional ending (〜なら, 〜たら, 〜ば); otherwise no もし. Words that follow their noun \
 in Japanese (前 後 中 上 下 間 代わりに くらい まで) always follow it, as in "lock の前に". Japanese leaves out "you" and "I": \
 drop them rather than writing あなた or 私. 多い and 少ない come after their noun (人が少ない) or take の (多くの); a \
@@ -749,15 +749,16 @@ def draft_rules(stage, level, command, sentences=None):
             'text, messages to other agents, subagent prompts, or drafts and documents meant to be shared.\n'
             '1. Write your whole reply in plain English, as you normally would, with no Japanese, and pass it to the '
             f'weave on stdin, in one Bash call:\n{command} weave {flags} <<\'DRAFT\'\n(your English reply)\nDRAFT\n'
-            '   It swaps in every Japanese word that could go there, each wrapped as <abbr title="reading · meaning">'
+            '   It swaps in every Japanese word that could stay there, each wrapped as <abbr title="reading · meaning">'
             'Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. Its '
-            'first line says how many twins to write and within which limits.\n'
-            '2. Write the reply from its output: your English sentences with the swaps that fit, and a Japanese twin '
+            'first line lists the words for twins only and says how many twins to write and within which limits.\n'
+            '2. Write the reply from its output: your English sentences keeping its swaps, and a Japanese twin '
             'after each sentence that fits:\n' + DRAFT_RULES + '\n'
             f'3. Check it in one Bash call:\n{command} check-reply {flags} <<\'REPLY\'\n(your reply)\nREPLY\n'
-            '   It drops a twin that breaks a limit or rule (its sentence stays English), puts back the swaps that '
-            'can\'t stay, chooses what each level shows, and prints the final markup under a line of =====. If it '
-            'lists things to fix before there is anything to send, fix them and run it again; if it dropped a twin you '
+            '   It drops a twin that breaks a limit or rule (its sentence stays English), puts back in English the '
+            'swaps that can\'t stay and in Japanese the sure ones you dropped, chooses what each level shows, and '
+            'prints the final markup under a line of =====. If it lists things to fix before there is anything to '
+            'send, fix them and run it again; if it dropped a twin you '
             'can fix quickly, you may fix it and run it once more (at most twice in all).\n'
             '4. Send everything below the ===== line exactly as it is, as your whole final message: nothing before or '
             'after it and no change to it. Don\'t mention the draft, the commands or these steps: the user sees only '
@@ -770,9 +771,10 @@ def draft_digest(stage, level, command, sentences=None):
     head, flags = turned_dials(level, sentences), level_flags(level, sentences)
     return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the steps earlier in this chat still '
             f'hold. Write the reply in plain English, pass it to `{command} weave {flags}` on stdin, write '
-            'your English with the swaps that fit and a <ja> twin after each sentence that fits (limits and how many '
-            f'on its first line), pass that to `{command} check-reply {flags}`, and send everything below its '
-            '===== line exactly as it is (at most two checks). '
+            'your English keeping its swaps (undo one, as {{word}}, only where it obscures the meaning) and a <ja> '
+            'twin after each sentence that fits (limits and how many on its first line), pass that to '
+            f'`{command} check-reply {flags}`, and send everything below its ===== line exactly as it is (at most two '
+            'checks). '
             'Plain English with no Japanese for health, medication, legal, money, safety or urgent topics, and for a '
             'reply of a sentence or two.')
 

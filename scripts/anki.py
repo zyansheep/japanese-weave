@@ -159,8 +159,28 @@ def deck_names(con):
     return {int(did): d['name'] for did, d in decks.items()}
 
 
-def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=()):
-    """([{ja, en, hint, kana, interval, mature}], report). base: lexicon rows used for readings and glosses."""
+SENSE_MARK = re.compile(r'\s*[(\uff08](?:\d{1,2}|on|kun)[)\uff09]\s*$', re.I)  # 'kara (1)', 'hito (on)': a sense marker
+
+
+def from_dictionary(ja, reading='', d=None):
+    """The dictionary entry (data/dictionary.tsv) a card's word is when the lexicon lacks it: written that way (its
+    written form before another spelling, then the best-ranked), one read as the card reads it first; else None, as
+    with no dictionary file."""
+    import dictionary
+    try:
+        d = d or dictionary.load()
+    except OSError:
+        return None
+    found = d.written(ja)
+    if reading:
+        found = sorted(found, key=lambda e: kana_lib.hiragana(e['kana']) != reading)  # stable: the order otherwise
+    return found[0] if found else None
+
+
+def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=(), dictionary=None):
+    """([{ja, en, hint, kana, interval, mature}], report). base: lexicon rows used for readings and glosses; a word
+    they lack takes its reading, and its gloss when the card has no meaning, from its dictionary entry
+    (from_dictionary; dictionary: a loaded dictionary.Dictionary, else data/dictionary.tsv)."""
     by_word = {w['ja']: w for w in base}
     by_kana = {}
     for w in base:
@@ -195,7 +215,7 @@ def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=()):
             skip('no Japanese word field')
             continue
         ja, reading = furigana(fields[found['word']])
-        ja = ja.strip()
+        ja = SENSE_MARK.sub('', ja.strip())
         if not JAPANESE.search(ja) or len(ja) > MAX_WORD or re.search(r'[\s、。！？!?,.]', ja):
             skip('sentence or not a word')
             continue
@@ -206,12 +226,16 @@ def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=()):
             reading = furigana(fields[found['reading']])[1] or clean(fields[found['reading']])
         reading = kana_lib.hiragana(re.sub(r'\s+', '', reading or ''))
         known = by_word.get(ja)
+        entry = None if known else from_dictionary(ja, reading if kana_lib.is_kana(reading) else '', dictionary)
         if not kana_lib.is_kana(reading):
-            reading = known['kana'] if known else (kana_lib.hiragana(ja) if kana_lib.is_kana(ja) else '')
+            reading = known['kana'] if known else (kana_lib.hiragana(ja) if kana_lib.is_kana(ja) else
+                                                   kana_lib.hiragana(entry['kana']) if entry else '')
         if not reading:
             skip('no reading')
             continue
         en = known['en'] if known else short_gloss(fields[found['meaning']]) if 'meaning' in found else ''
+        if not en and entry and not ('meaning' in found and clean(fields[found['meaning']])):
+            en = entry['en']  # an empty meaning; one that opens with an explanation is a grammar card's
         if not en:
             skip('no English meaning')
             continue
@@ -221,7 +245,9 @@ def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=()):
         if ja in seen:
             continue
         seen.add(ja)
-        hint = known['hint'] if known else kana_lib.romaji(reading, verb_u=bool(re.search(r'[\u4e00-\u9fff]う$', ja)))
+        own = entry and kana_lib.hiragana(entry['kana']) == reading  # the entry's romaji, as the lexicon has it
+        hint = known['hint'] if known else entry['romaji'] if own else kana_lib.romaji(
+            reading, verb_u=bool(re.search(r'[\u4e00-\u9fff]う$', ja)))
         out.append({'ja': ja, 'en': en, 'hint': hint, 'kana': reading, 'interval': note['interval'],
                     'mature': note['interval'] >= mature_days})
     return out, report

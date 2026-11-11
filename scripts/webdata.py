@@ -56,17 +56,20 @@ def _dictionary():
         return None
 
 
-def add_word_data(words, state=None):
+def add_word_data(words, state=None, own_safe=False):
     """Gives each word of the state reply (dicts with ja, en, kana; changed in place) its glosses, the ones of them
     flagged safe, and its entry id: the state word's own (a dictionary word taken in by intake carries it), else the
     dictionary entry it is (dictionary.find on its spelling, reading and gloss, as reading.Tally finds chat's words),
-    else none. Returns words."""
+    else none. own_safe: every gloss of the word's own (its en, split at the slashes) is safe too, but closed-class
+    English (senses.function_gloss): chat's looser standard, where a swap stays when the sentence's meaning still gets
+    across (docs/chat-weave.md); the web keeps the flags. Returns words."""
     flags, d = _flags(), _dictionary()
     own = {w['ja']: w.get('id') for w in (state or {}).get('words') or [] if isinstance(w, dict) and 'ja' in w}
     for w in words:
         glosses = matcher.gloss_alternatives(w.get('en', ''))
         w['glosses'] = glosses
-        w['safe'] = [g for g in glosses if flags is not None and senses.sense_flag(flags, w, g) == 's']
+        w['safe'] = [g for g in glosses if (own_safe and not senses.function_gloss(g)) or (
+            flags is not None and senses.sense_flag(flags, w, g) == 's')]
         id_ = own.get(w['ja'])
         if not isinstance(id_, int) and d is not None:
             e = d.find(w['ja'], w.get('kana', ''), w.get('en', ''))

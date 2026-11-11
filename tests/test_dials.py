@@ -585,7 +585,7 @@ class KnownAdverbs(unittest.TestCase):
     def test_the_brief_says_so(self):
         self.assertIn('adverbs among the known-word swaps', weave.DRAFT_RULES)
         self.assertIn('rather than one that drops the swap', weave.DRAFT_RULES)
-        self.assertEqual(weave.RULES, 'dials')
+        self.assertEqual(weave.RULES, 'offers')
         state = fwlib.new_state(known_top=10)
         plan = {'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {}, 'known': 3, 'whole': True}
         again, _after, record = weave.compose_draft(state, 0, {'rules': 'twins', 'known': []}, 'fw', plan)
