@@ -7,7 +7,7 @@ line. It finds the errors blind judges kept finding in woven replies that code c
   - a Japanese word right next to a number;
   - in a sentence that stays English, a Japanese word that isn't a noun (or an adjective right before an English
     noun, or an adverb the reader knows at a glance), by the word's types in data/dictionary.tsv; a form the
-    dictionary doesn't have (a conjugated verb) too;
+    dictionary doesn't have (a conjugated verb) too (english_problem, which the weave's offers share: may_stay);
   - Japanese outside <abbr> tags other than the structural particles (は が を に で の へ と ね よ) and です/ます: か, や, も,
     から, まで, より, なら, けど, ので, のに and a nominalising の after a verb or adjective carry meaning, so they need a gloss;
   - する on an English word (arrive します, use して, build しない);
@@ -46,13 +46,14 @@ GRAMMAR = sorted({'は', 'が', 'を', 'に', 'で', 'の', 'へ', 'と', 'ね',
                   'ませんか', 'ではありません', 'じゃありません', '、', '。', '？', '！', '「', '」', '・', 'ー', '〜', '（', '）'},
                  key=len, reverse=True)
 NOUN_TYPES = ('n', 'n-adv', 'n-t', 'n-suf', 'n-pref', 'num', 'ctr', 'pn')
+WHOLE_NOUNS = {'n', 'n-adv', 'n-t', 'num', 'pn'}  # nouns that stand alone, not as an affix or a counter
 ADJECTIVE_TYPES = ('adj-i', 'adj-na', 'adj-no', 'adj-pn', 'adj-f', 'adj-ix')
 ADVERB_TYPES = ('adv', 'adv-to')  # time words used as adverbs (今) are nouns by type (n-adv, n-t) already
 # Connectives and question words stay out of English sentences, whatever else their types allow (a noun, an adverb):
 # a spelling listed here, any spelling the dictionary types as a conjunction (conj) unless the English it stands in for
 # is on KEEP_ENGLISH (また as "again"), a question word (the kosoado series' ど- words), or a swap whose English is a
 # connective or a question word. "so" alone is also an intensifier: an adverb with no conj type (とても) may keep it.
-CONNECTIVES = set(grammar.WHOLE) | {'もし', 'けど'}
+CONNECTIVES = set(grammar.WHOLE) | {'もし', 'けど', 'つまり'}  # tsumari: "in other words", a noun and adverb by type
 QUESTION_WORDS = {w for w in grammar.KOSOADO if w.startswith('ど')}
 CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though', 'although', 'however', 'moreover',
                       'furthermore', 'also', 'alternatively', 'therefore', 'then', 'instead', 'otherwise', 'unless',
@@ -60,6 +61,7 @@ CONNECTIVE_ENGLISH = {'and', 'but', 'so', 'if', 'or', 'because', 'yet', 'though'
 KEEP_ENGLISH = {'again'}
 DEGREE_ENGLISH = {'so'}
 VERB_OR_ADJECTIVE = re.compile(r'^(v|adj-i)')
+VERB = re.compile(r'v(?!s|i$|t$)')  # a verb's types (v1, v5r, vk...), not a suru noun's (vs) or a type of verb (vi, vt)
 SURU = re.compile(r'([A-Za-z][A-Za-z-]*)\s*((?:し[なまよてた]|さ[れせ]|す[るれ])[ぁ-ん]{0,6})')
 ARTICLE = re.compile(r'\b(a|an|the)\b', re.I)
 REPEAT = 5
@@ -67,8 +69,10 @@ REPEAT = 5
 
 @functools.lru_cache(maxsize=1)
 def word_types(path=DICTIONARY):
-    """{spelling: the JMdict types of every entry written that way}, from data/dictionary.tsv (ja, kana and forms)."""
-    types, header = {}, None
+    """{spelling: the JMdict types of every entry written that way}, from data/dictionary.tsv: the entries whose
+    written form (ja) it is, else those with it as their reading or another spelling (kana, forms), so the interjection
+    the interjection nee isn't a noun for being a reading of ane, "older sister"."""
+    types, header, written = {}, None, set()
     with open(path, encoding='utf-8') as f:
         for line in f:
             if line.startswith('#'):
@@ -79,8 +83,13 @@ def word_types(path=DICTIONARY):
                 continue
             row = dict(zip(header, cells))
             pos = set(filter(None, re.split(r'[,|]', row.get('pos', ''))))
-            for spelling in [row.get('ja'), row.get('kana')] + (row.get('forms') or '').split(','):
-                if spelling:
+            if row.get('ja'):
+                if row['ja'] not in written:  # the first entry written so: what other spellings gave goes
+                    written.add(row['ja'])
+                    types[row['ja']] = set()
+                types[row['ja']].update(pos)
+            for spelling in [row.get('kana')] + (row.get('forms') or '').split(','):
+                if spelling and spelling not in written:
                     types.setdefault(spelling, set()).update(pos)
     return types
 
@@ -144,6 +153,52 @@ def connective(ja, pos, en=None):
     return en in CONNECTIVE_ENGLISH and not (en in DEGREE_ENGLISH and 'conj' not in pos)
 
 
+def english_problem(ja, pos, en=None, known=False, attributive=False):
+    """Why a swap can't stay in a sentence that stays English, or None when it may (the stays-English rules, shared by
+    the check and the weave's offers): ja its spelling, pos its dictionary types (None: a form the dictionary doesn't
+    list), en the English it stands in for (None: unknown), known whether the reader knows it at a glance (its adverbs
+    may stay), attributive whether an English word follows it (its adjectives may stay). Nouns may stay, but for the
+    pronouns (PRONOUNS, ENGLISH_ONLY_NOUNS) and connectives and question words (connective)."""
+    if ja in PRONOUNS or ja in ENGLISH_ONLY_NOUNS:
+        return f'{ja} as an English pronoun in a sentence that stays English'
+    return type_problem(ja, pos, en, known, attributive)
+
+
+def type_problem(ja, pos, en=None, known=False, attributive=False):
+    """english_problem by the word's types and English alone (the pronouns left to the caller)."""
+    if pos is None:
+        return (f'{ja} is a form the dictionary does not list (a conjugated verb or phrase) inside a sentence that '
+                'stays English')
+    if connective(ja, pos, en):
+        return (f'{ja} is a connective or a question word in a sentence that stays English: keep it English, or use '
+                'it in a twin')
+    verb = any(VERB.match(p) for p in pos)  # kuru, aru: adnominals too, but verbs
+    nouns = WHOLE_NOUNS if 'int' in pos else NOUN_TYPES  # an interjection that is a noun only as an affix (nee)
+    if any(p in nouns for p in pos) or (attributive and not verb and any(p in ADJECTIVE_TYPES for p in pos)) or (
+            known and any(p in ADVERB_TYPES for p in pos)):
+        return None
+    kind = '/'.join(sorted(pos)) or 'not a noun'
+    return (f'{ja} ({kind}) in a sentence that stays English, where only nouns, adjectives right before a noun and '
+            'adverbs known at a glance go')
+
+
+FOLLOWED = re.compile(r'\s*[A-Za-z]')  # an English word next: a Japanese adjective before it is attributive
+
+
+def may_stay(swap, types=None):
+    """Whether one of the weave's swaps ({ja, en, free, before and after: the draft's English around it}) may stay in
+    an English sentence (english_problem), and where it is: not a word that follows its noun (AFTER_NOUN) before an
+    English word, nor right next to a number, as sentence_problems has it. What the weave offers in its text; the rest
+    it offers for twins only."""
+    types = word_types() if types is None else types
+    before, after = swap.get('before') or '', swap.get('after') or ''
+    followed = bool(FOLLOWED.match(after))
+    if (swap['ja'] in AFTER_NOUN and followed) or re.search(r'\d\s*$', before) or re.match(r'\s*\d', after):
+        return False
+    return english_problem(swap['ja'], types.get(swap['ja']), swap.get('en'), bool(swap.get('free')),
+                           followed) is None
+
+
 def sentence_problems(sent, types, english=False, known=None, english_of=None):
     """[(what is wrong, the index of the glossed word it is about, or None)] for one sentence (a token list from
     sentences). english: the sentence is English whatever its share of Japanese (an English sentence of a reply with
@@ -201,21 +256,11 @@ def sentence_problems(sent, types, english=False, known=None, english_of=None):
             add(f'{ja} follows its noun in Japanese, but here it stands before English like a preposition', i)
         if re.search(r'\d\s*$', prev_text) or re.match(r'\s*\d', next_text):
             add(f'{ja} sits right next to a number', i)
-        if stays_english:
-            pos = types.get(ja)
-            attributive = bool(re.match(r'\s*[A-Za-z]', next_text))
-            if pos is None:
-                add(f'{ja} is a form the dictionary does not list (a conjugated verb or phrase) inside a '
-                    'sentence that stays English', i)
-            elif connective(ja, pos, english_of(t) if english_of is not None else None):
-                add(f'{ja} is a connective or a question word in a sentence that stays English: keep it English, or '
-                    'use it in a twin', i)
-            elif not any(p in NOUN_TYPES for p in pos) and not (
-                    attributive and any(p in ADJECTIVE_TYPES for p in pos)) and not (
-                    known is not None and known(t) and any(p in ADVERB_TYPES for p in pos)):
-                kind = '/'.join(sorted(pos)) or 'not a noun'
-                add(f'{ja} ({kind}) in a sentence that stays English, where only nouns, adjectives right before a '
-                    'noun and adverbs known at a glance go', i)
+        if stays_english:  # the pronouns said above
+            why = type_problem(ja, types.get(ja), english_of(t) if english_of is not None else None,
+                                  known is not None and known(t), bool(FOLLOWED.match(next_text)))
+            if why:
+                add(why, i)
     for t in sent:
         if t[0] == 't':
             for run in RUN.findall(t[1]):
@@ -503,6 +548,144 @@ def match_swaps(words, contexts, swaps):
     return out
 
 
+# Put back (put_back): a sure swap of the weave that may stay in English, which the reply dropped but whose English it
+# still has at the same place: its words around it (CONTEXT_WORDS each side, as match_swaps compares them) share at
+# least BACK_MIN with the draft's, at least one on each side the draft has words.
+BACK_MIN = 4
+# What a put-back never touches, as the weave leaves it alone (chatweave.mjs): inline code, link targets, URLs, tags,
+# glosses, {{...}} marks, and paths (a run of non-space characters, no brackets, parentheses or backticks, that starts
+# with / or ~/ or has a / between word characters; chatweave.mjs PATH is the same).
+PATH = r'''(?<![^\s(\[*_"'])(?:~?/|[^\s()\[\]<>`\ue000-\uf8ff]*\w/(?=\w))[^\s()\[\]<>`\ue000-\uf8ff]*'''
+UNTOUCHED = re.compile(r'``.+?``|`[^`\n]+`|\]\([^)]*\)|https?://\S+|\{\{.*?\}\}|<abbr\b[^>]*>.*?</abbr>|<[^>]+>|'
+                       + PATH, re.I)
+
+
+# English that may be a verb, where a Japanese noun doesn't go back: after a subject pronoun, "to", a modal or the like
+# ("it works", "to store", "always notify"); at a sentence's start before an object ("Store the file"); and an -s form
+# of the gloss ("works" for "work") unless a determiner, a number, a quantifier or a preposition comes before it ("the
+# works", "three things", "in places"): "the page works at", "Sending means picking".
+VERB_BEFORE = {'i', 'you', 'we', 'they', 'he', 'she', 'it', 'who', 'which', 'to', 'will', 'would', 'can', 'could',
+               'should', 'must', 'may', 'might', 'shall', 'not', 'never', 'also', 'still', 'just', 'does', 'did', 'do',
+               'please', 'always', 'usually', 'often', 'sometimes', 'already'}
+VERB_AFTER = {'the', 'a', 'an', 'that', 'this', 'these', 'those', 'it', 'its', 'them', 'him', 'her', 'us', 'me', 'you',
+              'my', 'your', 'our', 'their', 'why', 'how', 'what', 'when', 'where', 'whether', 'if', 'each', 'every',
+              'all', 'any', 'no'}
+PLURAL_BEFORE = {'the', 'these', 'those', 'my', 'your', 'our', 'their', 'its', 'his', 'her', 'no', 'some', 'any',
+                 'many', 'few', 'several', 'both', 'all', 'more', 'most', 'other', 'such', 'same', 'different',
+                 'various', 'multiple', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+                 'of', 'in', 'for', 'with', 'by', 'from', 'on', 'at', 'into', 'about', 'between', 'among', 'across',
+                 'over', 'under', 'per', 'than', 'and', 'or'}
+SENTENCE_START = re.compile(r'(^|[.!?:;])[\s*_>#+\-\d.)]*$')
+
+
+def verb_like(before, word, after, glosses=(), start=False):
+    """Whether English `word` (lowercased, with the words before and after it, '' at the edge) may be a verb there
+    (VERB_BEFORE, VERB_AFTER, PLURAL_BEFORE); glosses: the swap's English as its gloss has it (an -s form not among
+    them is an inflection); start: it opens its sentence."""
+    plural = word.endswith('s') and word not in glosses
+    return before in VERB_BEFORE or (start and after in VERB_AFTER) or (plural and before not in PLURAL_BEFORE)
+
+
+def put_back(lines, words, swaps, types, contexts=None):
+    """The reply's lines (twins.parse_authored) with the sure swaps it dropped put back, and how many: each swap the
+    weave offered in its text as sure (not unsure, not for twins only, not a dictionary word) that may stay in an
+    English sentence (may_stay), that no word of the reply is (match_swaps), and whose English the reply still has in
+    its own English (raw segments: never a twin's English or Japanese, code, a link target, a URL, a tag or a path)
+    with BACK_MIN of the draft's words around it (greedily, the best overlap first, each place and swap once), goes in
+    as the weave's abbr with data-back (its place in swaps), which the rules then hold like any other swap. words: the
+    reply's word parts (twins.reply_parts) in order, which are its abbrs outside twins' Japanese; contexts: their
+    reply_contexts."""
+    import twins
+    matched = match_swaps(words, contexts or {}, swaps)
+    used = {id(s) for s, _sure in matched.values()}
+    wanted = [k for k, s in enumerate(swaps) if id(s) not in used and not s.get('unsure') and not s.get('twin')
+              and not s.get('dictionary') and s.get('ja') and s.get('title') and WORD.search(str(s.get('en')).lower())
+              and may_stay(s, types)]
+    if not wanted:
+        return lines, 0
+    # the reply's English as the reader reads it (code out, a gloss as its English), and the places a swap may go: its
+    # own English words, outside twins and what UNTOUCHED leaves alone (place: (stream index, line, segment, start,
+    # end))
+    stream, places = [], []
+    queue = iter(words)
+    english_of = lambda w: (matched.get(id(w), ({},))[0].get('en') or twins.meaning(w['title'])) if w else ''
+    code = twins._fence_lines(lines)
+    token = re.compile(UNTOUCHED.pattern + r"|[A-Za-z0-9']+", re.I)
+    for li, (number, segments) in enumerate(lines):
+        if number in code:
+            continue
+        for si, seg in enumerate(segments):
+            for m in token.finditer(seg[1]):  # a twin's English too, for the words around a place
+                piece = m.group().lower()
+                if piece.startswith('<abbr'):
+                    stream.extend(WORD.findall(str(english_of(next(queue, None))).lower()))
+                elif WORD.fullmatch(piece):
+                    if seg[0] == 'raw':
+                        places.append((len(stream), li, si, m.start(), m.end()))
+                    stream.append(piece)
+    found = []
+    for k in wanted:
+        s = swaps[k]
+        target = WORD.findall(s['en'].lower())
+        draft_before, draft_after = _context_words(s.get('before'), True), _context_words(s.get('after'), False)
+        for n, (at, li, si, start, _end) in enumerate(places):
+            run = places[n:n + len(target)]
+            text = lines[li][1][si][1]
+            if stream[at:at + len(target)] != target or len(run) < len(target) or any(
+                    p[:3] != (at + j, li, si) for j, p in enumerate(run)) or any(
+                    not re.fullmatch(r'[\s-]*', text[a[4]:b[3]]) for a, b in zip(run, run[1:])):
+                continue
+            before = set(stream[max(0, at - CONTEXT_WORDS):at]) & set(draft_before)
+            after = set(stream[at + len(target):at + len(target) + CONTEXT_WORDS]) & set(draft_after)
+            if len(before) + len(after) < BACK_MIN or (draft_before and not before) or (draft_after and not after):
+                continue
+            reading, dot, meanings = s['title'].partition('·')
+            glosses = [g.strip().lower() for g in (meanings if dot else reading).split(' / ')]
+            if any(p in NOUN_TYPES for p in types.get(s['ja']) or ()) and verb_like(
+                    stream[at - 1] if at else '', target[-1], stream[at + len(target)] if at + len(target) < len(
+                        stream) else '', glosses, bool(SENTENCE_START.search(text[:start]))):
+                continue
+            found.append((-(len(before) + len(after)), n, k, li, si, start, run[-1][4]))
+    taken, done, inserts = [], set(), {}
+    for _score, _n, k, li, si, start, end in sorted(found):
+        if k in done or any((li, si) == (a, b) and start < e and s < end for a, b, s, e in taken):
+            continue
+        done.add(k)
+        taken.append((li, si, start, end))
+        inserts.setdefault((li, si), []).append((start, end, k))
+    out = []
+    for li, (number, segments) in enumerate(lines):
+        segs = []
+        for si, seg in enumerate(segments):
+            text = seg[1]
+            for start, end, k in sorted(inserts.get((li, si), ()), reverse=True):
+                tag = (f'<abbr title="{twins.esc(swaps[k]["title"])}" data-en="{twins.esc(text[start:end])}" '
+                       f'data-back="{k}">{swaps[k]["ja"]}</abbr>')
+                text = text[:start] + tag + text[end:]
+            segs.append((seg[0], text) + tuple(seg[2:]))
+        out.append((number, segs))
+    return out, len(done)
+
+
+KEEP = re.compile(r"(``.+?``|`[^`\n]+`)|\{\{([A-Za-z][A-Za-z0-9' -]{0,60}?)\}\}")  # code, or English in {{...}}
+
+
+def keep_english(lines):
+    """The reply's lines with English the writer kept on purpose, {{like this}}, as plain text (put_back left it
+    alone), and how many; code and fenced code untouched."""
+    import twins
+    code, out, n = twins._fence_lines(lines), [], 0
+
+    def plain(m):
+        nonlocal n
+        n += bool(m.group(2))
+        return m.group(1) or m.group(2)
+    for number, segments in lines:
+        out.append((number, segments if number in code else
+                    [(seg[0], KEEP.sub(plain, seg[1])) + tuple(seg[2:]) for seg in segments]))
+    return out, n
+
+
 GRAMMAR_WORDS = set(grammar.WHOLE) | set(grammar.BARE_WORDS) | set(grammar.KOSOADO) | set(grammar.CONJUNCTIONS)
 CONTENT = re.compile('[㐀-鿿々ァ-ヺ]')  # kanji or katakana: a content word, not grammar
 
@@ -622,30 +805,11 @@ def _twin_chances(marked, plan, now_ms, known):
     return out
 
 
-def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
-    """A reply written with <ja> twins (twins.py) checked and made into the final markup: a Checked whose text is what
-    fw.py check-reply prints. Problems code can't fix stop it (a <ja> without its </ja> or English sentence, Japanese
-    outside a twin and outside a gloss, a Japanese sentence outside <ja>). Otherwise it fixes what it can see: a twin
-    that breaks the weave's limits (more than MAX_SENTENCES sentences, a sentence over the length limit, grammar not on
-    the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left English;
-    a swap that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right before a noun
-    and adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each
-    twin (sentence_model.predict per sentence) and each swap (the weave's lookup chance), assigns thresholds and
-    propensities (twins.assign, twins.propensities), writes the final markup, checks that it reads back to the same
-    elements and thresholds and that every level renders clean, and keeps the plan (twins.remember_plan) for the hook's
-    sentence record. Each kind is cut from its own part of each level's budget (twins.assign: twins by the sentence
-    level, words by the word level), and every level abbr, twin and glossed word in a twin whose chance is known carries
-    it as data-p (the tint)."""
-    import knowledge
-    import random
-    import time
-    import twins
-    types = word_types() if types is None else types
-    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    lines, blocking, notes = twins.parse_authored(text)
-    parts = twins.reply_parts(lines)
+def _collect(parts, blocking):
+    """(the reply's word parts, its twins), in order; what code can't fix added to blocking: Japanese outside twins
+    and glosses, a glossed closing mark in English text."""
     words, all_twins = [], []
-    for line, p, twin in _walk(parts):
+    for line, p, _twin in _walk(parts):
         if isinstance(p, tuple):
             if p[0] == 'raw':
                 bare = re.sub(r'``.+?``|`[^`\n]+`', ' ', p[1])
@@ -660,6 +824,34 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             words.append(p)
         else:
             all_twins.append(p)
+    return words, all_twins
+
+
+def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
+    """A reply written with <ja> twins (twins.py) checked and made into the final markup: a Checked whose text is what
+    fw.py check-reply prints. Problems code can't fix stop it (a <ja> without its </ja> or English sentence, Japanese
+    outside a twin and outside a gloss, a Japanese sentence outside <ja>). Otherwise it fixes what it can see: a twin
+    that breaks the weave's limits (more than MAX_SENTENCES sentences, a sentence over the length limit, grammar not on
+    the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left English;
+    a sure swap of the weave the reply dropped where its English is unchanged goes back in (put_back; English written
+    {{like this}} stays English, keep_english), held to the same rules as the reply's own, which come first; a swap
+    that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right before a noun and
+    adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each
+    twin (sentence_model.predict per sentence) and each swap (the weave's lookup chance), assigns thresholds and
+    propensities (twins.assign, twins.propensities), writes the final markup, checks that it reads back to the same
+    elements and thresholds and that every level renders clean, and keeps the plan (twins.remember_plan) for the hook's
+    sentence record. Each kind is cut from its own part of each level's budget (twins.assign: twins by the sentence
+    level, words by the word level), and every level abbr, twin and glossed word in a twin whose chance is known carries
+    it as data-p (the tint)."""
+    import knowledge
+    import random
+    import time
+    import twins
+    types = word_types() if types is None else types
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    lines, blocking, notes = twins.parse_authored(text)
+    parts = twins.reply_parts(lines)
+    words, all_twins = _collect(parts, blocking)
     if blocking:
         out = [f'jw-check: {len(blocking)} thing{"s" if len(blocking) > 1 else ""} to fix before there is anything '
                'to send:']
@@ -668,9 +860,16 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
                    'same line, keep other Japanese in glosses (or quoted in backticks), then run check-reply again.')
         return Checked('\n'.join(out))
     fixed = [f'- line {n}: {what}' for n, what in notes]
-    matched = match_swaps(words, reply_contexts(parts), plan.swaps)
+    lines, n_back = put_back(lines, words, plan.swaps, types, reply_contexts(parts))
+    lines, n_kept = keep_english(lines)
+    if n_back or n_kept:  # the sure swaps the reply dropped, back in, and {{English}} as written: its parts again
+        parts = twins.reply_parts(lines)
+        words, all_twins = _collect(parts, [])
+    backed = {w['back'] for w in words if w.get('back') is not None and w['back'] < len(plan.swaps)}
+    matched = match_swaps([w for w in words if w.get('back') is None], reply_contexts(parts),
+                          [s for k, s in enumerate(plan.swaps) if k not in backed])
     for w in words:  # each kept swap is the draft's swap whose English around it matches best
-        swap, sure = matched.get(id(w), (None, False))
+        swap, sure = (plan.swaps[w['back']], True) if w.get('back') in backed else matched.get(id(w), (None, False))
         w['en'], w['p'], w['free'], w['dictionary'] = _word_info(w, plan, now_ms, swap if sure else None)
         if swap is not None and not sure:  # the word's numbers from its swap all the same: only the English is unsure
             w['p'], w['free'], w['dictionary'] = float(swap.get('p', w['p'])), bool(swap.get('free')), \
@@ -729,15 +928,21 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         for m in ABBR.finditer(t['marked']):
             if m.group(2) not in MARKS and KANJI.search(m.group(2)):
                 uses[m.group(2)] = uses.get(m.group(2), 0) + 1
-    for k, w in enumerate(words):
+    for k, w in sorted(enumerate(words), key=lambda kw: kw[1].get('back') is not None):  # the reply's own first
         inside = w['twin'] is not None and id(all_twins[w['twin']]) in kept_ids
         if inside or k in reverted or not KANJI.search(w['ja']):
             continue
         uses[w['ja']] = uses.get(w['ja'], 0) + 1
         if uses[w['ja']] >= REPEAT:
             reverted[k] = (w['line'], f'{w["ja"]} glossed {REPEAT} times or more in this reply')
-    for k, (number, what) in sorted(reverted.items()):
+    # a swap put back that the rules sent back to English was never there: neither put back nor reverted
+    restored = [w for k, w in enumerate(words) if w.get('back') is not None and k not in reverted]
+    shown_reverted = {k: v for k, v in reverted.items() if words[k].get('back') is None}
+    for k, (number, what) in sorted(shown_reverted.items()):
         fixed.append(f'- line {number}, swap put back in English: {what}')
+    if restored:
+        fixed.append(f'- put back, where your English kept the word the weave offered as sure: '
+                     + ', '.join(f'{w["ja"]} ({w["en"]})' for w in restored))
     # each twin's words' chances, for data-p
     known = {s['ja']: float(s['p']) for s in plan.swaps if s.get('ja') and isinstance(s.get('p'), (int, float))}
     known.update({w['ja']: w['p'] for w in words})
@@ -840,7 +1045,9 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     head = (f'jw-check: {len(kept)} twin{"s" if len(kept) != 1 else ""} and {n_words} word swap'
             f'{"s" if n_words != 1 else ""} ({n_free} known at a glance)'
             + (f'; {len(dropped)} twin{"s" if len(dropped) != 1 else ""} dropped' if dropped else '')
-            + (f', {len(reverted)} swap{"s" if len(reverted) != 1 else ""} put back in English' if reverted else '')
+            + (f', {len(shown_reverted)} swap{"s" if len(shown_reverted) != 1 else ""} put back in English'
+               if shown_reverted else '')
+            + (f', {len(restored)} put back' if restored else '')
             + (':' if fixed else '.'))
     out = [head] + fixed + summary['lines']
     out.append(f'Send everything below the {SEPARATOR} line exactly as it is, as your whole final message.')

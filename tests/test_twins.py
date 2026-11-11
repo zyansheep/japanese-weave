@@ -699,9 +699,14 @@ class ReviewRound3(Home):
                           'before': 'the result. It ', 'after': ' fixes the bug.'}]
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
         types = dict(TYPES, また={'n', 'adv'})
-        text = f'Run the tests again and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
+        text = f'Run the tests {{{{again}}}} and check the result. It {self.AGAIN} fixes the bug.' + self.FILLER
         final = check_reply.finish(text, own, types, seed=1, remember=False).final
-        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['once more'])
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['once more'])  # {{again}}: English on purpose
+        self.assertIn('Run the tests again and check', final)
+        dropped = text.replace('{{again}}', 'again')  # dropped as plain English: the sure swap goes back in
+        final = check_reply.finish(dropped, own, types, seed=1, remember=False).final
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', final), ['again', 'once more'])
+        text = dropped
         unsure = [dict(x, before='', after='') for x in swaps]  # no context to tell: the gloss's first meaning
         own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, unsure, 0.08, None, None)
         final = check_reply.finish(text, own, types, seed=1, remember=False).final
@@ -809,6 +814,99 @@ class ReviewRound4(Home):
         text = 'Wrap each word in <abbr title="..."> tags. Then done.'
         self.assertEqual(twins.render(text, twins.OFF), text)
         twins.english_only(f'{text} {P}.')  # a later </abbr> closes it, as in HTML: read, not a crash
+
+
+class PutBack(Home):
+    """check_reply.put_back: the sure swaps a reply dropped where its English is unchanged go back in."""
+    DRAFT = ('The problem is in the log. Read the information below before you start, and check the whole thing '
+             'twice. Then run the tests and read what they print, line by line, until it all passes.')
+    TYPES = dict(TYPES, 仕事={'n', 'vs'}, 来る={'vk', 'adj-pn'}, ねえ={'int', 'prt', 'n-suf'}, もう={'adv', 'int'})
+
+    def swap(self, ja, title, en, p=0.02, free=True, **extra):
+        at = self.DRAFT.index(en)
+        return dict({'ja': ja, 'title': title, 'en': en, 'kana': '', 'p': p, 'free': free,
+                     'before': self.DRAFT[max(0, at - 60):at], 'after': self.DRAFT[at + len(en):at + len(en) + 60]},
+                    **extra)
+
+    def check(self, text, swaps):
+        own = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08, None, None)
+        return check_reply.finish(text, own, self.TYPES, seed=1, remember=False)
+
+    def test_a_dropped_sure_swap_goes_back(self):
+        swaps = [self.swap('問題', 'もんだい · problem', 'problem'),
+                 self.swap('情報', 'じょうほう · information', 'information', 0.3, False)]
+        checked = self.check(self.DRAFT, swaps)
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', checked.final), ['problem', 'information'])
+        self.assertIn(', 2 put back', checked.text.split('\n')[0])
+        self.assertIn('- put back, where your English kept the word the weave offered as sure: 問題 (problem), '
+                      '情報 (information)', checked.text)
+        self.assertNotIn('data-back', checked.final)
+        kept = self.DRAFT.replace('problem', P, 1)  # a swap the reply kept is no swap to put back
+        self.assertEqual(re.findall(r'data-en="([^"]*)"', self.check(kept, swaps[:1]).final), ['problem'])
+
+    def test_what_stays_out(self):
+        cases = {'unsure': [self.swap('問題', 'もんだい · problem', 'problem', unsure=True)],
+                 'for twins only': [self.swap('問題', 'もんだい · problem', 'problem', twin=True)],
+                 'a dictionary word': [self.swap('問題', 'もんだい · problem', 'problem', dictionary=True)],
+                 'a verb': [self.swap('使う', 'つかう · use', 'run', free=False)],
+                 'no context': [dict(self.swap('問題', 'もんだい · problem', 'problem'), before='', after='x y')]}
+        for why, swaps in cases.items():
+            with self.subTest(why):
+                self.assertNotIn('data-en', self.check(self.DRAFT, swaps).final)
+        rewritten = 'Your problem sits somewhere else entirely, so look there first and fix it quickly.'
+        self.assertNotIn('data-en', self.check(rewritten, cases['unsure'][:0] + [
+            self.swap('問題', 'もんだい · problem', 'problem')]).final)  # the English around it changed
+
+    def test_never_in_a_twin_code_or_a_path(self):
+        swaps = [self.swap('問題', 'もんだい · problem', 'problem')]
+        twin = self.DRAFT.replace('The problem is in the log.', f'The problem is in the log.<ja>{P}は{LOG}です。</ja>')
+        final = self.check(twin, swaps).final
+        self.assertIn('<span data-jw="en" data-on="', final)
+        self.assertIn('>The problem is in the log.</span>', final)  # the twin's English: untouched
+        self.assertNotIn('data-en="problem"', final)
+        for hidden in ('`problem`', '/tmp/problem', 'docs/problem.md', '~/problem', 'https://x.org/problem',
+                       '[it](problem)'):
+            with self.subTest(hidden):
+                text = self.DRAFT.replace('The problem is', f'The {hidden} is')
+                lines = twins.parse_authored(text)[0]
+                back, n = check_reply.put_back(lines, [], [dict(swaps[0], before='The ', after=' is in the log.')],
+                                               self.TYPES)
+                self.assertEqual(n, 0, back)
+
+    def test_english_that_reads_as_a_verb_and_the_shared_rule(self):
+        draft = 'It works fine on the phone now, so the work on the desktop app can start next week.'
+        work = lambda en, at: {'ja': '仕事', 'title': 'しごと · work / job', 'en': en, 'p': 0.02, 'free': True,
+                               'before': draft[max(0, at - 60):at], 'after': draft[at + len(en):at + 60]}
+        swaps = [work('works', draft.index('works')), work('work', draft.index('work '))]
+        lines = twins.parse_authored(draft)[0]
+        back, n = check_reply.put_back(lines, [], swaps, self.TYPES)
+        self.assertEqual(n, 1)  # "the work", never "It works"
+        self.assertIn('the <abbr title="しごと · work / job" data-en="work"', back[0][1][0][1])
+        self.assertTrue(check_reply.verb_like('to', 'store', 'it'))
+        self.assertTrue(check_reply.verb_like('page', 'works', 'at', ['work']))
+        self.assertFalse(check_reply.verb_like('three', 'things', 'were', ['thing']))
+        self.assertFalse(check_reply.verb_like('the', 'status', 'is', ['status']))
+        # the stays-English rules the weave's offers and the check share
+        may = lambda ja, en, after, free=True: check_reply.may_stay(
+            {'ja': ja, 'en': en, 'free': free, 'after': after}, self.TYPES)
+        self.assertTrue(may('小さい', 'small', ' tool'))
+        self.assertFalse(may('小さい', 'small', '.'))  # an adjective only before an English word
+        self.assertFalse(may('来る', 'comes', ' back'))  # adj-pn as 来たる, but a verb
+        self.assertFalse(may('ねえ', 'right', ' side'))  # an interjection, a noun only as a reading of ane
+        self.assertTrue(may('もう', 'already', ' done'))  # a known adverb, interjection or not
+        self.assertFalse(may('もう', 'already', ' done', free=False))
+        self.assertFalse(may('あなた', 'you', ' can'))
+        self.assertFalse(may('仕事', 'and', ' then'))  # a connective's English
+
+    def test_the_repeat_limit_keeps_the_replys_own_uses(self):
+        draft = 'One problem here. ' * 4 + 'And the last problem is in the log, so read it.'
+        at = draft.rindex('problem')
+        swaps = [{'ja': '問題', 'title': 'もんだい · problem', 'en': 'problem', 'p': 0.02, 'free': True,
+                  'before': draft[at - 60:at], 'after': draft[at + 7:at + 67]}]
+        text = draft.replace('One problem', f'One {P}')
+        checked = self.check(text, swaps)
+        self.assertEqual(checked.final.count('data-en="problem"'), 4)  # the fifth would go over REPEAT
+        self.assertNotIn('put back', checked.text.split('\n')[0])
 
 
 if __name__ == '__main__':

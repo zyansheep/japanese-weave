@@ -1553,7 +1553,7 @@ id	ja	kana	romaji	en	glosses	pos	score	jpdb	bccwj	common	loan	swap	field	forms
 1551200	率	りつ	ritsu	rate / ratio	rate;ratio;proportion;percentage	n,n-suf	1632	5853	455	3		0		
 1089760	ナイト	ないと	naito	knight	knight	n	1634	432	6178	3	kata	0		
 1238610	響く	ひびく	hibiku	resound / be heard far away	to resound;to be heard far away|to reverberate;to shake;to vibrate|to come;to remain|to have an effect	v5k,vi	1634	1355	1970	3		0		
-1174420	英語	えいご	eigo	English	English	n	1636	2934	912	3		0		
+1174420	英語	えいご	eigo	English / English language	English	n	1636	2934	912	3		0		
 1328110	手段	しゅだん	shudan	means / way	means;way;method;measure	n	1637	1750	1531	3		1		
 1444800	登場	とうじょう	tōjō	appear / entrance	entrance;appearance|arrival;emergence;introduction;advent	n,vs,vi	1637	2364	1134	3		1		
 1007400	だったら	だったら	dattara	in that case / then	if it's the case	conj	1638	518	5178	3		1		
@@ -19564,7 +19564,7 @@ id	ja	kana	romaji	en	glosses	pos	score	jpdb	bccwj	common	loan	swap	field	forms
 1421790	稚拙	ちせつ	chisetsu	unskillful / childish	unskillful;childish;immature;naive;artless	adj-na,n	27490	22835	33093	3		1		
 1463100	二分	にぶん	nibun	halving / dividing	halving;dividing;bisection|the two equinoxes	n,vs,vt,vi	27492	9946	75993	3		1		
 1286570	国際法	こくさいほう	kokusaihō	international law / law of nations	international law;law of nations	n	27493	45078	16768	3		1		
-1464530	日本語	にほんご	nihongo	Japanese	Japanese	n	27506	4705	160807	3		0		にっぽんご
+1464530	日本語	にほんご	nihongo	Japanese / Japanese language	Japanese	n	27506	4705	160807	3		0		にっぽんご
 1596450	装丁	そうてい	sōtei	binding	binding|design	n,vs,vt	27508	26455	28602	3		1		装幀,装釘,装訂
 1035600	オリオン	おりおん	orion	Orion	Orion	n	27510	39767	19031	3	kata	0	grmyth	
 1534860	木片	もくへん	mokuhen	block / chip	block;chip;splinter	n	27513	26746	28302	3		1		

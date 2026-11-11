@@ -289,6 +289,22 @@ def mark_known(state, names, day=None):
     return entries
 
 
+def mark_learning(state, names, day=None):
+    """Makes words learning by name (Anki cards under review that aren't mature, fw.py anki --learning) when they
+    aren't introduced yet, their origin learning; outside the day's intake, as they come from Anki. Returns the words
+    made learning."""
+    day = day or today()
+    by_key = {key(w['ja']): w for w in state['words']}
+    entries = [e for e in (by_key.get(key(name)) or find(state, name) for name in names) if e]
+    done = []
+    for e in entries:  # known and learning words stay as they are
+        if e['status'] == 'queue' and e not in done:
+            set_status(e, 'active', day)
+            e['origin'] = 'learning'
+            done.append(e)
+    return done
+
+
 def blank(word):
     """A lexicon entry as a word not introduced yet."""
     return dict(word, status='queue', added='', changed='')

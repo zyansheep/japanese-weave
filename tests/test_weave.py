@@ -495,8 +495,8 @@ class Scale(Home):
             w.update(status='active' if i < 24 else 'known', added='2026-01-01')
         state['words'] = anki + lexicon  # an Anki sync puts its words first
         known = [w for w in state['words'] if w['status'] == 'known']
-        self.assertEqual(len(known), 1506)
-        for w in known[-6:]:
+        self.assertEqual(len(known), 1508)
+        for w in known[-8:]:
             w['status'] = 'queue'
         self.assertEqual(fwlib.stage_for(state), 4)
         rare = known[-10]  # a word far down the base list that keeps coming up in the user's chats
@@ -1521,6 +1521,49 @@ class Anki(Home):
         self.assertEqual([(w['ja'], w['en']) for w in words], [('イタリア', 'italy'), ('書く', 'write')])
         self.assertEqual(report['skipped'], {'no English meaning': 2, 'romaji, not a meaning': 1,
                                              'conjugated form': 1})
+
+    def test_words_the_lexicon_lacks_come_from_the_dictionary(self):
+        path = self.home / 'collection.anki2'
+        collection(path, [
+            (20, ['天気', 'weather'], 1, 2, 2, 40),                      # no reading anywhere on the card
+            (30, ['電車', '', ''], 1, 2, 2, 40),                           # no reading and an empty meaning
+            (20, ['人 (on)', 'person'], 1, 2, 2, 40),                    # a sense marker after the word
+            (20, ['自転車 (2)', 'bike'], 1, 2, 2, 40),
+            (20, ['未知語未知語', 'nothing'], 1, 2, 2, 40),               # in neither: still skipped
+        ], {20: ['Front', 'Back'], 30: ['Word', 'Furigana', 'meaning']})
+        words, report = anki.review_words(path, base=fwlib.read_lexicon(fwlib.LEXICON))
+        got = {w['ja']: (w['kana'], w['hint'], w['en']) for w in words}
+        self.assertEqual(got['天気'], ('てんき', 'tenki', 'weather'))
+        self.assertEqual(got['電車'], ('でんしゃ', 'densha', 'train / electric train'))  # the entry's gloss
+        self.assertEqual(got['人'], ('ひと', 'hito', 'person / people'))  # the lexicon's, marker gone
+        self.assertEqual(got['自転車'], ('じてんしゃ', 'jitensha', 'bike'))  # the card's meaning wins
+        self.assertEqual(report['skipped'], {'no reading': 1})
+        self.assertEqual(anki.SENSE_MARK.sub('', 'から (kun)'), 'から')
+        self.assertEqual(anki.SENSE_MARK.sub('', '早い（2）'), '早い')
+
+    def test_learning_makes_the_young_cards_learning_words(self):
+        state = fwlib.new_state('2026-01-01')
+        queued = [w['ja'] for w in state['words'] if w['status'] == 'queue'][:3]
+        known = next(w for w in state['words'] if w['status'] == 'queue' and w['ja'] not in queued)
+        op = {'kind': 'anki', 'words': [{'ja': ja, 'en': 'x'} for ja in queued], 'known': [known['ja']],
+              'learning': queued + ['未知語']}
+        self.assertIsNone(hub.validate(hub.stamp(op)))
+        self.assertIsNotNone(hub.validate(hub.stamp(dict(op, learning='all'))))
+        result = hub.apply(state, hub.stamp(op))
+        self.assertEqual((result['known'], result['learning']), (1, 3))
+        self.assertEqual({fwlib.find(state, ja)['status'] for ja in queued}, {'active'})
+        self.assertEqual({fwlib.find(state, ja)['origin'] for ja in queued}, {'learning'})
+        self.assertEqual(hub.apply(state, hub.stamp(op))['learning'], 0)  # again: they are learning words already
+        without = {k: v for k, v in op.items() if k != 'learning'}  # as before --learning
+        self.assertNotIn('learning', hub.apply(state, hub.stamp(without)))
+        path = self.home / 'collection.anki2'
+        collection(path, self.CARDS)
+        for flags, wanted in (([], None), (['--learning'], ['食べる', '猫'])):
+            with mock.patch.object(hub, 'submit', return_value={'known': 2, 'learning': 2}) as submit, \
+                    mock.patch('sys.stdout', new=io.StringIO()) as out:
+                fw.main(['anki', str(path)] + flags)
+            self.assertEqual(submit.call_args[0][0].get('learning'), wanted)  # only when asked: older hubs ignore it
+            self.assertEqual('2 others learning' in out.getvalue(), bool(flags))
 
     def test_sync_puts_anki_words_first_and_marks_mature_known(self):
         path = self.home / 'collection.anki2'

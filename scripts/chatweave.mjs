@@ -6,11 +6,13 @@
 // (each once a line, as planSwaps keeps one use of a word per passage at normal), then the rest over the whole reply at
 // full, a word again where it fits, and at most DICTIONARY_MAX of the dictionary words (the host's pool, flagged dictionary: true)
 // that aren't in the word list, those nearest the target lookup chance first; check-reply decides what each level
-// shows. Code fences, inline code, link targets, URLs and tags are left alone. Reads one JSON object on stdin: { draft,
-// words (the host's state message's words, with the pool's), recency, intensity (levels.js: 3 is full, the default) }.
-// Prints one JSON object: { text: the woven draft, words: its word count, swaps: [{ ja, title, en, kana, p, free,
-// dictionary, unsure, before, after }] }, p the word's current lookup chance as levels.js costOf prices it (its
-// long-term chance when known at a glance), before and after the draft's English around it. Runs under node or bun.
+// shows. Code fences, inline code, link targets, URLs, tags and paths (PATH) are left alone. Reads one JSON object on
+// stdin: { draft, words (the host's state message's words, with the pool's), recency, intensity (levels.js: 3 is full,
+// the default) }. Prints one JSON object: { text: the woven draft, parts: the same as a list of the draft's text
+// (strings) and swaps (their index in swaps), for the caller to render each swap or leave it English, words: its word
+// count, swaps: [{ ja, title, en, kana, p, free, dictionary, unsure, before, after }] }, p the word's current lookup
+// chance as levels.js costOf prices it (its long-term chance when known at a glance), before and after the draft's
+// English around it. Runs under node or bun.
 import { readFileSync } from 'node:fs';
 
 const src = (name) => new URL(`../extension/src/${name}`, import.meta.url).href;
@@ -32,15 +34,19 @@ const intensity = Number.isFinite(input.intensity) ? input.intensity : 3;
 const now = Date.now();
 const opts = { recency: input.recency || null, now, jitter: 1, intensity };
 
-// Lines, code fences kept out; inside a line, inline code, link targets, URLs and tags become one private-use
-// character each (no letter, so the matcher skips it), put back at the end.
+// Lines, code fences kept out; inside a line, inline code, link targets, URLs, tags and paths become one private-use
+// character each (no letter, so the matcher skips it), put back at the end. A path is a run of non-space characters
+// (no brackets, parentheses or backticks) that starts with / or ~/, or has a / between word characters:
+// /home/a/b, research/linear-ic-net/player/, scripts/fw.py (check_reply.PATH is the same).
+const PATH = /(?<![^\s(\[*_"'])(?:~?\/|[^\s()\[\]<>`\uE000-\uF8FF]*\w\/(?=\w))[^\s()\[\]<>`\uE000-\uF8FF]*/;
+const PROTECT = new RegExp(/`[^`]*`|\]\([^)]*\)|https?:\/\/\S+|<[^>]+>|/.source + PATH.source, 'g');
 const saved = [];
 const lines = [];
 let fence = false;
 for (const raw of String(input.draft || '').split('\n')) {
   if (/^\s*(```|~~~)/.test(raw)) { fence = !fence; lines.push({ raw, code: true, text: '' }); continue; }
   if (fence) { lines.push({ raw, code: true, text: '' }); continue; }
-  const text = raw.replace(/`[^`]*`|\]\([^)]*\)|https?:\/\/\S+|<[^>]+>/g, (m) => String.fromCharCode(0xE000 + saved.push(m) - 1));
+  const text = raw.replace(PROTECT, (m) => String.fromCharCode(0xE000 + saved.push(m) - 1));
   lines.push({ raw, code: false, text });
 }
 let at = 0;
@@ -94,20 +100,25 @@ const KANJI = /[㐀-䶿一-鿿々]/;
 const title = (s) => (KANJI.test(s.ja) && s.reading ? `${s.reading} · ${s.gloss}` : s.gloss);
 const abbr = (s) => `<abbr title="${title(s)}">${s.ja}</abbr>`;
 const restore = (t) => t.replace(/[\uE000-\uF8FF]/g, (c) => saved[c.charCodeAt(0) - 0xE000]);
-const result = lines.map((l) => {
-  if (l.code) return l.raw;
-  let t = '';
+// The draft as text and swaps in order: strings of it, and each swap's index in swaps.
+const parts = [];
+lines.forEach((l, k) => {
+  if (k) parts.push('\n');
+  if (l.code) { parts.push(l.raw); return; }
   let from = 0;
   for (const s of swaps.filter((x) => x.start >= l.start && x.end <= l.start + l.text.length)) {
-    t += l.text.slice(from, s.start - l.start) + (s.unsure ? `{{${s.en}→${abbr(s)}}}` : abbr(s));
+    parts.push(restore(l.text.slice(from, s.start - l.start)), swaps.indexOf(s));
     from = s.end - l.start;
   }
-  return restore(t + l.text.slice(from));
-}).join('\n');
+  parts.push(restore(l.text.slice(from)));
+});
+const shown = (s) => (s.unsure ? `{{${s.en}→${abbr(s)}}}` : abbr(s));
+const result = parts.map((x) => (typeof x === 'number' ? shown(swaps[x]) : x)).join('');
 
 const round = (x) => Math.round(x * 10000) / 10000;
 // The English around each swap in the draft, for the check to tell apart two uses of a word with one gloss.
 const context = (from, to) => whole.slice(Math.max(0, from), Math.max(0, to)).replace(/[\uE000-\uF8FF]/g, ' ');
-console.log(JSON.stringify({ text: result, words: wordCount(whole), swaps: swaps.map((s) => ({ ja: s.ja, title: title(s),
-  en: s.en, kana: s.reading || '', p: round(s.p), free: s.free, dictionary: s.dictionary, unsure: s.unsure,
-  before: context(s.start - CONTEXT, s.start), after: context(s.end, s.end + CONTEXT) })) }));
+console.log(JSON.stringify({ text: result, parts: parts.filter((x) => x !== ''), words: wordCount(whole),
+  swaps: swaps.map((s) => ({ ja: s.ja, title: title(s), en: s.en, kana: s.reading || '', p: round(s.p), free: s.free,
+  dictionary: s.dictionary, unsure: s.unsure, before: context(s.start - CONTEXT, s.start),
+  after: context(s.end, s.end + CONTEXT) })) }));

@@ -62,8 +62,10 @@ level from [blocks/](blocks/level-01.md).
   for a `t3 serve` parent and weaves there.
 - **Chat replies in T3 Code: draft and weave** (the default where the chat shows hover glosses and node or bun is
   installed). The brief has Claude write each reply in plain English first and pass it to `fw.py weave`, which weaves
-  in Japanese with the extension's own code: every place one of your words could go, as at full. Claude then writes
-  the reply with the swaps whose sense fits and, right after each sentence it can say in Japanese within the limits,
+  in Japanese with the extension's own code: every place one of your words could go and stay in English, as at full
+  (verbs, connectives and the like are listed apart, for the Japanese sentences). Claude then writes the reply keeping
+  the swaps wherever the meaning still gets across (`fw.py check-reply` puts back the sure ones it dropped) and,
+  right after each sentence it can say in Japanese within the limits,
   its Japanese twin: short (at most as many Japanese characters as your log says you read without opening the
   translation, 9 on 2026-11-04), using only grammar you know plus at most one pattern you are learning, one at a time,
   which the weave names with an example so Claude uses it on purpose ([docs/grammar.md](docs/grammar.md)). Finally
@@ -154,9 +156,11 @@ the review (`tools/build_dictionary.py`). It is planned to become the vocabulary
 **Anki.** `fw.py anki <collection.anki2>` reads your collection (a temporary copy, so Anki can stay open) and puts
 every word on a card in learning or review (not new, not suspended) at the front of the list, most familiar first.
 Mature cards (interval of 21 days or more, `--mature-days`) are marked known; the rest become the first learning
-words. Field roles come from the note type (Core 2k/6k, Kaishi, JLPT and Yomitan-mined decks name them; Front/Back
-decks are read by content). Rerun it whenever you like; it never resets progress. `--deck NAME` limits it to decks
-whose name contains NAME.
+words, and with `--learning` they become learning words at once. Field roles come from the note type (Core 2k/6k,
+Kaishi, JLPT and Yomitan-mined decks name them; Front/Back decks are read by content). A word the list lacks takes
+its reading, and its gloss when the card's meaning is empty, from the dictionary (its best-ranked entry written that
+way), and a sense marker after the word ("kara (1)", "hito (on)") is dropped. Rerun it whenever you like; it never resets
+progress. `--deck NAME` limits it to decks whose name contains NAME.
 
 ## How words advance
 

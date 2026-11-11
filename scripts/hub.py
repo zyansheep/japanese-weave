@@ -167,6 +167,8 @@ def validate(op):
             return 'anki: words are {ja, en, hint, kana, interval, mature}'
         if not texts(known, 50_000):
             return 'anki: known is a list of words'
+        if 'learning' in op and not texts(op['learning'], 50_000):
+            return 'anki: learning is a list of words'
     elif kind == 'exposure':
         replies = op.get('replies')
         counts = lambda x: x is None or isinstance(x, dict) and len(x) <= 5000 and all(
@@ -350,7 +352,10 @@ def apply(state, op):
         return {'seeded': fwlib.seed_known(state, op['n'], day)}
     if kind == 'anki':  # the words reach the front of the list through anki.csv (run writes it first)
         entries = fwlib.mark_known(state, op['known'], day)
-        return {'words': len(op['words']), 'known': sum(e['status'] == 'known' for e in entries)}
+        result = {'words': len(op['words']), 'known': sum(e['status'] == 'known' for e in entries)}
+        if 'learning' in op:  # fw.py anki --learning (an older hub ignores it: the op stays valid there)
+            result['learning'] = len(fwlib.mark_learning(state, op['learning'], day))
+        return result
     if kind == 'chat_day':  # it counted assumed exposure days, which nothing counts any more
         return {'logged': 0}
     if kind == 'exported':

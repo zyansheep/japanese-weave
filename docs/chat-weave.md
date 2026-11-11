@@ -19,16 +19,28 @@ for the Japanese sentences.
 
    Words known at a glance go in line by line, once a line. The rest go over the whole reply, a word again where it
    fits, with at most 6 dictionary words the reader doesn't have yet (those nearest the target lookup chance), which
-   show only at full. A span the web would ask its model about is taken at its first option and marked
-   `{{English→Japanese}}`. Each swap's English, reading and current lookup chance are kept in `weave-swaps.json` for
-   the check. The first line names the learning words and asks for a Japanese twin of each sentence that fits the
-   limits: at most so many Japanese characters a sentence (where known patterns reach a 5% open chance), the known
+   show only at full. In chat a word's own glosses count as safe (`webdata.add_word_data` with `own_safe`, from
+   `chatweave.words_for`), but for closed-class English, as `senses.js` treats it: kuruma is sure for "car" though
+   `data/senses.tsv` flags only "automobile"; the web keeps the flags. A span still unsure (one of closed-class
+   English: "now", "one", "all") is taken at its first option and marked `{{English→Japanese}}`. Inline code, link
+   targets, URLs, tags and paths (`/home/a/b`, `research/net/player/`, `scripts/fw.py`: a run of non-space characters
+   that starts with `/` or `~/` or has a `/` between word characters) are left alone.
+
+   The text offers only the swaps that may stay in an English sentence by the check's rules (`check_reply.may_stay`,
+   the same rule the check holds the reply to: nouns, adjectives right before an English word, adverbs known at a
+   glance; not a word that follows its noun before an English word, nor one next to a number); the rest stay
+   English there and go on the first line "for twins only", each Japanese word once with its short gloss (pronouns
+   left out: Japanese drops them). Each swap's English, reading, current lookup chance and the English around it are
+   kept in `weave-swaps.json` for the check, those for twins flagged `twin`. The first line names the learning words
+   and asks for a Japanese twin of each sentence that fits the limits: at most so many Japanese characters a sentence (where known patterns reach a 5% open chance), the known
    grammar patterns plus at most one learning pattern, and this week's learning pattern with its explanation and
    example, to use on purpose in a twin or two (`chatweave.sentence_plan`). It asks for at most 1.5 times the
    sentences much heavier (+2) pays for at the price of a sentence, and at least 3: full shows every twin, but full
    costs more reading than it teaches (round 4 below) and is rarely read, so twins past what +2 uses mostly serve it;
    the slack leaves the ranking a choice and covers the twins the check drops.
-3. Claude writes the reply from the output: its English sentences with the swaps whose sense fits, and right after
+3. Claude writes the reply from the output: its English sentences keeping the swaps wherever the sentence's meaning
+   still gets across (a near synonym is fine), and undoing one only where the Japanese would obscure or change the
+   meaning, written `{{like this}}` so the check leaves it English; and right after
    each sentence that fits, on the same line, its twin in `<ja>...</ja>`: one Japanese or mixed sentence, or two short
    ones for a long English sentence, glossed as before, each ending with a bare 。 or ？. The twin's English is the text
    back to the end of the sentence before it (a `.`, `!`, `?`, `:` or `;` after anything but a space, with any
@@ -41,7 +53,7 @@ for the Japanese sentences.
    can't tell whether a sentence ends: its English holds more than one sentence, sits
    in a table row or a task list, holds a link, or leaves bold, italic, a link or code open (or starts inside one the
    line left open), or its Japanese does. Japanese may be quoted in backticks; elsewhere it goes in twins or glosses.
-   The rules and the list of known sense traps are `weave.DRAFT_RULES`.
+   The rules and the list of known sense traps, now examples of a meaning obscured, are `weave.DRAFT_RULES`.
 
        This is a problem.<ja><abbr title="this">これ</abbr>は<abbr title="もんだい · problem">問題</abbr>です。</ja>
 
@@ -51,6 +63,15 @@ for the Japanese sentences.
    - drops a twin that breaks a limit (more than two sentences, too long, grammar not on the list, two learning
      patterns in a sentence) or any rule of the old check (a pronoun, もし with no conditional, bare particles that
      carry meaning, する on an English word and the rest): its sentence stays English;
+   - puts back in Japanese a sure swap the reply dropped (`check_reply.put_back`): one the weave offered in its text,
+     not unsure, not for twins only and not a dictionary word, that no glossed word of the reply is, whose English the
+     reply still has in its own English with at least 4 of the draft's words around it (6 a side, at least one on each
+     side the draft has), outside twins (their English and Japanese), code, link targets, URLs, tags, paths and
+     `{{...}}`; a Japanese noun never goes back where the English may be a verb (after "it", "to", a modal and the
+     like; an -s form with no determiner, number, quantifier or preposition before it; a sentence's first word before
+     an object). Each goes in as the weave's abbr and is held to the rules below like the reply's own words, which come
+     first for the repeat limit; one the rules send back to English is neither counted nor listed. The summary line
+     says "N put back" and a line lists them;
    - puts back in English a swap that breaks the stays-English rules (only nouns, adjectives right before a noun, and
      adverbs the reader knows at a glance, below), and a content word's fifth gloss;
    - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave;
@@ -156,8 +177,27 @@ as (`check_reply.connective`): a few spellings (もし, でも, そして and th
 the English it stands in for is "again" (また), the question words of the ど- series, and any swap for "and", "but",
 "so", "if", "however", "moreover", "also", "therefore", "then", "instead", "otherwise", "unless", "in case", "in other
 words", "how", "why", "what", "when", "where" and the like ("so" stays as an intensifier for an adverb with no
-conjunction type, as とても). The brief asks Claude to keep, where the English reads as naturally either way, a phrasing
-that leaves a swapped known noun or adjective in place.
+conjunction type, as とても; tsumari is a connective by spelling). The brief asks Claude to keep, where the English reads
+as naturally either way, a phrasing that leaves a swapped known noun or adjective in place. One rule
+(`check_reply.english_problem`) serves the check and the weave's offers. A word's types are those of the entries
+written that way, else of those it is the reading or another spelling of; a word that is also a verb is never an
+adjective before a noun (kuru and aru are also adnominals, as kitaru and "a certain"), and an interjection is a
+noun only as a whole noun, not as an affix (nee, a reading of ane, "older sister").
+
+**Offers and put-backs (2026-11).** Of 22 woven replies (about 8,000 English words) after the two dials, the weave
+offered 1,259 swaps and 132 survived. Most offers could never stay in an English sentence (pronouns, connectives,
+question words, interjections, verbs, adverbs still being learned), and almost every known-word swap was marked unsure
+(294 of the reader's 361 known words had no gloss flagged safe), so writers kept about 10 of 140 and dropped good
+nouns with them. The weave now offers in its text only what may stay, lists the rest for twins, treats a word's own
+glosses as safe, and the brief asks for a looser sense standard; check-reply puts back what was dropped by mistake.
+Re-run over the same 22 drafts with the word state of 2026-11-10: 1,851 swaps found (1,841 before), 765 offered in the
+text (all 1,841 before) and 305 of them unsure (1,634 before), the other 1,086 listed for twins; re-checking the
+writers' final replies, written under the old brief, puts back 178 swaps, and their word swaps go from 156 to 347
+(108 to 287 shown at normal, 1.1 to 3.1 per 100 of the drafts' words as the weave counts them). Some put-backs are
+still wrong in sense (mise, "shop", for a data "store"; hou, "side", in "side effects"): those replies' writers had
+dropped them on purpose under the old brief, where now they would write `{{store}}`. With it, eigo ("English / English
+language") joined the word list, and nihongo's gloss is "Japanese / Japanese language", so plain "Japanese" matches,
+as a noun and before one; the weave's paths stopped taking swaps ("/home/..." was the word for house).
 
 **Exploration and propensities.** Each element's place in its order is, with chance 0.2 (`twins.EXPLORE`), a uniform
 random place instead of its rank. So every element has a known chance of showing at each level, never 0 or 1 by the

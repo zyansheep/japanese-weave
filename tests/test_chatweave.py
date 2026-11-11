@@ -102,6 +102,58 @@ class Weave(unittest.TestCase):
         self.assertIn('情報', [s['ja'] for s in kept])  # kept for the check step, per session
         self.assertEqual(next(s for s in kept if s['ja'] == '情報')['en'], 'information')
 
+    def test_the_text_offers_only_what_may_stay_in_english(self):
+        words = WORDS + [word('使う', 'つかう', 'use', True, 3.0), word('私', 'わたし', 'i', True, 3.0),
+                         word('そして', 'そして', 'and', True, 3.0), word('小さい', 'ちいさい', 'small', True, 3.0),
+                         word('書く', 'かく', 'write', False, 1.0, status='active')]
+        draft = ('I use the small problem tool, and then I read the log.\nIn the end the problem is small. Write the '
+                 'information down before you start the next run of the tool.')
+        state = {'version': 'v1', 'prefs': {}, 'words': []}
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'JAPANESE_WEAVE_HOME': home}), \
+                mock.patch.object(chatweave, 'words_for', return_value=([dict(w) for w in words], {'recency': None})), \
+                mock.patch.object(chatweave.knowledge, 'load', return_value={}), \
+                mock.patch.object(chatweave, 'pool', return_value=[]):
+            out = chatweave.weave(draft, 0, state, session='s1')
+            import twins
+            kept = {s['ja']: s for s in twins.swaps_for('s1')}
+        head, text = out.split('\n-----\n', 1)
+        self.assertIn('<abbr title="ちいさい · small">小さい</abbr> <abbr title="もんだい · problem">問題</abbr>', text)
+        self.assertIn('the <abbr title="もんだい · problem">問題</abbr> is small.', text)  # small after it: English
+        self.assertNotIn('使う', text)
+        self.assertNotIn('そして', text)
+        self.assertNotIn('書く', text)
+        self.assertTrue(text.startswith('I use the'))  # the draft's English where a swap can't stay
+        self.assertIn('For twins only (they can\'t stay in an English sentence): ', head)
+        self.assertIn('使う (use)', head)
+        self.assertIn('書く (write)', head)  # a learning verb: in twins
+        self.assertIn('learning words 書く, 情報: keep each', head)
+        self.assertNotIn('小さい (', head)  # in the text before a noun: not listed again
+        self.assertNotIn('私 (', head)  # a pronoun: Japanese leaves it out, twins too
+        self.assertTrue(kept['使う']['twin'] and kept['私']['twin'])  # every swap kept for the check
+        self.assertNotIn('twin', kept['問題'])
+        self.assertEqual(chatweave.render({'parts': ['a ', 0, '.'], 'swaps': [
+            {'ja': '今', 'title': 'いま · now', 'en': 'now', 'unsure': True}]}, [True]),
+            'a {{now→<abbr title="いま · now">今</abbr>}}.')
+
+    def test_paths_are_left_alone(self):
+        words = [word('家', 'いえ', 'house', True, 3.0), word('研究', 'けんきゅう', 'research', True, 3.0)]
+        draft = ('The research notes are in /home/zyansheep/notes, research/linear-ic-net/player/ and '
+                 '~/house/plan.md, and scripts/research.py builds the house list (see a/b).')
+        out = run_mjs({'draft': draft, 'words': words})
+        self.assertEqual([s['en'] for s in out['swaps']], ['research', 'house'])
+        for path in ('/home/zyansheep/notes,', 'research/linear-ic-net/player/', '~/house/plan.md,',
+                     'scripts/research.py'):
+            self.assertIn(path, out['text'])
+        self.assertEqual(''.join(x if isinstance(x, str) else out['swaps'][x]['en'] for x in out['parts']), draft)
+
+    def test_own_glosses_are_safe_in_chat(self):
+        import webdata
+        chat = webdata.add_word_data([{'ja': '車', 'en': 'car', 'kana': 'くるま'},
+                                      {'ja': 'これ', 'en': 'this one / this', 'kana': 'これ'}], own_safe=True)
+        web = webdata.add_word_data([{'ja': '車', 'en': 'car', 'kana': 'くるま'}])
+        self.assertEqual((chat[0]['safe'], web[0]['safe']), (['car'], []))  # data/senses.tsv: car is doubtful
+        self.assertEqual(chat[1]['safe'], [])  # closed-class English never is
+
     def test_the_cap_follows_the_heaviest_budgeted_level(self):
         cap, heaviest = chatweave.twin_cap(300)
         self.assertAlmostEqual(heaviest, intensity.SENTENCE_SHARE * intensity.BUDGETS[2] * 3 / 0.08)
@@ -166,6 +218,25 @@ class Check(unittest.TestCase):
         self.assertEqual(final.strip(), 'Plain English.')
 
 
+class Lexicon(unittest.TestCase):
+    def test_english_and_japanese_are_words(self):
+        import fwlib
+        import matcher
+        lexicon = fwlib.load_lexicon()
+        by = {w['ja']: w for w in lexicon}
+        self.assertEqual((by['英語']['en'], by['日本語']['en']), ('English / English language',
+                                                                  'Japanese / Japanese language'))
+        state = {'words': [{'ja': '日本語', 'en': 'japanese language', 'hint': 'nihongo', 'kana': 'にほんご',
+                            'status': 'known', 'added': '', 'changed': ''}]}
+        fwlib.merge_lexicon(state, lexicon)
+        self.assertEqual(next(w for w in state['words'] if w['ja'] == '日本語')['en'], 'Japanese / Japanese language')
+        index = matcher.build_index([by['日本語'], by['英語'], by['言語']])
+        found = [(s['english'], [o['ja'] for o in s['options']]) for s in matcher.match_text(
+            index, 'Japanese is fun. The Japanese language and Japanese sentences, in English.')]
+        self.assertEqual(found, [('Japanese', ['日本語']), ('Japanese language', ['日本語']), ('Japanese', ['日本語']),
+                                 ('English', ['英語'])])
+
+
 class Brief(unittest.TestCase):
     STATE = {'prefs': {}, 'words': [{'status': 'known'}] * 200}
 
@@ -182,13 +253,17 @@ class Brief(unittest.TestCase):
         text, after, record = weave.compose_draft(self.STATE, 2, None, 'fw', plan)
         self.assertIn("fw weave --level 2 <<'DRAFT'", text)
         self.assertIn("fw check-reply --level 2 <<'REPLY'", text)
-        self.assertIn('穏やか', text)  # the trap list
+        self.assertIn('穏やか', text)  # the trap list, as examples of an obscured meaning
+        self.assertIn('a near synonym is fine', text)  # the looser sense standard
+        self.assertIn('{{works}}', text)  # how to keep a word English on purpose
+        self.assertIn('lists the rest for twins only', text)
         self.assertIn('<ja>...</ja>', text)
         self.assertIn('Send everything below the ===== line exactly as it is', text)
         self.assertLess(len(text), weave.BRIEF_MAX)
         self.assertEqual((after['rules'], record['mode'], record['whole']), (weave.RULES, 'draft', True))
         later, after2, record2 = weave.compose_draft(self.STATE, 0, dict(after, known=[]), 'fw', plan)
         self.assertIn('fw weave --level 0', later)
+        self.assertIn('{{word}}', later)
         self.assertLess(len(later), len(text) / 5)
         self.assertFalse(record2['whole'])
         switched, _, _ = weave.compose_draft(self.STATE, 0, {'rules': 'classic', 'known': ['今']}, 'fw', plan)
