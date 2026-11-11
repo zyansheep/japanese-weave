@@ -1530,14 +1530,16 @@ class Anki(Home):
             (20, ['人 (on)', 'person'], 1, 2, 2, 40),                    # a sense marker after the word
             (20, ['自転車 (2)', 'bike'], 1, 2, 2, 40),
             (20, ['未知語未知語', 'nothing'], 1, 2, 2, 40),               # in neither: still skipped
-        ], {20: ['Front', 'Back'], 30: ['Word', 'Furigana', 'meaning']})
+            (40, ['2', 'ざ', 'ザ', 'za'], 1, 2, 2, 40),                      # a kana chart: no gloss from the dictionary
+        ], {20: ['Front', 'Back'], 30: ['Word', 'Furigana', 'meaning'], 40: ['id', 'hiragana', 'katakana', 'Rōmaji']})
         words, report = anki.review_words(path, base=fwlib.read_lexicon(fwlib.LEXICON))
         got = {w['ja']: (w['kana'], w['hint'], w['en']) for w in words}
         self.assertEqual(got['天気'], ('てんき', 'tenki', 'weather'))
         self.assertEqual(got['電車'], ('でんしゃ', 'densha', 'train / electric train'))  # the entry's gloss
         self.assertEqual(got['人'], ('ひと', 'hito', 'person / people'))  # the lexicon's, marker gone
         self.assertEqual(got['自転車'], ('じてんしゃ', 'jitensha', 'bike'))  # the card's meaning wins
-        self.assertEqual(report['skipped'], {'no reading': 1})
+        self.assertNotIn('ざ', got)
+        self.assertEqual(report['skipped'], {'no reading': 1, 'no English meaning': 1})
         self.assertEqual(anki.SENSE_MARK.sub('', 'から (kun)'), 'から')
         self.assertEqual(anki.SENSE_MARK.sub('', '早い（2）'), '早い')
 
