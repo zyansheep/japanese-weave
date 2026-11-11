@@ -234,8 +234,9 @@ def review_words(collection, deck=None, mature_days=MATURE_DAYS, base=(), dictio
             skip('no reading')
             continue
         en = known['en'] if known else short_gloss(fields[found['meaning']]) if 'meaning' in found else ''
-        if not en and entry and not ('meaning' in found and clean(fields[found['meaning']])):
-            en = entry['en']  # an empty meaning; one that opens with an explanation is a grammar card's
+        if not en and entry and not kana_lib.is_kana(ja) and not ('meaning' in found and clean(fields[found['meaning']])):
+            en = entry['en']  # an empty meaning; one that opens with an explanation is a grammar card's, and a kana
+            # word with none is a kana chart's (its dictionary entry is a particle or a stray one-mora word)
         if not en:
             skip('no English meaning')
             continue
