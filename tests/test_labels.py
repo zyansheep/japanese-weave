@@ -1,7 +1,6 @@
 """Labels from the fitted model, the replay that compares them with the day-count rules' before the switch, and the
 delayed-start experiment (NEXT_STEPS steps 6 and 8). Run: python3 -m unittest discover -s tests"""
 import io
-import json
 import os
 from pathlib import Path
 import sys
@@ -273,7 +272,7 @@ class Arms(Home):
         arm, se, p, _read = result['fit']
         self.assertLess(arm, 0)  # shown words looked up less: exposure taught
         text = experiment.report(state, None, fwlib.today())
-        self.assertIn(f'held: 32 (2 held, 30 probed)', text)
+        self.assertIn('held: 32 (2 held, 30 probed)', text)
         self.assertIn(f'Outcome, looked up at the probe: held {k1}/30', text)
         self.assertIn('logistic regression with the read chance: shown -', text)
         self.assertIn('words a side due their probe in about', text)

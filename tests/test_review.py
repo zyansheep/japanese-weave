@@ -147,8 +147,11 @@ class Endpoint(Home):
         self.assertEqual(set(body), {'ok', 'card', 'counts', 'newPerDay'})
         self.assertEqual(set(card), {'id', 'ja', 'kana', 'gloss', 'queue', 'intervals'})
         self.assertEqual(card['queue'], 'new')  # nothing graded yet: a new card (or a probe or made-up one, alike)
-        self.assertEqual({k: card['intervals'][k] for k in ('again', 'hard', 'good')}, {'again': 60, 'hard': 330,
-                                                                                         'good': 600})
+        served = feedback.cards(self.db)[0]['served_at']  # a step past 4am counts in days: as the server had it then
+        self.assertEqual(card['intervals'], srs.intervals(srs.NEW_CARD, served, srs.card_id(card['ja'])))
+        if srs.day_number(served + 600_000) == srs.day_number(served):
+            self.assertEqual({k: card['intervals'][k] for k in ('again', 'hard', 'good')},
+                             {'again': 60, 'hard': 330, 'good': 600})
         self.assertEqual(card['intervals']['easy'] % 86_400, 0)
         self.assertEqual(body['counts'], {'new': len(self.active), 'learning': 0, 'review': 0})
         self.assertTrue(1 <= len(card['id']) <= 64 and 1 <= len(card['ja']) <= 40)

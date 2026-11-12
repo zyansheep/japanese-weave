@@ -1,6 +1,5 @@
 """Offline tests for T3 messages replayed whole: messages with a word count count opened or not, by the chance their
 paragraphs' stays on screen say each word was read. Run: python -m unittest tests/test_chat_showings.py"""
-import math
 import os
 from pathlib import Path
 import sqlite3

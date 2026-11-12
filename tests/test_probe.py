@@ -3,7 +3,6 @@ simulated readers that check it (tools/probe_sim.py), the made-up words, the loo
 the collector, and fw.py probe. Run: python3 -m unittest tests/test_probe.py"""
 import datetime as dt
 import io
-import json
 import os
 from pathlib import Path
 import random

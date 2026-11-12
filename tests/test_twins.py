@@ -194,7 +194,8 @@ class Final(Home):
 
     def test_limits_and_english_rules(self):
         long = '<abbr title="a very very long sentence">とてもとてもとても長い長い長い文</abbr>です'
-        text = (f'This one is long.<ja>{P}は{long}。</ja> We {"<abbr title=\"つかう · use\">使う</abbr>"} the {INFO}.'
+        use = '<abbr title="つかう · use">使う</abbr>'
+        text = (f'This one is long.<ja>{P}は{long}。</ja> We {use} the {INFO}.'
                 f' You see.<ja><abbr title="you">あなた</abbr>は{P}です。</ja> Three.<ja>{P}。{P}。{P}。</ja>')
         checked = check_reply.finish(text, plan(), TYPES, seed=1, remember=False)
         self.assertIn('too long', checked.text)
@@ -553,7 +554,7 @@ class ReviewRound1(Home):
         self.assertNotIn('`</span>`', twins.render(checked.final, 3))
 
     def test_10_japanese_quoted_in_backticks_passes(self):
-        checked = check_reply.finish(f'Write it as `問題` here.' + self.FILLER, plan(), TYPES, remember=False)
+        checked = check_reply.finish('Write it as `問題` here.' + self.FILLER, plan(), TYPES, remember=False)
         self.assertIsNotNone(checked.final)
         self.assertIn('quoted in backticks', weave.DRAFT_RULES)
         self.assertIsNone(check_reply.finish('It is 問題 here.' + self.FILLER, plan(), TYPES, remember=False).final)
@@ -639,8 +640,9 @@ class ReviewRound2(Home):
         unclosed = ja + en[:-len('</span>')]
         self.assertEqual(shown(unclosed, 3), [])  # broken (an English twin left open): every pair English
         self.assertIn('The problem is small.', twins.render(unclosed, 3))
-        nested = (f'<span data-jw="ja" data-on="1">x {ja.replace("on=\"1\"", "on=\"2\"")}'
-                  f'{en.replace("on=\"1\"", "on=\"2\"")}</span><span data-jw="en" data-on="1">outer</span>')
+        two = lambda pair: pair.replace('on="1"', 'on="2"')
+        nested = (f'<span data-jw="ja" data-on="1">x {two(ja)}'
+                  f'{two(en)}</span><span data-jw="en" data-on="1">outer</span>')
         self.assertEqual(shown(nested, 3), [])
         for bad in ('4', '+1', '1.0', ' 1', '', '-0', '-3'):  # not exactly -2..3: as written
             word = f'The <abbr title="もんだい · problem" data-en="problem" data-on="{bad}">問題</abbr> is small.'
@@ -761,7 +763,7 @@ class ClientParity(unittest.TestCase):
             self.assertEqual(shown, 'The problem is small.The problem is small.', on)  # no Japanese in English only
 
     def test_english_only_on_old_markup_follows_the_clients(self):
-        old = (f'Old <abbr title="あめ · rain">雨</abbr>です<abbr title="It is rain.">。</abbr> '
+        old = ('Old <abbr title="あめ · rain">雨</abbr>です<abbr title="It is rain.">。</abbr> '
                '<abbr title="もんだい · problem" data-en="problem" data-on="1">問題</abbr>.')
         self.assertEqual(twins.render(old, twins.OFF), 'It is rain. problem.')
         self.assertEqual(twins.shown_texts(old, 0), ['雨', '。'])

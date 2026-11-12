@@ -18,7 +18,7 @@ import inflection  # noqa: E402
 import knowledge  # noqa: E402
 import logs  # noqa: E402
 import stats  # noqa: E402
-from world import DAY, HOUR, MINUTE, World, TrueWord, local_midnight, day_name, retention  # noqa: E402
+from world import DAY, HOUR, World, TrueWord, local_midnight, day_name, retention  # noqa: E402
 
 START = '2026-09-01'
 STATUS = ('known', 'learning', 'new')
