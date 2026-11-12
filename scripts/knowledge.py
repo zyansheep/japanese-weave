@@ -2589,7 +2589,6 @@ def calibrate(rows, contexts, changes, now_ms, days=CALIBRATION_DAYS, shown=None
     english_on = sum(1 for c in changes if c['surface'] == 'english' and c['on'] and c['at'] >= since)
     for surface in ('chat', 'browser', 'sentences'):
         mine = [c for c in changes if c['surface'] == surface]
-        recent = [c for c in mine if c['at'] >= since]
         time_at = {}
         for i, c in enumerate(mine):
             start = max(c['at'], since)

@@ -36,7 +36,6 @@ repeats) and, later, the probe's weights by your reading.
 """
 import collections
 import contextlib
-import gc
 import marshal
 import os
 from pathlib import Path

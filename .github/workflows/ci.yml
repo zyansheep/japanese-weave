@@ -1,5 +1,7 @@
 # Tests for the hook's scripts and the browser extension on each push to main and each pull request. Everything
-# runs offline against fixtures; the tests that need node or bun (the shared chat weave) run under bun here.
+# runs offline against fixtures; the tests that need node or bun (the shared chat weave) run under bun here. The
+# Python tests run on the oldest Python scripts/run accepts (3.9) and the newest; `check`, the one main's protection
+# requires, passes when every other job did.
 name: CI
 
 on:
@@ -12,19 +14,51 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: pip install ruff==0.16.10
+      # pyflakes' checks: unused imports and variables, undefined names, a test defined twice (the second hides the first)
+      - run: ruff check --select F scripts tests tools
+
+  python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
       - run: python3 -m unittest discover -s tests -q
+
+  extension:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - working-directory: extension
         run: bun install --frozen-lockfile
       - working-directory: extension
         run: bun test
+
+  check:
+    needs: [lint, python, extension]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: test "${{ needs.lint.result }}" = success && test "${{ needs.python.result }}" = success && test "${{ needs.extension.result }}" = success

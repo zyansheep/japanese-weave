@@ -192,8 +192,8 @@ def first_line(woven, plan, cap, heaviest, inline=None, least=None):
             + f'. {sum(1 for s in shown if s.get("unsure"))} swaps are marked {{{{English→Japanese}}}}: the code '
             'wasn\'t sure of the sense. '
             + (f'For twins only (they can\'t stay in an English sentence): {"; ".join(others)}. ' if others else '')
-            + f'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
-            f'<ja>...</ja>, '
+            + 'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
+            '<ja>...</ja>, '
             + (f'at least {least} and ' if least and least < cap else '')
             + f'up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
             'code chooses which show at each level). '

@@ -843,7 +843,6 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     sentence record. Each kind is cut from its own part of each level's budget (twins.assign: twins by the sentence
     level, words by the word level), and every level abbr, twin and glossed word in a twin whose chance is known carries
     it as data-p (the tint)."""
-    import knowledge
     import random
     import time
     import twins
@@ -941,7 +940,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     for k, (number, what) in sorted(shown_reverted.items()):
         fixed.append(f'- line {number}, swap put back in English: {what}')
     if restored:
-        fixed.append(f'- put back, where your English kept the word the weave offered as sure: '
+        fixed.append('- put back, where your English kept the word the weave offered as sure: '
                      + ', '.join(f'{w["ja"]} ({w["en"]})' for w in restored))
     # each twin's words' chances, for data-p
     known = {s['ja']: float(s['p']) for s in plan.swaps if s.get('ja') and isinstance(s.get('p'), (int, float))}
