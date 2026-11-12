@@ -263,7 +263,7 @@ class Brief(Home):
         # normal's 0.5: 0.09 for whole sentences (intensity.SENTENCE_SHARE), 0.41 for learning words at 0.27 each
         self.assertIn('about 1.5 learning words per 100 words (5 in a 300-word reply), at most one in a sentence',
                       lines[0])
-        self.assertIn('about 1 whole sentence per 100 words (3 in a 300-word reply) fully in Japanese', lines[0])
+        self.assertIn('about 2 whole sentences per 100 words (6 in a 300-word reply) fully in Japanese', lines[0])
         self.assertIn('never conjugated', lines[0])
         self.assertIn('No other Japanese anywhere, not even a common word', lines[0])
         self.assertIn('never in files, code', lines[0])
@@ -277,7 +277,7 @@ class Brief(Home):
         self.assertEqual(len(lines), 4)
         self.assertNotIn('何', '\n'.join(lines[1:]))  # queued words are not in use yet
         three = weave.brief(self.state(3), self.seen)
-        self.assertIn('about 1 whole sentence per 100 words (3 in a 300-word reply) fully in Japanese', three)
+        self.assertIn('about 2 whole sentences per 100 words (6 in a 300-word reply) fully in Japanese', three)
         self.assertIn('sentences of known words, particles and これ/それ only', three)
         self.assertIn('No other Japanese anywhere, not even a common word', three)
         self.assertNotIn('never conjugated', three)
@@ -285,7 +285,7 @@ class Brief(Home):
         self.assertNotIn('%', three)
         # the stage no longer sets how many sentences: the budget does, at every stage
         for stage in (1, 4):
-            self.assertIn('about 1 whole sentence per 100 words', weave.brief(self.state(stage), self.seen))
+            self.assertIn('about 2 whole sentences per 100 words', weave.brief(self.state(stage), self.seen))
 
     def test_no_recall_cue_and_turns_still_count(self):
         state = self.state()
@@ -1628,12 +1628,12 @@ class Intensity(Home):
         plain, light, heavy = (weave.brief(state, {}, level=level) for level in (0, -1, 1))
         # whole sentences take intensity.SENTENCE_SHARE of the budget at 0.08 each, the learning word (0.27) the rest
         self.assertIn('about 1.5 learning words per 100 words', plain)  # 0.41 / 0.27
-        self.assertIn('about 1 whole sentence per 100 words', plain)  # 0.09 / 0.08
+        self.assertIn('about 2 whole sentences per 100 words', plain)  # 0.15 / 0.08
         self.assertIn('(Stage 3, turned lighter for now by the user)', light)
         self.assertIn('about 1 learning word per 100 words (3 in a 300-word reply), at most one in a sentence', light)
-        self.assertIn('about 0.5 whole sentences per 100 words (2 in a 300-word reply)', light)  # 0.054 / 0.08
+        self.assertIn('about 1 whole sentence per 100 words (3 in a 300-word reply)', light)  # 0.09 / 0.08
         self.assertIn('about 2 learning words per 100 words (6 in a 300-word reply), at most 2 in a sentence', heavy)
-        self.assertIn('about 2 whole sentences per 100 words', heavy)  # 0.144 / 0.08
+        self.assertIn('about 3 whole sentences per 100 words', heavy)  # 0.24 / 0.08
         for brief in (plain, light, heavy):
             self.assertIn('Default swaps (write the Japanese every time the English word has that meaning): '
                           'meaning → でも', brief)
@@ -1987,31 +1987,31 @@ class Budget(Home):
 
     def test_whole_sentences_take_a_share_of_the_budget(self):
         split = lambda *args: tuple(round(x, 4) for x in intensity.split(*args))
-        self.assertEqual(split(0.5, None, None), (0.41, 0.09))  # SENTENCE_SHARE of normal's 0.5
+        self.assertEqual(split(0.5, None, None), (0.35, 0.15))  # SENTENCE_SHARE of normal's 0.5
         self.assertEqual(split(0.5, 0.2, None), (0.2, 0.3))  # what learning words can't use goes to sentences
         self.assertEqual(split(0.5, None, 0.04), (0.46, 0.04))  # and the other way
         self.assertEqual(split(3, 1.35, 0.24), (1.35, 0.24))  # neither can use it all
         self.assertEqual(split(0.5, 0, 0), (0, 0))
-        # normal asks for the sentences the Stage 3 brief asked for before they were priced: one in five, about 1.1 per
-        # 100 words
-        self.assertAlmostEqual(intensity.SENTENCE_SHARE * intensity.BUDGETS[0] / intensity.SENTENCE_PRICE, 1.125)
+        # normal pays for about 1.9 sentences per 100 words (SENTENCE_SHARE 0.30 since 2026-11-11; it was 1.1, the
+        # Stage 3 brief's one in five before sentences were priced)
+        self.assertAlmostEqual(intensity.SENTENCE_SHARE * intensity.BUDGETS[0] / intensity.SENTENCE_PRICE, 1.875)
         rounded = lambda result: tuple(round(x, 4) if isinstance(x, float) else x for x in result)
-        self.assertEqual(rounded(weave.amounts(0.5, [0.25] * 4, 0.08, 0)), (1.5, 1, 0.41, 0.09))
+        self.assertEqual(rounded(weave.amounts(0.5, [0.25] * 4, 0.08, 0)), (1.5, 2, 0.35, 0.15))
         self.assertEqual(rounded(weave.amounts(0.5, [], 0.08, 0)), (None, 3, 0, 0.24))  # sentences at their most
         self.assertEqual(rounded(weave.amounts(0.5, [0.25], 0.08, 0, sentences=False)), (2, 0, 0.5, 0))  # none known
-        self.assertEqual(rounded(weave.amounts(0.15, [0.25], 0.08, -2)), (0.5, 0.5, 0.123, 0.027))
-        self.assertEqual(rounded(weave.amounts(1.2, [0.25], 0.08, 2)), (4, 3, 0.984, 0.216))  # 2.7 sentences
+        self.assertEqual(rounded(weave.amounts(0.15, [0.25], 0.08, -2)), (0.5, 0.5, 0.105, 0.045))
+        self.assertEqual(rounded(weave.amounts(1.2, [0.25], 0.08, 2)), (4, 3, 0.96, 0.24))  # 3 sentences at their most
         # the price: knowledge.json's for chat (t3) once a fit makes one, else the default the extension also uses
         self.assertEqual(intensity.sentence_price({'sentencePrice': {'t3': 0.045, 'browser': 0.2}}), 0.045)
         for bad in ({}, None, {'sentencePrice': {'browser': 0.2}}, {'sentencePrice': {'t3': 0}},
                     {'sentencePrice': {'t3': 1.5}}, {'sentencePrice': {'t3': True}}, {'sentencePrice': [0.1]}):
             self.assertEqual(intensity.sentence_price(bad), intensity.SENTENCE_PRICE, bad)
         state = {'stage': 3, 'stage_pinned': True, 'paused': False, 'words': [word('でも'), word('今', 'active')]}
-        cheap = dict(self.know({}), sentencePrice={'t3': 0.045})  # 0.09 buys 2 sentences per 100 words
+        cheap = dict(self.know({}), sentencePrice={'t3': 0.045})  # 0.15 buys 3 sentences per 100 words (SENTENCES_MAX)
         text, _, plan = weave.compose(state, {}, know=cheap)
-        self.assertIn('about 2 whole sentences per 100 words (6 in a 300-word reply)', text)
-        self.assertEqual((plan['ask'], plan['sentences'], plan['sentencePrice']), (1.5, 2, 0.045))
-        self.assertAlmostEqual(plan['expected'], 1.5 * knowledge.sigmoid(-knowledge.prior(None)) + 2 * 0.045, places=3)
+        self.assertIn('about 3 whole sentences per 100 words (9 in a 300-word reply)', text)
+        self.assertEqual((plan['ask'], plan['sentences'], plan['sentencePrice']), (1.5, 3, 0.045))
+        self.assertAlmostEqual(plan['expected'], 1.5 * knowledge.sigmoid(-knowledge.prior(None)) + 3 * 0.045, places=3)
 
     def test_feedback_line_compares_expected_lookups_with_the_budget(self):
         words = [word('でも'), word('だから'), word('今'), word('簡単', 'active'), word('問題', 'active')]
@@ -2288,7 +2288,7 @@ class BriefRecords(Home):
         self.assertTrue(all(abs(p - knowledge.sigmoid(-knowledge.prior(None))) < 0.001 for _, p in b['offered']))
         self.assertEqual((b['level'], b['intensity'], b['budget'], b['arms'], b['known']), (0, 1.0, 0.5, {}, 60))
         # the learning words asked for at their lookup chance and the whole sentences at their price
-        self.assertEqual((b['sentences'], b['sentencePrice']), (1, intensity.SENTENCE_PRICE))
+        self.assertEqual((b['sentences'], b['sentencePrice']), (2, intensity.SENTENCE_PRICE))
         self.assertAlmostEqual(b['expected'], b['ask'] * b['offered'][0][1] + b['sentences'] * b['sentencePrice'],
                                places=2)
         self.assertEqual(briefs[2]['turn'], 'turn-9')

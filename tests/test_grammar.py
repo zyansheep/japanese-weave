@@ -256,7 +256,7 @@ class Fit(unittest.TestCase):
         self.assertNotIn('wa', model['patterns'])  # known patterns add nothing
         # the limit: where known patterns alone reach the target
         chars = 10 * (math.log(0.05 / 0.95) - model['a']) / model['b']
-        self.assertEqual(sentence_model.max_chars(model), int(max(8, min(24, math.floor(chars)))))
+        self.assertEqual(sentence_model.max_chars(model), int(max(12, min(24, math.floor(chars)))))
         self.assertLess(sentence_model.typical(model)[1], sentence_model.TARGET)
         statuses = grammar.statuses({})
         self.assertGreater(sentence_model.predict(model, 10, ['quote'], statuses),

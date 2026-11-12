@@ -608,9 +608,10 @@ export const SENTENCE_PRICE = 0.08;
 // The most of a passage's budget whole sentences may take, as ../scripts/intensity.py SENTENCE_SHARE says for chat too
 // (keep them the same): words and phrases get the rest, and what one of the two can't use goes to the other. Ranked like
 // a word whose lookup chance is their price, sentences would otherwise get only what learning words leave, and nothing
-// once code finds enough candidates. 0.18 keeps chat at the one sentence in five (about 1.1 per 100 words) its brief
-// asked for at Stage 3 before sentences were priced: 0.18 * 0.5 / 0.08 = 1.1 at normal.
-export const SENTENCE_SHARE = 0.18;
+// once code finds enough candidates. 0.18 kept chat at the one sentence in five (about 1.1 per 100 words) its brief
+// asked for at Stage 3 before sentences were priced; 0.30 since 2026-11-11, when the reader asked for more Japanese at
+// normal: 0.30 * 0.5 / 0.08 = 1.9 at normal.
+export const SENTENCE_SHARE = 0.30;
 // The same share above normal, on the web only (chat's replies have no sentence candidates of code's: chatweave.mjs
 // keeps SENTENCE_SHARE). Only about 1 lookup in 7 of the budget was spent, so raising a budget bought nothing: sentences
 // and dictionary words are what +1 and +2 buy, and these and INTENSITY_DICTIONARY_SHARE are what sets them apart. A

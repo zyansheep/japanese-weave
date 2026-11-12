@@ -36,6 +36,10 @@ TIMEOUT = 30
 # the check drops, while bounding the writing a reply takes.
 TWIN_SLACK = 1.5
 TWIN_MIN = 3
+# The least twins the first line asks for: one per WORDS_PER_TWIN English words, at most the cap. With only a ceiling
+# the model wrote about 4 twins in a 370-word reply where the line allowed 23 (137 replies, 2026-11-05 to 11-12), so
+# normal had too few to choose from and showed about 0.7 sentences per 100 words.
+WORDS_PER_TWIN = 60
 POOL = 'weave-pool.json'  # the dictionary words full adds, kept in the state folder until the word list or fit changes
 SENSITIVE = ('med', 'pharm', 'dent', 'vet', 'psy', 'anat', 'physiol', 'embryo', 'law', 'finc', 'econ', 'bus')
 
@@ -126,6 +130,11 @@ def twin_cap(words, normal=None, price=intensity.SENTENCE_PRICE):
     return max(TWIN_MIN, math.ceil(TWIN_SLACK * heaviest)), heaviest
 
 
+def twin_least(words, cap):
+    """The least twins to ask for in a reply of `words` English words: see WORDS_PER_TWIN."""
+    return max(1, min(cap, math.ceil(words / WORDS_PER_TWIN)))
+
+
 def offers(swaps, types=None):
     """[whether each swap is offered in the text]: one that may stay in an English sentence by the check's rules
     (check_reply.may_stay: nouns, adjectives right before an English word, adverbs known at a glance; never pronouns,
@@ -159,11 +168,11 @@ def twin_words(swaps, inline):
                               if not here and s['ja'] not in check_reply.PRONOUNS and s['ja'] not in shown))
 
 
-def first_line(woven, plan, cap, heaviest, inline=None):
+def first_line(woven, plan, cap, heaviest, inline=None, least=None):
     """The weave's first line: the swaps in the text (known, learning, dictionary words by name, unsure ones), the
     learning words by name, the words for twins only (twin_words), then the twins to write, their limits and grammar
     (sentence_plan) and this week's learning pattern. inline: a flag per swap, whether the text offers it (offers;
-    None: every one)."""
+    None: every one). least: the fewest twins to write (twin_least; None: no least)."""
     swaps = woven['swaps']
     inline = [True] * len(swaps) if inline is None else inline
     shown = [s for s, here in zip(swaps, inline) if here]
@@ -184,7 +193,9 @@ def first_line(woven, plan, cap, heaviest, inline=None):
             'wasn\'t sure of the sense. '
             + (f'For twins only (they can\'t stay in an English sentence): {"; ".join(others)}. ' if others else '')
             + f'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
-            f'<ja>...</ja>, up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
+            f'<ja>...</ja>, '
+            + (f'at least {least} and ' if least and least < cap else '')
+            + f'up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
             'code chooses which show at each level). '
             f'Each Japanese sentence at most {plan.get("maxChars") or 14} Japanese characters (a twin may be two short '
             f'sentences), using only these grammar patterns: {", ".join(g.get("known") or ())}; plus at most one '
@@ -220,5 +231,5 @@ def weave(draft, level=0, state=None, session=None, remember=True):
                              session)
     price = intensity.sentence_price(know)
     cap, heaviest = twin_cap(woven['words'], knowledge.challenge_of(state) or None, price)
-    return (first_line(woven, sentence_plan(state, know), cap, heaviest, inline) + '\n-----\n'
+    return (first_line(woven, sentence_plan(state, know), cap, heaviest, inline, twin_least(woven['words'], cap)) + '\n-----\n'
             + render(woven, inline))

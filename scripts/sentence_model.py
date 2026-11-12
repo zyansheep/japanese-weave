@@ -56,7 +56,9 @@ READ_MIN = 0.05            # a sentence read with less chance than this is left 
 READY_READ = 150           # the fit replaces the fixed price once it rests on this many sentences read (weighted)
 READY_OPENS = 8            # and this many opens
 LENGTH_START = 14          # the weave's limit in Japanese characters before the fit is ready
-LENGTH_RANGE = (8, 24)     # and the most it may be set to from the fit
+LENGTH_RANGE = (12, 24)    # and the most it may be set to from the fit: at least 12, since the fit set 8 (its 5% at 7
+                           # characters) while twins opened twice against 15 predicted and length barely mattered
+                           # (4% at 4 characters, 6% at 10, 8% at 14; 2026-11-11), and 8 left room for few twins
 TYPICAL_SHARE = 0.7        # a typical allowed sentence is this share of the limit long, of known patterns only
 KNOWN_EVIDENCE = 15        # a learning pattern becomes known after this many read sentences with it (weighted)
 KNOWN_D = 0.3              # with its fitted difficulty at most this (near zero: odds x1.35 at most). Its interval is
