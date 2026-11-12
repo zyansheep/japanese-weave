@@ -91,6 +91,9 @@
   fw.py review revlog                                the graded reviews as CSV in the FSRS optimizer's layout
                                                      (card_id, review_time, review_rating, review_state,
                                                      review_duration)
+  fw.py review new N                                 at most N new review cards a day (default 10; T3 Code's
+                                                     review menu sets the same), the words that come up most in
+                                                     your reading first
   fw.py relabel [--dry-run] [--home DIR] [--examples N]
                                                      the words whose labels the fitted model would change from
                                                      the day-count rules', grouped and explained; writes nothing
@@ -753,8 +756,14 @@ def log_cmd(args):
 
 
 def review_cmd(args):
-    """fw.py review [revlog]: the schedule's numbers (review.summary), or the graded reviews as the FSRS optimizer's
-    CSV; from the collector when one is set, where the cards live."""
+    """fw.py review [revlog | new N]: the schedule's numbers (review.summary), or the graded reviews as the FSRS
+    optimizer's CSV, from the collector when one is set, where the cards live; or sets the new cards a day."""
+    if args.what == 'new':
+        if args.n is None or not fwlib.valid_review_new(args.n):
+            sys.exit(f'fw.py review new N: N is a whole number 0..{fwlib.REVIEW_NEW_MAX}')
+        queued = hub.submit({'kind': 'set', 'prefs': {fwlib.REVIEW_NEW_PREF: args.n}}).get('queued')
+        print(f'New review cards: at most {args.n} a day.' + (' (Collector unreachable; queued.)' if queued else ''))
+        return
     collector = fwlib.collector_url()
     path = 'revlog' if args.what == 'revlog' else 'stats'
     if collector:
@@ -1166,7 +1175,9 @@ def main(argv=None):
     evaluate.add_arguments(p)
     p.set_defaults(run=evaluate.run)
     p = sub.add_parser('review')
-    p.add_argument('what', nargs='?', choices=['revlog'], help='revlog: the graded reviews as the FSRS optimizer\'s CSV')
+    p.add_argument('what', nargs='?', choices=['revlog', 'new'],
+                   help='revlog: the graded reviews as the FSRS optimizer\'s CSV; new N: new cards a day')
+    p.add_argument('n', nargs='?', type=int, help='with new: the most new cards a day')
     p.set_defaults(run=review_cmd)
     p = sub.add_parser('relabel')
     relabel.add_arguments(p)

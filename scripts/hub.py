@@ -14,7 +14,7 @@ Ops (each also carries uid, day, at and machine; see stamp):
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
              "intensity_chat"?, "intensity_sentences"?, "intensity_browser"?: {level -3..3, until, at, source}}}
                                                        (intensity.py; chat: the word level, sentences: chat's
-                                                       sentence level)
+                                                       sentence level), "review_new_per_day"?: 0-200 (review.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
@@ -113,7 +113,7 @@ def is_day(value):
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'chat_style': lambda v: v in ('draft', 'classic'),
          'challenge': knowledge.valid_challenge, 'extension_sites': lambda v: v in ('all', 'ask'),
          'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid,
-         'intensity_sentences': intensity.valid}
+         'intensity_sentences': intensity.valid, fwlib.REVIEW_NEW_PREF: fwlib.valid_review_new}
 LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 
@@ -676,6 +676,15 @@ def change_intensity_here(surface, delta, source, db=None):
     if not result.get('ok'):
         raise ValueError(result.get('error') or 'intensity not saved')
     return intensity.current({intensity.pref(surface): value}, surface)
+
+
+def set_review_new_here(n, db=None):
+    """The reader's limit of new review cards a day (fwlib.REVIEW_NEW_PREF), set where the state lives, as a set op;
+    from T3 Code's review menu through POST /v1/review/next's newPerDay, or fw.py review new N."""
+    result = run(stamp({'kind': 'set', 'prefs': {fwlib.REVIEW_NEW_PREF: n}}), db)
+    if not result.get('ok'):
+        raise ValueError(result.get('error') or 'limit not saved')
+    return n
 
 
 def change_intensity(surface, delta, source):

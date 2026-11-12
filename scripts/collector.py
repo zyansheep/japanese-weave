@@ -19,14 +19,15 @@ private network such as Tailscale. Python 3.9+, standard library only.
                           "sentenceLevel", the sentence level (absent: the same), which makes each pair of levels a
                           message was shown at a showing of its own)
   POST /v1/review/next    {"source": "desktop"|"mobile", "exclude"?: [card ids], "more"?: bool, "peek"?: bool,
-                          "release"?: [card ids]}: the next review card, in Anki's order (review.py; more: past today's
-                          new-card limit; peek: the counts alone, for a badge: card null, nothing served or recorded;
-                          release: cards served to this client and never shown, given back first)
+                          "release"?: [card ids], "newPerDay"?: 0..200}: the next review card, in Anki's order
+                          (review.py; more: past today's new-card limit; peek: the counts alone, for a badge: card
+                          null, nothing served or recorded; release: cards served to this client and never shown,
+                          given back first; newPerDay: the reader's new cards a day, from the review menu, saved first)
                           -> {"ok": true, "card": {"id", "ja", "kana", "gloss", "queue": "new"|"learning"|"review",
                               "intervals": {"again", "hard", "good", "easy"} (seconds)} or null,
-                              "counts": {"new", "learning", "review"}}
+                              "counts": {"new", "learning", "review"}, "newPerDay": the limit in effect}
   GET  /v1/review/stats   the review schedule's numbers, for fw.py review -> {"ok": true, "review": {counts, deck,
-                          today, month, graded, optimize, retention, desired}} (review.summary)
+                          newPerDay, today, month, graded, optimize, retention, desired}} (review.summary)
   GET  /v1/review/revlog  the graded reviews as the FSRS optimizer reads them -> {"ok": true, "columns": [...],
                           "rows": [[card_id, review_time, review_rating, review_state, review_duration], ...]}
   GET  /v1/stats?since=MS how much has been collected, in all and since MS (default: the start of today here)
@@ -197,6 +198,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {'ok': False, 'error': error})
             if not (fwlib.home() / 'state.json').exists():
                 return self.reply(409, {'ok': False, 'error': hub.NO_STATE})
+            if body.get('newPerDay') is not None:
+                with PRESSES:
+                    try:
+                        hub.set_review_new_here(body['newPerDay'], self.db)
+                    except ValueError as error:
+                        return self.reply(400, {'ok': False, 'error': str(error)})
             try:
                 card, counts = review.next_card(body['source'], body.get('exclude') or (), self.db,
                                                 more=body.get('more') is True, peek=body.get('peek') is True,
@@ -204,7 +211,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:  # a broken card must not take the server down; the client tries again later
                 print(f'review card failed: {error.__class__.__name__}: {error}', file=sys.stderr, flush=True)
                 return self.reply(500, {'ok': False, 'error': 'no card: the collector failed to choose one'})
-            return self.reply(200, {'ok': True, 'card': card, 'counts': counts})
+            return self.reply(200, {'ok': True, 'card': card, 'counts': counts,
+                                    'newPerDay': fwlib.review_new_per_day(fwlib.load_state(create=False))})
         if path == '/v1/intensity':
             source = body.get('source', 'unknown') if isinstance(body, dict) else None
             if not isinstance(body, dict) or body.get('surface') not in intensity.SURFACES or body.get('step') not in (-1, 0, 1) \

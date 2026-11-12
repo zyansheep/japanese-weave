@@ -385,8 +385,10 @@ Again (you didn't recall it), Hard, Good or Easy; above each, when the card woul
 word goes through a 1-minute and a 10-minute step, then comes back in days, each review spacing it further while you
 recall it, aiming at a 90% chance of recall when it comes back; a word you forget relearns in 10 minutes. The cards come
 from the collector (`POST /v1/review/next`) in Anki's order: words in their learning steps that are due, then words due
-for review today (a day starts at 4am), then up to 20 new words a day, the words you are learning in today's order
-(first those behind on showings in their first two weeks, then those the model is least sure of), and last, when
+for review today (a day starts at 4am), then up to 10 new words a day (set it in the review menu, or `fw.py review new
+N`), the words you are learning in today's order (first those that come up most in what you read over the last 30
+days, so the cards teach the words you keep meeting; among equals, those behind on showings in their first two weeks,
+then those the model is least sure of), and last, when
 nothing else is due, a learning step up to 20 minutes early. The panel shows Anki's three counts (new left today,
 learning, review due), and so do T3 Code's header badge and the phone's, which ask for the counts alone without taking
 a card; at 0, 0, 0 you are done for the day, and "Review more" brings in more new words. About 1 card
