@@ -705,10 +705,10 @@ def change_intensity(surface, delta, source):
     return intensity.current({intensity.pref(surface): value}, surface), error or 'collector unreachable; queued'
 
 
-def set_intensity(surface, level, source):
-    """A level set directly (fw.py intensity off|full), for DURATION_MS from now: a set op, here or on the collector,
-    queued when it is out of reach. Returns ({level, until, at}, error or None)."""
-    value = intensity.at_level(level, source)
+def set_intensity(surface, level, source, keep=False):
+    """A level set directly (fw.py intensity off|full), for DURATION_MS from now or with keep until changed: a set op,
+    here or on the collector, queued when it is out of reach. Returns ({level, until, at}, error or None)."""
+    value = intensity.at_level(level, source, keep=keep)
     queued = submit({'kind': 'set', 'prefs': {intensity.pref(surface): value}}).get('queued')
     error = 'collector unreachable; queued' if queued else None
     return intensity.current({intensity.pref(surface): value}, surface), error

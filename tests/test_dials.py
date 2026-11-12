@@ -197,6 +197,25 @@ class Hook(Server):
             with mock.patch('sys.stdin', new=io.StringIO('The draft.')), self.assertRaises(SystemExit):
                 fw.main(args)  # both off (--level alone: both dials at it, as older briefs say)
 
+    def test_sentences_off_until_changed(self):
+        hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
+        with mock.patch.object(weave, 't3_host', return_value=True), \
+                mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
+            self.fw('intensity', 'sentences', 'off')  # for 3 hours: the twins are written all the same
+            self.assertNotIn(weave.NO_TWINS_LINE, self.hook('What is a monad?'))
+            self.assertIn('Chat sentences: off until you change it', self.fw('intensity', 'sentences', 'off', 'always'))
+            chat = feedback.request(self.url + '/v1/intensity?surface=chat')
+            self.assertEqual((chat['sentences']['level'], chat['sentences']['until']), (-3, intensity.KEEP))
+            context = self.hook('And a functor?')
+            self.assertIn(weave.NO_TWINS_LINE, context)  # off until changed: no twins asked for
+            self.assertIn('weave --level 0 --sentences -3`', context)
+            self.assertIn('Chat sentences: off until you change it', self.fw('intensity'))
+            self.fw('intensity', 'sentences', 'up')  # the panel's arrow: 3 hours at much lighter, then normal
+            self.assertNotIn(weave.NO_TWINS_LINE, self.hook('And an applicative?'))
+        for args in (['intensity', 'off', 'always'], ['intensity', 'sentences', 'up', 'always']):
+            with self.assertRaises(SystemExit):
+                fw.main(args)  # always takes one dial and off or full
+
     def test_off_means_no_japanese_and_back_on_means_both(self):
         hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
         with mock.patch.object(weave, 't3_host', return_value=True), \

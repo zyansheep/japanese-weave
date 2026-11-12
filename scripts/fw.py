@@ -68,6 +68,10 @@
                                                      Japanese (each also for 3 hours); with no surface, off,
                                                      normal and full set both chat dials; no step: show the level
                                                      (no surface either: both chat dials)
+  fw.py intensity chat|sentences|browser off|full always
+                                                     the same until you change it, not for 3 hours: `sentences
+                                                     off always` leaves chat replies without Japanese sentences
+                                                     (no twins are written)
   fw.py intensity [off|normal] here [--session ID]   no Japanese in one chat until turned back on (normal); ID:
                                                      its session id (default $CLAUDE_CODE_SESSION_ID)
   fw.py calibrate                                    is the default amount right? reading speed and opens by how
@@ -1026,8 +1030,11 @@ def intensity_cmd(args):
         return english_cmd(args)
     surfaces = [w for w in args.words if w in intensity.SURFACES]
     steps = [w for w in args.words if w in ('up', 'down', 'normal', 'off', 'full')]
-    if len(surfaces) + len(steps) != len(args.words) or len(surfaces) > 1 or len(steps) > 1:
-        sys.exit('Usage: fw.py intensity [chat|sentences|browser] [up|down|normal|off|full], or one chat: '
+    keep = 'always' in args.words  # off or full until changed, not for 3 hours
+    if len(surfaces) + len(steps) + keep != len(args.words) or len(surfaces) > 1 or len(steps) > 1 \
+            or (keep and (not surfaces or (steps or [None])[0] not in ('off', 'full'))):
+        sys.exit('Usage: fw.py intensity [chat|sentences|browser] [up|down|normal|off|full], '
+                 'fw.py intensity chat|sentences|browser off|full always (until changed), or one chat: '
                  'fw.py intensity off|normal here')
     surface, step = (surfaces or ['chat'])[0], (steps or [None])[0]
     names = {'chat': 'Chat words', 'sentences': 'Chat sentences', 'browser': 'Web pages'}
@@ -1043,7 +1050,7 @@ def intensity_cmd(args):
         print(f'{names["chat"]}: {intensity.describe(words)}.\n{names["sentences"]}: {intensity.describe(sentences)}.')
         return
     if step in ('off', 'full'):  # set outright, not a step from the level in effect
-        value, error = hub.set_intensity(surface, intensity.OFF if step == 'off' else intensity.FULL, 'command')
+        value, error = hub.set_intensity(surface, intensity.OFF if step == 'off' else intensity.FULL, 'command', keep)
     else:
         value, error = hub.change_intensity(surface, {'up': 1, 'down': -1, 'normal': 0}[step], 'command')
     if error:

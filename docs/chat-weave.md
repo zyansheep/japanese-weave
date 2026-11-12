@@ -62,7 +62,10 @@ for the Japanese sentences.
      and glosses, a Japanese sentence outside `<ja>`;
    - drops a twin that breaks a limit (more than two sentences, too long, grammar not on the list, two learning
      patterns in a sentence) or any rule of the old check (a pronoun, もし with no conditional, bare particles that
-     carry meaning, する on an English word and the rest): its sentence stays English;
+     carry meaning, する on an English word and the rest), or that says less than its English sentence (a gist: more
+     than two of the sentence's content words, and over half of them, nowhere in the twin's English words or its
+     glosses' meanings, `check_reply.says_less`; on 401 twins of 2026-11-04 to 11-12 that was 178, such as a bare
+     "shall I do it?" for a sentence naming what to delete and build): its sentence stays English;
    - puts back in Japanese a sure swap the reply dropped (`check_reply.put_back`): one the weave offered in its text,
      not unsure, not for twins only and not a dictionary word, that no glossed word of the reply is, whose English the
      reply still has in its own English with at least 4 of the draft's words around it (6 a side, at least one on each
@@ -137,7 +140,8 @@ English only stays one switch over both, rendering both as -3. Until the reader 
 first experience is one dial, and an off spell from before the sentence level keeps the sentences off too. Off still
 means no Japanese: `fw.py intensity off` (and the skill's off), `normal` and `full` without a dial named, and saying
 "japanese back on", set both dials (a dial that follows the words just follows them, so it stays one dial), while
-`fw.py intensity chat off` or `sentences off` turns one kind off. `fw.py intensity sentences up` and the like step the
+`fw.py intensity chat off` or `sentences off` turns one kind off. `fw.py intensity sentences off always` keeps the
+sentences off until changed (until `intensity.KEEP`), and the hook then asks for no twins at all. `fw.py intensity sentences up` and the like step the
 sentence level, and `fw.py intensity` shows both. The hook passes the live levels to the commands it asks Claude to
 run (`--level W --sentences S`; `--level` alone, as in older briefs, means both dials at it), so the weave and the
 check don't read the levels from a cache that may lag the collector; the hook still writes twins while only the word
