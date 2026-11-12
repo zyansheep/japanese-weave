@@ -35,12 +35,14 @@ Japanese sentences than the count before the sentence model did), plus the costl
 the rest of the word level's budget at their current lookup chance, a word in a twin's English counted as if its twin
 were English (what words show can't depend on the sentence level). Levels are filled from -2 up, each starting from
 the level below, so each kind's sets are nested. Words go in at most intensity.per_sentence costly words in one
-English sentence and one use of each learning word below full; the element at the edge of a part gets in with the
-chance (what is left) / (its cost), so short replies still get some on average and a level's expected spend is its
-part (assign: systematic rounding, one draw per reply and part). Words known at a glance cost nothing and show from -2
-(in a twin's English, while it is English); dictionary words the reader doesn't have yet (the weave's pool) and a
-learning word's later uses show only at full, as before, and so does a twin holding one; whatever no budgeted level
-took shows at full. The order is by value per expected open: a word's learning value exp(-|logit p - logit
+English sentence and one use of each learning word below heavier (LATER_USE); the element at the edge of a part gets
+in with the chance (what is left) / (its cost), so short replies still get some on average and a level's expected
+spend is its part (assign: systematic rounding, one draw per reply and part). Words known at a glance cost nothing, so
+the budget can't ration them: each word level shows its intensity.FREE_SHARE of them (all from normal up), in a random
+order drawn for each reply, nested and rounded the same way (in a twin's English, while it is English). A learning
+word's later uses, and a twin holding one, show from heavier; dictionary words the reader doesn't have yet (the
+weave's pool) show only at full, as before, and so does a twin holding one; whatever no budgeted level took shows at
+full. The order is by value per expected open: a word's learning value exp(-|logit p - logit
 TARGET_P|) (1 at the target chance) over p; a twin's SENTENCE_VALUE plus the learning values of the costly words in
 its Japanese plus PATTERN_VALUE when it uses this week's learning pattern, over its cost.
 
@@ -80,6 +82,7 @@ SHOWING = BUDGETED + (FULL,)          # the levels with Japanese; an element's t
 # record's pair fingerprints, grammar.record_levels)
 PAIRS = tuple((w, s) for w in intensity.LEVELS for s in intensity.LEVELS)
 EXPLORE = 0.2                         # the chance an element's place in its order is drawn at random
+LATER_USE = 1                         # the lowest level showing a learning word's later use (heavier)
 DRAWS = 1000                          # runs of assign for the propensities
 MAX_SENTENCES = 2                     # Japanese sentences in one twin (a long English sentence split in two)
 SENTENCE_VALUE = 1.0                  # a twin's own value (reading practice), in learning words at their target
@@ -951,14 +954,18 @@ class Element:
     the sentences' part (each at its open chance, never less than the price of a sentence); cost_w: a word's lookup
     chance unless it is free, or a twin's costly words (their chances, spent from the sentences' part with the twin:
     cost); opens: its expected opens if read; value: what showing it teaches; parent: the twin (an index) whose English
-    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order (free words
-    -2, dictionary words and a learning word's later uses FULL); children: a twin's words."""
-    __slots__ = ('kind', 'cost_s', 'cost_w', 'opens', 'value', 'parent', 'sid', 'fixed', 'children', 'ja')
+    holds the word; sid: the English sentence a word is in; fixed: a threshold it takes whatever the order
+    (dictionary words FULL); least: the lowest level that may take it (a learning word's later use, and a twin holding
+    one, LATER_USE); free: a word known at a glance, placed by intensity.FREE_SHARE instead of the budget; children: a
+    twin's words."""
+    __slots__ = ('kind', 'cost_s', 'cost_w', 'opens', 'value', 'parent', 'sid', 'fixed', 'least', 'free', 'children',
+                 'ja')
 
     def __init__(self, kind, cost_s=0.0, cost_w=0.0, opens=0.0, value=0.0, parent=None, sid=None, fixed=None,
-                 ja=None):
+                 ja=None, least=-2, free=False):
         self.kind, self.cost_s, self.cost_w, self.opens, self.value = kind, cost_s, cost_w, opens, value
         self.parent, self.sid, self.fixed, self.children, self.ja = parent, sid, fixed, [], ja
+        self.least, self.free = least, free
 
     def cost(self):
         """What it spends of its kind's part: a twin its sentences and its costly words, a word its chance."""
@@ -986,10 +993,11 @@ def link(els):
     return els
 
 
-def _order(els, kind, on, rng, explore, explored):
+def _order(els, kind, on, rng, explore, explored, free=False):
     """The elements of a kind still to place, best first: by density (ties in document order), each place drawn at
-    random instead with chance explore."""
-    idx = [i for i, e in enumerate(els) if e.kind == kind and on[i] is None]
+    random instead with chance explore. free: the words known at a glance instead of the rest, every place drawn at
+    random (they all cost nothing, so no order is better)."""
+    idx = [i for i, e in enumerate(els) if e.kind == kind and on[i] is None and e.free == free]
     ranked = sorted(idx, key=lambda i: (-els[i].density(), i))
     key = {}
     for r, i in enumerate(ranked):
@@ -1019,13 +1027,15 @@ def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_senten
     explored = [False] * len(els)
     twins = _order(els, 's', on, rng, explore, explored)
     words = _order(els, 'w', on, rng, explore, explored)
+    free = _order(els, 'w', on, rng, 1.0, [False] * len(els), free=True)  # not the model's choice to sample
     u_s, u_w = rng.random(), rng.random()
+    u_f = rng.random()
     taken = lambda i, level: on[i] is not None and on[i] <= level
     for level in BUDGETED:
         words_part, sentences_part = budgets[level]
         spent = sum(e.cost() for i, e in enumerate(els) if e.kind == 's' and taken(i, level))
         for i in twins:
-            if on[i] is None and spent + u_s * els[i].cost() <= sentences_part + 1e-12:
+            if on[i] is None and level >= els[i].least and spent + u_s * els[i].cost() <= sentences_part + 1e-12:
                 on[i] = level
                 spent += els[i].cost()
         spent, counts = 0.0, {}
@@ -1036,12 +1046,18 @@ def assign(els, budgets, rng, explore=EXPLORE, per_sentence=intensity.per_senten
                     counts[e.sid] = counts.get(e.sid, 0) + 1
         most = per_sentence(level)
         for i in words:
-            if on[i] is not None or counts.get(els[i].sid, 0) >= most:
+            if on[i] is not None or level < els[i].least or counts.get(els[i].sid, 0) >= most:
                 continue
             if spent + u_w * els[i].cost_w <= words_part + 1e-12:
                 on[i] = level
                 spent += els[i].cost_w
                 counts[els[i].sid] = counts.get(els[i].sid, 0) + 1
+        # the words known at a glance: the level's share of them, in their random order (systematic rounding as above)
+        shown, share = sum(1 for i in free if on[i] is not None), intensity.free_share(level) * len(free)
+        for i in free:
+            if on[i] is None and level >= els[i].least and shown + u_f <= share + 1e-12:
+                on[i] = level
+                shown += 1
     return [FULL if x is None else x for x in on], explored
 
 

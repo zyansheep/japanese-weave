@@ -42,6 +42,11 @@ NAMES = {OFF: 'off', -2: 'much lighter', -1: 'lighter', 0: 'normal', 1: 'heavier
 # budget and scales the others with it.
 BUDGETS = {-2: 0.15, -1: 0.3, 0: 0.5, 1: 0.8, 2: 1.2}
 PER_SENTENCE = {-2: 1, -1: 1, 0: 1, 1: 2, 2: 2}  # most budgeted (not-yet-known) words in one sentence
+# In chat replies, the share of the words known at a glance each word level shows (twins.assign): they cost nothing, so
+# the budget alone left them all showing from much lighter up, about 40 of a long reply's 50 swaps, and the word dial
+# moved only the few learning words (18 words shown at much lighter, 20 at much heavier over 150 replies, 2026-11-12).
+# Normal and up show them all, as before.
+FREE_SHARE = {-2: 0.35, -1: 0.65, 0: 1.0, 1: 1.0, 2: 1.0}
 # A whole sentence in Japanese costs its translation lookups: the chance a reader who reads it opens its translation,
 # whatever words it uses. knowledge.json's sentencePrice per surface once a fit makes one (sentence_price), else this,
 # as levels.js SENTENCE_PRICE says (keep them the same). Measured on chat, 2026-10-15 to 20: of the 439 sentence ends in
@@ -151,6 +156,10 @@ def budget(level, normal=None):
 
 def per_sentence(level):
     return PER_SENTENCE.get(level, PER_SENTENCE[0])
+
+
+def free_share(level):
+    return FREE_SHARE.get(level, FREE_SHARE[0])
 
 
 def sentence_price(know, surface='t3'):

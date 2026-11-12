@@ -1007,12 +1007,13 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     def word_element(w, parent):
         words_p[len(els)] = w['p']
         free = w['free']
-        fixed_on = -2 if free else (twins.FULL if w['dictionary'] or w['ja'] in seen_costly else None)
+        fixed_on = twins.FULL if not free and w['dictionary'] else None
+        later = not free and w['ja'] in seen_costly
         if not free:
             seen_costly.add(w['ja'])
         e = twins.Element('w', cost_w=0.0 if free else w['p'], opens=0.0 if free else w['p'],
                           value=0.0 if free else twins.learning_value(w['p']), parent=parent, sid=w['sid'],
-                          fixed=fixed_on, ja=w['ja'])
+                          fixed=fixed_on, ja=w['ja'], least=twins.LATER_USE if later else -2, free=free)
         owner[id(w)] = len(els)
         els.append(e)
 
@@ -1033,14 +1034,15 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             twin = len(els)
             owner[id(p)] = twin
             by_el[twin] = p
-            # a dictionary word, a word not in the word list, or a learning word already used before it, shows only
-            # at full: so does its twin
-            late = outside or any(ja in dictionary or ja in seen_costly for ja, _x in held)
+            # a dictionary word or a word not in the word list shows only at full, and a learning word already used
+            # before it from heavier up: so does its twin
+            late = outside or any(ja in dictionary for ja, _x in held)
+            again = any(ja in seen_costly for ja, _x in held)
             els.append(twins.Element('s', cost_s=sum(max(x, plan.price) for x in ps), cost_w=sum(inside),
                                      opens=sum(ps) + sum(inside),
                                      value=twins.SENTENCE_VALUE + sum(twins.learning_value(x) for x in inside)
                                      + (twins.PATTERN_VALUE if plan.learning in ids_all else 0.0),
-                                     fixed=twins.FULL if late else None))
+                                     fixed=twins.FULL if late else None, least=twins.LATER_USE if again else -2))
             for q in p['english']:
                 if not isinstance(q, tuple) and keep.index(id(q)) not in reverted:
                     word_element(q, twin)
@@ -1089,7 +1091,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
             's': sentence_ps,
             'd': [sorted({i for _c, ids in t.get('sentences') or () for i in ids}) for t in dropped]}, now_ms)
     n_words = sum(1 for e in els if e.kind == 'w')
-    n_free = sum(1 for e in els if e.kind == 'w' and e.fixed == -2)
+    n_free = sum(1 for e in els if e.kind == 'w' and e.free)
     head = (f'jw-check: {len(kept)} twin{"s" if len(kept) != 1 else ""} and {n_words} word swap'
             f'{"s" if n_words != 1 else ""} ({n_free} known at a glance)'
             + (f'; {len(dropped)} twin{"s" if len(dropped) != 1 else ""} dropped' if dropped else '')

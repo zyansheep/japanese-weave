@@ -100,16 +100,17 @@ class Authoring(unittest.TestCase):
         self.assertIn('。</abbr>', twins.japanese_twin(f'{P}です！', 'It is!'))
 
 
-def element(kind, cost, value=1.0, parent=None, sid=0, fixed=None):
+def element(kind, cost, value=1.0, parent=None, sid=0, fixed=None, least=-2, free=False):
     if kind == 's':
-        return twins.Element('s', cost_s=cost, opens=cost, value=value)
-    return twins.Element('w', cost_w=cost, opens=cost, value=value, parent=parent, sid=sid, fixed=fixed)
+        return twins.Element('s', cost_s=cost, opens=cost, value=value, least=least)
+    return twins.Element('w', cost_w=cost, opens=cost, value=value, parent=parent, sid=sid, fixed=fixed, least=least,
+                         free=free)
 
 
 class Thresholds(unittest.TestCase):
     def elements(self):
-        els = [element('s', 0.08, 3.0), element('w', 0.25, parent=0, sid='t0'), element('w', 0.0, parent=0,
-                                                                                           sid='t0', fixed=-2),
+        els = [element('s', 0.08, 3.0), element('w', 0.25, parent=0, sid='t0'), element('w', 0.0, value=0.0, parent=0,
+                                                                                           sid='t0', free=True),
                element('s', 0.08, 1.0), element('s', 0.16, 2.0), element('w', 0.3, sid=1), element('w', 0.2, sid=2),
                element('w', 0.25, sid=3), element('w', 0.4, sid=4, fixed=twins.FULL)]
         return twins.link(els)
@@ -129,9 +130,28 @@ class Thresholds(unittest.TestCase):
                 spent_w = sum(els[i].cost_w for i in taken if els[i].kind == 'w')  # words, as if twins were English
                 self.assertLessEqual(spent_s, sentences_part + max(e.cost() for e in els))  # one at the edge at most
                 self.assertLessEqual(spent_w, words_part + max(e.cost_w for e in els))
-            self.assertEqual(on[2], -2)  # known at a glance: from -2 (while its twin is English)
-            self.assertEqual(on[8], twins.FULL)  # fixed at full: a dictionary word, a later use
+            self.assertIn(on[2], (-2, -1, 0))  # known at a glance: by its level's share, all of them from normal
+            self.assertEqual(on[8], twins.FULL)  # fixed at full: a dictionary word
         self.assertEqual(twins.assign(els, {lv: (0, 0) for lv in twins.BUDGETED}, random.Random(1))[0][0], twins.FULL)
+
+    def test_the_word_dial_shows_a_share_of_the_free_words(self):
+        # the words known at a glance cost nothing: each word level shows its share of them, nested, normal all
+        els = twins.link([element('w', 0.0, value=0.0, sid=i, free=True) for i in range(40)])
+        budgets = twins.budgets_for(400)
+        for seed in range(50):
+            on, explored = twins.assign(els, budgets, random.Random(seed))
+            shown = {lv: sum(1 for x in on if x <= lv) for lv in twins.BUDGETED}
+            for lv in twins.BUDGETED:
+                self.assertAlmostEqual(shown[lv], intensity.free_share(lv) * 40, delta=1)
+            self.assertEqual(shown[0], 40)
+            self.assertFalse(any(explored))  # drawn at random by design, not the model's sample
+
+    def test_a_later_use_shows_from_heavier(self):
+        # a learning word's second use, and a twin holding one, wait for heavier however much budget is left
+        els = twins.link([element('w', 0.1, sid=1), element('w', 0.1, sid=2, least=twins.LATER_USE),
+                          element('s', 0.08, least=twins.LATER_USE)])
+        on, _x = twins.assign(els, {lv: (10.0, 10.0) for lv in twins.BUDGETED}, random.Random(0), explore=0)
+        self.assertEqual(on, [-2, twins.LATER_USE, twins.LATER_USE])
 
     def test_value_per_expected_open_orders_them(self):
         els = twins.link([element('s', 0.08, 1.0), element('s', 0.08, 3.0), element('s', 0.16, 2.0)])
