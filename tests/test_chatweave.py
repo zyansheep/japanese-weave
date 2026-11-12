@@ -67,7 +67,7 @@ class Weave(unittest.TestCase):
         self.assertEqual((info['before'][-9:], info['after'][:6]), ('Read the ', ' below'))  # its context
         self.assertTrue(next(s for s in swaps if s['ja'] == '問題')['free'])
         self.assertTrue(30 < out['words'] < len(DRAFT.split()))  # the prose's words, the fence's left out
-        self.assertIn('Twins. After an English sentence', weave.DRAFT_RULES)
+        self.assertIn('Twins. After each English sentence', weave.DRAFT_RULES)
 
     def test_dictionary_words_are_few_and_flagged(self):
         pool = [dict(word(ja, kana, gloss, False, k, status='active'), dictionary=True)

@@ -51,8 +51,10 @@ SENTENCE_PRICE = 0.08
 # rest, and what one of the two can't use goes to the other. Chosen so normal asks for as many sentences as the chat
 # brief did at Stage 3 before sentences were priced: one in five, about 1.1 per 100 words (about 5.5 prose sentences
 # in 100 words), which at 0.08 a sentence is 0.088 of normal's 0.5, a share of 0.176. At 0.18, normal pays for
-# 0.18 * 0.5 / 0.08 = 1.1 sentences per 100 words; much lighter for 0.34 and much heavier for 2.7.
-SENTENCE_SHARE = 0.18
+# 0.18 * 0.5 / 0.08 = 1.1 sentences per 100 words; much lighter for 0.34 and much heavier for 2.7. Raised to 0.30 on
+# 2026-11-11 when the reader asked for more Japanese at normal (it showed about 0.7 sentences per 100 words, using 52%
+# of its sentences' part and 19% of its words' part): 1.9 sentences per 100 words at normal's budget.
+SENTENCE_SHARE = 0.30
 DURATION_MS = 3 * 3600 * 1000
 NORMAL = {'level': 0, 'until': 0, 'at': 0}
 

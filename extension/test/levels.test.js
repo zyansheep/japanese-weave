@@ -350,12 +350,12 @@ describe('the lookup budget', () => {
       const whole = r.swaps.filter((s) => s.kind === 'sentence');
       return { words: r.swaps.length - whole.length, whole: whole.length, expected: r.plan.expected };
     };
-    expect(SENTENCE_SHARE).toBe(0.18);
-    expect(SENTENCE_SHARE * intensityBudget(0) / SENTENCE_PRICE).toBeCloseTo(1.125); // sentences per 100 words at normal
+    expect(SENTENCE_SHARE).toBe(0.30);
+    expect(SENTENCE_SHARE * intensityBudget(0) / SENTENCE_PRICE).toBeCloseTo(1.875); // sentences per 100 words at normal
     const both = plan([...offer(learning), ...sentences]);
-    expect(both.whole).toBe(Math.floor(4 * SENTENCE_SHARE / SENTENCE_PRICE + 1e-9)); // 0.72 buys 9
-    expect(both.words).toBeGreaterThanOrEqual(13); // 3.28 buys 13, and a 14th with chance 0.03 / 0.25
-    expect(both.words).toBeLessThanOrEqual(14);
+    expect(both.whole).toBe(Math.floor(4 * SENTENCE_SHARE / SENTENCE_PRICE + 1e-9)); // 1.2 buys 15
+    expect(both.words).toBeGreaterThanOrEqual(11); // 2.8 buys 11, and a 12th with chance 0.05 / 0.25
+    expect(both.words).toBeLessThanOrEqual(12);
     // either alone gets the whole budget: 16 words, or every sentence (20 cost 1.6 of the 4)
     expect(plan(offer(learning))).toMatchObject({ words: 16, whole: 0 });
     expect(plan(sentences)).toMatchObject({ words: 0, whole: 20 });

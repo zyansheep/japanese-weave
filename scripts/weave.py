@@ -639,17 +639,17 @@ STYLES = ('draft', 'classic')
 RULES = 'offers'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (dials:
                   # before the weave offered only what may stay in English and the looser sense standard)
 DRAFT_RULES = """\
-   - Twins. After an English sentence that carries the content (the advice, the explanation, the conclusion) and \
-that you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
+   - Twins. After each English sentence you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
 on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
 before it, so make it one whole sentence, not in a table, task list or link, with any bold or code closed inside it \
-(code drops a twin that cuts through markdown). Write twins up to the first line's number; code chooses which twins \
-each level shows, so never add stock lines to get more. A twin is one Japanese or \
+(code drops a twin that cuts through markdown). Write at least the first line's least number of twins and up to its \
+most, twinning every sentence that fits; code chooses which twins each level shows, so never add stock lines to get \
+more. A twin is one Japanese or \
 mixed sentence, or two short ones for a long English sentence, and ends with a bare 。 or ？: code puts the English \
 sentence on it as its translation. Write each twin around its Japanese words in Japanese word order with particles \
 and grammar (verb endings, です/ます, これ/それ), keeping English nouns where no Japanese word was swapped in. Only an \
 English noun or noun phrase may take a particle; an English adjective, adverb or verb never does ("early に" and \
-"quieter な" are wrong). Keep each English stretch inside a twin to about four words; a sentence that needs a longer \
+"quieter な" are wrong). Keep each English stretch inside a twin to about six words; a sentence that needs a longer \
 one, or an English relative clause, gets no twin. Use polite です/ます form throughout. Prefer a verb to "noun + \
 があります". Never put する on an English word ("arrive します", "use して", "build しない", "lose されたら"): use a Japanese verb \
 from the weave's output, or give that sentence no twin. English nouns inside a twin stay singular, and Japanese words \
