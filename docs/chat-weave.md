@@ -82,8 +82,8 @@ for the Japanese sentences.
      overlaps most with the reply's, so a word offered for two senses keeps each sense's English even when Claude puts
      an earlier one back; with no clear match its English is the gloss's meaning). A twin's words the weave didn't offer
      are priced as the weave prices its swaps, from the same word list and on the same scale, while a content word not
-     on that list or flagged a dictionary word, like a dictionary word or a learning word's later use, makes the twin
-     show only at full; glossed grammar costs nothing. It then
+     on that list or flagged a dictionary word, like a dictionary word, makes the twin show only at full (a learning
+     word's later use: from heavier); glossed grammar costs nothing. It then
      decides what each level of each dial shows (thresholds and propensities, below), writes the final markup with
      each element's predicted chance (`data-p`, the tint), checks that it reads back to the same elements, thresholds
      and chances and that every pair of a word level and a sentence level renders clean, and keeps the plan in
@@ -157,9 +157,13 @@ price of a sentence (so no level asks for more Japanese sentences than the count
 the costly words in its Japanese; words from the rest at each word level, at their current lookup chance, a word in a
 twin's English counted as if its twin were English. Levels are filled from -2 up, each starting from the level below,
 so each kind's sets are nested; at most the level's costly words in one English sentence and one use of each learning
-word below full. The element at the edge of a part gets in with the chance (what is left) / (its cost), one uniform
+word below heavier. The element at the edge of a part gets in with the chance (what is left) / (its cost), one uniform
 draw per reply and part, so a level's expected spend is its part and the sets stay nested. Words known at a glance
-show from -2; dictionary words and a learning word's later uses only at full, and so does a twin holding one. The
+cost nothing, so the budget can't ration them: much lighter shows 35% of them and lighter 65%, in a random order per
+reply, and normal and up show them all (`intensity.FREE_SHARE`; before 2026-11-12 every level showed them all, and the
+word dial moved only the few learning words: 18 words shown at much lighter and 20 at much heavier, over 150
+replies). A learning word's later uses show from heavier, and so does a twin holding one; dictionary words only at
+full, and so does a twin holding one. The
 order is by value per expected open: for a twin its own value, the learning values of the costly words in its
 Japanese and this week's pattern, over its cost; for a word its learning value (1 at the target chance of 25%) over
 its chance. The rules that only made sense with one dial are gone: a twin shown no longer hides its English's swaps
