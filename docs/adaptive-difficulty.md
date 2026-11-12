@@ -382,10 +382,13 @@ dictionary entry id when its cards have one (a card served before the word had a
 spelling, so nothing needs migrating), else its spelling. The fuzz factor comes from SHA-256 rather than Anki's random
 generator (another day within the same range), there is no load balancer, and the arithmetic is in doubles.
 
-The queue is Anki's: learning cards due, then review cards due today, then new cards, up to 20 a day (Review more lifts
-the limit for a request; a new card served and not yet graded counts against it, so a grade in flight can't let a 21st
-in), from the learning words in the order the cards used before (behind on showings first, then the least certain,
-ties broken the same way all day), then a learning card up to 20 minutes early. A client gives back cards it fetched
+The queue is Anki's: learning cards due, then review cards due today, then new cards, up to the reader's limit a day
+(10 unless set otherwise: the review menu's setting, sent as newPerDay and kept as the pref review_new_per_day, or
+`fw.py review new N`; Review more lifts the limit for a request; a new card served and not yet graded counts against
+it, so a grade in flight can't let one more in), from the learning words by how often their dictionary entry came up
+in the reader's text over the last 30 days (exposure.json's reading counts), most first, so the cards teach the words
+the reader meets most; among equals in the order the cards used before (behind on showings first, then the least
+certain, ties broken the same way all day), then a learning card up to 20 minutes early. A client gives back cards it fetched
 ahead and never showed (release): they are as if never served, and a review of one is refused. A grade arriving for a
 card already reported as left completes it. A word the reader marks known leaves the deck; one the
 model labels known keeps its schedule (the model moving on says nothing about recall). Probe and made-up cards come in

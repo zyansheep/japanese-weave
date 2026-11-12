@@ -40,6 +40,9 @@ ANKI_LEXICON = 'anki.csv'  # in the state dir, written by `fw.py anki`: your Ank
 # The day-count rules from French Weave (learning slots, exposure days, shaky words) are gone; their fields stay under
 # each word's "legacy" for LEGACY_DAYS after the switch, so it can be undone (restore).
 NEW_PER_DAY = 5         # new words a day at most, taken in while the lookup budget goes unspent (knowledge.intake_room)
+REVIEW_NEW_PREF = 'review_new_per_day'  # the reader's own limit of new review cards a day (review.py)
+REVIEW_NEW_DEFAULT = 10  # without one
+REVIEW_NEW_MAX = 200
 # Words from your reading (reading.py): a dictionary entry is eligible to come in once it came up on ELIGIBLE_DAYS
 # different days of the last READING_DAYS (reading.nominations).
 READING_DAYS = 30
@@ -138,6 +141,17 @@ def home():
 
 def today():
     return dt.date.today().isoformat()
+
+
+def valid_review_new(value):
+    """A review_new_per_day pref: a whole number of new review cards a day, 0..REVIEW_NEW_MAX."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= REVIEW_NEW_MAX
+
+
+def review_new_per_day(state):
+    """How many new review cards a day: the reader's pref when set, else REVIEW_NEW_DEFAULT."""
+    value = ((state.get('prefs') or {}) if isinstance(state, dict) else {}).get(REVIEW_NEW_PREF)
+    return value if valid_review_new(value) else REVIEW_NEW_DEFAULT
 
 
 def days_between(a, b):
