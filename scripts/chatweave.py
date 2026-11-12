@@ -194,7 +194,7 @@ def first_line(woven, plan, cap, heaviest, inline=None, least=None):
             + (f'For twins only (they can\'t stay in an English sentence): {"; ".join(others)}. ' if others else '')
             + 'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
             '<ja>...</ja>, '
-            + (f'at least {least} and ' if least and least < cap else '')
+            + (f'about {least} (where sentences fit whole: never a gist) and ' if least and least < cap else '')
             + f'up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
             'code chooses which show at each level). '
             f'Each Japanese sentence at most {plan.get("maxChars") or 14} Japanese characters (a twin may be two short '

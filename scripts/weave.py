@@ -642,9 +642,11 @@ DRAFT_RULES = """\
    - Twins. After each English sentence you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
 on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
 before it, so make it one whole sentence, not in a table, task list or link, with any bold or code closed inside it \
-(code drops a twin that cuts through markdown). Write at least the first line's least number of twins and up to its \
-most, twinning every sentence that fits; code chooses which twins each level shows, so never add stock lines to get \
-more. A twin is one Japanese or \
+(code drops a twin that cuts through markdown). Aim for the first line's number of twins, up to its most, twinning every \
+sentence whose whole meaning fits; code chooses which twins each level shows, so never add stock lines to get more. \
+A twin says everything its English sentence says: each noun, name, verb and number, with the nouns and names left in \
+English where no Japanese word was swapped in. Never write a shorter gist to get a twin ("Shall I do it?" for "Should \
+I delete the rule and build the gate?"): code drops a twin that leaves out most of its sentence. A twin is one Japanese or \
 mixed sentence, or two short ones for a long English sentence, and ends with a bare 。 or ？: code puts the English \
 sentence on it as its translation. Write each twin around its Japanese words in Japanese word order with particles \
 and grammar (verb endings, です/ます, これ/それ), keeping English nouns where no Japanese word was swapped in. Only an \
@@ -785,11 +787,16 @@ def english_line(until):
             'with its twins as usual, and its Japanese shows once English only is off.')
 
 
-def compose_draft(state, level, had=None, command=None, plan=None, english=None, sentences=None):
+NO_TWINS_LINE = ('\nJapanese sentences are off until the user turns them back on: write no <ja> twins, only the '
+                 'English with the weave\'s swaps.')
+
+
+def compose_draft(state, level, had=None, command=None, plan=None, english=None, sentences=None, twins_off=False):
     """(brief, what the chat has after it, plan) in draft style, as compose returns them: the steps in full on a
     chat's first turn (had None) or when the chat last had another brief (the classic one, or the steps from before
     twins), else the digest. plan: the classic brief's plan (compose), recorded with mode draft, so the log says what
-    the lists were. english: when English only is on, until when (english_line). sentences: the sentence level, when
+    the lists were. twins_off: the sentence level is off until changed (intensity.kept), so no twins are asked for.
+    english: when English only is on, until when (english_line). sentences: the sentence level, when
     it isn't the word level (level)."""
     command = command or fw_command()
     stage = fwlib.stage_for(state)
@@ -797,6 +804,8 @@ def compose_draft(state, level, had=None, command=None, plan=None, english=None,
     text = draft_rules(stage, level, command, sentences) if whole else draft_digest(stage, level, command, sentences)
     if english:
         text += english_line(english)
+    if twins_off:  # the sentence level set off to stay (fw.py intensity sentences off always): twins nobody sees
+        text += NO_TWINS_LINE
     after = {'known': list(had.get('known') or []) if had else [], 'rules': RULES}
     return text, after, dict(plan or {}, whole=whole, mode='draft')
 
@@ -1309,7 +1318,8 @@ def main(argv):
     if style == 'draft':
         classic = build
         build = lambda had: compose_draft(state, level, had, plan=classic(None)[2],
-                                          english=english['until'] if english_on else None, sentences=sentences)
+                                          english=english['until'] if english_on else None, sentences=sentences,
+                                          twins_off=intensity.is_off(sentences) and intensity.kept(held))
     try:
         if hook and session:
             text, plan = chat_turn(state, session, build, mark)

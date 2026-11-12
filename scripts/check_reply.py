@@ -65,6 +65,20 @@ VERB = re.compile(r'v(?!s|i$|t$)')  # a verb's types (v1, v5r, vk...), not a sur
 SURU = re.compile(r'([A-Za-z][A-Za-z-]*)\s*((?:し[なまよてた]|さ[れせ]|す[るれ])[ぁ-ん]{0,6})')
 ARTICLE = re.compile(r'\b(a|an|the)\b', re.I)
 REPEAT = 5
+# A twin says what its English sentence says, not a gist of it: one that leaves out more than SAYS_MISSING of the
+# sentence's content words (English words outside STOPWORDS, matched to the twin's English words and its glosses'
+# meanings by stem) and covers less than SAYS_SHARE of them is dropped. On 401 twins of 2026-11-04 to 11-12 this drops
+# 179, gists like "やりましょうか？" for "Should I delete that rule now and build the gate as a PR?"; the twins
+# kept keep the sentence's nouns, in English where no Japanese word was swapped in.
+SAYS_MISSING = 2
+SAYS_SHARE = 0.5
+STOPWORDS = set('''a an the and or but so if then than that this these those there here it its is are was were be been being am
+do does did done have has had having i you we they he she me us them my your our their his her what which who whom
+whose when where why how all any some no not none nor of in on at to for from by with without about into onto over under
+up down out off again further once only own same too very can will just should would could may might must shall also
+as each few more most other such both either neither every one ones don doesn didn isn aren wasn weren won wouldn
+shouldn couldn let lets get gets got still yet now already even much many well really quite rather like way thing things
+because while until since before after during through per via etc ok yes anything something nothing everything'''.split())
 
 
 @functools.lru_cache(maxsize=1)
@@ -758,6 +772,37 @@ def _english_view(parts, keep):
     return {n: ''.join(pieces) for n, pieces in out.items()}
 
 
+def content_words(text):
+    """The content words of English text, lowercased (STOPWORDS out, three letters or more), in order."""
+    return [w for w in re.findall(r"[a-z][a-z0-9'-]*", text.lower()) if w not in STOPWORDS and len(w) > 2]
+
+
+def _stem(word):
+    word = word.split("'")[0]
+    for suffix in ('ing', 'ed', 'es', 's', 'ly', 'er', 'est'):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[:-len(suffix)]
+    return word
+
+
+def says_less(english, marked):
+    """The content words of a twin's English sentence that the twin leaves out, when it leaves out more than
+    SAYS_MISSING of them and covers less than SAYS_SHARE (else []): a gist, not a twin. The twin covers a word with an
+    English word of its own or a gloss's meanings (every alternative), matched by stem or a shared start of four
+    letters or more."""
+    wanted = list(dict.fromkeys(content_words(english)))
+    said = set(content_words(ABBR.sub(' ', marked)))
+    for title, inner in ABBR.findall(marked):
+        if inner not in MARKS:
+            _reading, dot, rest = title.partition('·')
+            said.update(content_words(rest if dot else title))
+    stems = {_stem(w) for w in said}
+    close = lambda s: s in stems or any(min(len(s), len(t)) >= 4 and (s.startswith(t) or t.startswith(s))
+                                        for t in stems)
+    missing = [w for w in wanted if not close(_stem(w))]
+    return missing if len(missing) > SAYS_MISSING and len(missing) > (1 - SAYS_SHARE) * len(wanted) else []
+
+
 def _twin_words(marked, costly):
     """The costly words in a twin's Japanese, [(ja, lookup chance)]: its glossed words that are (a form of) one of the
     weave's costly swaps ({ja: p})."""
@@ -913,6 +958,10 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
                 if len(learning) > 1:
                     wrong.append('more than one learning pattern: ' + ', '.join(grammar.BY_ID[i].name
                                                                                 for i in learning))
+            short = says_less(english, t['marked'])
+            if short:
+                wrong.append(f'it says less than its English sentence: nothing for {", ".join(short[:4])}; say the '
+                             'whole sentence (its nouns may stay English) or give it no twin')
             why = wrong[0] if wrong else None
         if why:
             t['why'] = why

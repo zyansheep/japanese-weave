@@ -9,7 +9,8 @@ two), which decides the swapped words of a reply with render-time levels (twins.
 but the sentence level follows the word level until the reader first sets it (apart): one dial until they diverge. A
 collector from before the sentence level has none, and a client then reads the sentence level as the word level.
 
-A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0). -2..2 are lookup budgets;
+A level is -3..3 and lasts DURATION_MS after the last change, then it is back to normal (0), or set to stay (`fw.py
+intensity sentences off always`: until KEEP, the latest time a stored level may have, so until the reader changes it). -2..2 are lookup budgets;
 the ends are modes of their own: -3 is off (no Japanese) and 3 is full (all the Japanese the reader can follow: the
 same choices with no budget). Each change is a `set` op on the pref intensity_chat, intensity_sentences or
 intensity_browser ({level, until, at, source}), so the collector's ops table keeps every press: how often and when the
@@ -58,6 +59,8 @@ SENTENCE_SHARE = 0.30
 DURATION_MS = 3 * 3600 * 1000
 NORMAL = {'level': 0, 'until': 0, 'at': 0}
 
+
+KEEP = 10 ** 14  # the until of a level set to stay (at_level keep): the latest valid() allows, the year 5138
 
 ENGLISH = 'english_chat'
 ENGLISH_MS = 3600 * 1000
@@ -110,10 +113,17 @@ def chat_levels(prefs, now=None):
     return current(prefs, WORDS, now)['level'], current(prefs, SENTENCES, now)['level']
 
 
-def at_level(level, source, now=None):
-    """The pref for a level set now: it lasts DURATION_MS (normal has no end)."""
+def at_level(level, source, now=None, keep=False):
+    """The pref for a level set now: it lasts DURATION_MS, or with keep until the reader changes it (KEEP); normal has
+    no end."""
     now = now if now is not None else now_ms()
-    return {'level': level, 'until': now + DURATION_MS if level else 0, 'at': now, 'source': str(source or 'unknown')[:20]}
+    until = (KEEP if keep else now + DURATION_MS) if level else 0
+    return {'level': level, 'until': until, 'at': now, 'source': str(source or 'unknown')[:20]}
+
+
+def kept(value):
+    """Whether a level in effect ({level, until, at}) was set to stay (at_level keep)."""
+    return bool(value.get('level')) and value.get('until', 0) >= KEEP
 
 
 def step(prefs, surface, delta, source, now=None):
@@ -180,7 +190,7 @@ def describe(value):
     level = value.get('level', 0)
     if not level:
         return 'normal'
-    until = clock(value['until'])
+    until = 'you change it' if kept(value) else clock(value['until'])
     return f'off until {until}' if is_off(level) else f'{NAMES[level]} ({level:+d}) until {until}'
 
 

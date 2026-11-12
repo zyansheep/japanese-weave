@@ -192,6 +192,21 @@ class Final(Home):
         self.assertEqual(len(kept['d']), 4)  # the dropped twins' patterns, for intake's counts
         self.assertTrue(all(len(e[2]) == 5 for e in kept['e']))
 
+    def test_a_twin_says_its_whole_sentence(self):
+        says_less = check_reply.says_less
+        use = '<abbr title="つかう · use">使う</abbr>'
+        self.assertEqual(says_less('Should I delete that rule now and build the gate as a PR?', f'{P}です。'),
+                         ['delete', 'rule', 'build', 'gate'])  # a gist: four of four left out
+        self.assertEqual(says_less('The problem is the cache.', f'{P}は cache です。'), [])
+        self.assertEqual(says_less('We use the cached logs for the problem.', f'logs を{use}。'), [])  # by stem
+        self.assertEqual(says_less('Quines in chemlambda and in interaction combinators never read anything.',
+                                   'Quine です。'), ['chemlambda', 'interaction', 'combinators', 'never', 'read'])
+        self.assertEqual(says_less('Deploy it.', f'{P}です。'), [])  # two words or fewer left out: kept
+        gist = f'Should I delete that rule now and build the gate as a PR?<ja>{P}です。</ja>'
+        checked = check_reply.finish(gist, plan(), TYPES, seed=1, remember=False)
+        self.assertIn('twin dropped (its sentence stays English): it says less than its English sentence: nothing '
+                      'for delete, rule, build, gate', checked.text)
+
     def test_limits_and_english_rules(self):
         long = '<abbr title="a very very long sentence">とてもとてもとても長い長い長い文</abbr>です'
         use = '<abbr title="つかう · use">使う</abbr>'
