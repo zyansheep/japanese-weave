@@ -15,6 +15,13 @@ fast-forward the local `main` (the live hook) to `origin/main` before deploying.
 - Python: `sh scripts/run -m unittest discover -s tests -q` (or `python3 -m unittest ...` where python3 is on PATH;
   `scripts/run` finds a Python where it isn't, as on functor).
 - Extension: `cd extension && bun test`.
+- A change to the chat brief, the weave or the check: replay the chats so far through main and through the branch
+  (`fw.py backtest --fw <main checkout>/scripts/fw.py --out before.json`, then `fw.py backtest --against before.json`)
+  and put the numbers in the PR. It works on copies of the word state and writes nothing live.
+
+## Ethos
+Close design calls follow [ETHOS.md](ETHOS.md): show an approximate meaning rather than none, take a sentence down a
+step rather than to bare English, and have code fix what it can see rather than drop it.
 
 ## Reloading the browser extension during development
 `sh scripts/run scripts/fw.py extension` rebuilds `~/.japanese-weave/extension` (Chrome, unpacked) and

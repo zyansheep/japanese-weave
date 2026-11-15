@@ -636,14 +636,14 @@ def digest(stage, level, markup, n, m):
 # and prints the final markup (twins.py), and Claude sends that. Four rounds of blind-judged replies
 # (docs/chat-weave.md) chose these steps and the rules in DRAFT_RULES; the twins came with render-time levels.
 STYLES = ('draft', 'classic')
-RULES = 'offers'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (dials:
-                  # before the weave offered only what may stay in English and the looser sense standard)
+RULES = 'mend'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (offers:
+                # before code mended bare grammar words and articles and the first line asked for a firm count)
 DRAFT_RULES = """\
    - Twins. After each English sentence you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
 on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
 before it, so make it one whole sentence, not in a table, task list or link, with any bold or code closed inside it \
-(code drops a twin that cuts through markdown). Aim for the first line's number of twins, up to its most, twinning every \
-sentence whose whole meaning fits; code chooses which twins each level shows, so never add stock lines to get more. \
+(code drops a twin that cuts through markdown). Write the first line's number of twins, on sentences whose whole \
+meaning fits; code chooses which twins each level shows, so never add stock lines to get more. \
 A twin says everything its English sentence says: each noun, name, verb and number, with the nouns and names left in \
 English where no Japanese word was swapped in. Never write a shorter gist to get a twin ("Shall I do it?" for "Should \
 I delete the rule and build the gate?"): code drops a twin that leaves out most of its sentence. A twin is one Japanese or \
@@ -655,8 +655,7 @@ English noun or noun phrase may take a particle; an English adjective, adverb or
 one, or an English relative clause, gets no twin. Use polite です/ます form throughout. Prefer a verb to "noun + \
 があります". Never put する on an English word ("arrive します", "use して", "build しない", "lose されたら"): use a Japanese verb \
 from the weave's output, or give that sentence no twin. English nouns inside a twin stay singular, and Japanese words \
-in it take no spaces between them (spaces only around the English). Drop English articles inside a twin, and never \
-write "an" before a Japanese word. Don't open a twin with そして as "And...": use また or それに, or join the clauses \
+in it take no spaces between them (spaces only around the English). Don't open a twin with そして as "And...": use また or それに, or join the clauses \
 with the て-form.
    - Grammar and length. The weave's first line says how many Japanese characters a sentence of a twin may have and \
 which grammar patterns it may use: the known ones, plus at most one learning pattern in a sentence. Split a longer \
@@ -692,15 +691,13 @@ drop them rather than writing あなた or 私. 多い and 少ない come after 
    - Keep every twin guessable from its English, the English left in it, and the words the user can hover.
    - Use only Japanese words that appear in the weave's output (you may conjugate its verbs and adjectives), plus \
 particles and grammar. Add no other Japanese words and no katakana loanwords, and keep names whole.
-   - Code, commands, paths, numbers and names stay exactly as they are, and no Japanese word sits right next to a \
-number.
+   - Code, commands, paths, numbers and names stay exactly as they are.
    - Glosses. Wrap each Japanese word in <abbr title="reading · meaning"> (kana-only words: just the meaning). Wrap a \
 conjugated verb or adjective whole, with the reading and the meaning of that form, ending included (like "したい · want \
 to do"). Grammar that carries meaning is glossed too: だけ, それから, のある, ことができる, and a nominalising の (〜のは, \
-〜のが) with the word before it. Only the structural particles (は が を に で の へ と ね よ) and です/ます stay outside \
-the tags; every particle or ending that carries meaning is glossed: か (or), や (and so on), も (also), から, まで, より, \
-なら, けど, ので, のに, が or ですが meaning "but", と meaning "when". Gloss 自分で whole ("by oneself"). Leave a twin's \
-closing 。 or ？ bare. All Japanese goes in twins or glosses, none bare in the English except quoted in backticks. \
+〜のが) with the word before it. Code glosses the common grammar words you leave bare (も, か, から, この, これ, \
+あります, します and the like) and drops English articles inside a twin; gloss the rest yourself (なら, のに, が meaning \
+"but", と meaning "when", 自分で whole as "by oneself"). Leave a twin's closing 。 or ？ bare. All Japanese goes in twins or glosses, none bare in the English except quoted in backticks. \
 No bold on Japanese words, and no footer."""
 
 
@@ -738,9 +735,20 @@ def level_flags(level, sentences=None):
     return f'--level {level}' + (f' --sentences {sentences}' if sentences is not None and sentences != level else '')
 
 
-def draft_rules(stage, level, command, sentences=None):
-    """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change."""
+TWIN_RULES = ('Twins.', 'Grammar and length.', 'Grammar.', 'Keep every twin')  # the bullets about writing twins
+
+
+def word_rules():
+    """DRAFT_RULES without the bullets about writing twins (TWIN_RULES): the brief while the sentence level is off."""
+    bullets = DRAFT_RULES.split('\n   - ')
+    return '\n   - '.join(b for b in bullets if not b.lstrip(' -').startswith(TWIN_RULES))
+
+
+def draft_rules(stage, level, command, sentences=None, twins=True):
+    """The draft-and-weave brief in full: a chat's first turn, and any turn on which its steps change. twins False:
+    the sentence level is off, so the brief leaves out how to write twins (word_rules)."""
     head, flags = turned_dials(level, sentences), level_flags(level, sentences)
+    rules = DRAFT_RULES if twins else word_rules()
     return (f'Japanese Weave (Stage {stage}{head}), draft and weave: the user is a native English speaker '
             'learning Japanese by reading, so your chat reply carries Japanese for every level the user can choose, '
             'and their app shows it at the level they set (they can change it after reading, or turn on English '
@@ -754,8 +762,10 @@ def draft_rules(stage, level, command, sentences=None):
             '   It swaps in every Japanese word that could stay there, each wrapped as <abbr title="reading · meaning">'
             'Japanese</abbr>, and marks the swaps it wasn\'t sure of as {{English→<abbr ...>Japanese</abbr>}}. Its '
             'first line lists the words for twins only and says how many twins to write and within which limits.\n'
-            '2. Write the reply from its output: your English sentences keeping its swaps, and a Japanese twin '
-            'after each sentence that fits:\n' + DRAFT_RULES + '\n'
+            + ('2. Write the reply from its output: your English sentences keeping its swaps, and a Japanese twin '
+               'after each sentence that fits:\n' if twins else
+               '2. Write the reply from its output: your English sentences keeping its swaps (no twins: Japanese '
+               'sentences are off):\n') + rules + '\n'
             f'3. Check it in one Bash call:\n{command} check-reply {flags} <<\'REPLY\'\n(your reply)\nREPLY\n'
             '   It drops a twin that breaks a limit or rule (its sentence stays English), puts back in English the '
             'swaps that can\'t stay and in Japanese the sure ones you dropped, chooses what each level shows, and '
@@ -787,7 +797,7 @@ def english_line(until):
             'with its twins as usual, and its Japanese shows once English only is off.')
 
 
-NO_TWINS_LINE = ('\nJapanese sentences are off until the user turns them back on: write no <ja> twins, only the '
+NO_TWINS_LINE = ('\nJapanese sentences are off for now: write no <ja> twins, only the '
                  'English with the weave\'s swaps.')
 
 
@@ -795,18 +805,20 @@ def compose_draft(state, level, had=None, command=None, plan=None, english=None,
     """(brief, what the chat has after it, plan) in draft style, as compose returns them: the steps in full on a
     chat's first turn (had None) or when the chat last had another brief (the classic one, or the steps from before
     twins), else the digest. plan: the classic brief's plan (compose), recorded with mode draft, so the log says what
-    the lists were. twins_off: the sentence level is off until changed (intensity.kept), so no twins are asked for.
+    the lists were. twins_off: the sentence level is off (for 3 hours or until changed), so no twins are asked for.
     english: when English only is on, until when (english_line). sentences: the sentence level, when
     it isn't the word level (level)."""
     command = command or fw_command()
     stage = fwlib.stage_for(state)
-    whole = had is None or had.get('rules') != RULES
-    text = draft_rules(stage, level, command, sentences) if whole else draft_digest(stage, level, command, sentences)
+    rules = RULES + ('-words' if twins_off else '')  # the steps without twins: the whole steps again once they're on
+    whole = had is None or had.get('rules') != rules
+    text = draft_rules(stage, level, command, sentences, twins=not twins_off) if whole else \
+        draft_digest(stage, level, command, sentences)
     if english:
         text += english_line(english)
-    if twins_off:  # the sentence level set off to stay (fw.py intensity sentences off always): twins nobody sees
+    if twins_off:  # the sentence level is off: twins nobody sees, and the weave's first line asks for none either
         text += NO_TWINS_LINE
-    after = {'known': list(had.get('known') or []) if had else [], 'rules': RULES}
+    after = {'known': list(had.get('known') or []) if had else [], 'rules': rules}
     return text, after, dict(plan or {}, whole=whole, mode='draft')
 
 
@@ -1319,7 +1331,7 @@ def main(argv):
         classic = build
         build = lambda had: compose_draft(state, level, had, plan=classic(None)[2],
                                           english=english['until'] if english_on else None, sentences=sentences,
-                                          twins_off=intensity.is_off(sentences) and intensity.kept(held))
+                                          twins_off=intensity.is_off(sentences))
     try:
         if hook and session:
             text, plan = chat_turn(state, session, build, mark)
