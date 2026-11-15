@@ -248,21 +248,35 @@ def english_problem(ja, pos, en=None, known=False, attributive=False):
 
 
 def type_problem(ja, pos, en=None, known=False, attributive=False):
-    """english_problem by the word's types and English alone (the pronouns left to the caller)."""
+    """english_problem by the word's types and English alone (the pronouns left to the caller). Verbs may stay, in
+    any form (ETHOS.md: a verb read roughly in an English sentence still teaches it; the weave conjugates one to fit
+    its English, inflection.conjugate)."""
     if pos is None:
-        return (f'{ja} is a form the dictionary does not list (a conjugated verb or phrase) inside a sentence that '
-                'stays English')
+        return (f'{ja} is a form the dictionary does not list (a phrase, or a verb form code can\'t read back) inside '
+                'a sentence that stays English')
     if connective(ja, pos, en):
         return (f'{ja} is a connective or a question word in a sentence that stays English: keep it English, or use '
                 'it in a twin')
     verb = any(VERB.match(p) for p in pos)  # kuru, aru: adnominals too, but verbs
     nouns = WHOLE_NOUNS if 'int' in pos else NOUN_TYPES  # an interjection that is a noun only as an affix (nee)
-    if any(p in nouns for p in pos) or (attributive and not verb and any(p in ADJECTIVE_TYPES for p in pos)) or (
+    if verb or any(p in nouns for p in pos) or (attributive and any(p in ADJECTIVE_TYPES for p in pos)) or (
             known and any(p in ADVERB_TYPES for p in pos)):
         return None
     kind = '/'.join(sorted(pos)) or 'not a noun'
-    return (f'{ja} ({kind}) in a sentence that stays English, where only nouns, adjectives right before a noun and '
-            'adverbs known at a glance go')
+    return (f'{ja} ({kind}) in a sentence that stays English, where only nouns, verbs, adjectives right before a '
+            'noun and adverbs known at a glance go')
+
+
+def pos_of(ja, types):
+    """A written form's dictionary types: its own, else those of the verb it is a form of (読んだ is 読む's, through
+    inflection.deinflect), else None."""
+    if ja in types:
+        return types[ja]
+    import inflection
+    for form, _kinds, steps in inflection.deinflect(ja):
+        if steps and form in types and any(VERB.match(p) for p in types[form]):
+            return types[form]
+    return None
 
 
 # A number right before or after a word, a decimal point or thousands comma between (4.2, 1,000, 5%): no Japanese word
@@ -270,6 +284,29 @@ def type_problem(ja, pos, en=None, known=False, attributive=False):
 NEXT_TO_NUMBER_BEFORE = re.compile(r'\d\s*$|\d[.,]$')
 NEXT_TO_NUMBER_AFTER = re.compile(r'\s*\d|[.,]\d|%')
 FOLLOWED = re.compile(r'\s*[A-Za-z]')  # an English word next: a Japanese adjective before it is attributive
+
+
+# Where English uses a verb's word as something else, a Japanese verb in its place reads wrong (2026-11-15 sample:
+# "the whole run" as 走る, "show up" as 見せる, "Moving everything" as 動いている): a determiner before it makes it a
+# noun, a particle after it a phrasal verb, and an -ing form is the ongoing form only after a form of "be".
+DETERMINERS = {'the', 'a', 'an', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their', 'his', 'her', 'its',
+               'each', 'every', 'whole', 'one', 'first', 'last', 'next', 'no', 'any', 'some', "it's"}
+PARTICLES = {'up', 'out', 'off', 'down', 'over', 'away', 'around', 'through'}
+BE = {'is', 'are', 'was', 'were', 'be', 'been', 'am', "i'm", "it's", "that's", "we're", "you're", "they're", "he's",
+      "she's", 'not', 'still', 'already', 'now', 'currently', 'also', 'just'}
+
+
+def verb_slot(before, en, after):
+    """Whether English `en` (the draft's words before and after it) is used as a verb there, so a Japanese verb may
+    stand in for it (DETERMINERS, PARTICLES, BE)."""
+    words_before = re.findall(r"[A-Za-z']+", before.lower())
+    prev = words_before[-1] if words_before else ''
+    nxt = (re.findall(r"[A-Za-z']+", after.lower()) or [''])[0]
+    if prev in DETERMINERS or nxt in PARTICLES:
+        return False
+    if str(en).lower().endswith('ing') and str(en).lower() not in __import__('inflection').NOT_ONGOING:
+        return prev in BE and not re.search(r'[.!?:;]\s*$', before)
+    return True
 
 
 def may_stay(swap, types=None):
@@ -283,8 +320,11 @@ def may_stay(swap, types=None):
     if (swap['ja'] in AFTER_NOUN and followed) or NEXT_TO_NUMBER_BEFORE.search(before) or \
             NEXT_TO_NUMBER_AFTER.match(after) or re.search(r'\d', str(swap.get('en') or '')):
         return False
-    return english_problem(swap['ja'], types.get(swap['ja']), swap.get('en'), bool(swap.get('free')),
-                           followed) is None
+    pos = pos_of(swap['ja'], types)
+    if pos and any(VERB.match(p) for p in pos) and not any(p in NOUN_TYPES for p in pos) and not verb_slot(
+            before, swap.get('en') or '', after):
+        return False
+    return english_problem(swap['ja'], pos, swap.get('en'), bool(swap.get('free')), followed) is None
 
 
 def sentence_problems(sent, types, english=False, known=None, english_of=None):
@@ -345,7 +385,7 @@ def sentence_problems(sent, types, english=False, known=None, english_of=None):
         if NEXT_TO_NUMBER_BEFORE.search(prev_text) or NEXT_TO_NUMBER_AFTER.match(next_text):
             add(f'{ja} sits right next to a number', i)
         if stays_english:  # the pronouns said above
-            why = type_problem(ja, types.get(ja), english_of(t) if english_of is not None else None,
+            why = type_problem(ja, pos_of(ja, types), english_of(t) if english_of is not None else None,
                                   known is not None and known(t), bool(FOLLOWED.match(next_text)))
             if why:
                 add(why, i)
@@ -956,8 +996,8 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     the list or two learning patterns in one sentence) or any rule of problems() is dropped, its sentence left English;
     a sure swap of the weave the reply dropped where its English is unchanged goes back in (put_back; English written
     {{like this}} stays English, keep_english), held to the same rules as the reply's own, which come first; a swap
-    that breaks the stays-English rules (sentence_problems with english: nouns, adjectives right before a noun and
-    adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each
+    that breaks the stays-English rules (sentence_problems with english: nouns, verbs, adjectives right before a noun
+    and adverbs known at a glance stay), or a content word's fifth gloss, goes back to its English. Then it scores each
     twin (sentence_model.predict per sentence) and each swap (the weave's lookup chance), assigns thresholds and
     propensities (twins.assign, twins.propensities), writes the final markup, checks that it reads back to the same
     elements and thresholds and that every level renders clean, and keeps the plan (twins.remember_plan) for the hook's

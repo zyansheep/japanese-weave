@@ -137,11 +137,37 @@ def twin_least(words, cap):
 
 def offers(swaps, types=None):
     """[whether each swap is offered in the text]: one that may stay in an English sentence by the check's rules
-    (check_reply.may_stay: nouns, adjectives right before an English word, adverbs known at a glance; never pronouns,
-    connectives, question words, verbs and the rest). The others go on the first line, for twins only."""
+    (check_reply.may_stay: nouns, verbs, adjectives right before an English word, adverbs known at a glance; never
+    pronouns, connectives, question words and the rest). The others go on the first line, for twins only."""
     import check_reply
     types = check_reply.word_types() if types is None else types
     return [check_reply.may_stay(s, types) for s in swaps]
+
+
+FORM_NOTE = {'past': ' (past)', 'ongoing': ' (ongoing)'}
+
+
+def fit_verbs(swaps, types=None):
+    """The weave's verb swaps bent to the form of the English they stand in for (ETHOS.md: a verb may stay in an
+    English sentence, conjugated to fit): "opened" gets the past (開いた), "reading" the ongoing form (読んでいる),
+    anything else the dictionary form. Each changed swap keeps its dictionary form as lemma; its title gets that
+    form's reading and the meaning with "(past)" or "(ongoing)". Changed in place; returns swaps."""
+    import check_reply
+    import inflection
+    import twins
+    types = check_reply.word_types() if types is None else types
+    for s in swaps:
+        pos = types.get(s['ja']) or ()
+        if not any(check_reply.VERB.match(p) for p in pos):
+            continue
+        form = inflection.english_form(s.get('en'))
+        bent = inflection.conjugate(s['ja'], s.get('kana') or '', form)
+        if form == inflection.PLAIN or not bent:
+            continue
+        meaning = twins.meaning(s['title']) + FORM_NOTE[form]
+        s.update(lemma=s['ja'], ja=bent[0], kana=bent[1],
+                 title=f'{bent[1]} · {meaning}' if check_reply.KANJI.search(bent[0]) else meaning)
+    return swaps
 
 
 def render(woven, inline):
@@ -227,6 +253,7 @@ def weave(draft, level=0, state=None, session=None, remember=True, sentences=Non
     if run.returncode != 0:
         raise RuntimeError((run.stderr or 'the weave failed').strip().splitlines()[-1][:300])
     woven = json.loads(run.stdout)
+    fit_verbs(woven['swaps'])
     inline = offers(woven['swaps'])
     if remember:
         import twins

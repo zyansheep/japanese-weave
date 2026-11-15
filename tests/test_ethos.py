@@ -1,6 +1,7 @@
 """ETHOS.md in code: single kana sounds are never words to swap in, no Japanese word touches a number, the check mends
 what it can see instead of dropping a twin, the weave asks for no twins while the sentence level is off (and the brief
-leaves out how to write them), a known word goes in wherever it fits, and fw.py backtest replays the chats."""
+leaves out how to write them), a known word goes in wherever it fits, a verb stays in an English sentence
+conjugated to fit, and fw.py backtest replays the chats."""
 import json
 from pathlib import Path
 import sys
@@ -158,6 +159,55 @@ class Backtest(unittest.TestCase):
         self.assertEqual(woven, {'offered': 2, 'unsure': 1, 'twin_only': 2, 'asked': 3})
         self.assertEqual(backtest.english_words('Run `make all` now.\n```\ncode here\n```'), 2)
 
+
+
+class Verbs(unittest.TestCase):
+    def test_a_verb_in_the_form_of_its_english(self):
+        import inflection as inf
+        cases = {('読む', 'よむ'): ('読む', '読んだ', '読んでいる'), ('開く', 'ひらく'): ('開く', '開いた', '開いている'),
+                 ('行く', 'いく'): ('行く', '行った', '行っている'), ('始める', 'はじめる'): ('始める', '始めた', '始めている'),
+                 ('確認する', 'かくにんする'): ('確認する', '確認した', '確認している'),
+                 ('来る', 'くる'): ('来る', '来た', '来ている'), ('走る', 'はしる'): ('走る', '走った', '走っている'),
+                 ('待つ', 'まつ'): ('待つ', '待った', '待っている'), ('泳ぐ', 'およぐ'): ('泳ぐ', '泳いだ', '泳いでいる')}
+        for (ja, kana), forms in cases.items():
+            got = tuple(inf.conjugate(ja, kana, f)[0] for f in (inf.PLAIN, inf.PAST, inf.ONGOING))
+            self.assertEqual(got, forms, ja)
+        self.assertEqual(inf.conjugate('読む', 'よむ', inf.PAST)[1], 'よんだ')
+        self.assertIsNone(inf.conjugate('古い', 'ふるい', inf.PAST))  # not a verb
+        forms = {w: inf.english_form(w) for w in ('reads', 'read', 'opened', 'running', 'wrote', 'need', 'agreed',
+                                                  'written', 'set')}
+        self.assertEqual(forms, {'reads': 'plain', 'read': 'plain', 'opened': 'past', 'running': 'ongoing',
+                                 'wrote': 'past', 'need': 'plain', 'agreed': 'past', 'written': 'past', 'set': 'plain'})
+
+    def test_the_weave_bends_its_verb_swaps(self):
+        swaps = [{'ja': '開く', 'kana': 'ひらく', 'title': 'ひらく · open', 'en': 'opened'},
+                 {'ja': '読む', 'kana': 'よむ', 'title': 'よむ · read', 'en': 'reads'},
+                 {'ja': '問題', 'kana': 'もんだい', 'title': 'もんだい · problem', 'en': 'problems'}]
+        chatweave.fit_verbs(swaps, {'開く': {'v5k'}, '読む': {'v5m'}, '問題': {'n'}})
+        self.assertEqual((swaps[0]['ja'], swaps[0]['title'], swaps[0]['lemma']), ('開いた', 'ひらいた · open (past)', '開く'))
+        self.assertEqual(swaps[1]['ja'], '読む')
+        self.assertNotIn('lemma', swaps[1])
+        self.assertEqual(swaps[2]['ja'], '問題')
+
+    def test_only_where_the_english_is_a_verb(self):
+        cases = {('The whole ', 'run', ' took'): False, ('Gmail ', 'reading', ' went'): False,
+                 ('', 'Moving', ' everything'): False, ('The ', 'deciding', ' question'): False,
+                 ("so it won't ", 'show', ' up'): False, ('It is ', 'reading', ' the log'): True,
+                 ('I ', 'opened', ' the door'): True, ('', 'Bring', ' the world'): True}
+        for (before, en, after), want in cases.items():
+            self.assertEqual(check_reply.verb_slot(before, en, after), want, en)
+        self.assertFalse(check_reply.may_stay({'ja': '走る', 'en': 'run', 'before': 'The whole ', 'after': ' took'},
+                                              {'走る': {'v5r'}}))
+        import inflection
+        self.assertEqual(inflection.english_form('Bring'), 'plain')
+
+    def test_a_conjugated_verb_may_stay_in_english(self):
+        types = {'読む': {'v5m'}, '問題': {'n'}}
+        self.assertEqual(check_reply.pos_of('読んでいる', types), {'v5m'})
+        self.assertIsNone(check_reply.pos_of('読書', types))
+        self.assertTrue(check_reply.may_stay({'ja': '読んだ', 'en': 'read', 'before': 'I ', 'after': ' it'}, types))
+        found = check_reply.problems('It <abbr title="よんでいる · read (ongoing)">読んでいる</abbr> the log.', types)
+        self.assertEqual(found, [])
 
 if __name__ == '__main__':
     unittest.main()

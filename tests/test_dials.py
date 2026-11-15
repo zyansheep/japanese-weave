@@ -569,9 +569,10 @@ class KnownAdverbs(unittest.TestCase):
         plan = check_reply.Plan(grammar.statuses({}), None, 0, None, {}, swaps, 0.08)
         checked = check_reply.finish(text, plan, self.TYPES, seed=1, remember=False)
         back = [line for line in checked.text.split('\n') if line.startswith('- line') and 'put back' in line]
-        self.assertEqual(len(back), 4, back)
-        for ja in ('多分', 'もし', '使う'):  # learning, a connective, a verb
+        self.assertEqual(len(back), 3, back)
+        for ja in ('多分', 'もし'):  # learning, a connective
             self.assertTrue(any(ja in line for line in back), ja)
+        self.assertIn('data-en="use"', checked.final)  # a verb stays (ETHOS.md)
         self.assertTrue(any('また' in line for line in back))  # as "and"
         self.assertIn('data-en="already"', checked.final)  # a known adverb stays
         self.assertIn('data-en="again"', checked.final)
@@ -604,7 +605,7 @@ class KnownAdverbs(unittest.TestCase):
     def test_the_brief_says_so(self):
         self.assertIn('adverbs among the known-word swaps', weave.DRAFT_RULES)
         self.assertIn('rather than one that drops the swap', weave.DRAFT_RULES)
-        self.assertEqual(weave.RULES, 'mend')
+        self.assertEqual(weave.RULES, 'verbs')
         state = fwlib.new_state(known_top=10)
         plan = {'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {}, 'known': 3, 'whole': True}
         again, _after, record = weave.compose_draft(state, 0, {'rules': 'twins', 'known': []}, 'fw', plan)

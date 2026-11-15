@@ -32,8 +32,8 @@ for the Japanese sentences.
    that starts with `/` or `~/` or has a `/` between word characters) are left alone.
 
    The text offers only the swaps that may stay in an English sentence by the check's rules (`check_reply.may_stay`,
-   the same rule the check holds the reply to: nouns, adjectives right before an English word, adverbs known at a
-   glance; not a word that follows its noun before an English word, nor one next to a number); the rest stay
+   the same rule the check holds the reply to: nouns, verbs (since 2026-11-15, conjugated to fit their English:
+   `chatweave.fit_verbs`), adjectives right before an English word, adverbs known at a glance; not a word that follows its noun before an English word, nor one next to a number); the rest stay
    English there and go on the first line "for twins only", each Japanese word once with its short gloss (pronouns
    left out: Japanese drops them). Each swap's English, reading, current lookup chance and the English around it are
    kept in `weave-swaps.json` for the check, those for twins flagged `twin`. The first line names the learning words
@@ -85,8 +85,8 @@ for the Japanese sentences.
      an object). Each goes in as the weave's abbr and is held to the rules below like the reply's own words, which come
      first for the repeat limit; one the rules send back to English is neither counted nor listed. The summary line
      says "N put back" and a line lists them;
-   - puts back in English a swap that breaks the stays-English rules (only nouns, adjectives right before a noun, and
-     adverbs the reader knows at a glance, below), and a content word's fifth gloss;
+   - puts back in English a swap that breaks the stays-English rules (only nouns, verbs in any form it can read back
+     to the dictionary, adjectives right before a noun, and adverbs the reader knows at a glance, below), and a content word's fifth gloss;
    - scores each twin (the sentence model, per Japanese sentence) and each swap (its lookup chance from the weave;
      each kept swap is the draft's swap of the same word and gloss whose English around it, kept by the weave,
      overlaps most with the reply's, so a word offered for two senses keeps each sense's English even when Claude puts
@@ -189,8 +189,13 @@ background from green (0) through yellow to red (0.5 and up), a twin's span ligh
 has none and gets no tint. The tint changes nothing in reports.
 
 **Known words in English sentences.** An English sentence keeps the swaps that are nouns, adjectives right before a
-noun and, since the two dials, adverbs the reader knows at a glance (the weave's free swaps), time words used as adverbs
-among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns). Verbs, pronouns and
+noun, since the two dials adverbs the reader knows at a glance (the weave's free swaps), time words used as adverbs
+among them (now, already, soon, still, first: the dictionary has them as adverbs or as nouns), and since 2026-11-15
+verbs. A verb comes in the form its English has (`inflection.english_form`, `inflection.conjugate`): plain for
+"reads" or "read", past in た for "opened" or "wrote", ongoing in ている for "reading", glossed "open (past)"; the
+check reads a form back to its verb (`check_reply.pos_of`). Verbs had stayed out since the blind-judged rounds below
+found Japanese in English grammar slots wrong; ETHOS.md weighs it the other way: a verb read roughly still teaches it,
+and a third of the places a known word fit a draft's English were verbs, which then showed only in twins. Pronouns and
 adverbs still being learned stay out, and so do connectives and question words whatever else the dictionary types them
 as (`check_reply.connective`): a few spellings (もし, でも, そして and the like), any word typed as a conjunction unless
 the English it stands in for is "again" (また), the question words of the ど- series, and any swap for "and", "but",
@@ -293,7 +298,8 @@ and unlabelled.
 What the judges kept finding, and what now handles it:
 - **Wrong senses on basic words:** the trap list in `DRAFT_RULES`.
 - **Japanese words in English grammar slots:** nouns only in English sentences (and adjectives right before a noun;
-  since the two dials also adverbs the reader knows at a glance), checked with the dictionary's word types.
+  since the two dials also adverbs the reader knows at a glance, and since 2026-11-15 verbs, by ETHOS.md), checked
+  with the dictionary's word types.
 - **Words that follow their noun used as English prepositions, pronouns, "if" with no conditional ending, and
   English verbs with する:** all in `check_reply.py`.
 
