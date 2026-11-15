@@ -432,10 +432,11 @@ class Plan:
     the price of a sentence, this week's learning pattern (its id, or None), the level the reply is read at (view:
     the chat level, also while English only is on, since the reply shows its Japanese once that is off), the weave's
     word list and recency (words, recency; words None: the twins' words the weave didn't offer go unpriced), and the
-    chat's sentence level (sentences: the level its twins are read at, sview; None: the word level, one dial)."""
+    chat's sentence level (sentences: the level its twins are read at, sview; None: the word level, one dial), and
+    whether twins get their middle step (steps)."""
 
     def __init__(self, statuses, model=None, level=0, normal=None, know=None, swaps=(), price=None, learning=None,
-                 view=None, words=None, recency=None, sentences=None):
+                 view=None, words=None, recency=None, sentences=None, steps=False):
         self.statuses, self.model, self.level, self.normal = statuses, model, level, normal
         self.sentences = level if sentences is None else sentences
         self.ready = bool(model and model.get('ready'))
@@ -446,6 +447,7 @@ class Plan:
         self.sview = self.sentences if view is None or sentences is not None else self.view
         self.words = words  # the weave's word list (chatweave.words_for), for the twins' words it didn't offer
         self.recency = recency  # and the fit's recency, as the weave has it (fw_host.adaptive)
+        self.steps = steps  # whether each twin gets its middle step (fwlib.sentence_steps)
 
     @classmethod
     def load(cls, level=None, sentences=None, session=None):
@@ -470,7 +472,7 @@ class Plan:
             words, recency = fwlib.public_state(state)['words'], None
         return cls(grammar.statuses(state), model, level, knowledge.challenge_of(state) or None, know,
                    twins.swaps_for(session), intensity.sentence_price(know), learning.id if learning else None, level,
-                   words, recency, sentences)
+                   words, recency, sentences, fwlib.sentence_steps(state))
 
 
 def score(text, plan):
@@ -936,6 +938,74 @@ def _twin_words(marked, costly):
     return out
 
 
+SURU_START = ('\u3057', '\u3059', '\u3055', '\u305b')  # the kana a form of suru starts with
+# punctuation the English sits against without a space
+STEP_PUNCT = set('\u3001\u3002\uff0c\uff0e\uff01\uff1f\u300c\u300d\u300e\u300f\uff08\uff09\u30fb\uff1a' ',.!?:;()"\'')
+
+
+def middle_step(japanese, english_of, glance):
+    """A twin's middle step (ETHOS.md, "Steps, not jumps"): its Japanese (with chances, twins.with_chances) in the
+    same order, its particles, endings and other grammar as they are and the words known at a glance (glance(word))
+    too, each other glossed word as English: english_of(word) (english, the entry it is a form of), else its gloss's
+    meaning; a suru verb keeps its ending (a noun entry the word starts with, then a form of suru: "check" then the
+    rest). The closing marks keep the translation. Spaces set the English apart. None when no word turns English."""
+    import twins
+    pieces, at, turned = [], 0, False
+    for m in twins.ABBR.finditer(japanese):
+        if m.start() > at:
+            pieces.append(('raw', japanese[at:m.start()]))
+        at = m.end()
+        word, a = grammar.clean(m.group(2)).strip(), twins.attrs(m.group(1))
+        grammar_word = not CONTENT.search(word) and (word in GRAMMAR_WORDS or all(
+            x in grammar.UNITS for x in grammar._split(word, glossed=True)))
+        if word in twins.END_MARKS:
+            pieces.append(('mark', m.group()))
+        elif grammar_word or glance(word):
+            pieces.append(('ja', m.group()))
+        else:
+            english, entry = english_of(word)
+            english = english or twins.meaning(a.get('title'))
+            if not english:
+                pieces.append(('ja', m.group()))
+                continue
+            pieces.append(('en', twins.esc_text(english)))
+            rest = word[len(entry):] if entry and word.startswith(entry) else ''
+            if rest[:1] in SURU_START and rest:
+                pieces.append(('raw', rest))
+            turned = True
+    if at < len(japanese):
+        pieces.append(('raw', japanese[at:]))
+    if not turned:
+        return None
+    out, before = '', None
+    for kind, text in pieces:
+        last, first = re.sub(r'<[^>]+>', '', out)[-1:], re.sub(r'<[^>]+>', '', text)[:1]
+        if (out and kind != 'mark' and 'en' in (kind, before) and last and first and not last.isspace()
+                and not first.isspace() and last not in STEP_PUNCT and first not in STEP_PUNCT):
+            out += ' '
+        out, before = out + text, kind
+    return out
+
+
+def _step_words(t, words, swaps, know=None):
+    """(english_of, glance) for a twin's middle step: a glossed word (or a form of one) as the English it stands for,
+    from the twin's own English sentence's swaps first, then the reply's, then the weave's (None when none has it);
+    and whether it is known at a glance (free in one of those, or in knowledge.json's words: know)."""
+    import inflection
+    english = {}
+    free = {ja for ja, w in ((know or {}).get('words') or {}).items() if isinstance(w, dict) and w.get('free')}
+    for q in list(t['english']) + list(words) + list(swaps):
+        if isinstance(q, dict) and q.get('ja'):
+            if q.get('en'):
+                english.setdefault(q['ja'], q['en'])
+            if q.get('free'):
+                free.add(q['ja'])
+    lex = inflection.Lexicon([{'ja': ja} for ja in set(english) | free]) if english or free else None
+    entry = (lambda word: lex.entry(word)) if lex is not None else (lambda word: None)
+    return ((lambda word: (english.get(entry(word)), entry(word) if entry(word) in english else None)),
+            (lambda word: word in free or entry(word) in free))
+
+
 def _twin_chances(marked, plan, now_ms, known):
     """[lookup chance or None] of each glossed word in a twin's Japanese (its closing marks left out), for data-p: a
     word (or a form of one) the reply's swaps or the weave's swaps have a chance for (known, {ja: p}), else one of the
@@ -1113,6 +1183,9 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     known.update({w['ja']: w['p'] for w in words})
     for t in kept:
         t['chances'] = _twin_chances(t['marked'], plan, now_ms, known)
+        if plan.steps:
+            english_of, glance = _step_words(t, words, plan.swaps, plan.know)
+            t['step'] = middle_step(twins.with_chances(t['marked'], t['chances']), english_of, glance)
     # the elements, in document order (a twin before its English's words)
     els, owner = [], {}
     seen_costly = set()
@@ -1184,7 +1257,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     expected = [(e.kind, on[i], e.parent, written(chance[id(by_el[i])] if e.kind == 's' else words_p[i]))
                 for i, e in enumerate(els)]
     error = None
-    if [(b['kind'], b['on'], b['parent'], b['p']) for b in back] != expected:
+    if [(b['kind'], b['on'], b['parent'], b['p']) for b in back if b['kind'] != 'm'] != expected:
         error = 'the final markup does not read back to the thresholds and chances assigned'
     if twins.twin_word_chances(final) != [None if x is None else written(x) for t in kept for x in t['chances']]:
         error = "the final markup does not read back to the twins' words' chances"
@@ -1224,7 +1297,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
 
 def _markup(parts, on, reverted, keep, kept_ids):
     """The final markup: the reverted swaps as their English, the dropped twins as their English alone, and every kept
-    swap and twin with its threshold (on) and chance (data-p)."""
+    swap and twin with its threshold (on) and chance (data-p), a twin's middle step (its step) a level below it."""
     import twins
     out = []
     for p in parts:
@@ -1236,8 +1309,10 @@ def _markup(parts, on, reverted, keep, kept_ids):
         elif id(p) in kept_ids:
             n = on.get(id(p), 0)
             chance = f' data-p="{twins.p_text(twins.twin_chance(p["p"]))}"' if p.get('p') else ''
+            step = (f'<span data-jw="mid" data-on="{n - 1}">{p["step"]}</span>'
+                    if p.get('step') and n - 1 >= min(twins.BUDGETED) else '')
             out.append(f'<span data-jw="ja" data-on="{n}"{chance}>'
-                       f'{twins.with_chances(p["marked"], p.get("chances") or ())}</span>'
+                       f'{twins.with_chances(p["marked"], p.get("chances") or ())}</span>{step}'
                        f'<span data-jw="en" data-on="{n}">{_markup(p["english"], on, reverted, keep, kept_ids)}'
                        '</span>')
         else:

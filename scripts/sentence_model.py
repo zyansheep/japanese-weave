@@ -94,7 +94,8 @@ class Leveled:
     def __init__(self, r):
         import twins
         self.r, self.twins = r, twins
-        self.els = [{'kind': e[0], 'on': e[1], 'parent': None if e[2] < 0 else e[2]} for e in r['e']]
+        self.els = twins.link_steps([{'kind': e[0], 'on': e[1], 'parent': None if e[2] < 0 else e[2]}
+                                     for e in r['e']])
 
     def pairs(self):
         """[(fingerprint, pair)] of what each pair shows: every pair of twins.PAIRS from a record with pf, else the

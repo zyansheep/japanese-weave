@@ -120,8 +120,16 @@ The contract with the T3 clients (desktop and phone) is the markup: a swapped wo
 title="reading · meaning" data-en="original English" data-on="N" data-p="P">JAPANESE</abbr>`, shown as that gloss at
 word levels N and up and as its English below; a twinned sentence is `<span data-jw="ja" data-on="N"
 data-p="P">...</span><span data-jw="en" data-on="N">...</span>`, the Japanese from sentence level N up and the English
-below. N is in -2..3 (3: full only). Anything without `data-on` or `data-jw` renders as before, so older messages are
-unchanged. Malformed markup renders by one rule on both clients, each element compared to its own kind's dial, which
+below. N is in -2..3 (3: full only). A twin may carry a middle step between the two (ETHOS.md, "Steps, not jumps"):
+`<span data-jw="mid" data-on="M">...</span>`, only whitespace around it, M below N: the sentence in Japanese order with
+its particles, endings, grammar and the words known at a glance as glossed abbrs and every other word as the English it
+stood for (a suru verb keeps its ending after the English noun), shown from sentence level M to below N, the English only
+below M. check-reply writes it at N - 1 (none at N = -2), only while the pref `sentence_steps` is on (`fw.py steps
+on|off`, off by default until both clients render it); a mid span whose threshold isn't below the pair's never shows
+and the pair is as without it, and one that is no pair's step never shows. In the elements and sentence records a step
+is an element of kind `m` (its threshold, its twin as parent) after all the others, owning its glossed words, and the
+words of the twin's English show only below it. On replies of 2026-11-10 to 15, 25 of 54 twins got a step. Anything
+without `data-on` or `data-jw` renders as before, so older messages are unchanged. Malformed markup renders by one rule on both clients, each element compared to its own kind's dial, which
 `twins.render` mirrors so the fingerprints agree: a Japanese span pairs with an English one right after it (whitespace
 between allowed) of the same threshold; a lone English span always shows; a lone Japanese one shows from its threshold
 and below it is its last sentence mark's translation; in a broken message (a twin span left open, split by a blank

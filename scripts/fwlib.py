@@ -43,6 +43,8 @@ NEW_PER_DAY = 5         # new words a day at most, taken in while the lookup bud
 REVIEW_NEW_PREF = 'review_new_per_day'  # the reader's own limit of new review cards a day (review.py)
 REVIEW_NEW_DEFAULT = 10  # without one
 REVIEW_NEW_MAX = 200
+STEPS_PREF = 'sentence_steps'  # whether twins carry a middle step (twins.py, ETHOS.md "Steps, not jumps"): the
+                               # clients must render data-jw="mid" before it is on
 # Words from your reading (reading.py): a dictionary entry is eligible to come in once it came up on ELIGIBLE_DAYS
 # different days of the last READING_DAYS (reading.nominations).
 READING_DAYS = 30
@@ -152,6 +154,11 @@ def review_new_per_day(state):
     """How many new review cards a day: the reader's pref when set, else REVIEW_NEW_DEFAULT."""
     value = ((state.get('prefs') or {}) if isinstance(state, dict) else {}).get(REVIEW_NEW_PREF)
     return value if valid_review_new(value) else REVIEW_NEW_DEFAULT
+
+
+def sentence_steps(state):
+    """Whether check-reply gives each twin its middle step: the reader's pref, off unless set."""
+    return ((state.get('prefs') or {}) if isinstance(state, dict) else {}).get(STEPS_PREF) is True
 
 
 def days_between(a, b):

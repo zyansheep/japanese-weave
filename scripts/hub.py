@@ -14,7 +14,8 @@ Ops (each also carries uid, day, at and machine; see stamp):
   set       {"stage"?: 1-4 | "auto", "paused"?: bool, "prefs"?: {"chat_glosses"?, "challenge"?, "extension_sites"?,
              "intensity_chat"?, "intensity_sentences"?, "intensity_browser"?: {level -3..3, until, at, source}}}
                                                        (intensity.py; chat: the word level, sentences: chat's
-                                                       sentence level), "review_new_per_day"?: 0-200 (review.py)
+                                                       sentence level), "review_new_per_day"?: 0-200 (review.py),
+                                                       "sentence_steps"?: bool (twins' middle steps, twins.py)
   seed      {"n": N}                                   the top N lexicon words known, unless already introduced
   anki      {"words": [{ja, en, hint, kana, interval, mature}], "known": [ja]}   Anki review words first
   exposure  {"replies": [{"d": digest, "day", "words": [ja], "entries"?: {entry id: times}}]}   chat replies scanned
@@ -113,7 +114,8 @@ def is_day(value):
 PREFS = {'chat_glosses': lambda v: v in ('abbr', 'footer'), 'chat_style': lambda v: v in ('draft', 'classic'),
          'challenge': knowledge.valid_challenge, 'extension_sites': lambda v: v in ('all', 'ask'),
          'intensity_chat': intensity.valid, 'intensity_browser': intensity.valid,
-         'intensity_sentences': intensity.valid, fwlib.REVIEW_NEW_PREF: fwlib.valid_review_new}
+         'intensity_sentences': intensity.valid, fwlib.REVIEW_NEW_PREF: fwlib.valid_review_new,
+         fwlib.STEPS_PREF: lambda v: isinstance(v, bool)}
 LIVE_TIMEOUT = 0.3         # seconds the hook waits for the collector's intensity before using the cache
 
 

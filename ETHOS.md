@@ -46,6 +46,10 @@ what they can already read:
 Each sentence carries its ladder, and the reader's dials choose the step. Taking a sentence down a step undoes its
 construction back to the weave, never to bare English, so the words already earned stay in view.
 
+In code: check-reply writes the middle step itself from the writer's Japanese sentence (the particles, endings, grammar
+and words known at a glance stay; each other word becomes the English it stood for), and it shows one sentence level
+below the full sentence. `fw.py steps on` turns it on once the chat client renders it.
+
 ## Fix, don't drop
 
 Every rule the code checks is there to keep a meaning from going wrong. When code can see what the writer meant and
