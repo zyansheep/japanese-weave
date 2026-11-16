@@ -378,8 +378,10 @@ class Brief(Home):
     def test_no_japanese_in_scripted_runs(self):
         self.assertIn('Japanese Weave', self.run_hook({}))  # no claude parent here: weave by default
         self.assertEqual(self.run_hook({}, JAPANESE_WEAVE_OFF='1'), '')
-        # Agent SDK scripts stay silent, except under T3 Code (which these tests may themselves run under).
-        self.assertEqual(self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-py') != '', weave.t3_host())
+        # Agent SDK scripts stay silent, except under T3 Code (which these tests may themselves run under). The hook
+        # runs as this process's child, so it looks for T3 from here: from this process's parent instead, the search
+        # starts a level higher and, under one more wrapping shell, ends at a different ancestor (a flaky result).
+        self.assertEqual(self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-py') != '', weave.t3_host(os.getpid()))
         self.assertIn('Japanese Weave', self.run_hook({}, CLAUDE_CODE_ENTRYPOINT='sdk-cli', CLAUDE_CODE_SESSION_ATTENDED='0'))
         one_shot = ['claude', '-p', '--model', 'haiku', 'Reply OK']
         remote = ['claude', '--print', '--sdk-url', 'https://example.invalid/v1/code/sessions/x', '--session-id', 'x',

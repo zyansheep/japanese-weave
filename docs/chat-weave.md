@@ -17,12 +17,17 @@ for the Japanese sentences.
    - `verify.js` `candidatesOf` and `levels.js` `planSwaps` place them as at full: every candidate, whatever the
      level, since the reply has to hold what every level shows.
 
-   Words known at a glance go in line by line, once a line. The rest go over the whole reply, a word again where it
+   Words known at a glance go in line by line, each wherever it fits (once a line until 2026-11-15, which left 5% of
+   the places a known word fit English). The rest go over the whole reply, a word again where it
    fits, with at most 6 dictionary words the reader doesn't have yet (those nearest the target lookup chance), which
    show only at full. In chat a word's own glosses count as safe (`webdata.add_word_data` with `own_safe`, from
    `chatweave.words_for`), but for closed-class English, as `senses.js` treats it: kuruma is sure for "car" though
    `data/senses.tsv` flags only "automobile"; the web keeps the flags. A span still unsure (one of closed-class
-   English: "now", "one", "all") is taken at its first option and marked `{{English→Japanese}}`. Inline code, link
+   English: "now", "one", "all") is taken at its first option and marked `{{English→Japanese}}`, unless the English is
+   one of the word's own glosses ("now" for ima): then it is sure (ETHOS.md; over 410 drafts since 2026-11-10 that
+   took unsure swaps from 7.9 to 0.1 per 100 words). No swap is or touches a number ("4.2" once came back with a
+   numeral for its 2), and no single kana sound is a word to swap in (`fwlib.letter`: 52 of them, marked known with
+   their frequency-list senses, "the" and "is" among them, were 18% of the weave's swaps). Inline code, link
    targets, URLs, tags and paths (`/home/a/b`, `research/net/player/`, `scripts/fw.py`: a run of non-space characters
    that starts with `/` or `~/` or has a `/` between word characters) are left alone.
 
@@ -34,10 +39,11 @@ for the Japanese sentences.
    kept in `weave-swaps.json` for the check, those for twins flagged `twin`. The first line names the learning words
    and asks for a Japanese twin of each sentence that fits the limits: at most so many Japanese characters a sentence (where known patterns reach a 5% open chance), the known
    grammar patterns plus at most one learning pattern, and this week's learning pattern with its explanation and
-   example, to use on purpose in a twin or two (`chatweave.sentence_plan`). It asks for at most 1.5 times the
-   sentences much heavier (+2) pays for at the price of a sentence, and at least 3: full shows every twin, but full
-   costs more reading than it teaches (round 4 below) and is rarely read, so twins past what +2 uses mostly serve it;
-   the slack leaves the ranking a choice and covers the twins the check drops.
+   example, to use on purpose in a twin or two (`chatweave.sentence_plan`). It asks for a firm number
+   of twins, one per 60 English words (`chatweave.twin_least`), at most 1.5 times the sentences much heavier (+2) pays
+   for at the price of a sentence and at least 1. A range ("about 17 and up to 122") was read as optional: from
+   2026-11-13 to 15 the writer wrote 239 of the 657 twins asked for. While the sentence level is off (for 3 hours or
+   until changed) the line asks for none, and the hook's brief leaves out how to write them (`weave.word_rules`).
 3. Claude writes the reply from the output: its English sentences keeping the swaps wherever the sentence's meaning
    still gets across (a near synonym is fine), and undoing one only where the Japanese would obscure or change the
    meaning, written `{{like this}}` so the check leaves it English; and right after
@@ -58,6 +64,10 @@ for the Japanese sentences.
        This is a problem.<ja><abbr title="this">これ</abbr>は<abbr title="もんだい · problem">問題</abbr>です。</ja>
 
 4. Claude passes it to `fw.py check-reply --level N` (and `--sentences S`), which:
+   - first mends what it can see (`check_reply.mend`, ETHOS.md "Fix, don't drop"): inside a twin, a bare word that
+     carries meaning and that code can gloss (も, か, この, これ, あります, します and the like, `GLOSSABLE`) gets its
+     gloss and English articles go; anywhere, "an" before a Japanese word becomes "a". These had dropped 71 of 126
+     twins on their first check (2026-11-12 to 15). The summary lists each as "mended";
    - stops only on what code can't fix: a `<ja>` without its `</ja>` or its English sentence, Japanese outside twins
      and glosses, a Japanese sentence outside `<ja>`;
    - drops a twin that breaks a limit (more than two sentences, too long, grammar not on the list, two learning
@@ -140,7 +150,8 @@ English only stays one switch over both, rendering both as -3. Until the reader 
 first experience is one dial, and an off spell from before the sentence level keeps the sentences off too. Off still
 means no Japanese: `fw.py intensity off` (and the skill's off), `normal` and `full` without a dial named, and saying
 "japanese back on", set both dials (a dial that follows the words just follows them, so it stays one dial), while
-`fw.py intensity chat off` or `sentences off` turns one kind off. `fw.py intensity sentences off always` keeps the
+`fw.py intensity chat off` or `sentences off` turns one kind off, and while the sentences are off no twins are
+written (a reply written then shows none if the dial goes back up). `fw.py intensity sentences off always` keeps the
 sentences off until changed (until `intensity.KEEP`), and the hook then asks for no twins at all. `fw.py intensity sentences up` and the like step the
 sentence level, and `fw.py intensity` shows both. The hook passes the live levels to the commands it asks Claude to
 run (`--level W --sentences S`; `--level` alone, as in older briefs, means both dials at it), so the weave and the

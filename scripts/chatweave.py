@@ -168,11 +168,12 @@ def twin_words(swaps, inline):
                               if not here and s['ja'] not in check_reply.PRONOUNS and s['ja'] not in shown))
 
 
-def first_line(woven, plan, cap, heaviest, inline=None, least=None):
+def first_line(woven, plan, cap, heaviest, inline=None, least=None, twins_off=False):
     """The weave's first line: the swaps in the text (known, learning, dictionary words by name, unsure ones), the
     learning words by name, the words for twins only (twin_words), then the twins to write, their limits and grammar
     (sentence_plan) and this week's learning pattern. inline: a flag per swap, whether the text offers it (offers;
-    None: every one). least: the fewest twins to write (twin_least; None: no least)."""
+    None: every one). least: the twins to write (twin_least; None: up to cap). twins_off: the sentence level is off,
+    so the line asks for no twins and names no words for them."""
     swaps = woven['swaps']
     inline = [True] * len(swaps) if inline is None else inline
     shown = [s for s, here in zip(swaps, inline) if here]
@@ -190,13 +191,14 @@ def first_line(woven, plan, cap, heaviest, inline=None, least=None):
             + (f'; learning words {names(teach)}: keep each whose sense fits, in a twin when it can\'t stay in the '
                'English' if teach else '')
             + f'. {sum(1 for s in shown if s.get("unsure"))} swaps are marked {{{{English→Japanese}}}}: the code '
-            'wasn\'t sure of the sense. '
-            + (f'For twins only (they can\'t stay in an English sentence): {"; ".join(others)}. ' if others else '')
-            + 'Twins: right after each sentence you can say in Japanese within these limits, write its Japanese in '
-            '<ja>...</ja>, '
-            + (f'about {least} (where sentences fit whole: never a gist) and ' if least and least < cap else '')
-            + f'up to {cap} twins (much heavier shows about {max(1, round(heaviest))}, full shows them all; '
-            'code chooses which show at each level). '
+            'wasn\'t sure of the sense. ')
+    if twins_off:
+        return line + ('Japanese sentences are off: write no <ja> twins, only the English with the weave\'s swaps.')
+    want = least if least else cap
+    line += ((f'For twins only (they can\'t stay in an English sentence): {"; ".join(others)}. ' if others else '')
+            + f'Twins: write {want} twin{"s" if want > 1 else ""}, each right after an English sentence you can say '
+            'whole in Japanese within these limits, in <ja>...</ja> (a twin that leaves out part of its sentence is '
+            'dropped; code chooses which twins show at each level). '
             f'Each Japanese sentence at most {plan.get("maxChars") or 14} Japanese characters (a twin may be two short '
             f'sentences), using only these grammar patterns: {", ".join(g.get("known") or ())}; plus at most one '
             'learning pattern in a sentence. '
@@ -206,11 +208,12 @@ def first_line(woven, plan, cap, heaviest, inline=None, least=None):
     return line
 
 
-def weave(draft, level=0, state=None, session=None, remember=True):
+def weave(draft, level=0, state=None, session=None, remember=True, sentences=None):
     """The draft woven with every candidate swap: the weave's first line, -----, then the text, which offers the swaps
     that may stay in an English sentence (offers) and leaves the rest English, named on the first line for twins only.
     Every swap is kept for the check step (twins.remember_swaps; remember False: none), those for twins flagged twin.
-    level: the chat's level now (the first line doesn't depend on it)."""
+    level: the chat's level now (the first line doesn't depend on it); sentences: the sentence level, and when it is
+    off the first line asks for no twins."""
     js = runtime()
     if js is None:
         raise RuntimeError('no node or bun to run the weave')
@@ -231,5 +234,7 @@ def weave(draft, level=0, state=None, session=None, remember=True):
                              session)
     price = intensity.sentence_price(know)
     cap, heaviest = twin_cap(woven['words'], knowledge.challenge_of(state) or None, price)
-    return (first_line(woven, sentence_plan(state, know), cap, heaviest, inline, twin_least(woven['words'], cap)) + '\n-----\n'
+    off = sentences is not None and intensity.is_off(sentences)
+    return (first_line(woven, sentence_plan(state, know), cap, heaviest, inline, twin_least(woven['words'], cap),
+                       twins_off=off) + '\n-----\n'
             + render(woven, inline))

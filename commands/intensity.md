@@ -14,7 +14,7 @@ panel's arrows): replies are written without them. `always` works with `off` or 
 
 `off` and `full` set the ends directly for 3 hours, in every chat (or on web pages, with `browser`): with no dial named
 both chat dials, no Japanese at all or all you can follow; `chat off` or `sentences off` turns off only the swapped
-words or only the Japanese sentences. `normal` brings back the usual amount (both dials when none is named).
+words or only the Japanese sentences (while the sentences are off, replies are written without them). `normal` brings back the usual amount (both dials when none is named).
 
 `english on` shows chat in English for an hour (T3 Code's shortcut toggles the same switch): the messages on screen
 show their English, and new replies keep their Japanese twins, shown once it ends; `english off` ends it.

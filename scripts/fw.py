@@ -56,6 +56,11 @@
   fw.py check-reply [--level N] [FILE]               check a reply written with <ja> twins, drop what breaks the
                                                      limits, choose what each level shows (thresholds and
                                                      propensities) and print the final markup to send
+  fw.py backtest [--since DATE] [--limit N] [--jobs N] [--level N --sentences N] [--out FILE] [--against FILE] [--fw PATH]
+                                                     replay the chat replies woven so far through today's weave
+                                                     and check, on copies of the word state, and report how much
+                                                     Japanese they show and what was dropped, as sent and now
+                                                     (scripts/backtest.py; ETHOS.md "Measure it")
   fw.py grammar [known|learning|new PATTERN]         the grammar patterns with your status and fitted difficulty
                                                      (docs/grammar.md), or set one pattern's status
   fw.py intensity english [on|off]                   chat shown in English for an hour (T3 Code's shortcut does
@@ -146,6 +151,7 @@ import chatweave  # noqa: E402
 import check_reply  # noqa: E402
 import grammar  # noqa: E402
 import sentence_model  # noqa: E402
+import backtest  # noqa: E402
 
 HOST_NAME = 'com.japaneseweave.host'
 EXTENSION_ID = 'memhbflhgmgbmoaphojljmdmcamnmljb'  # Chrome: fixed by the "key" in extension/manifest.json
@@ -874,9 +880,14 @@ def weave_cmd(args):
     if intensity.is_off(level) and intensity.is_off(sentences):
         sys.exit('Japanese is off in chat: send the draft as it is.')  # both dials (the twins show at the other)
     try:  # English only too: the reply carries its Japanese, shown once English only is off (twins.py)
-        print(chatweave.weave(read_input(args.file), level))
+        print(chatweave.weave(read_input(args.file), level, sentences=sentences))
     except Exception as error:
         sys.exit(f'The weave failed ({error}): send the English draft as it is.')
+
+
+def backtest_cmd(args):
+    args.levels = command_levels(args)
+    backtest.main(args)
 
 
 def check_reply_cmd(args):
@@ -1217,6 +1228,16 @@ def main(argv=None):
     p.add_argument('--sentences', type=int, choices=list(intensity.LEVELS))
     p.add_argument('file', nargs='?')
     p.set_defaults(run=check_reply_cmd)
+    p = sub.add_parser('backtest')
+    p.add_argument('--since', help='only replies woven on or after this date (2026-11-13)')
+    p.add_argument('--limit', type=int, help='only the latest N replies')
+    p.add_argument('--jobs', type=int, default=4)
+    p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
+    p.add_argument('--sentences', type=int, choices=list(intensity.LEVELS))
+    p.add_argument('--out')
+    p.add_argument('--against')
+    p.add_argument('--fw', help="another checkout's scripts/fw.py to replay through (a baseline)")
+    p.set_defaults(run=backtest_cmd)
     p = sub.add_parser('glosses')
     p.add_argument('style', choices=['abbr', 'footer'])
     p.set_defaults(run=glosses)

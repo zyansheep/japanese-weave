@@ -54,7 +54,8 @@ class Weave(unittest.TestCase):
         out = run_mjs({'draft': DRAFT, 'words': WORDS})
         rest, swaps = out['text'], out['swaps']
         self.assertIn('<abbr title="もんだい · problem">問題</abbr>', rest)  # safe: placed outright
-        self.assertIn('{{now→<abbr title="いま · now">今</abbr>}}', rest)  # no safe sense: marked for the writer
+        # no safe sense, but "now" is the word's own gloss: sure all the same (ETHOS.md)
+        self.assertIn('fix <abbr title="いま · now">今</abbr>.', rest)
         self.assertIn('情報', rest)  # a learning word, at every level's candidates
         self.assertEqual(rest.count('<abbr title="じょうほう · information">情報</abbr>'), 2)  # as at full: each place
         self.assertIn('problem = now()  # code stays as it is', rest)  # code fences untouched
@@ -63,7 +64,7 @@ class Weave(unittest.TestCase):
         self.assertEqual((info['en'], info['title'], info['free'], info['dictionary']),
                          ('information', 'じょうほう · information', False, False))
         self.assertAlmostEqual(info['p'], 1 / (1 + math.exp(1.2)), places=3)  # its chance from k, as costOf prices it
-        self.assertTrue(next(s for s in swaps if s['ja'] == '今')['unsure'])
+        self.assertFalse(next(s for s in swaps if s['ja'] == '今')['unsure'])
         self.assertEqual((info['before'][-9:], info['after'][:6]), ('Read the ', ' below'))  # its context
         self.assertTrue(next(s for s in swaps if s['ja'] == '問題')['free'])
         self.assertTrue(30 < out['words'] < len(DRAFT.split()))  # the prose's words, the fence's left out
@@ -93,10 +94,10 @@ class Weave(unittest.TestCase):
         head, rest = short.split('\n-----\n', 1)
         self.assertTrue(head.startswith('jw-weave: '))
         self.assertIn('情報: keep each whose sense fits', head)  # the learning words named
-        self.assertIn('Twins: right after each sentence you can say in Japanese', head)
-        self.assertIn(f'up to {chatweave.TWIN_MIN} twins', head)  # a short reply: the least
-        cap = lambda out: int(out.split('up to ')[1].split(' ')[0])
-        self.assertGreater(cap(long), cap(short))  # the cap grows with the reply
+        self.assertIn('Twins: write ', head)
+        self.assertIn('Twins: write 1 twin,', head)  # a short reply: one per WORDS_PER_TWIN words, at least one
+        count = lambda out: int(out.split('Twins: write ')[1].split(' ')[0])
+        self.assertGreater(count(long), count(short))  # the count grows with the reply
         self.assertIn('<abbr title="じょうほう · information">情報</abbr>', rest)
         self.assertEqual(pool.call_count, 2)  # the dictionary words: on every weave now
         self.assertIn('情報', [s['ja'] for s in kept])  # kept for the check step, per session

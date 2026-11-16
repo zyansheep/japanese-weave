@@ -201,8 +201,8 @@ class Hook(Server):
         hub.submit({'kind': 'set', 'prefs': {'chat_glosses': 'abbr'}})
         with mock.patch.object(weave, 't3_host', return_value=True), \
                 mock.patch.object(chatweave, 'runtime', return_value='/bin/node'):
-            self.fw('intensity', 'sentences', 'off')  # for 3 hours: the twins are written all the same
-            self.assertNotIn(weave.NO_TWINS_LINE, self.hook('What is a monad?'))
+            self.fw('intensity', 'sentences', 'off')  # for 3 hours: no twins asked for either (nobody sees them)
+            self.assertIn(weave.NO_TWINS_LINE, self.hook('What is a monad?'))
             self.assertIn('Chat sentences: off until you change it', self.fw('intensity', 'sentences', 'off', 'always'))
             chat = feedback.request(self.url + '/v1/intensity?surface=chat')
             self.assertEqual((chat['sentences']['level'], chat['sentences']['until']), (-3, intensity.KEEP))
@@ -604,7 +604,7 @@ class KnownAdverbs(unittest.TestCase):
     def test_the_brief_says_so(self):
         self.assertIn('adverbs among the known-word swaps', weave.DRAFT_RULES)
         self.assertIn('rather than one that drops the swap', weave.DRAFT_RULES)
-        self.assertEqual(weave.RULES, 'offers')
+        self.assertEqual(weave.RULES, 'mend')
         state = fwlib.new_state(known_top=10)
         plan = {'level': 0, 'intensity': 1.0, 'offered': [], 'arms': {}, 'known': 3, 'whole': True}
         again, _after, record = weave.compose_draft(state, 0, {'rules': 'twins', 'known': []}, 'fw', plan)

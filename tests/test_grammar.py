@@ -308,7 +308,7 @@ class FirstLine(unittest.TestCase):
         woven = {'swaps': [{'ja': '情報', 'free': False, 'dictionary': False, 'unsure': False},
                            {'ja': '記録', 'free': False, 'dictionary': True, 'unsure': True}]}
         head = chatweave.first_line(woven, plan, 9, 6.2)
-        self.assertIn('up to 9 twins (much heavier shows about 6', head)
+        self.assertIn('Twins: write 9 twins,', head)
         self.assertIn('at most 11 Japanese characters', head)
         self.assertIn('grammar patterns: は (topic), です (is); plus at most one learning pattern', head)
         self.assertIn(f"This week's learning pattern is {teiru.name}: {teiru.explain}, as in {teiru.example}", head)

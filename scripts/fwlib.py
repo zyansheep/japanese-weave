@@ -283,7 +283,7 @@ def seed_known(state, n, day=None):
     known. Words already learning or known keep their label, so seeding never resets progress. Returns how many words
     changed."""
     day = day or today()
-    seeded = [w for w in state['words'][:max(n, 0)] if w['status'] == 'queue']
+    seeded = [w for w in state['words'][:max(n, 0)] if w['status'] == 'queue' and not letter(w['ja'])]
     for w in seeded:
         set_status(w, 'known', day)
         w['origin'] = 'known'
@@ -295,7 +295,7 @@ def mark_known(state, names, day=None):
     entries found, whether they changed or not."""
     day = day or today()
     by_key = {key(w['ja']): w for w in state['words']}  # thousands of words: one lookup each
-    entries = [e for e in (by_key.get(key(name)) or find(state, name) for name in names) if e]
+    entries = [e for e in (by_key.get(key(name)) or find(state, name) for name in names) if e and not letter(e['ja'])]
     for e in entries:  # learning words keep learning; only words not introduced yet jump to known
         if e['status'] == 'queue':
             set_status(e, 'known', day)
@@ -760,12 +760,25 @@ def apply_event(state, ja, kind, day=None):
     return True
 
 
+SMALL_KANA = set('ぁぃぅぇぉゃゅょゎァィゥェォャュョヮ')
+KANA_ONLY = re.compile('[ぁ-ゖァ-ヺー]+')
+
+
+def letter(ja):
+    """Whether a spelling is one kana sound alone (ざ, む, てぃ, に): a letter of the syllabary, or a particle, not a
+    word to swap in. The frequency list has such entries (ざ "the", す "is", む "six"), and once marked known they
+    were offered for every "the" and "is" in a chat draft, and for digits inside numbers (18% of the weave's swaps
+    over 633 drafts, 2026-11-15)."""
+    ja = str(ja or '')
+    return bool(KANA_ONLY.fullmatch(ja)) and sum(1 for c in ja if c not in SMALL_KANA) <= 1
+
+
 def introduced(state, day=None):
     """The words every surface may use on `day` (default today): in use (learning and known) and not hidden by the
-    delayed-start experiment (hidden), learning words first."""
+    delayed-start experiment (hidden), learning words first; never a single kana sound (letter), whatever its label."""
     day = day or today()
     order = {'shaky': 0, 'active': 1, 'known': 2}
-    words = [w for w in state['words'] if w['status'] in order and not hidden(w, day)]
+    words = [w for w in state['words'] if w['status'] in order and not hidden(w, day) and not letter(w['ja'])]
     return sorted(words, key=lambda w: (order[w['status']], w['added']))
 
 

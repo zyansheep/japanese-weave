@@ -3,7 +3,7 @@
 // candidatesOf and levels.js planSwaps pick them by the word model. A span the web would ask its model about is taken at
 // its first option and marked {{English→Japanese}}, for the writer to keep or undo. Since replies carry every level
 // at once (twins.py), the weave offers every candidate, as at full (intensity 3): words known at a glance line by line
-// (each once a line, as planSwaps keeps one use of a word per passage at normal), then the rest over the whole reply at
+// (at full: a word again where it fits), then the rest over the whole reply at
 // full, a word again where it fits, and at most DICTIONARY_MAX of the dictionary words (the host's pool, flagged dictionary: true)
 // that aren't in the word list, those nearest the target lookup chance first; check-reply decides what each level
 // shows. Code fences, inline code, link targets, URLs, tags and paths (PATH) are left alone. Reads one JSON object on
@@ -75,16 +75,24 @@ function placed(text, offset, level) {
     if (s.kind) continue; // sentences and phrases: none without a model's answer
     const m = locate({ text }, s.o, s.ctx);
     if (!m) continue;
-    const unsure = plan.spans.some((x) => x.doubtful.length && x.span.start === m.start && x.span.end === m.end);
+    // Never a number, or a word inside or right next to one ("4.2" once came back with ふ, "two / 2", for its 2).
+    if (/\d/.test(text.slice(m.start, m.end)) || /\d[.,]?$/.test(text.slice(0, m.start)) || /^[.,]?\d|^%/.test(text.slice(m.end))) continue;
+    // Unsure only where the English isn't one of the word's own glosses (ETHOS.md: an approximate meaning beats none;
+    // the check's put-back skips unsure swaps, and the writer dropped most of them).
+    const en = text.slice(m.start, m.end).toLowerCase();
+    const w = byJa.get(exactJa(s.f));
+    const own = new Set([...(w?.glosses || []), ...String(w?.en || '').split(' / ')].map((g) => String(g).trim().toLowerCase()));
+    const unsure = !own.has(en) && plan.spans.some((x) => x.doubtful.length && x.span.start === m.start && x.span.end === m.end);
     out.push({ start: offset + m.start, end: offset + m.end, en: text.slice(m.start, m.end), ja: s.f, reading: s.k,
       gloss: s.g, unsure, ...chanceOf(s.f) });
   }
   return out;
 }
 
-// Known words line by line, at normal with no budget: each once a line; then the rest over the whole reply, at full.
+// Known words line by line, at full: every place each fits, a word again where it recurs (once a line kept 5% of the
+// places a known word fits English, 2026-11-15); then the rest over the whole reply, at full.
 const swaps = [];
-for (const l of lines) if (!zero(l) && wordCount(l.text) >= 3) swaps.push(...placed(l.text, l.start, 0).filter((s) => s.free));
+for (const l of lines) if (!zero(l) && wordCount(l.text) >= 3) swaps.push(...placed(l.text, l.start, 3).filter((s) => s.free));
 const lineOf = (pos) => lines.find((l) => pos >= l.start && pos <= l.start + l.text.length);
 const logit = (p) => Math.log(p / (1 - p));
 const closeness = (s) => -Math.abs(logit(Math.min(Math.max(s.p, 1e-6), 1 - 1e-6)) - logit(TARGET_P));

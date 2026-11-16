@@ -36,7 +36,7 @@ RUN = re.compile('[぀-ヿ㐀-鿿々ー、。？！「」・〜（）]+')
 KANJI = re.compile('[㐀-鿿]')
 LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
 MARKS = ('。', '？', '！', '?', '!')
-PRONOUNS = {'あなた', '私', '僕', '君', '彼', '彼女', 'あなたたち', '私たち'}
+PRONOUNS = {'あなた', '私', '僕', '俺', '君', '彼', '彼女', 'あなたたち', '私たち'}
 ENGLISH_ONLY_NOUNS = {'これ', 'それ', 'あれ', '自分'}  # nouns by type, but they stand in for English pronouns
 AFTER_NOUN = {'前', '後', '中', '上', '下', '間', '代わりに', 'くらい', 'まで'}
 CONDITIONAL = re.compile('なら|たら|だら|れば|えば|けば|せば|てば|ねば|べば|めば|ければ|ても|でも')
@@ -122,6 +122,75 @@ def ungrammatical(run):
     return ''.join(rest)
 
 
+# Bare Japanese inside a twin that code glosses itself rather than dropping the twin (mend, ETHOS.md "Fix, don't
+# drop"): words that carry meaning, with the meaning a reader hovering them should see. Of 126 twins dropped on their
+# first check (2026-11-12 to 15), 71 left one of these bare (も, この, これは, にあります, しました).
+GLOSSABLE = {
+    'も': 'also / even', 'か': 'or / (question)', 'や': 'and so on', 'から': 'from / because', 'まで': 'until / up to',
+    'だけ': 'only', 'より': 'than', 'けど': 'but', 'ので': 'so / because', 'でも': 'but / even', 'ほど': 'about / as much as',
+    'これ': 'this', 'それ': 'that', 'あれ': 'that over there', 'この': 'this', 'その': 'that', 'あの': 'that ... over there',
+    'ここ': 'here', 'そこ': 'there', 'どこ': 'where', 'どれ': 'which', 'どの': 'which', 'どう': 'how', 'こう': 'like this',
+    'そう': 'so / like that', 'なに': 'what', 'なん': 'what', 'いつ': 'when', 'だれ': 'who', 'それぞれ': 'each',
+    'あります': 'there is / has', 'ありません': "there isn't / doesn't have", 'ありました': 'there was / had',
+    'ありませんでした': "there wasn't", 'ある': 'there is / has', 'あり': 'there is / has',
+    'います': 'is (there) / -ing', 'いません': "isn't (there)", 'いました': 'was (there)',
+    'します': 'do / does', 'しました': 'did', 'しません': "don't do", 'しませんでした': "didn't do", 'して': 'do and',
+    'なります': 'becomes', 'なりました': 'became', 'なりません': "doesn't become",
+    'まだ': 'still / not yet', 'もう': 'already / anymore', 'また': 'again / also', 'とても': 'very', 'ちょっと': 'a little',
+    'もっと': 'more', 'すぐ': 'soon / right away', 'いつも': 'always', 'よく': 'often / well', 'いい': 'good',
+    'ない': 'not', 'たくさん': 'a lot', 'みんな': 'everyone / all', 'すべて': 'all', 'ください': 'please',
+}
+MEND_PIECES = sorted(set(GLOSSABLE) | set(GRAMMAR), key=len, reverse=True)
+TWIN = re.compile(r'(<ja>)(.*?)(</ja>)', re.S)
+TAGGED = re.compile(r'(<abbr\b[^>]*>.*?</abbr>|`[^`\n]*`)', re.S)
+AN_BEFORE_JAPANESE = re.compile(r'\b([Aa])n(\s+<abbr\b[^>]*>[぀-ヿ㐀-鿿々])')
+
+
+def _mend_run(run):
+    """A bare run of Japanese with its GLOSSABLE words wrapped, or None when some of it is neither those nor GRAMMAR
+    (then the twin is held to the rules as written)."""
+    i, out, glossed = 0, [], 0
+    while i < len(run):
+        piece = next((g for g in MEND_PIECES if run.startswith(g, i)), None)
+        if piece is None:
+            return None
+        if piece in GLOSSABLE and piece not in GRAMMAR:
+            out.append(f'<abbr title="{GLOSSABLE[piece]}">{piece}</abbr>')
+            glossed += 1
+        else:
+            out.append(piece)
+        i += len(piece)
+    return ''.join(out) if glossed else None
+
+
+def mend(text):
+    """(text, notes): the mechanical slips code fixes rather than dropping a twin for (ETHOS.md): inside each <ja>
+    twin, bare words that carry meaning (GLOSSABLE) get their gloss and English articles go; anywhere, "an" before a
+    Japanese word becomes "a". Code spans and abbrs are left as they are."""
+    notes = []
+
+    def twin(m):
+        pieces = TAGGED.split(m.group(2))
+        for k in range(0, len(pieces), 2):  # the bare text between tags
+            seg = pieces[k]
+            seg2 = RUN.sub(lambda r: _mend_run(r.group()) or r.group(), seg)
+            if seg2 != seg:
+                notes.append('glossed ' + ', '.join(sorted(set(re.findall(r'>([^<]+)</abbr>', seg2)) -
+                                                        set(re.findall(r'>([^<]+)</abbr>', seg)))))
+            seg3 = re.sub(r'(?<![\w-])(?:the|an?)\s+(?=[A-Za-z<])', '', seg2, flags=re.I) if JAPANESE.search(m.group(2)) \
+                else seg2
+            if seg3 != seg2:
+                notes.append('dropped an English article inside a twin')
+            pieces[k] = seg3
+        return m.group(1) + ''.join(pieces) + m.group(3)
+
+    text = TWIN.sub(twin, text)
+    text, n = AN_BEFORE_JAPANESE.subn(r'\1\2', text)
+    if n:
+        notes.append(f'"an" before a Japanese word made "a" ({n})')
+    return text, notes
+
+
 def sentences(line):
     """A line's sentences as lists of tokens: ('w', ja, title) for a glossed word, ('m', mark, title) for a glossed
     closing mark (which ends its sentence), ('t', text) for the rest, which is split at English sentence ends."""
@@ -196,6 +265,10 @@ def type_problem(ja, pos, en=None, known=False, attributive=False):
             'adverbs known at a glance go')
 
 
+# A number right before or after a word, a decimal point or thousands comma between (4.2, 1,000, 5%): no Japanese word
+# goes there.
+NEXT_TO_NUMBER_BEFORE = re.compile(r'\d\s*$|\d[.,]$')
+NEXT_TO_NUMBER_AFTER = re.compile(r'\s*\d|[.,]\d|%')
 FOLLOWED = re.compile(r'\s*[A-Za-z]')  # an English word next: a Japanese adjective before it is attributive
 
 
@@ -207,7 +280,8 @@ def may_stay(swap, types=None):
     types = word_types() if types is None else types
     before, after = swap.get('before') or '', swap.get('after') or ''
     followed = bool(FOLLOWED.match(after))
-    if (swap['ja'] in AFTER_NOUN and followed) or re.search(r'\d\s*$', before) or re.match(r'\s*\d', after):
+    if (swap['ja'] in AFTER_NOUN and followed) or NEXT_TO_NUMBER_BEFORE.search(before) or \
+            NEXT_TO_NUMBER_AFTER.match(after) or re.search(r'\d', str(swap.get('en') or '')):
         return False
     return english_problem(swap['ja'], types.get(swap['ja']), swap.get('en'), bool(swap.get('free')),
                            followed) is None
@@ -268,7 +342,7 @@ def sentence_problems(sent, types, english=False, known=None, english_of=None):
             add(f'{ja} as an English pronoun in a sentence that stays English', i)
         if ja in AFTER_NOUN and re.match(r'\s*[A-Za-z]', next_text):
             add(f'{ja} follows its noun in Japanese, but here it stands before English like a preposition', i)
-        if re.search(r'\d\s*$', prev_text) or re.match(r'\s*\d', next_text):
+        if NEXT_TO_NUMBER_BEFORE.search(prev_text) or NEXT_TO_NUMBER_AFTER.match(next_text):
             add(f'{ja} sits right next to a number', i)
         if stays_english:  # the pronouns said above
             why = type_problem(ja, types.get(ja), english_of(t) if english_of is not None else None,
@@ -614,7 +688,7 @@ def put_back(lines, words, swaps, types, contexts=None):
     used = {id(s) for s, _sure in matched.values()}
     wanted = [k for k, s in enumerate(swaps) if id(s) not in used and not s.get('unsure') and not s.get('twin')
               and not s.get('dictionary') and s.get('ja') and s.get('title') and WORD.search(str(s.get('en')).lower())
-              and may_stay(s, types)]
+              and not re.search(r'\d', str(s.get('en'))) and may_stay(s, types)]
     if not wanted:
         return lines, 0
     # the reply's English as the reader reads it (code out, a gloss as its English), and the places a swap may go: its
@@ -652,6 +726,8 @@ def put_back(lines, words, swaps, types, contexts=None):
             before = set(stream[max(0, at - CONTEXT_WORDS):at]) & set(draft_before)
             after = set(stream[at + len(target):at + len(target) + CONTEXT_WORDS]) & set(draft_after)
             if len(before) + len(after) < BACK_MIN or (draft_before and not before) or (draft_after and not after):
+                continue
+            if NEXT_TO_NUMBER_BEFORE.search(text[:start]) or NEXT_TO_NUMBER_AFTER.match(text[run[-1][4]:]):
                 continue
             reading, dot, meanings = s['title'].partition('·')
             glosses = [g.strip().lower() for g in (meanings if dot else reading).split(' / ')]
@@ -893,6 +969,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     import twins
     types = word_types() if types is None else types
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    text, mended = mend(text)
     lines, blocking, notes = twins.parse_authored(text)
     parts = twins.reply_parts(lines)
     words, all_twins = _collect(parts, blocking)
@@ -903,7 +980,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
         out.append('Write every Japanese sentence as the English sentence followed by its twin in <ja>...</ja> on the '
                    'same line, keep other Japanese in glosses (or quoted in backticks), then run check-reply again.')
         return Checked('\n'.join(out))
-    fixed = [f'- line {n}: {what}' for n, what in notes]
+    fixed = [f'- line {n}: {what}' for n, what in notes] + [f'- mended: {what}' for what in dict.fromkeys(mended)]
     lines, n_back = put_back(lines, words, plan.swaps, types, reply_contexts(parts))
     lines, n_kept = keep_english(lines)
     if n_back or n_kept:  # the sure swaps the reply dropped, back in, and {{English}} as written: its parts again

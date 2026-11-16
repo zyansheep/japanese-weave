@@ -13,6 +13,9 @@ A port of [French Weave](https://github.com/jackieoliver/french-weave) by Jackie
 - the browser extension running in **Firefox** as well as Chrome;
 - the chat hook working in **T3 Code**, which runs Claude Code through the Agent SDK.
 
+What it believes about learning, and so how close calls get decided, is in [ETHOS.md](ETHOS.md): meaning is refined
+over many meetings, and an approximate meaning beats none.
+
 ## Set up
 
 Python 3.9+ as `python3` or `python`, and Claude Code.
@@ -451,6 +454,8 @@ python3 scripts/make_blocks.py                   # regenerate blocks/ and extens
 cd extension && bun install && bun test           # extension (happy-dom)
 sh tools/make-icons.sh                            # redraw the extension's icons from tools/icons/icon.svg
 python3 tests/model_eval.py --out /tmp/jw-eval    # live check via claude -p
+python3 scripts/fw.py backtest --since 2026-11-10 --fw ~/main/scripts/fw.py --out /tmp/before.json
+python3 scripts/fw.py backtest --since 2026-11-10 --against /tmp/before.json   # chat replies so far, before and after
 ```
 
 ## License

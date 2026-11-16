@@ -43,7 +43,7 @@ INFO = '<abbr title="じょうほう · information">情報</abbr>'
 SMALL = '<abbr title="ちいさい · small">小さい</abbr>'
 LOG = '<abbr title="log">ログ</abbr>'
 PARAGRAPH = (f'The {P} is small.<ja>{P}は{SMALL}です。</ja> Read the {INFO} below before you start, and check the '
-             f'whole thing twice.\nThe {INFO} is in the log.<ja>{INFO}は{LOG}にあります。</ja> After that, run the '
+             f'whole thing twice.\nThe {INFO} is in the log.<ja>{INFO}は{LOG}に残ります。</ja> After that, run the '
              'tests and look at what they print, line by line, until it all passes.')
 AUTHORED = '\n\n'.join([PARAGRAPH] * 4)
 # A final markup written by hand, for the readers: a twin from +1, a free word in its English, a learning word from 0
@@ -203,7 +203,7 @@ class Final(Home):
         self.assertEqual(full.count('です<abbr title="The problem is small.">。</abbr>'), 4)  # every twin at full
         self.assertNotIn('The problem is small', re.sub(r'<abbr[^>]*>', '', full))
         self.assertIn('the information is in the log.', head.lower() + twins.render(final, -2).lower())
-        # what was dropped and put back: the second twin has bare あります; nothing else
+        # what was dropped and put back: the second twin has bare 残ります (code can't gloss it); nothing else
         self.assertIn('twin dropped (its sentence stays English): Japanese outside the <abbr> tags', head)
         kept = twins.plan_for(final)
         self.assertEqual(len(kept['e']), len(back))
