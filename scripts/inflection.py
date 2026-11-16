@@ -213,3 +213,73 @@ def lexicon(words):
     if _last[0] != key:
         _last = (key, Lexicon(words))
     return _last[1]
+
+
+# ---- forward: a verb in the form an English verb has (chat swaps in English sentences, ETHOS.md) ----
+
+PLAIN, PAST, ONGOING = 'plain', 'past', 'ongoing'
+# English past forms that don't end in -ed (and aren't their own present, as read, put and set are)
+IRREGULAR_PAST = set('''ate became began bit blew bought brought built caught chose came dealt did drank drew drove fell
+felt fought found flew forgot forgave froze gave got went grew hung had heard held hid kept knew laid led left lent lay
+lost made meant met paid rode rang rose ran said saw sought sold sent shook shone shot showed shut sang sank sat slept
+slid spoke spent stood stole stuck struck swore swept swam took taught tore told thought threw understood woke wore
+won wrote'''.split())
+PARTICIPLE = set('''been begun bitten blown broken chosen done drawn driven eaten fallen flown forgotten forgiven
+frozen given gone grown hidden known ridden risen seen shaken shown spoken stolen sworn taken thrown torn woken worn
+written'''.split())
+
+
+NOT_ONGOING = {'bring', 'sing', 'ring', 'sting', 'swing', 'spring', 'string', 'wring', 'cling', 'fling', 'sling',
+               'thing', 'king', 'wing'}  # end in -ing, aren't -ing forms
+NOT_PAST = {'embed', 'shed', 'shred', 'wed', 'bed', 'red', 'bred', 'sled'}  # end in -ed, aren't past forms
+
+
+def english_form(en):
+    """The form an English verb is in, as a Japanese verb in its place should be: ONGOING for -ing, PAST for a past or
+    participle (-ed, ran, written), else PLAIN (reads, read, run: present or bare; read stays present)."""
+    word = str(en or '').strip().lower().split()[-1:] or ['']
+    word = word[0]
+    if word.endswith('ing') and len(word) > 4 and word not in NOT_ONGOING:
+        return ONGOING
+    if word in IRREGULAR_PAST or word in PARTICIPLE or (word.endswith('ed') and len(word) > 3 and not (
+            word.endswith('eed') and word not in ('freed', 'agreed', 'guaranteed')) and word not in NOT_PAST):
+        return PAST
+    return PLAIN
+
+
+def _forms(word, kind):
+    """(past, te) of a dictionary form of the given kind, or None."""
+    if kind == VS:
+        return word[:-2] + 'した', word[:-2] + 'して'
+    if kind == VK:
+        base = word[:-2]
+        head = 'き' if word.endswith('くる') else '来'
+        return base + head + 'た', base + head + 'て'
+    if kind == V1:
+        return word[:-1] + 'た', word[:-1] + 'て'
+    if kind == V5:
+        last = word[-1]
+        if last not in GODAN:
+            return None
+        te, voiced = GODAN[last][4], GODAN[last][5]
+        if word.endswith(('行く', 'いく')):
+            te = 'っ'
+        stem = word[:-1] + te
+        return stem + ('だ' if voiced else 'た'), stem + ('で' if voiced else 'て')
+    return None
+
+
+def conjugate(ja, kana, form):
+    """(written, reading) of verb ja (reading kana) in form (PLAIN, PAST or ONGOING), or None when it isn't a verb
+    this knows how to bend (an adjective, a noun). ONGOING is the te form with いる: 読んでいる."""
+    kind = word_class(ja, kana)
+    if kind not in (V1, V5, VK, VS):
+        return None
+    if form == PLAIN:
+        return ja, kana or ja
+    written, reading = _forms(ja, kind), _forms(hiragana(kana or ja), kind)
+    if not written or not reading:
+        return None
+    if form == PAST:
+        return written[0], reading[0]
+    return written[1] + 'いる', reading[1] + 'いる'

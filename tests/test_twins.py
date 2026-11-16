@@ -236,8 +236,9 @@ class Final(Home):
         self.assertIn('too long', checked.text)
         self.assertIn('the pronoun あなた', checked.text)
         self.assertIn('3 Japanese sentences, at most 2', checked.text)
-        self.assertIn('swap put back in English: 使う (v5u)', checked.text)
-        self.assertIn('We use the', checked.final)  # its English, as the weave had it
+        self.assertNotIn('swap put back in English: 使う', checked.text)  # a verb stays (ETHOS.md)
+        self.assertIn('data-en="use"', checked.final)
+        self.assertIn('We <abbr title="つかう · use" data-en="use"', checked.final)  # its English, as the weave had it
         self.assertNotIn('data-jw', checked.final)  # every twin dropped
         blocked = check_reply.finish('It is です here.', plan(), TYPES, remember=False)
         self.assertIsNone(blocked.final)
@@ -885,11 +886,12 @@ class PutBack(Home):
         cases = {'unsure': [self.swap('問題', 'もんだい · problem', 'problem', unsure=True)],
                  'for twins only': [self.swap('問題', 'もんだい · problem', 'problem', twin=True)],
                  'a dictionary word': [self.swap('問題', 'もんだい · problem', 'problem', dictionary=True)],
-                 'a verb': [self.swap('使う', 'つかう · use', 'run', free=False)],
                  'no context': [dict(self.swap('問題', 'もんだい · problem', 'problem'), before='', after='x y')]}
         for why, swaps in cases.items():
             with self.subTest(why):
                 self.assertNotIn('data-en', self.check(self.DRAFT, swaps).final)
+        verb = [self.swap('使う', 'つかう · use', 'run', free=False)]  # a verb goes back in now (ETHOS.md)
+        self.assertIn('data-en="run"', self.check(self.DRAFT, verb).final)
         rewritten = 'Your problem sits somewhere else entirely, so look there first and fix it quickly.'
         self.assertNotIn('data-en', self.check(rewritten, cases['unsure'][:0] + [
             self.swap('問題', 'もんだい · problem', 'problem')]).final)  # the English around it changed
@@ -928,7 +930,7 @@ class PutBack(Home):
             {'ja': ja, 'en': en, 'free': free, 'after': after}, self.TYPES)
         self.assertTrue(may('小さい', 'small', ' tool'))
         self.assertFalse(may('小さい', 'small', '.'))  # an adjective only before an English word
-        self.assertFalse(may('来る', 'comes', ' back'))  # adj-pn as 来たる, but a verb
+        self.assertTrue(may('来る', 'comes', ' back'))  # adj-pn as 来たる, but a verb, and a verb may stay
         self.assertFalse(may('ねえ', 'right', ' side'))  # an interjection, a noun only as a reading of ane
         self.assertTrue(may('もう', 'already', ' done'))  # a known adverb, interjection or not
         self.assertFalse(may('もう', 'already', ' done', free=False))

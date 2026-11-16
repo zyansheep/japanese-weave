@@ -120,17 +120,17 @@ class Weave(unittest.TestCase):
         head, text = out.split('\n-----\n', 1)
         self.assertIn('<abbr title="ちいさい · small">小さい</abbr> <abbr title="もんだい · problem">問題</abbr>', text)
         self.assertIn('the <abbr title="もんだい · problem">問題</abbr> is small.', text)  # small after it: English
-        self.assertNotIn('使う', text)
+        self.assertIn('I <abbr title="つかう · use">使う</abbr> the', text)  # a verb stays (ETHOS.md)
+        self.assertIn('<abbr title="かく · write">書く</abbr> the', text)  # a learning verb too
         self.assertNotIn('そして', text)
-        self.assertNotIn('書く', text)
-        self.assertTrue(text.startswith('I use the'))  # the draft's English where a swap can't stay
+        self.assertTrue(text.startswith('I '))  # the pronoun: the draft's English, as a swap that can't stay
         self.assertIn('For twins only (they can\'t stay in an English sentence): ', head)
-        self.assertIn('使う (use)', head)
-        self.assertIn('書く (write)', head)  # a learning verb: in twins
+        self.assertIn('そして (and', head)  # a connective: in twins
+        self.assertNotIn('使う (', head)
         self.assertIn('learning words 書く, 情報: keep each', head)
         self.assertNotIn('小さい (', head)  # in the text before a noun: not listed again
         self.assertNotIn('私 (', head)  # a pronoun: Japanese leaves it out, twins too
-        self.assertTrue(kept['使う']['twin'] and kept['私']['twin'])  # every swap kept for the check
+        self.assertTrue(kept['私']['twin'] and not kept['使う'].get('twin'))  # every swap kept for the check
         self.assertNotIn('twin', kept['問題'])
         self.assertEqual(chatweave.render({'parts': ['a ', 0, '.'], 'swaps': [
             {'ja': '今', 'title': 'いま · now', 'en': 'now', 'unsure': True}]}, [True]),
@@ -186,7 +186,8 @@ class Check(unittest.TestCase):
         self.has('Then <abbr title="you">あなた</abbr> retry.', 'pronoun')
         self.has('Do it <abbr title="まえ · before">前</abbr> lunch.', 'preposition')
         self.has('Wait 2 <abbr title="いま · now">今</abbr>.', 'next to a number')
-        self.has('You <abbr title="つかう · use">使う</abbr> it daily.', 'stays English')
+        self.has('We test it, <abbr title="but">でも</abbr> it fails.', 'stays English')
+        self.assertEqual(self.found('You <abbr title="つかう · use">使う</abbr> it daily.'), [])  # a verb may stay
         self.has('Packets arrive します in order<abbr title="Packets arrive in order.">。</abbr>', 'する on an English word')
         self.has('It is an <abbr title="ふるい · old">古い</abbr> one.', '"an"')
         self.has('<abbr title="and then">そして</abbr>、<abbr title="もんだい · problem">問題</abbr>は'

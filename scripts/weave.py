@@ -636,8 +636,8 @@ def digest(stage, level, markup, n, m):
 # and prints the final markup (twins.py), and Claude sends that. Four rounds of blind-judged replies
 # (docs/chat-weave.md) chose these steps and the rules in DRAFT_RULES; the twins came with render-time levels.
 STYLES = ('draft', 'classic')
-RULES = 'mend'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (offers:
-                # before code mended bare grammar words and articles and the first line asked for a firm count)
+RULES = 'verbs'  # what sessions.json says a chat had in full: a chat that had older steps gets them again (mend:
+                 # before verbs could stay in an English sentence; offers: before code mended bare grammar words)
 DRAFT_RULES = """\
    - Twins. After each English sentence you can say in Japanese within the first line's limits, write its Japanese twin in <ja>...</ja> right after it, \
 on the same line: "The cache is stale.<ja>...</ja>". The twin's English is the text back to the end of the sentence \
@@ -663,13 +663,14 @@ twin into two short sentences, or give that sentence no twin. Grammar the line d
 like 〜た, 〜ない and だ, quoting with と思う or という, から and ので clauses, のは clefts, stacked particles like には, and \
 the rest). Use this week's learning pattern on purpose in a twin or two. Code drops a twin that breaks a limit or a \
 rule here, and its sentence stays English.
-   - The English. The weave's text holds only swaps that may stay in an English sentence (nouns, adjectives right \
-before an English noun, adverbs among the known-word swaps, time words like now and already too); its first line \
-lists the rest for twins only (verbs, adverbs still being learned, connectives like もし, そして and でも, question \
-words). Where the English reads as naturally either way, choose the phrasing that keeps a swapped known noun or \
+   - The English. The weave's text holds only swaps that may stay in an English sentence (nouns, verbs, adjectives \
+right before an English noun, adverbs among the known-word swaps, time words like now and already too); its first \
+line lists the rest for twins only (adverbs still being learned, connectives like もし, そして and でも, question \
+words). A verb comes conjugated to fit its English (plain, past in た, ongoing in ている): keep it where the English \
+around it still reads, and if you change the English's tense, change the verb's form and its gloss to match. Where the English reads as naturally either way, choose the phrasing that keeps a swapped known noun or \
 adjective in place rather than one that drops the swap.
    - Learning words. The weave's first line names them, and they are what the reply teaches: keep each one whose \
-sense fits. When one isn't a noun or an adjective before a noun, use it in its sentence's twin.
+sense fits. When one can't stay in an English sentence, use it in its sentence's twin.
    - Senses. Keep the weave's swaps wherever the meaning still gets across (a {{English→Japanese}} one as its <abbr> \
 alone); a near synonym is fine (仕事 for "task"). Undo one only where the Japanese would obscure or change the meaning, \
 writing its English as {{works}} (code puts back a sure swap you drop whose English it finds unchanged). Such cases: \
