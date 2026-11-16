@@ -20,6 +20,11 @@ What Claude sends (the final markup, written by code: markup; the contract with 
     the Japanese at sentence levels >= N and the English below; the Japanese's words are glossed abbrs with no data-on
     (they show and hide with it), the English keeps its own swaps, each shown by the word level while the twin is
     English;
+  - a twin's middle step (ETHOS.md, "Steps, not jumps"; only while the reader's pref sentence_steps is on, since
+    older clients would show it as text): <span data-jw="mid" data-on="M">STEP</span> between the pair's two spans,
+    M below the pair's threshold N (check-reply writes N - 1, and none when N is -2): the twin in Japanese order with
+    its grammar and the words known at a glance as glossed abbrs and the other words in English, shown at sentence
+    levels M up to below N, the English only below M; a mid span that is no pair's step never shows;
   - anything without data-on or data-jw renders as before, so older messages are unchanged.
 A threshold is in -2..3 (3: full only). The reader has two dials (docs/chat-weave.md, "Two dials"): the word level
 decides every level abbr and the sentence level every twin, each on its own. At -3 a dial's kind shows no Japanese,
@@ -103,6 +108,7 @@ ATTR = re.compile(r'([\w-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))')  # 
 TWIN_OPEN = re.compile(r'<span\b' + TAG_BODY + r'>', re.I)
 SPAN_CLOSE = re.compile(r'</span\s*>', re.I)
 BLANK_LINE = re.compile(r'\n[ \t]*\n')
+STEPS = ('ja', 'mid', 'en')               # a twin span's data-jw: its Japanese, its middle step, its English
 THRESHOLD = re.compile(r'-2|-1|0|1|2|3')  # the thresholds the contract allows: any other data-on renders as written
 UNSURE = re.compile(r'\{\{([^{}]*?)→\s*(<abbr\b[^>]*>.*?</abbr>)\s*\}\}', re.S)
 JA_TAG = re.compile(r'<(/?)ja>', re.I)
@@ -219,7 +225,7 @@ def outside_code(text):
 
 
 class Span:
-    """A twin span as the clients read it: kind 'ja' or 'en', its threshold as written (on: the number when it is one
+    """A twin span as the clients read it: kind 'ja', 'mid' or 'en', its threshold as written (on: the number when it is one
     of -2..3, else None: rendered as written), its data-p as written (p, or None), where its opening tag starts and
     ends, where its first </span> after it starts and ends (None when it never closes), and its content."""
     __slots__ = ('kind', 'on', 'p', 'start', 'open_end', 'close', 'close_end', 'content', 'nested', 'split')
@@ -238,7 +244,7 @@ def _spans(p):
                     sp.close, sp.close_end = m.start(), m.end()
             continue
         a = attrs(m.group(1))
-        if a.get('data-jw') not in ('ja', 'en'):
+        if a.get('data-jw') not in STEPS:
             stack.append(None)
             continue
         sp = Span()
@@ -252,20 +258,39 @@ def _spans(p):
         sp.content = p[sp.open_end:sp.close if sp.close is not None else len(p)]
         first = SPAN_CLOSE.search(p, sp.open_end)
         sp.split = bool(first and BLANK_LINE.search(p[sp.open_end:first.start()]))
-    valid = [sp for sp in found if sp.on is not None]
+    valid = [sp for sp in found if sp.on is not None or sp.kind == 'mid']  # a mid with no threshold: never shown
     broken = any(sp.close is None or sp.split or sp.nested for sp in valid)
     return valid, broken
 
 
 def _pairs(p, valid):
-    """{id of a ja span: its en span}: a Japanese span pairs with an English one right after it (only whitespace
-    between) with the same threshold."""
-    out = {}
+    """({id of a ja span: its en span}, {id of a ja span: the mid span between them}): a Japanese span pairs with an
+    English one right after it (only whitespace between) with the same threshold, or with a mid span between them
+    (only whitespace around it). The mid is the pair's middle step when its threshold is below theirs (step_of); one
+    that isn't never shows, and the pair is as without it."""
+    out, mids = {}, {}
+    after = lambda a: next((x for x in valid if a.close is not None and x.start >= a.close_end), None)
     for a in valid:
-        b = next((x for x in valid if a.close is not None and x.start >= a.close_end), None)
-        if a.kind == 'ja' and b is not None and b.kind == 'en' and a.on == b.on and not p[a.close_end:b.start].strip():
+        if a.kind != 'ja':
+            continue
+        b = after(a)
+        if b is None or p[a.close_end:b.start].strip():
+            continue
+        mid = None
+        if b.kind == 'mid':
+            mid, b = b, after(b)
+            if b is None or p[mid.close_end:b.start].strip():
+                continue
+        if b.kind == 'en' and a.on == b.on:
             out[id(a)] = b
-    return out
+            if mid is not None:
+                mids[id(a)] = mid
+    return out, mids
+
+
+def step_of(ja, mid):
+    """Whether a pair's mid span is its middle step: one with a threshold below the pair's."""
+    return mid is not None and mid.on is not None and mid.on < ja.on
 
 
 def _last_translation(content):
@@ -323,9 +348,10 @@ def _repair(p):
 
 def tokens(text):
     """The final markup in document order, as the clients read it: ('raw', text); ('abbr', {attributes}, inner, as
-    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None) for a Japanese twin
-    with an English one right after it (only whitespace between, the same threshold); ('ja', N, japanese) and ('en', N,
-    english) for a twin with no pair; and in a broken message (_spans) ('hidden', N, japanese, never) for each Japanese
+    written); ('pair', N, japanese, english, between, the Japanese span's data-p as written or None, mid) for a
+    Japanese twin with an English one right after it (only whitespace between, the same threshold), mid its middle step
+    (M, content) when one sits between them (_pairs), else None, and between the whitespace around it; ('ja', N,
+    japanese) and ('en', N, english) for a twin with no pair; a middle step that is part of no pair never shows; and in a broken message (_spans) ('hidden', N, japanese, never) for each Japanese
     twin (with what an unclosed one took in, up to the next English twin of its threshold; never: it is paired, or left
     open, so it never shows), its English twins unwrapped and every </span> dropped; broken tags as _repair reads them.
     A twin span whose data-on isn't exactly -2..3 is raw markup, as written, its glosses read as any. Fenced code is
@@ -339,8 +365,8 @@ def tokens(text):
         p = _repair(p)
         back = lambda t: _restore(t, saved)
         valid, broken = _spans(p)
-        pairs = _pairs(p, valid)
-        taken = {id(b) for b in pairs.values()}
+        pairs, mids = _pairs(p, valid)
+        taken = {id(b) for b in pairs.values()} | {id(m) for m in mids.values()}
         plain_ = (lambda t: SPAN_CLOSE.sub('', t)) if broken else (lambda t: t)
         at = 0
         for i, sp in enumerate(valid):
@@ -348,7 +374,9 @@ def tokens(text):
                 continue  # inside a span already taken
             out += _abbrs(plain_(p[at:sp.start]), back)
             if broken:
-                if sp.kind == 'ja':
+                if sp.kind == 'mid':
+                    at = sp.close_end if sp.close is not None else len(p)  # never shown
+                elif sp.kind == 'ja':
                     nxt = next((b for b in valid[i + 1:] if b.kind == 'en' and b.on == sp.on), None)
                     end = sp.close_end if sp.close is not None else (nxt.start if nxt else len(p))
                     out.append(('hidden', sp.on, back(p[sp.open_end:end]), id(sp) in pairs or sp.close is None))
@@ -359,10 +387,14 @@ def tokens(text):
             if id(sp) in taken:
                 continue
             if id(sp) in pairs:
-                en = pairs[id(sp)]
-                out.append(('pair', sp.on, back(sp.content), back(en.content), back(p[sp.close_end:en.start]),
-                            sp.p))
+                en, mid = pairs[id(sp)], mids.get(id(sp))
+                between = p[sp.close_end:en.start] if mid is None else (p[sp.close_end:mid.start]
+                                                                         + p[mid.close_end:en.start])
+                step = (mid.on, back(mid.content)) if step_of(sp, mid) else None
+                out.append(('pair', sp.on, back(sp.content), back(en.content), back(between), sp.p, step))
                 at = en.close_end
+            elif sp.kind == 'mid':
+                at = sp.close_end  # part of no pair: never shown
             else:
                 out.append((sp.kind, sp.on, back(sp.content)))
                 at = sp.close_end
@@ -446,7 +478,9 @@ def render(text, level, sentences=None):
     or a (word, sentence) pair as level), in the markup from before levels, by the rule the clients share: every level
     abbr by the word level, every twin by the sentence level. A pair (a Japanese twin right before an English one of
     the same threshold, only whitespace between) shows its Japanese from its threshold and its English below, the
-    glossed words in its Japanese with it; an English twin with no pair always shows; a Japanese one with no pair shows
+    glossed words in its Japanese with it, and with a middle step (a data-jw="mid" span between them, threshold M below
+    the pair's) that step at sentence levels from M to below the pair's threshold, its English only below M; an
+    English twin with no pair always shows, a middle step of no pair never; a Japanese one with no pair shows
     from its threshold and below it is its last sentence mark's translation, or nothing; in a broken message (_spans)
     every pair is English; a data-on that isn't exactly -2..3 renders as written; markup in inline code is text. A
     reply without levels is unchanged unless both dials are off. With both at off (and English only) everything is
@@ -467,7 +501,12 @@ def render(text, level, sentences=None):
         elif kind == 'abbr':
             out.append(_word(t, words))
         elif kind == 'pair':
-            out.append(_inside(t[2], words, True) + t[4] if shows(t[1]) else t[4] + _inside(t[3], words, False))
+            if shows(t[1]):
+                out.append(_inside(t[2], words, True) + t[4])
+            elif t[6] is not None and shows(t[6][0]):
+                out.append(_inside(t[6][1], words, True) + t[4])
+            else:
+                out.append(t[4] + _inside(t[3], words, False))
         elif kind == 'en':
             out.append(_inside(t[2], words, False))
         elif kind == 'ja':
@@ -532,7 +571,8 @@ def english_only(text):
 
 
 def well_formed(text):
-    """Whether every twin span is a pair with a threshold, in a message that isn't broken, every swapped word's
+    """Whether every twin span is a pair with a threshold (a mid span its middle step), in a message that isn't
+    broken, every swapped word's
     data-on is a threshold and every gloss in a twin's English has one: what check-reply writes, and the only markup a
     sentence record is made for."""
     for code, piece in _chunks(str(text)):
@@ -542,9 +582,11 @@ def well_formed(text):
         if _repair(p) != p:
             return False
         valid, broken = _spans(p)
-        jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in ('ja', 'en'))
-        pairs = _pairs(p, valid)
-        if broken or jw != len(valid) or 2 * len(pairs) != len(valid):
+        jw = sum(1 for m in TWIN_OPEN.finditer(p) if attrs(m.group(1)).get('data-jw') in STEPS)
+        pairs, mids = _pairs(p, valid)
+        ja = {id(sp): sp for sp in valid}
+        if broken or jw != len(valid) or 2 * len(pairs) + len(mids) != len(valid) or not all(
+                step_of(ja[k], mid) for k, mid in mids.items()):
             return False
         if any('data-on' not in attrs(m.group(1)) for en in pairs.values() for m in ABBR.finditer(en.content)):
             return False  # a gloss in a twin's English with no threshold: as written whatever the word level
@@ -570,11 +612,13 @@ def p_value(value):
 def elements(text):
     """(elements, owners) of well-formed final markup (well_formed). elements in document order: {kind: 's' (a twin)
     or 'w' (a swapped word with data-on outside a twin's Japanese), on: its threshold, parent: the twin whose English
-    holds the word, or None, p: its data-p (p_value) or None}; owners: per glossed word of the reply in order (the
-    Japanese of a twin before its English), the index of the element it belongs to, or -1 (a word without data-on,
-    shown unless both dials are off). An abbr without data-on inside a twin's English (not well-formed) would be an
-    element with threshold -2."""
-    els, owners = [], []
+    holds the word, or None, p: its data-p (p_value) or None}, then each twin's middle step, if any, after all of them
+    (kind 'm', on: its threshold, parent: its twin, p None; the twin gets 'mid': that threshold); owners: per glossed
+    word of the reply in order (a twin's Japanese, then its middle step, then its English), the index of the element
+    it belongs to, or -1 (a word without data-on, shown unless both dials are off). An abbr without data-on inside a
+    twin's English (not well-formed) would be an element with threshold -2. The steps come last so a reply without
+    any has the elements it had before them."""
+    els, owners, steps = [], [], []
     for t in tokens(text):
         if t[0] == 'abbr':
             on = _threshold(t[1])
@@ -587,13 +631,29 @@ def elements(text):
             twin = len(els)
             els.append({'kind': 's', 'on': t[1], 'parent': None, 'p': p_value(t[5])})
             owners += [twin] * sum(1 for _ in ABBR.finditer(t[2]))
+            if t[6] is not None:
+                steps.append((twin, t[6][0], len(owners)))
+                owners += [None] * sum(1 for _ in ABBR.finditer(t[6][1]))
             for m in ABBR.finditer(t[3]):
                 a = attrs(m.group(1))
                 on = _threshold(a)
                 owners.append(len(els))
                 els.append({'kind': 'w', 'on': -2 if on is None else on, 'parent': twin,
                             'p': p_value(a.get('data-p'))})
-    return els, owners
+    for twin, on, at in steps:
+        els.append({'kind': 'm', 'on': on, 'parent': twin, 'p': None})
+        while at < len(owners) and owners[at] is None:
+            owners[at] = len(els) - 1
+            at += 1
+    return link_steps(els), owners
+
+
+def link_steps(els):
+    """els with each twin's 'mid' set to its middle step's threshold (an element of kind 'm' whose parent it is)."""
+    for e in els:
+        if e['kind'] == 'm' and e['parent'] is not None:
+            els[e['parent']]['mid'] = e['on']
+    return els
 
 
 def twin_word_chances(text):
@@ -609,17 +669,21 @@ def twin_word_chances(text):
 
 def visible(els, i, level, sentences=None):
     """Whether element i shows at a word level and a sentence level (one level: both dials at it; dials): a twin from
-    its threshold at the sentence level; a word from its threshold at the word level, and in a twin's English only
-    while the twin is English (the sentence level below the twin's threshold); i -1 (no element) unless both dials
-    are off."""
+    its threshold at the sentence level; its middle step from its own threshold to below the twin's; a word from its
+    threshold at the word level, and in a twin's English only while the twin is English (the sentence level below the
+    twin's threshold, or its middle step's: link_steps); i -1 (no element) unless both dials are off."""
     words, sentences = dials(level, sentences)
     if i < 0:
         return words > OFF or sentences > OFF
     e = els[i]
     if e['kind'] == 's':
         return sentences > OFF and sentences >= e['on']
-    return words > OFF and words >= e['on'] and (e['parent'] is None or sentences <= OFF
-                                                 or sentences < els[e['parent']]['on'])
+    if e['kind'] == 'm':
+        return sentences > OFF and e['on'] <= sentences < els[e['parent']]['on']
+    if e['parent'] is None:
+        return words > OFF and words >= e['on']
+    twin = els[e['parent']]
+    return words > OFF and words >= e['on'] and (sentences <= OFF or sentences < twin.get('mid', twin['on']))
 
 
 def annotation_texts(text):
@@ -630,8 +694,8 @@ def annotation_texts(text):
         if t[0] == 'abbr':
             out.append(grammar.clean(t[2]).strip())
         elif t[0] == 'pair':
-            out += [grammar.clean(m.group(2)).strip() for m in ABBR.finditer(t[2])]
-            out += [grammar.clean(m.group(2)).strip() for m in ABBR.finditer(t[3])]
+            for content in (t[2], t[6][1] if t[6] is not None else '', t[3]):
+                out += [grammar.clean(m.group(2)).strip() for m in ABBR.finditer(content)]
     return out
 
 

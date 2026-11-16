@@ -50,6 +50,10 @@
   fw.py chat-style draft|classic                     T3 Code chats: draft and weave (the default: Claude writes
                                                      in English, code weaves the Japanese in, Claude rewrites
                                                      and checks it) or classic (Claude weaves as it writes)
+  fw.py steps on|off                                 T3 Code chats: give each Japanese sentence a middle step
+                                                     (Japanese order, English for the words not known at a
+                                                     glance) one sentence level below it (needs a T3 build that
+                                                     renders data-jw="mid"; off by default)
   fw.py weave [--level N] [FILE]                     weave an English draft (FILE, else stdin) with every swap
                                                      that could go in it, as at full, and ask for its Japanese
                                                      twins (N: the chat level now, -2 to 3)
@@ -855,6 +859,12 @@ def collector_cmd(args):
         print('Lingering is off, so it stops when you log out: sudo loginctl enable-linger $USER')
 
 
+def steps_cmd(args):
+    queued_note(hub.submit({'kind': 'set', 'prefs': {fwlib.STEPS_PREF: args.switch == 'on'}}))
+    print('Middle steps ' + ('on: each Japanese sentence steps down to Japanese order with English words, then to the'
+                             ' weave.' if args.switch == 'on' else 'off: each Japanese sentence steps down to the weave.'))
+
+
 def chat_style(args):
     queued_note(hub.submit({'kind': 'set', 'prefs': {'chat_style': args.style}}))
     print('T3 Code chats: Claude drafts each reply in English, code weaves the Japanese in, and Claude rewrites and '
@@ -1218,6 +1228,9 @@ def main(argv=None):
     p = sub.add_parser('chat-style')
     p.add_argument('style', choices=['draft', 'classic'])
     p.set_defaults(run=chat_style)
+    p = sub.add_parser('steps')
+    p.add_argument('switch', choices=['on', 'off'])
+    p.set_defaults(run=steps_cmd)
     p = sub.add_parser('weave')
     p.add_argument('--level', type=int, choices=list(intensity.LEVELS))
     p.add_argument('--sentences', type=int, choices=list(intensity.LEVELS))

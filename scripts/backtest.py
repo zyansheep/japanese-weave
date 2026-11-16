@@ -115,7 +115,8 @@ def parse_check(output):
     return {'words_full': len(levels), 'words_normal': sum(1 for x in levels if x <= 0), 'twins': len(twins),
             'twins_normal': sum(1 for x in twins if x <= 0), 'dropped': sum(reasons.values()),
             'put_back': int(back.group(1)) if back else 0,
-            'mended': sum(1 for line in head.splitlines() if line.startswith('- mended:')), 'reasons': dict(reasons)}
+            'mended': sum(1 for line in head.splitlines() if line.startswith('- mended:')),
+            'steps': final.count('data-jw="mid"'), 'reasons': dict(reasons)}
 
 
 def parse_weave(output):
@@ -196,7 +197,8 @@ def report(t, reasons, against=None):
                  line(f'{name}: twins at normal', f'{side}_twins_normal', 'checked_english'),
                  line(f'{name}: twins dropped', f'{side}_dropped', 'checked_english'),
                  line(f'{name}: swaps put back', f'{side}_put_back', 'checked_english')]
-    rows.append(f'  checked now: mended {t.get("now_mended", 0)} times')
+    rows.append(f'  checked now: mended {t.get("now_mended", 0)} times, {t.get("now_steps", 0)} twins with a middle step'
+                f' (fw.py steps on)')
     for side in ('now',):
         if reasons.get(side):
             rows.append('Twins dropped now, by reason: ' + '; '.join(f'{v} {k}' for k, v in reasons[side].items()))

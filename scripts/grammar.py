@@ -649,8 +649,9 @@ def record_levels(text, day, lex=None, plans=None):
     """The record of a reply with render-time levels (twins.py), still never text: fp, the fingerprint of every glossed
     word in it (twins.annotation_texts: what no level shows at once, the key that dedupes it); s, its Japanese
     sentences (those of its twins), each by its mark's place among all those glossed words, with a fifth number, the
-    open chance check-reply predicted for it, when its plan is here; e, its elements in order ([kind 's' a twin or 'w'
-    a swapped word, threshold, the twin whose English holds the word or -1, propensities at -2..2 or [], expected opens
+    open chance check-reply predicted for it, when its plan is here; e, its elements in order ([kind 's' a twin, 'w'
+    a swapped word or 'm' a twin's middle step (after all the others), threshold, the twin whose English holds the
+    word or whose step it is, or -1, propensities at -2..2 or [], expected opens
     or None, explored 1/0 or None]: twins.elements, with the plan's numbers); a, per glossed word the element it
     belongs to (-1: none, shown unless both dials are off); pf, the fingerprint of what each pair of a word level and
     a sentence level shows (twins.PAIRS, twins.pair_fingerprints), which the collector matches a T3 message's
@@ -677,14 +678,16 @@ def record_levels(text, day, lex=None, plans=None):
     lex = lexicon() if lex is None else lex
     plan = twins.plan_for(text, plans) or {}
     ps = plan.get('s') if isinstance(plan.get('s'), list) and len(plan['s']) == len(found) else None
-    planned = plan.get('e') if isinstance(plan.get('e'), list) and len(plan['e']) == len(els) and all(
+    placed = [e for e in els if e['kind'] != 'm']  # the elements check-reply placed; middle steps come after them
+    planned = plan.get('e') if isinstance(plan.get('e'), list) and len(plan['e']) == len(placed) and all(
         isinstance(x, list) and len(x) == 5 and x[0] == e['kind'] and x[1] == e['on']
-        for x, e in zip(plan['e'], els)) else None
+        for x, e in zip(plan['e'], placed)) else None
     out = {'fp': fingerprint(twins.annotation_texts(text)), 'day': day, 'v': VERSION,
            's': [[full[s['index']], s['jchars'], s['en'], scan_ids(s['segments'], lex)]
                  + ([round(float(ps[k]), 4)] if ps else []) for k, s in enumerate(found)],
            'e': [[e['kind'], e['on'], -1 if e['parent'] is None else e['parent']]
-                 + (list(planned[i][2:]) if planned else [[], None, None]) for i, e in enumerate(els)],
+                 + (list(planned[i][2:]) if planned and i < len(planned) else [[], None, None])
+                 for i, e in enumerate(els)],
            'a': owners}
     out['pf'] = twins.pair_fingerprints(text, paired)
     whole = lambda x: isinstance(x, int) and not isinstance(x, bool) and -3 <= x <= 3
@@ -718,7 +721,7 @@ def valid_record(r):
     e, a = r.get('e'), r.get('a')
     fps, size = (r['pf'], len(twins.PAIRS)) if 'pf' in r else (r.get('fps'), 6)  # pairs, or levels -2..3 (before)
     level = lambda x, low: isinstance(x, int) and not isinstance(x, bool) and low <= x <= 3
-    element = lambda x: (isinstance(x, list) and len(x) == 6 and x[0] in ('s', 'w') and level(x[1], -2)
+    element = lambda x: (isinstance(x, list) and len(x) == 6 and x[0] in ('s', 'w', 'm') and level(x[1], -2)
                          and isinstance(x[2], int) and not isinstance(x[2], bool) and -1 <= x[2] < len(e)
                          and isinstance(x[3], list) and len(x[3]) in (0, 5) and all(share(v) for v in x[3])
                          and (x[4] is None or (isinstance(x[4], (int, float)) and not isinstance(x[4], bool)

@@ -1,7 +1,8 @@
 """ETHOS.md in code: single kana sounds are never words to swap in, no Japanese word touches a number, the check mends
 what it can see instead of dropping a twin, the weave asks for no twins while the sentence level is off (and the brief
 leaves out how to write them), a known word goes in wherever it fits, a verb stays in an English sentence
-conjugated to fit, and fw.py backtest replays the chats."""
+conjugated to fit, a twin can carry a middle step between its Japanese and its English, and fw.py backtest replays the
+chats."""
 import json
 from pathlib import Path
 import sys
@@ -17,9 +18,11 @@ import backtest  # noqa: E402
 import chatweave  # noqa: E402
 import check_reply  # noqa: E402
 import fwlib  # noqa: E402
+import grammar  # noqa: E402
+import twins  # noqa: E402
 import weave  # noqa: E402
 from test_chatweave import RUNTIME, run_mjs, word  # noqa: E402
-from test_twins import P, SMALL, TYPES, plan  # noqa: E402
+from test_twins import INFO, LOG, P, SMALL, TYPES, plan  # noqa: E402
 
 
 class Letters(unittest.TestCase):
@@ -211,3 +214,81 @@ class Verbs(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+REMAIN = '<abbr title="のこります · remain">残ります</abbr>'
+MARK = '<abbr title="The information is in the log.">。</abbr>'
+LADDER = (f'<span data-jw="ja" data-on="1">{INFO}は{LOG}に{REMAIN}{MARK}</span>'
+          f'<span data-jw="mid" data-on="0">information は{LOG}に{REMAIN}{MARK}</span>'
+          '<span data-jw="en" data-on="1">The <abbr title="じょうほう · information" data-en="information" '
+          'data-on="-1">情報</abbr> is in the log.</span> Done.')
+
+
+class Steps(unittest.TestCase):
+    def test_each_sentence_level_shows_its_step(self):
+        shown = lambda s: twins.shown_texts(LADDER, (0, s))
+        self.assertEqual(shown(1), ['情報', 'ログ', '残ります', '。'])
+        self.assertEqual(shown(3), shown(1))
+        self.assertEqual(shown(0), ['ログ', '残ります', '。'])
+        self.assertIn('information は', twins.render(LADDER, (0, 0)))
+        self.assertEqual(shown(-1), ['情報'])  # the weave: the English with its own swap
+        self.assertEqual(twins.shown_texts(LADDER, (-2, -1)), [])
+        self.assertEqual(twins.render(LADDER, (-3, -3)), 'The information is in the log. Done.')
+
+    def test_the_elements_account_for_every_pair(self):
+        self.assertTrue(twins.well_formed(LADDER))
+        els, owners = twins.elements(LADDER)
+        self.assertEqual([(e['kind'], e['on'], e['parent']) for e in els], [('s', 1, None), ('w', -1, 0), ('m', 0, 0)])
+        self.assertEqual(els[0]['mid'], 0)
+        texts = twins.annotation_texts(LADDER)
+        for pair in twins.PAIRS:
+            self.assertEqual(twins.shown_texts(LADDER, pair),
+                             [texts[j] for j, o in enumerate(owners) if twins.visible(els, o, pair)], pair)
+
+    def test_a_step_that_cannot_be_one_never_shows(self):
+        bad = LADDER.replace('data-jw="mid" data-on="0"', 'data-jw="mid" data-on="2"')
+        self.assertFalse(twins.well_formed(bad))
+        self.assertNotIn('information は', ''.join(twins.render(bad, (0, s)) for s in range(-3, 4)))
+        self.assertEqual(twins.shown_texts(bad, (0, 1)), ['情報', 'ログ', '残ります', '。'])
+        self.assertEqual(twins.shown_texts(bad, (0, 0)), ['情報'])  # the pair, as without it
+        orphan = f'Before. <span data-jw="mid" data-on="0">{LOG}{MARK}</span> After.'
+        self.assertEqual(twins.render(orphan, (0, 0)), 'Before.  After.')
+        broken = LADDER.replace('</span> Done.', ' Done.')
+        self.assertNotIn('information は', ''.join(twins.render(broken, (0, s)) for s in range(-3, 4)))
+
+    def test_without_a_step_nothing_changes(self):
+        plain = LADDER.replace(LADDER[LADDER.index('<span data-jw="mid"'):LADDER.index('<span data-jw="en"')], '')
+        self.assertEqual(twins.shown_texts(plain, (0, 0)), ['情報'])
+        self.assertEqual([e['kind'] for e in twins.elements(plain)[0]], ['s', 'w'])
+
+    def test_the_middle_step_keeps_grammar_and_known_words(self):
+        glance = lambda word: word == 'ログ'
+        english_of = lambda word: {'情報': ('information', '情報'), '確認しました': ('check', '確認')}.get(word, (None, None))
+        check = '<abbr title="かくにんしました · checked">確認しました</abbr>'
+        step = check_reply.middle_step(f'{INFO}は{LOG}を{check}{MARK}', english_of, glance)
+        self.assertEqual(step, f'information は{LOG}を check しました{MARK}')
+        self.assertEqual(check_reply.middle_step(f'{INFO}は{REMAIN}{MARK}', english_of, glance),
+                         f'information は remain{MARK}')  # no English it stands for: its gloss's meaning
+        self.assertIsNone(check_reply.middle_step(f'{LOG}は{LOG}{MARK}', english_of, glance))
+
+    def test_the_check_adds_steps_only_when_switched_on(self):
+        reply = f'The {INFO} is in the log.<ja>{INFO}は{LOG}に{REMAIN}。</ja> After that, run the tests and read them.'
+        off = check_reply.finish(reply, plan(), TYPES, seed=1, remember=False)
+        self.assertNotIn('data-jw="mid"', off.final)
+        on = plan()
+        on.steps = True
+        checked = check_reply.finish(reply, on, TYPES, seed=1, remember=False)
+        self.assertNotIn('code (', checked.text)
+        els, _owners = twins.elements(checked.final)
+        twin = next(e for e in els if e['kind'] == 's')
+        self.assertEqual(twin['on'], 3)  # this seed's draw
+        self.assertEqual(twin['mid'], 2)
+        self.assertIn('information は log に remain', checked.final)
+        self.assertTrue(twins.well_formed(checked.final))
+        record = grammar.record_levels(checked.final, '2026-11-15')
+        self.assertTrue(grammar.valid_record(record))
+        self.assertEqual(record['e'][-1][0], 'm')
+
+    def test_the_switch_is_a_pref(self):
+        self.assertFalse(fwlib.sentence_steps({}))
+        self.assertTrue(fwlib.sentence_steps({'prefs': {fwlib.STEPS_PREF: True}}))
