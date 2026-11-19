@@ -188,14 +188,16 @@ def web_reply(passage):
     return {'d': d, 'day': min(day, fwlib.today()), 'words': [], 'entries': entries}
 
 
-def adaptive(state, words):
+def adaptive(state, words, surface='browser'):
     """Per-word estimates and normal's budget for the extension; starts a background refresh when they are stale.
     Never waits on the network: the refresh runs in its own process. Each word gets k (its long-term knowledge), sd,
     free and read (when it was last read, for its current chance: knowledge.current_chance) from knowledge.json (fit:
     every word of the word state), else from its fitted prior for its origin (knowledge.prior_estimate and origin_at;
     free when that is under fwlib.FREE_P); without knowledge.json, none, and the extension uses its own priors.
     recency: the fit's floor and the days back to the long-term chance. budget: normal's lookups per 100 words, the
-    challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget)."""
+    challenge when set, else intensity.BUDGETS[0]; the extension scales the other levels from it (intensity.budget).
+    A word that isn't free and is in its first sightings on the surface (the extension's, else chat's: 't3') gets early,
+    the log-odds shift its chance takes there (knowledge.early_of), which the extension takes off k."""
     know = knowledge.load()
     entries = know.get('words') if isinstance(know.get('words'), dict) else {}
     by_ja, today = {w['ja']: w for w in state['words']}, fwlib.today()
@@ -207,11 +209,17 @@ def adaptive(state, words):
                 w['free'] = entry['free']
             if isinstance(entry.get('read'), list) and entry['read']:
                 w['read'] = entry['read']
+            early = knowledge.early_of(know, entry, surface)
+            if early and not entry.get('free'):
+                w['early'] = round(early, 3)
             continue
         guess = knowledge.prior_estimate(know, knowledge.origin_at(by_ja.get(w['ja']), today))
         if guess is not None:
             w['k'], w['sd'] = round(guess[0], 2), round(guess[1], 2)
             w['free'] = knowledge.sigmoid(-guess[0]) < fwlib.FREE_P
+            early = knowledge.early_of(know, None, surface)
+            if early and not w['free']:
+                w['early'] = round(early, 3)
     if not fwlib.collector_url() and knowledge.is_stale(know) and feedback.default_path().exists():
         knowledge.start_refresh()  # with a collector, it keeps the estimates fresh and they come with the cache
     challenge = knowledge.challenge_of(state)

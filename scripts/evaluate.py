@@ -50,7 +50,8 @@ origin and Anki interval alone, without the word features (NEXT_STEPS step 13); 
 monthly probes' answers (knowledge.probe_answers); "noreview", the fit without the review cards' outcomes
 (knowledge.review_answers; still reads for the clock); "speed" and "nospeed", the fit with and without the passages' and
 paragraphs' reading times as evidence (knowledge.SPEED, NEXT_STEPS step 19; "fit" has them when knowledge.SPEED is
-set); "today", the online updates the fit replaced (knowledge.Online, fed the log in replay's order); and "constant",
+set); "noearly", the fit without the shift of a word's first sightings (knowledge.early_shifts, which "fit" applies
+as the refresh does); "today", the online updates the fit replaced (knowledge.Online, fed the log in replay's order); and "constant",
 one chance per surface. CURRENT names the model knowledge.py runs, which the convergence test checks.
 
 Reports: per model and class (all; web and chat; known, learning and new words, as written; forms; free and costly by
@@ -282,9 +283,9 @@ class Fitted:
     frozen: the shared parameters and prior widths held at their priors. plain: the prior without the word features
     (by origin and Anki interval alone), the flat start the word features are compared with."""
 
-    def __init__(self, frozen=False, plain=False, recency=True, probes=True, speed=None, reviews=True):
+    def __init__(self, frozen=False, plain=False, recency=True, probes=True, speed=None, reviews=True, early=True):
         self.frozen, self.plain, self.recency, self.last, self.flags, self.origin = frozen, plain, recency, None, {}, None
-        self.probes, self.speed, self.reviews = probes, speed, reviews
+        self.probes, self.speed, self.reviews, self.early, self.shifts = probes, speed, reviews, early, {}
         self.name = (('fit, priors held' if frozen else 'flat' if plain else 'fit') + ('' if recency else ', no recency')
                      + ('' if probes else ', no probe') + ('' if reviews else ', no review'))
 
@@ -298,10 +299,15 @@ class Fitted:
                                                                          self.last.words)), self.flags)
         self.clocks = knowledge.read_clocks(log, self.last.pace, self.last.top, self.last._chance()) if self.recency \
             else {}
+        self.shifts = knowledge.early_shifts(self.last, log) if self.early else {}
 
     def predict(self, obs):
-        """At the observation's time since the word was last read (knowledge.read_clocks: the log up to its showing)."""
-        return self.last.q(obs.word, obs.surface, obs.form, *self.clocks.get(id(obs), (1.0, 0.0)))
+        """At the observation's time since the word was last read (knowledge.read_clocks: the log up to its showing),
+        with early, in a word's first sightings, its surface's shift (knowledge.early_shifts), as the refresh prices."""
+        q = self.last.q(obs.word, obs.surface, obs.form, *self.clocks.get(id(obs), (1.0, 0.0)))
+        shift = self.shifts.get(obs.surface, 0.0) if not obs.form and obs.seen is not None and \
+            obs.seen < knowledge.EARLY_FIRST else 0.0
+        return knowledge.sigmoid(knowledge.logit(min(1 - 1e-9, max(1e-9, q))) + shift) if shift else q
 
 
 class Stale(Fitted):
@@ -320,7 +326,8 @@ def named(model, name):
 
 MODELS = {'today': Today, 'constant': Constant, 'fit': Fitted, 'step4': Stale, 'flat': lambda: Fitted(plain=True),
           'noprobe': lambda: Fitted(probes=False), 'noreview': lambda: Fitted(reviews=False), 'speed': lambda: named(Fitted(speed=True), 'speed'),
-          'nospeed': lambda: named(Fitted(speed=False), 'nospeed')}
+          'nospeed': lambda: named(Fitted(speed=False), 'nospeed'),
+          'noearly': lambda: named(Fitted(early=False), 'noearly')}
 CURRENT = 'fit'  # the model knowledge.py runs (knowledge.Fit)
 
 

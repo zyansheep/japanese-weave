@@ -55,10 +55,11 @@ def words_for(state):
     """The word list as the extension gets it from the host (fw_host.handle 'state': public_state, word data and the
     fit's estimates; never a key), with normal's budget, the fit's recency and the price of a whole sentence. Unlike
     the web's, each word's own glosses are safe (webdata.add_word_data own_safe): in chat a swap stays when the
-    sentence's meaning still gets across, so a known word is offered as sure for each of its glosses (kuruma for "car")."""
+    sentence's meaning still gets across, so a known word is offered as sure for each of its glosses (kuruma for "car").
+    A word in its first sightings carries chat's shift (early, fw_host.adaptive)."""
     words = fwlib.public_state(state)['words']
     webdata.add_word_data(words, state, own_safe=True)
-    return words, fw_host.adaptive(state, words)
+    return words, fw_host.adaptive(state, words, 't3')
 
 
 def safe_senses():

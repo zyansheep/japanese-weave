@@ -191,7 +191,12 @@ from the budget, and those swaps are no longer held at or below the twin's thres
 **The tint.** check-reply writes `data-p`, the predicted chance the reader looks it up (0..1, at most two decimals), on
 every level abbr (the weave's lookup chance), on each twin's Japanese span (the chance its translation is opened: 1 -
 the chance none of its sentences' is) and on the glossed words in a twin's Japanese whose chance it has (the reply's
-or the weave's swaps, or the weave's word list); never on a closing mark or an English span. The clients, with the
+or the weave's swaps, or the weave's word list); never on a closing mark or an English span. A word's `data-p` is its
+chance raised by one sd of its estimate on the log-odds scale (`twins.tint`; knowledge.json's sd, else the prior's
+width for a word with no history), so a word with little evidence shows warmer than a sure one at the same chance:
+since 2026-11-18, when a word seen 4 times at 0.22 showed nearly as green as one seen 167 times at 0.07 (now 0.38
+against 0.10), and a word with no history at the prior's 0.27 showed yellow (now 0.45). Costs and budgets keep the
+chance itself. The clients, with the
 tint on (a per-device setting, on by default), give each shown Japanese element with a valid `data-p` a faint
 background from green (0) through yellow to red (0.5 and up), a twin's span lighter than its words'; an older message
 has none and gets no tint. The tint changes nothing in reports.

@@ -684,7 +684,8 @@ export function currentChance(k, read, now, recency) {
 // A swap's listed words with their estimates: the host's k and sd (knowledge.json), else the prior for the word's status,
 // and the mean lookup chance p from k. The words a lookup would cost (due) are the ones not known at a glance: the
 // host's free flag (knowledge.json, with hysteresis, judged on the long-term chance) when it sends one, else p under
-// FREE_P; they cost their current chance at now (currentChance), and one that recency holds under SPACING_P, where its
+// FREE_P; they cost their current chance at now (currentChance, k less the host's early: the shift of a word in its
+// first sightings, ../scripts/knowledge.py early_of), and one that recency holds under SPACING_P, where its
 // long-term chance isn't, waits (PLAN.md section 5, rule 2); a whole sentence also costs its translation's price.
 // expected: the lookups predicted if it is read, every word and the translation.
 function costOf(s, words, price, now, recency) {
@@ -693,7 +694,7 @@ function costOf(s, words, price, now, recency) {
     const k = Number.isFinite(w?.k) ? w.k : w?.status === 'known' ? KNOWN_PRIOR_K : PRIOR_K;
     const long = peekChance(k);
     const free = typeof w?.free === 'boolean' ? w.free : long < FREE_P;
-    const p = free ? long : currentChance(k, w?.read, now, recency);
+    const p = free ? long : currentChance(k - (Number.isFinite(w?.early) ? w.early : 0), w?.read, now, recency);
     return { ja, w, k: Math.log((1 - p) / p), sd: Number.isFinite(w?.sd) ? w.sd : PRIOR_SD, p, free,
       waits: !free && p < SPACING_P && long >= SPACING_P };
   });

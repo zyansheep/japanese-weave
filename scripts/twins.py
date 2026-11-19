@@ -52,9 +52,10 @@ TARGET_P|) (1 at the target chance) over p; a twin's SENTENCE_VALUE plus the lea
 its Japanese plus PATTERN_VALUE when it uses this week's learning pattern, over its cost.
 
 The tint. Each level abbr, each twin's Japanese span and each glossed word in a twin's Japanese whose chance check-reply
-has carries data-p, the predicted chance the reader looks it up (a word's lookup chance; a twin's chance its
-translation is opened, 1 - the product of its sentences' chances of staying closed), 0..1 with at most two decimals
-(p_text): the clients tint each shown Japanese element by it.
+has carries data-p, the predicted chance the reader looks it up (a word's lookup chance raised by TINT_Z sds of its
+estimate, tint, so a word with little evidence shows warmer; a twin's chance its translation is opened, 1 - the product
+of its sentences' chances of staying closed), 0..1 with at most two decimals (p_text): the clients tint each shown
+Japanese element by it.
 
 Exploration. Each element's place in its order is, with chance EXPLORE, a uniform random place instead of its rank,
 drawn afresh for every reply (the element's x: 1 when explored). So every element has a known chance of showing at
@@ -604,6 +605,20 @@ def p_text(p):
     return f'{min(1.0, max(0.0, float(p))):.2f}'.rstrip('0').rstrip('.')
 
 
+# The tint (data-p) shows a word's lookup chance moved up by TINT_Z sds of its estimate on the log-odds scale, so a
+# word the model has little evidence on shows warmer than one it is sure of at the same chance: a word seen 4 times at
+# 0.22 (sd 0.78) shows 0.38, one seen 167 times at 0.07 (sd 0.43) 0.10, a word with no history at the neutral prior's
+# 0.27 (sd 0.82) 0.45. Costs and budgets keep the chance itself.
+TINT_Z = 1.0
+
+
+def tint(p, sd):
+    """The chance data-p carries for a word of lookup chance p whose estimate has sd sd (None: p as it is)."""
+    if sd is None or not 0 < p < 1:
+        return p
+    return 1 / (1 + math.exp(-(math.log(p / (1 - p)) + TINT_Z * sd)))
+
+
 def p_value(value):
     """A data-p as the clients read it: the number when it is one (P_TEXT), else None (no tint)."""
     return float(value) if isinstance(value, str) and P_TEXT.fullmatch(value) else None
@@ -985,8 +1000,10 @@ def japanese_twin(japanese, english):
 
 
 def word_markup(w, on):
-    """A swapped word's level abbr, with its lookup chance (w['p']) as data-p when it has one."""
-    p = f' data-p="{p_text(w["p"])}"' if isinstance(w.get('p'), (int, float)) else ''
+    """A swapped word's level abbr, with its tint (w['tint'], else its lookup chance w['p']) as data-p when it has
+    one."""
+    shown = w.get('tint', w.get('p'))
+    p = f' data-p="{p_text(shown)}"' if isinstance(shown, (int, float)) else ''
     return f'<abbr title="{esc(w["title"])}" data-en="{esc(w["en"])}" data-on="{on}"{p}>{w["ja"]}</abbr>'
 
 

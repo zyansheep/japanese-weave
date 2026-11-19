@@ -2,6 +2,7 @@
 in fw.py intensity, beside the word level (the chat level from before). Run: python -m unittest tests/test_dials.py"""
 import io
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -527,6 +528,25 @@ class Thresholds(unittest.TestCase):
         self.assertEqual([b['p'] for b in back if b['kind'] == 's'],  # one sentence each, no costly word
                          [twins.p_value(twins.p_text(e.opens)) for e in twin_ps])
         self.assertEqual(twins.twin_word_chances(final), [0.02, None] * 4)
+
+    def test_the_tint_rises_with_the_uncertainty_of_a_word(self):
+        # data-p is the lookup chance moved up by TINT_Z sds on the log-odds scale: a word with little evidence shows
+        # warmer than a sure one at the same chance; costs keep the chance itself
+        self.assertAlmostEqual(twins.tint(0.22, 0.777), 0.38, places=2)
+        self.assertAlmostEqual(twins.tint(0.07, 0.427), 0.10, places=2)
+        self.assertAlmostEqual(twins.tint(1 / (1 + math.e), 0.818), 0.45, places=2)  # no history: the prior's width
+        self.assertEqual(twins.tint(0.3, None), 0.3)
+        self.assertEqual(twins.tint(0, 0.5), 0)
+        plan = tt.plan()
+        plan.know = {'words': {'問題': {'k': 3.9, 'sd': 1.5, 'free': True}}, 'fit': {'widths': {'none': 0.8}}}
+        checked = check_reply.finish(tt.AUTHORED, plan, tt.TYPES, seed=4, now_ms=NOW, remember=False)
+        shown = twins.p_text(twins.tint(0.02, 1.5))
+        self.assertNotEqual(shown, '0.02')
+        self.assertIn(f'<abbr title="もんだい · problem" data-p="{shown}">問題</abbr>は', checked.final)
+        self.assertEqual(twins.twin_word_chances(checked.final), [float(shown), None] * 4)
+        # a word knowledge.json doesn't have takes the prior's width; its cost stays its chance
+        self.assertIn(f'data-p="{twins.p_text(twins.tint(0.3, 0.8))}">情報</abbr>', checked.final)
+        self.assertIn(0.3, [e.opens for e in checked.elements if e.kind == 'w' and e.ja == '情報'])
 
     def test_chances_as_written(self):
         for p, text in ((0.07, '0.07'), (0.5, '0.5'), (1, '1'), (0, '0'), (0.0049, '0'), (1.7, '1'), (-1, '0'),

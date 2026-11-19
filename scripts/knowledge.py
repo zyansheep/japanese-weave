@@ -104,8 +104,12 @@ TUNE_MARGIN = 3.0          # and how much more log likelihood than the defaults 
 # new web reading model rescales every word and moves the free line, the chat offset and the one unit's denominator
 # at once (on the 2026-10-20 snapshot, ready at 30 opens with web 1,000 ms and cap 0.2: the web's chance of every word
 # rises about 2.7 times, 366 free words become 68, and the web's words read fall from 16,596 to 3,354). Which scale
-# the free line is judged on is a decision to make first.
-SURFACE_TUNING = False
+# the free line is judged on is a decision to make first. So these are the surfaces that use theirs: chat since
+# 2026-11-18, whose reading model doesn't touch the web's scale the free line is judged on. On the live log then chat
+# was ready at 3,300 ms a word with a cap of 0.6 (64 log likelihood units over the defaults, 382 opens): the chat offset
+# moved from -0.23 to +0.27, no free flag or label moved, and chat's seen over expected opens went from 0.68 (outside
+# the calibrated band) to 0.90, its costly words' from 0.69 to 0.97.
+SURFACE_TUNING = ('t3',)
 READ_FLOOR = 0.05          # the least read chance an open's prediction uses: an open far down still happens
 CALIBRATION_DAYS = 30
 CALIBRATED = (0.83, 1.2)   # seen over expected lookups inside this, at 90%, is calibrated (PLAN.md section 10)
@@ -2318,7 +2322,7 @@ def tune(log, until, free=None):
     until it stays. A surface keeps the defaults until it has TUNE_MIN_OPENS opens, its best pair beats the defaults by
     TUNE_MARGIN, and it lies inside the grid: on its edge the likelihood has no maximum in the plausible range, a sign
     the reading model doesn't fit (on the live log of 2026-10-20 chat's keeps rising past 5,000 ms a word), and uses it
-    only with SURFACE_TUNING (else it is ready, reported, and the defaults stay). The surfaces differ: a web page stays
+    only when SURFACE_TUNING names it (else it is ready, reported, and the defaults stay). The surfaces differ: a web page stays
     on screen while it is skimmed or not read at all. Returns {pace, top (per surface), tuned (whether any surface uses
     its own), ready, best, inside, opens (per surface), grid (every point scored: surface, pace, top, loglik)}. free:
     the free flags the fits take (Fit)."""
@@ -2352,9 +2356,9 @@ def tune(log, until, free=None):
         default = scores[(PACES.index(PACE_MS), READ_MAXES.index(READ_MAX))]
         inside = 0 < best[0] < len(PACES) - 1 and 0 < best[1] < len(READ_MAXES) - 1
         ready = opens >= TUNE_MIN_OPENS and scores[best] - default >= TUNE_MARGIN and inside
-        if ready and SURFACE_TUNING:
+        if ready and surface in SURFACE_TUNING:
             pace[surface], top[surface] = PACES[best[0]], READ_MAXES[best[1]]
-        out['tuned'] = out['tuned'] or ready and SURFACE_TUNING
+        out['tuned'] = out['tuned'] or ready and surface in SURFACE_TUNING
         out['ready'][surface] = ready
         out['best'][surface] = {'pace': PACES[best[0]], 'top': READ_MAXES[best[1]], 'loglik': round(scores[best], 3),
                                 'default': round(default, 3)}
@@ -2381,6 +2385,70 @@ def free_flags(fit, words, before):
         k, sd = fit.estimate(ja)
         out[ja] = free_flag(k, sd, before.get(ja), fit.prior(ja)[0])
     return out
+
+
+# A word's first sightings (since 2026-11-18; docs/adaptive-difficulty.md). One k per word is its knowledge after it
+# has been learned, and the prior it starts from is fitted on words most of whose evidence came after that, so a word
+# met for the first few times is looked up more often than its prior says: on the live log of 2026-11-18, with chat at
+# its own reading model, 1.50 times as often over a word's first 3 sightings (90% interval 1.32 to 1.75). Each refresh
+# fits a log-odds shift for chat (early_shifts) and a word seen fewer than EARLY_FIRST times adds it (early_of):
+# prequentially (evaluate.py) chat's first sightings come to 1.12 and its log loss per observation falls by 0.0012
+# (0.0001 to 0.0023). The free flags and labels judge k as before.
+EARLY_FIRST = 3
+EARLY_SD = 1.0             # each surface's shift is held toward none by this
+# The surfaces that take one: on the web, whose seen over expected opens is 0.62 overall, a shift of about +0.55 fitted
+# its first sightings but no better prediction (log loss +0.0003, -0.0001 to +0.0007), so it stays at none there.
+EARLY_SURFACES = ('t3',)
+
+
+def early_shifts(fit, log):
+    """{surface: shift}: per surface of EARLY_SURFACES (the others none) the log-odds shift that best predicts the first
+    EARLY_FIRST sightings of each word
+    in the log's showings (log.scored; a word as written, not a conjugated form, which has its own offset), each
+    predicted at its word's prior mean (fit.prior; few sightings in, a word's k is mostly its prior) and its clock, by
+    penalized maximum likelihood (a N(0, EARLY_SD) prior): a sighting opened (y) has chance r q, one not opened
+    1 - r q, r its read chance from time on screen at the fit's reading model (at least READ_FLOOR; the log's may be
+    the day before's, before tune) and q the shifted chance."""
+    clocks = read_clocks(log, fit.pace, fit.top, fit._chance()) if fit.recency else {}
+    rows = {surface: [] for surface in SURFACES}
+    for o in log.scored():
+        if o.seen is None or o.seen >= EARLY_FIRST or o.form or o.surface not in EARLY_SURFACES:
+            continue
+        q = fit.q_at(fit.prior(o.word)[0], o.surface, False, *clocks.get(id(o), (1.0, 0.0)))
+        read = _chance(o.ms or 0, o.words or 0, o.share if o.share is not None else 1.0,
+                       by_surface(fit.pace, o.surface), by_surface(fit.top, o.surface))
+        rows[o.surface].append((o.y, max(READ_FLOOR, read), logit(min(1 - 1e-6, max(1e-6, q)))))
+    return {surface: round(_shift(found), 4) for surface, found in rows.items()}
+
+
+def _shift(rows):
+    """The shift c maximizing sum(y log(r q) + (1 - y) log(1 - r q)) - c^2 / (2 EARLY_SD^2), q = sigmoid(z + c), over
+    rows (y, r, z), by Newton's method."""
+    c = 0.0
+    for _ in range(50):
+        g, h = -c / EARLY_SD ** 2, -1 / EARLY_SD ** 2
+        for y, r, z in rows:
+            q = sigmoid(z + c)
+            p = min(1 - 1e-12, r * q)
+            dp, d2p = r * q * (1 - q), r * q * (1 - q) * (1 - 2 * q)
+            g += y * dp / p - (1 - y) * dp / (1 - p)
+            h += y * (d2p / p - (dp / p) ** 2) - (1 - y) * (d2p / (1 - p) + (dp / (1 - p)) ** 2)
+        step = max(-0.5, min(0.5, -g / h))
+        c += step
+        if abs(step) < 1e-6:
+            break
+    return c
+
+
+def early_of(knowledge, entry, surface):
+    """The log-odds shift a word's chance takes on a surface for being in its first sightings: knowledge.json's
+    "early" shift there while the word (its knowledge.json entry, or None: none yet) has fewer than its "first"
+    sightings (obs), else 0."""
+    early = knowledge.get('early') if isinstance(knowledge, dict) else None
+    if not isinstance(early, dict) or not isinstance(early.get(surface), (int, float)):
+        return 0.0
+    seen = (entry or {}).get('obs', 0) if isinstance(entry, dict) or entry is None else 0
+    return float(early[surface]) if isinstance(seen, (int, float)) and seen < early.get('first', EARLY_FIRST) else 0.0
 
 
 class Standing:
@@ -3083,6 +3151,7 @@ def refresh(now=None):
                      'k': {ja: e['k'] for ja, e in known.items() if isinstance(e, dict) and e.get('n')}}
         fit = Fit(log, now_ms, pace, top, start=start, free=before)
         stats, reads = word_stats(log, now_ms), word_reads(log, fit, now_ms)
+        early = dict(early_shifts(fit, log), first=EARLY_FIRST)
         flags = free_flags(fit, [w['ja'] for w in state['words']], before)
         sentences = sentence_events(rows, contexts, now_ms, pace, top)
         prices = sentence_prices(sentences, now_ms)
@@ -3168,6 +3237,7 @@ def refresh(now=None):
             'recency': {'floor': round(fit.theta[FLOOR], 4), 'context': round(fit.theta[CONTEXT], 4),
                         'days': LONG_DAYS, 'softMin': SOFT_MIN, 'spacing': SPACING_P},
             'sentencePrice': {surface: v['p'] for surface, v in prices.items()}, 'sentences': prices,
+            'early': early,
             'challenge': challenge, 'spend': spend, 'moves': (history + applied)[-200:], 'reading': reading,
             'calibration': dict(calibrate(rows, contexts, changes, now_ms, totals=totals, challenge=challenge),
                                 twins=(grammar_report or {}).get('exploration')),
@@ -3253,19 +3323,20 @@ def start_refresh():
                      start_new_session=True, env=dict(os.environ))
 
 
-def current_chance(entry, recency, now_ms, offset=0.0):
+def current_chance(entry, recency, now_ms, offset=0.0, early=0.0):
     """A knowledge.json word's P(lookup | read) at now_ms (ms) on a surface (its offset), in a new page or reply: its
     long-term knowledge k a share of the way back since it was last read (since_read of its "read": [shown, chance it
     was the last read] for its showings of the last LONG_DAYS), under the fit's floor (knowledge.json "recency").
-    Without them, its long-term chance."""
+    Without them, its long-term chance. early: the shift of a word in its first sightings (early_of), taken off k."""
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
     floor = recency.get('floor') if isinstance(recency, dict) else None
     reads = [(r[0], r[1], False) for r in entry.get('read') or []
              if isinstance(r, list) and len(r) == 2 and number(r[0]) and number(r[1])]
+    k = entry['k'] - early
     if not reads or not number(floor) or now_ms is None:
-        return sigmoid(offset - entry['k'])
+        return sigmoid(offset - k)
     u, _s = since_read(reads, max(0.0, 1 - sum(chance for _at, chance, _same in reads)), now_ms)
-    return sigmoid(offset + recency_log_odds(entry['k'], u, floor))
+    return sigmoid(offset + recency_log_odds(k, u, floor))
 
 
 def word_estimate(knowledge, ja, surface='browser', now_ms=None):
@@ -3274,16 +3345,17 @@ def word_estimate(knowledge, ja, surface='browser', now_ms=None):
     with its hysteresis, says whether the word is known at a glance, judged on its long-term chance, and p how likely
     a lookup is otherwise. So a planner comparing p with FREE_P (weave.lists) agrees with the flag. With now_ms, a word
     that isn't free gets its current chance (current_chance), still at least FREE_P: one read an hour ago is near the
-    floor, under SPACING_P, and waits (weave.lists); it isn't free."""
+    floor, under SPACING_P, and waits (weave.lists); it isn't free. A word that isn't free and is in its first
+    sightings adds the surface's shift (early_of)."""
     entry = (knowledge.get('words') or {}).get(ja)
     if not entry:
         return None
     offset = (knowledge.get('offset') or {}).get(surface, 0.0)
-    p = sigmoid(offset - entry['k'])
-    if entry['free'] if isinstance(entry.get('free'), bool) else p < fwlib.FREE_P:
-        return min(p, fwlib.FREE_P * 0.999), entry['k'], entry['sd']
-    if now_ms is not None:
-        p = current_chance(entry, knowledge.get('recency'), now_ms, offset)
+    if entry['free'] if isinstance(entry.get('free'), bool) else sigmoid(offset - entry['k']) < fwlib.FREE_P:
+        return min(sigmoid(offset - entry['k']), fwlib.FREE_P * 0.999), entry['k'], entry['sd']
+    early = early_of(knowledge, entry, surface)
+    p = current_chance(entry, knowledge.get('recency'), now_ms, offset, early) if now_ms is not None else \
+        sigmoid(offset + early - entry['k'])
     return max(p, fwlib.FREE_P), entry['k'], entry['sd']
 
 

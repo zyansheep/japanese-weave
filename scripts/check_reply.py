@@ -826,7 +826,8 @@ def weave_price(word, recency, now_ms):
     """(lookup chance, known at a glance) of a word of the weave's list ({ja, status, k?, free?, read?}: the host's
     words, chatweave.words_for), as the weave prices a swap (chatweave.mjs chanceOf, levels.js costOf): k from the
     word, else its status's prior; its free flag, else its long-term chance under FREE_P; its long-term chance when
-    free, else its current one (recency), on the web's scale as the weave's are."""
+    free, else its current one (recency, with its first sightings' shift: early), on the web's scale as the weave's
+    are."""
     import fwlib
     import knowledge
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
@@ -835,7 +836,8 @@ def weave_price(word, recency, now_ms):
     free = word['free'] if isinstance(word.get('free'), bool) else long < fwlib.FREE_P
     if free:
         return long, True
-    return knowledge.current_chance({'k': k, 'read': word.get('read')}, recency, now_ms), False
+    early = word['early'] if number(word.get('early')) else 0.0
+    return knowledge.current_chance({'k': k, 'read': word.get('read')}, recency, now_ms, early=early), False
 
 
 def _unoffered(marked, plan, now_ms):
@@ -1006,11 +1008,32 @@ def _step_words(t, words, swaps, know=None):
             (lambda word: word in free or entry(word) in free))
 
 
-def _twin_chances(marked, plan, now_ms, known):
-    """[lookup chance or None] of each glossed word in a twin's Japanese (its closing marks left out), for data-p: a
-    word (or a form of one) the reply's swaps or the weave's swaps have a chance for (known, {ja: p}), else one of the
-    weave's list priced as the weave prices its swaps (weave_price), else None (grammar, a dictionary word, a word no
-    list has)."""
+def _spread(know):
+    """The sd of a word's estimate for the tint (twins.tint): knowledge.json's, for the word or the entry a form of it
+    belongs to, else the prior's width for a word without a card (a word with no history), else None (no knowledge)."""
+    import inflection
+    know = know if isinstance(know, dict) else {}
+    entries = know.get('words') if isinstance(know.get('words'), dict) else {}
+    widths = (know.get('fit') or {}).get('widths') or {}
+    width = widths.get('none') if isinstance(widths.get('none'), (int, float)) else None
+    lex = None
+
+    def sd(ja):
+        nonlocal lex
+        entry = entries.get(ja)
+        if entry is None and ja:
+            lex = lex or inflection.Lexicon([{'ja': x} for x in entries])
+            entry = entries.get(lex.entry(ja))
+        value = (entry or {}).get('sd')
+        return float(value) if isinstance(value, (int, float)) else width
+    return sd
+
+
+def _twin_chances(marked, plan, now_ms, known, spread=lambda ja: None):
+    """[tint or None] of each glossed word in a twin's Japanese (its closing marks left out), for data-p: the lookup
+    chance of a word (or a form of one) the reply's swaps or the weave's swaps have a chance for (known, {ja: p}), else
+    of one of the weave's list priced as the weave prices its swaps (weave_price), else None (grammar, a dictionary
+    word, a word no list has); each raised by its estimate's sd (spread, _spread) as twins.tint does."""
     import inflection
     import twins
     lex = inflection.Lexicon([{'ja': ja} for ja in known]) if known else None
@@ -1024,15 +1047,15 @@ def _twin_chances(marked, plan, now_ms, known):
             continue
         ja = lex.entry(word) if lex is not None else None
         if ja in known:
-            out.append(known[ja])
+            out.append(twins.tint(known[ja], spread(ja)))
             continue
         if not CONTENT.search(word) and (word in GRAMMAR_WORDS or
                                          all(x in grammar.UNITS for x in grammar._split(word, glossed=True))):
             out.append(None)
             continue
         ja = listed.entry(word) if listed is not None else None
-        out.append(weave_price(by_ja[ja], plan.recency, now_ms)[0] if ja is not None and not by_ja[ja].get(
-            'dictionary') else None)
+        out.append(twins.tint(weave_price(by_ja[ja], plan.recency, now_ms)[0], spread(ja))
+                   if ja is not None and not by_ja[ja].get('dictionary') else None)
     return out
 
 
@@ -1178,11 +1201,14 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     if restored:
         fixed.append('- put back, where your English kept the word the weave offered as sure: '
                      + ', '.join(f'{w["ja"]} ({w["en"]})' for w in restored))
-    # each twin's words' chances, for data-p
+    # each word's tint and each twin's words' tints, for data-p
+    spread = _spread(plan.know)
+    for w in words:
+        w['tint'] = twins.tint(w['p'], spread(w['ja']))
     known = {s['ja']: float(s['p']) for s in plan.swaps if s.get('ja') and isinstance(s.get('p'), (int, float))}
     known.update({w['ja']: w['p'] for w in words})
     for t in kept:
-        t['chances'] = _twin_chances(t['marked'], plan, now_ms, known)
+        t['chances'] = _twin_chances(t['marked'], plan, now_ms, known, spread)
         if plan.steps:
             english_of, glance = _step_words(t, words, plan.swaps, plan.know)
             t['step'] = middle_step(twins.with_chances(t['marked'], t['chances']), english_of, glance)
@@ -1195,7 +1221,7 @@ def finish(text, plan, types=None, seed=None, remember=True, now_ms=None):
     by_el, words_p = {}, {}  # a twin's part by its element, a word's chance by its element
 
     def word_element(w, parent):
-        words_p[len(els)] = w['p']
+        words_p[len(els)] = w['tint']
         free = w['free']
         fixed_on = twins.FULL if not free and w['dictionary'] else None
         later = not free and w['ja'] in seen_costly
