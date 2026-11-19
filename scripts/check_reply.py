@@ -826,7 +826,8 @@ def weave_price(word, recency, now_ms):
     """(lookup chance, known at a glance) of a word of the weave's list ({ja, status, k?, free?, read?}: the host's
     words, chatweave.words_for), as the weave prices a swap (chatweave.mjs chanceOf, levels.js costOf): k from the
     word, else its status's prior; its free flag, else its long-term chance under FREE_P; its long-term chance when
-    free, else its current one (recency), on the web's scale as the weave's are."""
+    free, else its current one (recency, with its first sightings' shift: early), on the web's scale as the weave's
+    are."""
     import fwlib
     import knowledge
     number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
@@ -835,7 +836,8 @@ def weave_price(word, recency, now_ms):
     free = word['free'] if isinstance(word.get('free'), bool) else long < fwlib.FREE_P
     if free:
         return long, True
-    return knowledge.current_chance({'k': k, 'read': word.get('read')}, recency, now_ms), False
+    early = word['early'] if number(word.get('early')) else 0.0
+    return knowledge.current_chance({'k': k, 'read': word.get('read')}, recency, now_ms, early=early), False
 
 
 def _unoffered(marked, plan, now_ms):

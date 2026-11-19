@@ -303,6 +303,27 @@ little even there; the simulated reader above shows the same, less so. The probe
 the review stream), known or not for words sampled across ranks, is the evidence to pin the rank slope down before
 dictionary words are offered.
 
+### A word's first sightings
+
+A word has one k, its knowledge once learned, and the prior it starts from is fitted on words most of whose evidence
+came after they were learned. So a word met for the first few times is looked up more often than its prior says: on
+the live log of 2026-11-18 (34 days scored, chat at its own reading model), 1.50 times as often as predicted over each
+word's first 3 sightings (90% interval 1.32 to 1.75), new words 1.60. Each refresh fits a shift on the log-odds scale
+for chat (knowledge.early_shifts, held toward none by N(0, 1)): every first sighting in the log (a word's first
+EARLY_FIRST = 3 showings or episodes, as written: a conjugated form has its own offset), predicted from its word's
+prior mean at its clock and read at the fit's reading model, scored as the fit scores a showing. knowledge.json
+"early" keeps it ({browser, t3, first}); a word that isn't known at a glance and has been seen fewer than `first` times
+adds its surface's shift wherever its chance is priced: knowledge.word_estimate and current_chance, the host's word
+list (fw_host.adaptive sends `early`; the extension's levels.js costOf and the chat weave take it off k) and
+check-reply's weave_price. The free flags and the labels judge k as before.
+
+On that log chat's shift was +0.92. Prequentially (`fw.py evaluate --models noearly,fit`, each day's shift fitted on
+the days before) chat's first sightings went from 1.50 to 1.12 (0.96 to 1.26) times as predicted, new words from 1.60
+to 1.28, and the log loss per observation fell by 0.0008 (0.0000 to 0.0015) overall, 0.0012 (0.0001 to 0.0023) on
+chat and 0.0087 (0.0008 to 0.0191) on first sightings. The web fitted a shift too (+0.55), but its log loss rose by
+0.0003 (-0.0001 to +0.0007), so the web takes none (EARLY_SURFACES). With chat at the default reading model, the first
+sightings were 1.14 and a shift gained nothing: the "known" weight of every message passed without a hover hid it.
+
 ### The probe's answers in the fit
 
 Each answer of a monthly probe (probe.py, state["probes"]) is an observation of its own kind
@@ -634,6 +655,14 @@ scale, so a new web reading model rescales every word at once. On the snapshot w
 60), the web's words read fall from 16,596 to 3,354, the chat offset moves from +0.27 to -0.58, and the free set falls
 from 366 words to 68; calibrate becomes web costly 1.00 (0.78-1.63), free 4.42 (0.00-5.24), all 1.40 (0.76-2.84),
 chat costly 1.00 (0.90-1.12), all 1.09 (0.94-1.20). Which scale the free line is judged on has to be settled first.
+
+Since 2026-11-18 knowledge.SURFACE_TUNING names the surfaces that use their own reading model, and chat does: its
+reading model moves only the chat offset, never the web's scale the free line is judged on. On the live log that day
+chat was ready at 3,300 ms a word with a cap of 0.6, 64 log likelihood units above the defaults with 382 opens, inside
+the grid. A refresh on a copy of the state moved the chat offset from -0.23 to +0.27 and no free flag (505 of 2,019)
+or label; calibrate's chat went from all 0.68, costly 0.69, free 0.88 to all 0.90, costly 0.97, free 1.17. At the
+default, a word on screen for 3 s in a 20-word paragraph, halfway down, was read with chance 0.44; at chat's own
+model, 0.05: a message passed without a hover had counted as most of a "known".
 
 Why calibrate shows the web over-predicted on the snapshot (all 0.57, 0.35-0.93; costly 0.56, free 0.58; chat all
 1.18): one page. On the evening of 10-16 a page 16% in Japanese drew 20 of the web's 51 interactions, all on known

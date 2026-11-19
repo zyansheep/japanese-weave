@@ -63,7 +63,8 @@ function chanceOf(ja) {
   const k = Number.isFinite(w?.k) ? w.k : w?.status === 'known' ? KNOWN_PRIOR_K : PRIOR_K;
   const long = 1 / (1 + Math.exp(k));
   const free = typeof w?.free === 'boolean' ? w.free : long < FREE_P;
-  return { p: free ? long : currentChance(k, w?.read, now, opts.recency), free, dictionary: w?.dictionary === true };
+  const early = Number.isFinite(w?.early) ? w.early : 0;
+  return { p: free ? long : currentChance(k - early, w?.read, now, opts.recency), free, dictionary: w?.dictionary === true };
 }
 
 function placed(text, offset, level) {
