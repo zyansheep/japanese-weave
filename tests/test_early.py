@@ -58,24 +58,24 @@ class Shift(unittest.TestCase):
 
 class Applied(unittest.TestCase):
     KNOW = {'early': {'browser': 0.2, 't3': 0.8, 'first': 3}, 'offset': {'t3': 0.0},
-            'words': {'新': {'k': 1.0, 'sd': 0.8, 'free': False, 'obs': 2},
-                      '旧': {'k': 1.0, 'sd': 0.4, 'free': False, 'obs': 3},
+            'words': {'結局': {'k': 1.0, 'sd': 0.8, 'free': False, 'obs': 2},
+                      '多分': {'k': 1.0, 'sd': 0.4, 'free': False, 'obs': 3},
                       '今': {'k': 4.0, 'sd': 0.3, 'free': True, 'obs': 0}}}
 
     def test_only_while_a_word_has_fewer_than_its_first_sightings(self):
         early = lambda ja, surface='t3': knowledge.early_of(self.KNOW, self.KNOW['words'].get(ja), surface)  # noqa
-        self.assertEqual(early('新'), 0.8)
-        self.assertEqual(early('新', 'browser'), 0.2)
-        self.assertEqual(early('旧'), 0.0)  # its third sighting is behind it
-        self.assertEqual(early('無'), 0.8)  # no entry: none seen yet
+        self.assertEqual(early('結局'), 0.8)
+        self.assertEqual(early('結局', 'browser'), 0.2)
+        self.assertEqual(early('多分'), 0.0)  # its third sighting is behind it
+        self.assertEqual(early('情報'), 0.8)  # no entry: none seen yet
         self.assertEqual(knowledge.early_of({}, None, 't3'), 0.0)  # an older knowledge.json: no shift
 
     def test_the_estimate_and_the_weave_price_take_it(self):
         p = lambda ja: knowledge.word_estimate(self.KNOW, ja, 't3')[0]  # noqa: E731
-        self.assertAlmostEqual(p('新'), knowledge.sigmoid(0.8 - 1.0))
-        self.assertAlmostEqual(p('旧'), knowledge.sigmoid(-1.0))
+        self.assertAlmostEqual(p('結局'), knowledge.sigmoid(0.8 - 1.0))
+        self.assertAlmostEqual(p('多分'), knowledge.sigmoid(-1.0))
         self.assertLess(p('今'), 0.08)  # known at a glance: the shift doesn't touch it
-        word = {'ja': '新', 'k': 1.0, 'free': False}
+        word = {'ja': '結局', 'k': 1.0, 'free': False}
         self.assertAlmostEqual(check_reply.weave_price(dict(word, early=0.8), None, None)[0], knowledge.sigmoid(-0.2))
         self.assertAlmostEqual(check_reply.weave_price(word, None, None)[0], knowledge.sigmoid(-1.0))
 

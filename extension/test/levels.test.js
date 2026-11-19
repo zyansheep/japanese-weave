@@ -214,7 +214,7 @@ describe('the lookup budget', () => {
     expect(pick([near], { budgetPer100: 2, now, recency, shownToday: ['多分'] }).swaps.map((s) => s.word)).toEqual(['多分']);
   });
   test("a word in its first sightings costs its chance with the host's early shift (knowledge.py early_of)", () => {
-    const fresh = { ...word('候補', 1.27, 'active'), free: false };
+    const fresh = { ...word('結局', 1.27, 'active'), free: false };
     const plan = (w) => pick([w], { budgetPer100: 100 }).plan.expected;
     expect(plan(fresh)).toBeCloseTo(p(1.27), 3);
     expect(plan({ ...fresh, early: 0.8 })).toBeCloseTo(p(1.27 - 0.8), 3); // dearer: looked up more while it is new
