@@ -82,6 +82,7 @@ import threads  # noqa: E402
 MAX_BODY = 1024 * 1024
 MAX_OPS_BODY = 8 * 1024 * 1024  # an Anki sync carries every review word
 MAINTAIN_EVERY = 600
+REFUSED = 78  # exit status when the state dir points at another collector (EX_CONFIG): a service must not restart
 PRESSES = threading.Lock()  # intensity presses one at a time, so two quick ones make two steps
 
 
@@ -295,8 +296,9 @@ def main(argv=None):
     parser.add_argument('--db', help='SQLite file (default: interactions.sqlite in the state dir)')
     args = parser.parse_args(argv)
     if fwlib.collector_url():
-        sys.exit(f'{fwlib.home()} points at a collector ({fwlib.collector_url()}): the collector serves its own state '
-                 'dir, so remove its "collector" file first.')
+        print(f'{fwlib.home()} points at a collector ({fwlib.collector_url()}): the collector serves its own state '
+              'dir, so remove its "collector" file first.', file=sys.stderr)
+        sys.exit(REFUSED)
     host, _, port = args.listen.rpartition(':')
     serve(host.strip('[]'), int(port), args.db)
 

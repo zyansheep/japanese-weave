@@ -284,6 +284,8 @@ fw.py collector install --listen 100.64.0.4:7853      # there too: a systemd use
 fw.py setup --collector http://functor:7853           # on each other machine (off: back to its own state)
 ```
 
+With Nix, the module below does the second and the client side of the others ([Install with Nix](#install-with-nix)).
+
 Every change (`known`, `learn`, the dial, a browser peek, an Anki sync, the words used in chat replies) goes to the
 collector, which applies it and keeps a record of it; the other machine then refreshes its cache. The chat hook
 never waits on the network: it reads the cache and syncs in the background every couple of minutes. If the
@@ -298,6 +300,47 @@ T3 Code reports chat popovers when its server has `T3CODE_ANNOTATION_EVENTS_URL`
 `/v1/interactions` URL; that needs a T3 Code build with the abbreviation popover patches. Its English-only shortcut
 goes to the same collector (`/v1/english`), and its panel's arrows to `/v1/intensity`. Its review cards come from the
 same collector (`/v1/review/next`), and what happened to each goes with the popover events.
+
+### Install with Nix
+
+The flake packages the plugin read-only and has a home-manager module for both sides, so a NixOS configuration can
+deploy it instead of a checkout and `fw.py setup`/`collector install`:
+
+```nix
+# flake inputs
+japanese-weave.url = "github:zyansheep/japanese-weave";
+japanese-weave.inputs.nixpkgs.follows = "nixpkgs";
+
+# the always-on machine (home-manager)
+imports = [inputs.japanese-weave.homeManagerModules.default];
+services.japanese-weave.collector = { enable = true; listen = "<tailnet IP>:7853"; };
+services.japanese-weave.client.enable = true;     # if Claude Code or a browser runs there too
+
+# every other machine
+imports = [inputs.japanese-weave.homeManagerModules.default];
+services.japanese-weave.client.enable = true;
+```
+
+- `packages.<system>.default`: the plugin tree in `$out/share/japanese-weave` (`scripts/run` uses the package's own
+  Python, with node for the chat weave), and `fw` (fw.py), `fw-host` and `japanese-weave-backup` in `$out/bin`. Every
+  script writes only to the state folder, never next to the code.
+- `collector.enable`, `collector.listen`: the systemd user service `japanese-weave-collector`, running the package
+  from the store (as `fw.py collector install` does with a copy). It refuses to start, and isn't restarted, where the
+  state folder has a `collector` file. Enable lingering so it runs while logged out.
+- `client.enable`: the native host manifests for Firefox (and forks that read `~/.mozilla`, such as Floorp), Chrome
+  and Chromium (`client.browsers`), pointing at the package's `fw-host`; and `~/.local/share/japanese-weave/current`,
+  a link to the plugin tree that follows each switch. Point Claude Code's marketplace at it once, in
+  `~/.claude/settings.json`: `extraKnownMarketplaces.japanese-weave.source` =
+  `{"source": "directory", "path": "/home/<you>/.local/share/japanese-weave/current"}`.
+- Backups (`backups`, default 5 kept): before a new version first runs, the state folder's `.json` and `.csv` files
+  and `interactions.sqlite` (through SQLite's backup API) go to `~/.japanese-weave/backups/<version>-<time>`; the
+  collector's service does it before it starts, a client on activation. Keys are never copied.
+- Still by hand: the state itself (`fw.py setup` once on the collector's machine, `fw.py setup --collector URL` once
+  on each other), and the browser extension: `fw extension` rebuilds the .xpi from the installed version and opens
+  it in Floorp or Firefox, where you press **Add**.
+- The module's unit replaces one `fw.py collector install` wrote: remove
+  `~/.config/systemd/user/japanese-weave-collector.service` and its `default.target.wants` link before the first
+  switch, or home-manager refuses to overwrite them.
 
 ## Adaptive difficulty
 
@@ -449,6 +492,7 @@ may call.
 
 ```sh
 python3 -m unittest discover -s tests            # hook, rules, exports, native host, setup, Anki, Codex, yardsticks
+nix flake check -L                               # the same tests against the Nix package, from the read-only store
 python3 tools/sim/run.py all                     # the simulated reader's experiments (about a minute)
 python3 scripts/make_blocks.py                   # regenerate blocks/ and extension/src/starter.js
 cd extension && bun install && bun test           # extension (happy-dom)
