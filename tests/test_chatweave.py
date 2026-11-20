@@ -285,7 +285,7 @@ class Brief(unittest.TestCase):
         self.assertIsNotNone(hub.validate(hub.stamp({'kind': 'set', 'prefs': {'chat_style': 'loud'}})))
 
     def test_command_runs_from_this_copy(self):
-        self.assertIn(str(ROOT / 'scripts' / 'fw.py'), weave.fw_command())
+        self.assertIn(str((ROOT / 'scripts' / 'fw.py').resolve()), weave.fw_command())  # resolved, as fwlib's
 
 
 if __name__ == '__main__':

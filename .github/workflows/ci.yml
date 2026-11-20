@@ -1,7 +1,7 @@
-# Tests for the hook's scripts and the browser extension on each push to main and each pull request. Everything
-# runs offline against fixtures; the tests that need node or bun (the shared chat weave) run under bun here. The
-# Python tests run on the oldest Python scripts/run accepts (3.9) and the newest; `check`, the one main's protection
-# requires, passes when every other job did.
+# Tests for the hook's scripts, the browser extension and the Nix package on each push to main and each pull request.
+# Everything runs offline against fixtures; the tests that need node or bun (the shared chat weave) run under bun here.
+# The Python tests run on the oldest Python scripts/run accepts (3.9) and the newest; `check`, the one main's
+# protection requires, passes when every other job did.
 name: CI
 
 on:
@@ -56,9 +56,19 @@ jobs:
       - working-directory: extension
         run: bun test
 
+  # The Nix package (flake.nix): it builds, and the Python tests pass against it from the read-only store, as the
+  # machines that deploy it through NixOS run it.
+  nix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix flake check -L
+
   check:
-    needs: [lint, python, extension]
+    needs: [lint, python, extension, nix]
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - run: test "${{ needs.lint.result }}" = success && test "${{ needs.python.result }}" = success && test "${{ needs.extension.result }}" = success
+      - run: test "${{ needs.lint.result }}" = success && test "${{ needs.python.result }}" = success && test "${{ needs.extension.result }}" = success && test "${{ needs.nix.result }}" = success

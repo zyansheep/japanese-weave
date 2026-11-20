@@ -329,27 +329,37 @@ def write_launcher(home, remote=None, remote_home=None):
 XPI_NAME = 'japanese-weave.xpi'
 
 
+def writable(path):
+    """Every file and folder under path made writable by its owner, so a copy can be changed and replaced later."""
+    for folder, dirs, files in os.walk(path):
+        for name in [folder] + [os.path.join(folder, n) for n in dirs + files]:
+            if not os.path.islink(name):
+                os.chmod(name, os.stat(name).st_mode | 0o200)
+
+
+def replace_tree(source, target, ignore=None):
+    """target as a fresh copy of source. The source may be read-only (an installed package, as in the Nix store): the
+    copy takes its contents, not its permissions, so the next run can replace it."""
+    if target.exists():
+        writable(target)  # a copy from before this rule may be read-only
+        shutil.rmtree(target)
+    shutil.copytree(source, target, ignore=ignore, copy_function=shutil.copyfile)
+    writable(target)
+
+
 def install_app(root, home):
     """Stable copies of the scripts and word lists: launchers and services need fixed paths."""
     for name, ignore in (('scripts', shutil.ignore_patterns('__pycache__')), ('data', None)):
-        target = home / 'app' / name
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(root / name, target, ignore=ignore)
+        replace_tree(root / name, home / 'app' / name, ignore)
 
 
 def install_extensions(root, home):
     """Stable copies: the plugin cache path changes on every update, browsers need fixed paths."""
     install_app(root, home)
-    target = home / 'extension'
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(root / 'extension', target,
-                    ignore=shutil.ignore_patterns('test', 'node_modules', 'package.json', 'bun.lock'))
+    replace_tree(root / 'extension', home / 'extension',
+                 shutil.ignore_patterns('test', 'node_modules', 'package.json', 'bun.lock'))
     firefox = home / 'extension-firefox'
-    if firefox.exists():
-        shutil.rmtree(firefox)
-    shutil.copytree(home / 'extension', firefox)
+    replace_tree(home / 'extension', firefox)
     manifest = fwlib.read_json(firefox / 'manifest.json')
     fwlib.write_json(firefox / 'manifest.json', firefox_manifest(manifest))
     # A permanent install for Firefox builds that allow unsigned add-ons (Floorp, Developer Edition, Nightly, ESR).
@@ -403,8 +413,12 @@ def setup(args):
     install_extensions(root, home)
     launcher = write_launcher(home, args.remote, args.remote_home)
     for directory, browser in host_dirs(args.user_data_dir):
+        path = directory / f'{HOST_NAME}.json'
+        if path.is_symlink():  # placed by a package manager (the Nix module's client side): it keeps it current
+            print(f'Native host manifest {path} is managed elsewhere (a link to {os.path.realpath(path)}); left as is.')
+            continue
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f'{HOST_NAME}.json').write_text(json.dumps(host_manifest(browser, launcher), indent=1) + '\n')
+        path.write_text(json.dumps(host_manifest(browser, launcher), indent=1) + '\n')
     remote_file = home / 'remote'
     if args.remote:
         remote_file.write_text(args.remote + '\n')
@@ -573,6 +587,8 @@ def check(_args):
     for directory, browser in host_dirs():
         path = directory / f'{HOST_NAME}.json'
         manifest = fwlib.read_json(path)
+        if manifest and path.is_symlink() and Path(str(manifest.get('path'))).name == 'fw-host':
+            launcher = Path(manifest['path'])  # the Nix module's: its launcher is the package's own
         report(bool(manifest) and manifest == host_manifest(browser, launcher), f'native host manifest {path}')
     try:
         message = json.dumps({'type': 'ping'}).encode()

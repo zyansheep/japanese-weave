@@ -1199,9 +1199,10 @@ class Hub(Home):
         refused.exception.close()
         with fwlib.using_home(self.server_home):
             (fwlib.home() / 'collector').write_text('http://elsewhere:7853\n')
-            with self.assertRaises(SystemExit) as stopped:
+            with self.assertRaises(SystemExit) as stopped, mock.patch('sys.stderr', new=io.StringIO()) as said:
                 collector.main(['--listen', '127.0.0.1:0'])
-        self.assertIn('remove its "collector" file', str(stopped.exception.code))
+        self.assertEqual(stopped.exception.code, collector.REFUSED)  # a service's RestartPreventExitStatus
+        self.assertIn('remove its "collector" file', said.getvalue())
 
     def test_bad_ops_are_refused_one_by_one(self):
         good = hub.stamp({'kind': 'set', 'paused': True})
